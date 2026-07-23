@@ -1,0 +1,385 @@
+# CLI 提供形態の設計 (Distribution Design)
+
+`SPEC.md` / `PACKAGE.md` / `SELF_HOSTING.md` を踏まえ、`aac` CLI を**どう作り、どう開発陣で共有するか**を整理する。
+本書内の「実測」は全て本環境（Node v24.13.0 / pnpm 11.8.0）で検証した結果。
+
+---
+
+## 0. スコープの確定
+
+| # | 決定 | 帰結 |
+| --- | --- | --- |
+| 1 | **CLI 化する。開発陣**全員**で共有する** | 個人の `~/.local/bin` 前提の手順は不可。リポジトリに共有手段を持たせる |
+| 2 | **npm パッケージ化は将来スコープ** | レジストリを配布経路にしない。共有経路は git リポジトリそのもの |
+| 3 | **バイナリ化は避ける。許容する依存は Node のみ** | Bun / Deno / 単一バイナリ / Docker は全て対象外（付録A に記録） |
+
+決定3により、`typescript` パッケージも Bun も不要になり、**実行環境の前提は「Node のみ」に一本化**される。
+以降の設計は全てこの3点から導かれる。
+
+---
+
+## 1. 結論: `package.json` の `bin` + pnpm workspace
+
+「全員で共有」「npm 公開なし」「Node のみ」を同時に満たす方法は、実質これ1つ。
+
+```jsonc
+// packages/cli/package.json
+{
+  "name": "@aac/cli",
+  "type": "module",
+  "bin": { "aac": "./bin/aac.ts" },     // ← .ts を直接指してよい（実測）
+  "engines": { "node": ">=22.18" }
+}
+```
+
+```jsonc
+// ルートの package.json
+{ "private": true, "devDependencies": { "@aac/cli": "workspace:*" } }
+```
+
+`pnpm install` すると `node_modules/.bin/aac` が生成され、**リポジトリを clone した全員が同じコマンドを叩ける**。
+
+### 実測結果
+
+| 検証 | 結果 |
+| --- | --- |
+| `bin` が `.ts` を指した状態で `pnpm install` | ✅ `node_modules/.bin/aac` が生成される |
+| `pnpm aac compile foo.spec.ts`（ルートから） | ✅ 動作 |
+| `pnpm exec aac ...`（サブディレクトリから） | ✅ 動作。**cwd は呼び出し元ディレクトリ** |
+| `node_modules/.bin` を PATH に通して `/tmp` から実行 | ✅ 動作。cwd=`/tmp` |
+| 依存パッケージ数 | **0**（`node_modules` にサードパーティが1つも入らない） |
+| `pnpm install` 所要時間 | **0.8秒** |
+
+### なぜこれが最善か
+
+1. **npm 公開が要らない。** `workspace:*` はレジストリを一切見ない。決定2と矛盾しない
+2. **Windows 対応が無料で付く。** pnpm が生成する `.bin/aac` は手書き相当の sh シムで、
+   Cygwin / MSYS / WSL2 のパス変換まで含む。Windows では `.cmd` / `.ps1` も自動生成される
+   → 前案で必要だった「`bin/aac` + `bin/aac.cmd` + `bin/aac.ts` の3点セット」は**手書き不要**
+3. **将来 npm 公開する時、`bin` フィールドがそのまま効く。** 移行コストが実質ゼロ
+4. **PATH を各自が手作業で通す必要がない。** セットアップ手順が `pnpm install` の1行に収まる
+
+### 3つの呼び出し経路
+
+| 用途 | 方法 |
+| --- | --- |
+| リポジトリ内で使う（既定） | `pnpm aac ...` / サブディレクトリからは `pnpm exec aac ...` |
+| どこからでも `aac` と打ちたい | `PATH="$REPO/node_modules/.bin:$PATH"`（direnv / mise / 各自の rc） |
+| 別リポジトリの specs に使いたい | §2 を参照。**ここだけ話が変わる** |
+
+---
+
+## 2. 全てを決める1つのルール —— realpath が `node_modules` の外にあるか
+
+Node の型ストリップには**`node_modules` 内の `.ts` を実行しない**という仕様上の制限がある。
+これが「どこまでゼロビルドで行けるか」の境界を、そのまま決めている。
+
+### 実測
+
+| 配置 | `.ts` の実行 |
+| --- | --- |
+| `node_modules` の**外**（リポジトリ内の通常のパス） | ✅ |
+| pnpm workspace のリンク（`node_modules/@aac/cli` → 実体は `packages/cli`） | ✅ |
+| `node_modules` 内の symlink（実体が外） | ✅ |
+| `~/.local/bin/aac` → 実体 `.ts` への symlink | ✅ |
+| **`node_modules` 内の実体**（git 依存 / npm install / tarball 展開） | ❌ `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING` |
+
+最後の行は `import` された時だけでなく、**エントリポイントとして直接実行した場合も落ちる**（実測）。
+
+### 帰結（重要）
+
+**ビルドが必要になるトリガーは「npm 公開」ではなく「パッケージの実体が `node_modules` に入ること」。**
+
+* **同一リポジトリ内で共有する限り、ビルドは永久に不要。**
+  pnpm workspace はリンクなので実体は `packages/cli` にあり、制限にかからない
+* **他リポジトリから `pnpm add github:org/co-llm-piler` のような git 依存で入れると、実体がコピーされて動かない。**
+  npm 公開していなくても同じ。ここを勘違いすると、後で必ず詰まる
+
+### 別リポジトリの specs を扱いたい場合（ビルドを避ける2案）
+
+いずれも「実体を `node_modules` の外に置く」ことで制限を回避する。
+
+| 案 | 手順 | 評価 |
+| --- | --- | --- |
+| **A. specs を同じモノレポに置く** | `specs/` を本リポジトリに追加 | 最も安い。当面はこれで足りるはず |
+| **B. 各自 clone して symlink** | `ln -s <repo>/packages/cli/bin/aac.ts ~/.local/bin/aac`（実測✅） | 動くが**各自の手作業**が発生し、全員のバージョン統一が崩れやすい |
+| C. ビルドして `.js` を配る | tsc で型を落とすだけ（バンドル不要） | 必要になったら。§6 |
+
+**当面は案A を推奨。**「別リポジトリから使いたい」が現実になった時が、初めてビルドを入れる時。
+その「ビルド」に何を選ぶか（単体JS化を含む）は **§10 で比較**する。
+
+---
+
+## 3. 最大の運用リスク: Node バージョンの不一致
+
+全員共有にした瞬間、**これが唯一かつ最大の事故要因**になる。
+型ストリップは Node 22.18 以上が必要で、それ未満では意味の分かりにくいシンタックスエラーで落ちる。
+
+対策は3点セット。いずれも数行で済む。
+
+```jsonc
+// packages/cli/package.json — pnpm install 時点で弾く
+{ "engines": { "node": ">=22.18" } }
+```
+
+```text
+// .node-version（および .nvmrc）— nvm / fnm / mise / Volta が読む
+24
+```
+
+```ts
+// packages/cli/bin/aac.ts の先頭 — 実行時の最終防衛線
+const [maj, min] = process.versions.node.split(".").map(Number);
+if (maj < 22 || (maj === 22 && min < 18)) {
+  console.error(`aac: Node >=22.18 が必要です (現在 ${process.versions.node})`);
+  console.error(`     .node-version に従い、mise / nvm 等で切り替えてください`);
+  process.exit(1);
+}
+```
+
+さらに `pnpm` 側で `engine-strict=true`（`.npmrc`）を入れておくと、install 時点で確実に止まる。
+**エラーメッセージに「どうすれば直るか」を書く**ことが、共有ツールでは効果が大きい。
+
+---
+
+## 4. 依存ゼロを維持するか
+
+現状の実測では依存パッケージ数 0、`pnpm install` 0.8秒。この状態には固有の価値がある。
+
+* `git clone` → `pnpm install` が一瞬で終わり、新規メンバーの立ち上がりが速い
+* サプライチェーンの検討が不要
+* §2 の制限（`node_modules` 内 `.ts`）に触れる機会が減る
+
+一方、`bin` 方式を採る以上 `pnpm install` は必ず1回走るので、
+**「依存ゼロだから install 不要」という利点は取れない**（`.bin` の生成に install が要る）。
+したがって依存ゼロは**目的ではなく、維持できる限り維持する方針**として扱うのが正確。
+
+引数パーサは Node 組み込みの `util.parseArgs` で足りるため、少なくとも CLI 骨格の段階では依存は不要。
+`PACKAGE.md` が `packages/core` を「外部依存ゼロのピュアTS」と定めている以上、
+**CLI 側も同じ規律に揃えておくのが自然**。
+
+---
+
+## 5. 「安い保険」の見直し —— バイナリ非採用による降格
+
+前案では単一バイナリ化に備えて5つの制約を挙げたが、**決定3でバイナリを捨てたため、根拠が消えたものがある**。
+不要になった制約を惰性で守るのは害なので、明示的に整理する。
+
+| # | 制約 | 判定 |
+| --- | --- | --- |
+| 1 | テンプレートを `fs` で読まない | **降格（弱い推奨）**。バンドラが無いので `fs` 読みでよい。ただし `.js` ビルドを入れた時に `tsc` が `.txt` をコピーしない事故はあるので、TS モジュールに埋める方が依然として楽 |
+| 2 | 計算した文字列を `import()` に渡さない | **撤回**。動的ロードの制約はバイナリ固有。npm からのプラグイン動的ロードも将来的に選択肢に戻る |
+| 3 | 仕様読み込みを `SpecLoader` 1枚に閉じ込める | **維持**（理由差し替え）。`SPEC.md` が挙げる「Sandbox 上での安全な動的評価」への移行余地と、テスト容易性のため |
+| 4 | パス解決は `process.cwd()` 基準 | **維持・強化**。`.bin` シム経由や PATH 経由では cwd が任意のディレクトリになる（実測）。単純に正しい |
+| 5 | 出力を決定的にする | **維持**。§8 のセルフホスト検証の前提であり、バイナリとは無関係 |
+
+---
+
+## 6. リポジトリ構成（当面）
+
+```text
+co-llm-piler/
+├── .node-version              # 24
+├── .npmrc                     # engine-strict=true
+├── pnpm-workspace.yaml
+├── package.json               # private, devDeps: { "@aac/cli": "workspace:*" }
+├── packages/
+│   ├── core/                  # 型 + 極薄ヘルパ（依存ゼロ）
+│   │   └── index.ts
+│   └── cli/
+│       ├── package.json       # bin: { aac: "./bin/aac.ts" }, engines
+│       ├── bin/aac.ts         # #!/usr/bin/env node + Node バージョンガード
+│       └── src/
+│           ├── loader.ts      # SpecLoader（保険3）
+│           ├── extract.ts     # レコーディング Proxy → IR
+│           └── emit.ts        # IR → 生成コード
+└── specs/                     # 当面はここに置く（§2 案A）
+```
+
+`PACKAGE.md` の `plugins/` 分割は**まだ作らない**。
+ジェネレータは `packages/cli/src/emit.ts` 内の関数でよく、プラグイン機構は
+「第三者がジェネレータを書き始める日」まで不要（付録B）。
+
+セットアップ手順は README に2行:
+
+```bash
+pnpm install
+pnpm aac --help
+```
+
+---
+
+## 7. 生成コード側の扱い（CLI 配布とは別問題）
+
+CLI をどう配るかとは独立に、**生成された PBT コードの互換性**は早めに決めておく必要がある。
+
+* **IR バージョン**（整数、単調増加）を `universal-spec.ir.json` に持たせ、**唯一の互換性契約**とする
+  CLI の semver ではなく、これが契約であることを明示する
+* 生成ファイルのヘッダには `ir-version` と `spec-hash` のみ書き、**日時と CLI バージョンは埋めない**
+  （埋めると CLI を更新するたび全生成物に無意味な差分が出る。保険5と同じ理由）
+* 多言語対応（将来）では、Shrinking / State Diff / リプレイのロジックを
+  各言語の runtime ライブラリ（`aac-go/runtime` 等）に置き、生成物は薄いグルーに留める
+  ── 全生成物にロジックをコピーすると、バグ修正を配布できなくなるため
+
+```go
+// Code generated by aac. DO NOT EDIT.
+// ir-version: 1
+// spec-hash:  sha256:9f2a...
+```
+
+---
+
+## 8. `SELF_HOSTING.md` への修正提案（前案から維持）
+
+`SELF_HOSTING.md` は `diff ./stage1.js ./stage2.js` で不動点を検証する設計だが、
+そもそも**当面 `.js` をビルドしない**ため、この比較対象は存在しない。
+
+検証したいのは「コンパイラ出力の決定性」なので、比較対象を **IR と生成ソース**に置き換える。
+
+```bash
+pnpm aac compile platform-specs/ -o stage1.ir.json
+pnpm aac generate --out stage1-src/
+
+node stage1-src/cli.ts compile platform-specs/ -o stage2.ir.json
+node stage1-src/cli.ts generate --out stage2-src/
+
+diff stage1.ir.json stage2.ir.json
+diff -r stage1-src/ stage2-src/
+```
+
+前提として、IR の JSON はキーをソートし、インデントと改行コードを固定すること（保険5）。
+
+---
+
+## 9. 未検証の論点
+
+配布形態が確定したことで、残る論点は**コンパイラ本体の設計に一本化された**。
+
+1. **レコーディング Proxy による抽象実行が、現実の仕様でどこまで通るか。**
+   `cases` 内の `if` 分岐、Proxy 戻り値への後続演算、非同期などで破綻し得る。
+   崩れると `SPEC.md` の Layer 1 設計そのものに跳ね返るため、**Phase 1 の本丸はここ**
+2. `enum` / `namespace` / 拡張子なし import が使えない制約が、`packages/core` の型設計に与える影響
+   （`enum` 禁止は `as const` + union で代替でき、Layer 1 の思想とはむしろ合致する）
+
+---
+
+## 10. 単体JS化（ビルド）の比較
+
+### 10.1. 先に結論 —— 単体JS化が「解かないこと」
+
+期待されがちだが**外れる**のがここ。
+
+> **単体JS化しても、Node 22.18+ という要件は下がらない。**
+
+理由は、CLI 自身の形式ではなく**入力側**にある。`aac` の仕事は
+ユーザーの `.spec.ts` を実行時に `import()` することであり、これには型ストリップが要る。
+CLI を `.js` に固めても、読み込む対象が `.ts` である限り Node の要件は変わらない。
+
+要件を本当に下げたければ、**CLI 側に型ストリッパ（esbuild / ts-blank-space 等）を同梱し、
+`vm` か `data:` URL で評価する**必要がある。これは実装量と依存が跳ねるので、当面は非現実的。
+
+### 10.2. 単体JS化が「解くこと」
+
+| 効果 | 詳細 |
+| --- | --- |
+| **`node_modules` 制限の解除**（本命） | §2 の唯一のブロッカーが消え、**git 依存・npm 公開・1ファイルコピー**が全て解禁される |
+| **起動が速くなる** | 実測 140ms → **85ms**（約1.6倍）。型ストリップのコストが消える |
+| 1ファイルで完結 | 他リポジトリの `scripts/aac.js` に置くだけで動く。`pnpm install` すら不要 |
+
+**実測（本環境）:** `node_modules` 内に置いた `.js` エントリから、
+外部（`node_modules` の外）の `.spec.ts` を動的 `import()` できることを確認済み。
+つまり **CLI を JS 化すれば、他リポジトリ配布と spec 読み込みが両立する**。
+
+### 10.3. 4案の比較
+
+| | **0. .ts 直実行**（現行） | **1. transpile のみ** | **2. 単体JSバンドル** | **3. 2 + 成果物コミット** |
+| --- | --- | --- | --- | --- |
+| ビルド | 不要 | **0.15秒**（実測） | 数十ms〜（esbuild） | 同左 + commit |
+| devDependency | **0** | **0**（`node:module` 組込） | esbuild 等 **1つ** | 同左 |
+| 出力 | — | N ファイルの `.js` | **1 ファイル** | 1 ファイル（git 管理） |
+| `node_modules` 制限 | ❌ 引っかかる | ✅ 解除 | ✅ 解除 | ✅ 解除 |
+| 他リポジトリへ配布 | symlink のみ | git 依存・npm 可 | **1ファイルコピーも可** | **clone だけで動く** |
+| Node 要件 | 22.18+ | 22.18+ | 22.18+ | 22.18+ |
+| 起動 | 140ms | 85ms | 85ms | 85ms |
+| フィードバックループ | **0秒** | watch 必要 | watch 必要 | watch + commit 忘れ |
+| スタックトレース | 完全一致 | **完全一致**（後述） | sourcemap 必要 | sourcemap 必要 |
+| git diff ノイズ | 無し | 無し（`dist/` は ignore） | 無し | **有り** |
+
+### 10.4. 案1（transpile のみ）が意外に強い —— 依存ゼロでビルドできる
+
+Node 24 には `node:module.stripTypeScriptTypes()` が入っており、
+**バンドラを一切入れずに `.ts` → `.js` 変換ができる**（実測: 9ファイル 0.15秒）。
+
+```js
+// build.mjs — devDependency ゼロ
+import { stripTypeScriptTypes } from "node:module";
+import { readFileSync, writeFileSync, mkdirSync, readdirSync } from "node:fs";
+mkdirSync("dist", { recursive: true });
+for (const f of readdirSync("src").filter(f => f.endsWith(".ts"))) {
+  const js = stripTypeScriptTypes(readFileSync(`src/${f}`, "utf8"), { mode: "strip" });
+  writeFileSync(`dist/${f.replace(/\.ts$/, ".js")}`, js.replaceAll('.ts"', '.js"'));
+}
+```
+
+`mode: "strip"` は**型を空白で置換する**ため、行・列番号が元ファイルと完全に一致する。
+実測でも出力は `export const f1 = (x        )         => x + 1;` の形になり、
+**sourcemap 無しでスタックトレースが正しく出る**。これはバンドルに対する明確な優位点。
+
+**注意点2つ:**
+
+* インポート指定子の拡張子を `.ts` → `.js` に書き換える必要がある
+  （実行時は `.ts` 必須、ビルド後は `.js` 必須という衝突）。
+  上記のような素朴な置換は脆いので、実際には `node:module` の解決に合わせた処理か、
+  そもそもバンドル（案2）で回避するのが堅い
+* `stripTypeScriptTypes` は experimental 扱いで、実行の度に警告が stderr に出る
+  （ビルド時のみなので実害は小さい。`--no-warnings` で抑止可）
+
+### 10.5. 推奨
+
+| 時期 | 案 | 理由 |
+| --- | --- | --- |
+| **いま（同一リポジトリで共有）** | **案0（ビルド無し）** | §1 の `bin` 方式で全員共有が成立済み。0秒ループを手放す理由が無い |
+| 他リポジトリ / 他チームに配る時 | **案2（単体JSバンドル）** | 拡張子問題を回避でき、1ファイルコピーという最も強い配布形態が手に入る |
+| バンドラを入れたくない場合 | 案1 | 依存ゼロを維持したまま `node_modules` 制限だけ解除できる |
+| clone だけで動かしたい要求が出たら | 案3 | ただし §10.6 のガードが必須 |
+
+**「起動が 55ms 速い」だけを理由にビルドを入れるのは早い。**
+単体JS化の本当の動機は配布経路の解禁であり、それが必要になるまでは案0 が最も安い。
+
+### 10.6. 案3（成果物コミット）を選ぶ場合の必須ガード
+
+* **タグ時のみコミットする**（毎コミット更新はレビューが差分ノイズで死ぬ）
+* **CI で「再ビルドして `git diff --exit-code dist/`」を回す。**
+  コミット済み成果物とソースの乖離は放置すると必ず起きる
+* 成立条件は**ビルドが決定的であること** —— §8 のセルフホスト検証の要件と同一。
+  1つの規律で2つの見返りが得られる
+* **minify しない。** 数百KBより、diff が読めることの方が価値が高い
+
+---
+
+## 付録A. 対象外とした選択肢（記録）
+
+決定3により不採用。将来 Node 以外を許容する判断が出た場合のために残す。
+
+| 方式 | サイズ目安 | 不採用の理由 |
+| --- | --- | --- |
+| Bun `build --compile` | 55〜90MB | Node 以外の依存が増える。クロスコンパイル CI の運用が必要 |
+| Deno `compile` | 75〜100MB | 同上。加えて動的 `import()` の制約が厳しい |
+| Node SEA | 100〜130MB | クロスコンパイル不可。ターゲット毎のランナーが必要 |
+| Docker イメージ | — | Docker という依存に置き換わるだけ |
+| Rust / Go で書き直し | 5〜15MB | 抽象実行に JS ランタイムが要るため原理的に不可 |
+
+**バイナリを git にコミットする案も明確に不可**：git はバイナリの差分圧縮が効かず、
+リリース毎に全量が履歴へ永久に積まれる（5 platform × 80MB × 20 releases ≒ 8GB）。
+一度太った履歴は history rewrite なしに戻せない。Git LFS も `git-lfs` 導入と
+ネットワークが新たな前提になるため、「clone すれば動く」という目的と両立しない。
+
+## 付録B. プラグイン機構（将来）
+
+第三者がジェネレータを書き始めたら、`protoc` 方式（IR を stdin で渡し、
+生成ファイル一覧を stdout で受け取る独立実行ファイル）が最も素直。
+ジェネレータを任意の言語で書けるため、Go チームが Go で `aac-gen-golang` を書ける。
+「Universal IR = 言語非依存の契約」という `SPEC.md` の主張とも配布形態が一致する。
+
+ただし**バイナリを採らない現状では、npm パッケージを動的ロードする従来案も選択肢に戻る**（保険2の撤回）。
+どちらを採るかは、その時点で判断すればよい。
