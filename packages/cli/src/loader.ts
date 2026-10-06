@@ -2,6 +2,7 @@ import { readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { BEHAVIORS } from "@aac/core";
+import type { DomainModel } from "@aac/core";
 import type { SpecInput } from "./extract.ts";
 
 // 仕様の読み込みはここ1箇所に閉じ込める。パスは process.cwd() 基準。
@@ -22,6 +23,12 @@ export async function loadSpecs(dir: string): Promise<SpecInput> {
           if (name in input.behaviors) throw new Error(`behavior "${name}" が重複しています (${file})`);
           input.behaviors[name] = behavior as SpecInput["behaviors"][string];
         }
+      } else if (isDomainModel(value)) {
+        if (input.model && input.model !== value) throw new Error(`DomainModel が複数あります (${file})`);
+        if (!value.states.includes(value.initial)) {
+          throw new Error(`DomainModel "${exportName}" の initial "${value.initial}" が states にありません`);
+        }
+        input.model = value;
       } else if ("default" in value) {
         if (exportName in input.tables && input.tables[exportName] !== value) {
           throw new Error(`DecisionTable "${exportName}" が重複しています (${file})`);
@@ -31,4 +38,8 @@ export async function loadSpecs(dir: string): Promise<SpecInput> {
     }
   }
   return input;
+}
+
+function isDomainModel(value: object): value is DomainModel {
+  return "states" in value && Array.isArray(value.states) && "data" in value && "commands" in value;
 }

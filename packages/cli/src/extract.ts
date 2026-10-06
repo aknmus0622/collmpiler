@@ -1,4 +1,5 @@
-import { ABSTRACT_APPLY, getBinding } from "@aac/core";
+import { ABSTRACT_APPLY, getBinding, getPrecondition } from "@aac/core";
+import type { DomainModel } from "@aac/core";
 import { lintCase } from "./lint.ts";
 
 // レコーディング Proxy による抽象実行: cases の関数を「記号的な state」で1回走らせ、
@@ -10,6 +11,7 @@ export type SpecInput = {
   behaviors: Record<string, { where?: readonly string[]; cases: Record<string, (state: any) => unknown> }>;
   // export 名 → DecisionTable。applyDecision に渡された表の名前解決に使う
   tables: Record<string, object>;
+  model?: DomainModel;
 };
 
 export type Diagnostic = {
@@ -278,6 +280,16 @@ export async function extract(input: SpecInput, options: ExtractOptions = {}) {
         report("error", error.code, error.message);
       }
     }
+    for (const text of behavior.where ?? []) {
+      if (getPrecondition(text)) continue;
+      diagnostics.push({
+        severity: "error",
+        code: "unbound-precondition",
+        behavior: name,
+        case: "",
+        message: `where "${text}" に bindPreconditions による評価関数が登録されていない`,
+      });
+    }
     behaviors.push({ name, preconditions: [...(behavior.where ?? [])], transitions });
   }
 
@@ -287,7 +299,8 @@ export async function extract(input: SpecInput, options: ExtractOptions = {}) {
     if (bound || usedTables.has(name)) decisions[name] = { bound, rows: table };
   }
 
-  return { ir: { irVersion: IR_VERSION, behaviors, decisions }, diagnostics };
+  const ir = { irVersion: IR_VERSION, behaviors, decisions, ...(input.model ? { model: input.model } : {}) };
+  return { ir, diagnostics };
 }
 
 // キーをソートし、インデントと改行を固定する（出力の決定性）
