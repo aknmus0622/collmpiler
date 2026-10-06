@@ -1,0 +1,11 @@
+{
+  "name": "example-checkout-ts",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "verify": "node aac/verify.ts"
+  },
+  "devDependencies": {
+    "@aac/cli": "workspace:*"
+  }
+}

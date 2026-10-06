@@ -1,0 +1,86 @@
+{
+  "behaviors": [
+    {
+      "name": "Checkout",
+      "preconditions": [
+        "外部決済モジュールが有効な場合"
+      ],
+      "transitions": {
+        "PaymentSuccess": {
+          "emittedCommands": [
+            {
+              "action": "SendReceipt",
+              "payload": {
+                "discount": {
+                  "$ref": "decision:CampaignRules.discount"
+                }
+              },
+              "payloadSchema": {
+                "discount": "number"
+              }
+            },
+            {
+              "$spread": "decision:CampaignRules.effects"
+            }
+          ],
+          "event": "Payment completed",
+          "nextState": "PAID"
+        }
+      }
+    }
+  ],
+  "decisions": {
+    "CampaignRules": {
+      "bound": true,
+      "rows": {
+        "default": {
+          "discount": 0,
+          "effects": []
+        },
+        "ゴールド会員であり、かつ月末の場合": {
+          "discount": 0.2,
+          "effects": [
+            {
+              "action": "IssueCoupon",
+              "payload": {
+                "type": "Premium"
+              }
+            }
+          ]
+        },
+        "シルバー会員の場合": {
+          "discount": 0.05,
+          "effects": []
+        }
+      }
+    }
+  },
+  "irVersion": 1,
+  "model": {
+    "commands": {
+      "IssueCoupon": {
+        "type": [
+          "Premium",
+          "Standard"
+        ]
+      },
+      "SendReceipt": {
+        "discount": "number"
+      }
+    },
+    "data": {
+      "isMonthEnd": "boolean",
+      "paymentModuleActive": "boolean",
+      "rank": [
+        "Gold",
+        "Silver",
+        "Bronze"
+      ]
+    },
+    "initial": "PENDING",
+    "states": [
+      "PENDING",
+      "PAID"
+    ]
+  }
+}
