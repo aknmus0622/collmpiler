@@ -28,11 +28,11 @@
 
 | 領域 | レイヤー | 責務と特性 | 書き手 |
 | --- | --- | --- | --- |
-| **IN SCOPE**(プラットフォーム) | **Layer 1: Spec** | 業務の真実（What）を宣言する純粋データ（ドメインモデルとDMN）。`as const` と `satisfies` で型安全にする。関数は `cases` のマッピングだけで、構文を制限する（§3.1）。 | 人 |
+| **IN SCOPE**(プラットフォーム) | **Layer 1: Spec** | 業務の真実（What）を宣言する純粋データ（ドメインモデルとDMN）。部品を境界（入力・依存への問い合わせ・依存への指示）だけで記述する。`as const` と `satisfies` で型安全にする。関数は `cases` のマッピングだけで、構文を制限する（§3.1）。 | 人 |
 |  | **Layer 2: Binding** | Layer 1 の自然言語キー（DMN の条件、`where` の事前条件）に評価関数（How）を結び付ける。 | 人 |
 |  | **Universal IR** | Layer 1 をプラットフォームが抽象実行して出力する、**完全な言語非依存のJSON**。Layer 2 の関数は含まない。 | 生成 |
 |  | **Layer 3: Verification** | Layer 1, 2 から構築されるPBTエンジン。Target System をアダプター経由で操作して検証する。テスト側にのみ生成される。 | 生成 |
-| **境界線** | **Adapter Contract** | テストごとの状態リセット（`setupIsolation` / `teardownIsolation`）を強制し、決定論的なリプレイを可能にするインターフェース。型は生成され、中身は実装エージェントが書く。 | 生成＋LLM |
+| **境界線** | **Adapter Contract** | テストごとの状態リセット（`setupIsolation` / `teardownIsolation`）を強制し、決定論的なリプレイを可能にするインターフェース。本番システムの依存は、フレームワークが用意する代役（Ports）に置き換える。型は生成され、中身は実装エージェントが書く。 | 生成＋LLM |
 | **OUT OF SCOPE**(開発者の自由) | **Target System** | 本番のアプリケーション実装。**プラットフォームはここに一切コードを置かない**（型もシグネチャも生成しない）。 | LLM（または人） |
 
 ### 2.2. PBTエンジンの可観測性（デバッグ体験）
@@ -122,10 +122,12 @@ PBTエンジンがエラーを発見した場合、巨大なログダンプを�
 | 監査と取り出し | 作業場所から `src/` と `aac/adapter.ts` だけを出力先へ写す。それ以外のファイルの追加、渡した IR・契約の書き換えや削除、シンボリックリンクは違反 | 採点基準の改ざんと、リンク経由で仕様を持ち込む抜け道を防ぐ |
 | 採点基準の生成 | `ir.json` / `adapter.contract.ts` / `verify.ts` を出力先に生成し直す | 採点基準は作業場所を経由しない |
 | 余計なもの検査（本番コード） | `src/` 内の相対 import しか使っていない（パッケージ、`node:` 組み込み、`import()` / `require()` は不可） | 本番コードがフレームワーク・仕様・テスト側に依存しないことの保証 |
-| 余計なもの検査（アダプター） | `adapter.contract.ts` と `src/` しか import していない。数値リテラル、状態データのフィールド名とその値、DMN の条件キーを含まない | アダプターに業務ロジックを書いて本番コードを空のまま合格する抜け道を塞ぐ。データの中身に触れられなければ業務上の分岐は書けない |
+| 余計なもの検査（アダプター） | `adapter.contract.ts` と `src/` しか import していない。数値リテラル、入力のフィールド名とその値、DMN の条件キーを含まない（問い合わせ・指示の名前は配線に必要なので可） | アダプターに業務ロジックを書いて本番コードを空のまま合格する抜け道を塞ぐ。**暫定の規則**で、ミューテーションによる検査に置き換える予定（後述） |
 | PBT | 別プロセスで `verify.ts` を実行する | LLM が書いたコードはここで初めて実行される |
 
 検査は構文解析ではなくトークン単位の機械的な判定であり、グローバル（`fetch` や `process`）経由の抜け道までは塞いでいません。
+
+**今後の変更（決定済み・未実装）:** 本番コードに課す条件をゼロにするため、本番コードの作りに合わせるのは常にアダプター側とします（依存の差し込み、モジュールやグローバルの差し替え、偽のサーバーなど、手段はアダプターが選ぶ）。そのためアダプターの字面の規則は廃止し、代わりに「本番コードをわざと壊して PBT が落ちることを確かめる」ミューテーションの検査で、検証結果が本番コードで決まっていることを確認します。ミューテーションの検査も Strategy として差し替え可能にし、合否の基準（IR 由来の値を変えて合格したら不合格）はゲート側が持ちます。設計方針（依存の受け取り方など）は、プロジェクトが用意する文書として依頼文に組み込みます。
 
 #### 隔離の限界
 
@@ -147,7 +149,15 @@ PBTエンジンがエラーを発見した場合、巨大なログダンプを�
 
 #### ドメインモデル（値が源泉、型は導出）
 
-状態名・状態データ・Command は値として宣言し、TypeScript の型はそこから導出します。値として残るので、IR に出力でき、PBT の入力生成にも、LLM への情報提供にもそのまま使えます。
+部品を**境界だけ**で記述します。どの層の部品（ドメイン、ユースケース、UI）も、外から見れば次の3種類の境界しか持ちません。
+
+| 境界 | 意味 | 例 |
+| --- | --- | --- |
+| `input` | アクションの入力（外から部品を動かす呼び出しの引数） | 会員ランク |
+| `queries` | 依存への問い合わせ（部品が外に尋ねて答えをもらう値） | 時計、設定 |
+| `commands` | 依存への指示（部品が外に対して行う副作用） | 領収書の送信、返金 |
+
+これらと状態名は値として宣言し、TypeScript の型はそこから導出します。値として残るので、IR に出力でき、PBT の入力生成にも、LLM への情報提供にもそのまま使えます。
 
 ```typescript
 // --- specs/order.model.ts (Layer 1) ---
@@ -155,16 +165,23 @@ import type { CommandsOf, DomainModel, StatesOf } from "@aac/core";
 
 export const OrderModel = {
   initial: "PENDING",
-  states: ["PENDING", "PAID"],
-  data: {
+  states: ["PENDING", "PAID", "SHIPPED", "CANCELLED"],
+  // アクションの入力
+  input: {
     rank: ["Gold", "Silver", "Bronze"],   // 配列は列挙
+  },
+  // 依存への問い合わせ
+  queries: {
     isMonthEnd: "boolean",                // 文字列はプリミティブ型
     paymentModuleActive: "boolean",
   },
-  // 仕様として許可される副作用（Command）
+  // 依存への指示（仕様として許可される副作用）
   commands: {
     SendReceipt: { discount: "number" },
     IssueCoupon: { type: ["Premium", "Standard"] },
+    NotifyPaymentFailure: {},
+    SendShippingNotice: {},
+    Refund: {},
   },
 } as const satisfies DomainModel;
 
@@ -172,7 +189,14 @@ export type OrderStates = StatesOf<typeof OrderModel>;
 export type DomainCommand = CommandsOf<typeof OrderModel>;
 ```
 
-多重度（`One<T>` / `Lone<T>` / `Some<T>` / `Many<T>`）は現時点では型としてのみ提供しています。型は IR に出せないため、値として宣言できる形への拡張が今後の課題です。数値の範囲などの制約、値オブジェクトの不変条件も同じ枠組みで扱う予定です。
+条件の評価関数と case が読めるデータは、入力・問い合わせの答え・現在の状態名（`status`）です。
+
+現在の制約と今後の課題:
+
+* 入力はモデル全体で1つで、アクションごとには分けられません。
+* 状態が持つのは状態名だけです。前のアクションの入力を後のアクションで使う、といったデータの持ち越しは表現できません。
+* 多重度（`One<T>` / `Lone<T>` / `Some<T>` / `Many<T>`）は型としてのみ提供しています。型は IR に出せないため、値として宣言できる形への拡張が必要です。数値の範囲などの制約、値オブジェクトの不変条件も同じ枠組みで扱う予定です。
+* 部品どうしの組み合わせ（ある部品の依存を、代役ではなく別の本物の部品につなぐ）は未実装です。
 
 #### デシジョンテーブルと振る舞い
 
@@ -201,13 +225,21 @@ export const CampaignRules = {
   "default": { discount: 0.0, effects: [] } // 必須フォールバック
 } as const satisfies DecisionTable<CampaignOutputs>;
 
+// --- specs/cancel.dmn.ts (Layer 1) ---
+export const CancelRules = {
+  "決済済みの注文の場合": { effects: [{ action: "Refund", payload: {} }] },
+  "default": { effects: [] }
+} as const satisfies DecisionTable<CancelOutputs>;
+
 // --- specs/order.spec.ts (Layer 1) ---
 import { defineBehaviors, applyDecision } from "@aac/core";
 import { CampaignRules } from "./campaign.dmn.ts";
+import { CancelRules } from "./cancel.dmn.ts";
 import type { OrderStates, DomainCommand } from "./order.model.ts";
 
 export const behaviors = defineBehaviors<OrderStates, DomainCommand>({
   Checkout: {
+    from: ["PENDING"],
     where: ["外部決済モジュールが有効な場合"],
     cases: {
       "PaymentSuccess": (state) => {
@@ -221,6 +253,29 @@ export const behaviors = defineBehaviors<OrderStates, DomainCommand>({
             ...campaign.effects
           ]
         });
+      },
+      "PaymentFailure": (state) => state.PENDING({
+        event: "Payment failed",
+        effects: [{ action: "NotifyPaymentFailure", payload: {} }]
+      })
+    }
+  },
+  Ship: {
+    from: ["PAID"],
+    cases: {
+      "Shipped": (state) => state.SHIPPED({
+        event: "Order shipped",
+        effects: [{ action: "SendShippingNotice", payload: {} }]
+      })
+    }
+  },
+  Cancel: {
+    from: ["PENDING", "PAID"],
+    cases: {
+      "Cancelled": (state) => {
+        const cancel = applyDecision(CancelRules, state);
+
+        return state.CANCELLED({ event: "Order cancelled", effects: [...cancel.effects] });
       }
     }
   }
@@ -228,8 +283,9 @@ export const behaviors = defineBehaviors<OrderStates, DomainCommand>({
 
 ```
 
-* `where` は事前条件です。満たさない状態での挙動は仕様の対象外で、PBT も検証しません。
-* `cases` のキー（`"PaymentSuccess"`）は、アクションの結果の種類（outcome）です。決済の成否のような外部要因を表し、アクション実行時の入力として与えられます。
+* `from` は、そのアクションを実行できる状態です。省略すると全状態になります。
+* `where` は事前条件です。`from` と `where` を満たさない場合の挙動は仕様の対象外で、PBT も検証しません。
+* `cases` のキー（`"PaymentSuccess"` など）は、アクションの結果を決める外部要因の応答（outcome）です。決済の成否のように、依存先が返す結果を表します。
 
 #### case 本体の構文制限
 
@@ -260,6 +316,12 @@ export const CampaignEvaluator = bindDecisionDetails<CampaignConditions>(Campaig
   "default": () => true
 });
 
+// 条件は現在の状態名 (status) も参照できる
+export const CancelEvaluator = bindDecisionDetails<keyof typeof CancelRules>(CancelRules, {
+  "決済済みの注文の場合": (state) => state.status === "PAID",
+  "default": () => true
+});
+
 // behaviors の where に書いた事前条件の評価関数
 export const Preconditions = bindPreconditions({
   "外部決済モジュールが有効な場合": (state) => state.paymentModuleActive
@@ -279,9 +341,10 @@ Layer 2 は PBT が期待値を算出するための「正解」であり、IR �
   "irVersion": 1,
   "model": {
     "initial": "PENDING",
-    "states": ["PENDING", "PAID"],
-    "data": { "rank": ["Gold", "Silver", "Bronze"], "isMonthEnd": "boolean", "paymentModuleActive": "boolean" },
-    "commands": { "SendReceipt": { "discount": "number" }, "IssueCoupon": { "type": ["Premium", "Standard"] } }
+    "states": ["PENDING", "PAID", "SHIPPED", "CANCELLED"],
+    "input": { "rank": ["Gold", "Silver", "Bronze"] },
+    "queries": { "isMonthEnd": "boolean", "paymentModuleActive": "boolean" },
+    "commands": { "SendReceipt": { "discount": "number" }, "Refund": {}, ... }
   },
   "decisions": {
     "CampaignRules": {
@@ -291,11 +354,13 @@ Layer 2 は PBT が期待値を算出するための「正解」であり、IR �
         "シルバー会員の場合": { "discount": 0.05, "effects": [] },
         "default": { "discount": 0, "effects": [] }
       }
-    }
+    },
+    "CancelRules": { ... }
   },
   "behaviors": [
     {
       "name": "Checkout",
+      "from": ["PENDING"],
       "preconditions": ["外部決済モジュールが有効な場合"],
       "transitions": {
         "PaymentSuccess": {
@@ -307,9 +372,12 @@ Layer 2 は PBT が期待値を算出するための「正解」であり、IR �
               "payloadSchema": { "discount": "number" } },
             { "$spread": "decision:CampaignRules.effects" }
           ]
-        }
+        },
+        "PaymentFailure": { "nextState": "PENDING", ... }
       }
-    }
+    },
+    { "name": "Cancel", "from": ["PENDING", "PAID"], ... },
+    { "name": "Ship", "from": ["PAID"], ... }
   ]
 }
 
@@ -341,74 +409,65 @@ Universal IR から、テスト側のファイルだけを生成します。生�
 
 PBTエンジン（Layer 3）と本番システムを安全に接続し、決定論的なテストを成立させるためのアダプター・インターフェースです。型は IR から生成されます。
 
+本番システムが外部に頼るものは、フレームワークが用意する代役（`Ports`）に置き換えます。代役は問い合わせに対して生成した答えを返し、受けた指示を記録します。本番システムに状態を外から流し込む口はありません。任意の状態には、初期状態からアクションを積み重ねて到達します。
+
 ```typescript
-// --- aac/adapter.contract.ts（生成物） ---
-export type StateName = "PENDING" | "PAID";
-export type StateData = { isMonthEnd: boolean; paymentModuleActive: boolean; rank: "Gold" | "Silver" | "Bronze" };
-export type Command =
-  | { action: "IssueCoupon"; payload: { type: "Premium" | "Standard" } }
-  | { action: "SendReceipt"; payload: { discount: number } };
-export type ActionName = "Checkout";
-export type Outcome = "PaymentSuccess";
+// --- aac/adapter.contract.ts（生成物。コメントはエージェント向けに英語） ---
+export type StateName = "PENDING" | "PAID" | "SHIPPED" | "CANCELLED";
+export type ActionName = "Cancel" | "Checkout" | "Ship";
+export type ActionInput = { rank: "Gold" | "Silver" | "Bronze" };
+
+export type Ports = {
+  /** 問い合わせ。答えはアクションごとに変わり得るので、必要なときに尋ねる（保持しない）。 */
+  queries: {
+    isMonthEnd(): boolean;
+    paymentModuleActive(): boolean;
+  };
+  /** アクションの結果を決める外部要因の応答。そのアクションの実行中だけ有効。 */
+  outcomes: {
+    Cancel(): "Cancelled";
+    Checkout(): "PaymentFailure" | "PaymentSuccess";
+    Ship(): "Shipped";
+  };
+  /** 指示。呼び出しは発行順に記録され、仕様と照合される。 */
+  commands: {
+    IssueCoupon(payload: { type: "Premium" | "Standard" }): void;
+    NotifyPaymentFailure(payload: {}): void;
+    Refund(payload: {}): void;
+    SendReceipt(payload: { discount: number }): void;
+    SendShippingNotice(payload: {}): void;
+  };
+};
 
 export interface TargetSystemAdapter {
-  /** 【分離契約】1回の試行の開始前に呼ばれる。本番システムをまっさらな状態にする。 */
-  setupIsolation(): Promise<void>;
+  /** 【分離契約】試行の開始前に呼ばれる。初期状態の本番システムを新しく作り、ports につなぐ。 */
+  setupIsolation(ports: Ports): Promise<void>;
 
-  /** 【分離契約】試行の終了後（成功・失敗問わず）に呼ばれる。副作用を完全に破棄する。 */
+  /** 【分離契約】試行の終了後（成功・失敗問わず）に呼ばれる。試行が作ったものを完全に破棄する。 */
   teardownIsolation(): Promise<void>;
 
-  /** 検証の出発点となる状態を本番システムに用意する。data は加工せずそのまま本番コードへ渡す。 */
-  givenState(state: StateName, data: StateData): Promise<void>;
-
-  /** アクションを実行する。outcome は IR の transitions のキー（アクションの結果の種類）。 */
-  executeAction(action: ActionName, outcome: Outcome): Promise<void>;
+  /** アクションを1つ実行する。1回の試行で、同じシステムに対して複数のアクションが順に実行される。 */
+  executeAction(action: ActionName, input: ActionInput): Promise<void>;
 
   /** 現在の状態名を返す（Upcaster等のマイグレーション処理は本番側で完了していること）。 */
   getCurrentState(): Promise<StateName>;
-
-  /** setupIsolation 以降に発行された Command（メールやキュー等の副作用）を発行順に返す。 */
-  getFiredCommands(): Promise<Command[]>;
 }
 
 ```
 
-アダプターは呼び出しを本番コードへ取り次ぐだけの薄い層でなければなりません（§2.3 の出口ゲート）。
+`Ports` はテスト側の型であり、本番コードがこれを import することはありません。本番コードの依存の受け取り方に `Ports` をつなぐのはアダプターの仕事です。
 
 ### 3.6. Layer 3: PBT の検証内容
 
-現在の PBT は1ステップの検証です。1回の試行は次のとおりです。
+1回の試行は、初期状態から始まるアクション列（最大8手）です。
 
-1. ドメインモデルの `data` からランダムな状態データを、`behaviors` からアクションと outcome の組を生成する。`where` を満たさない入力は捨てる。
-2. 仕様の case を具体値で実行し、期待される次状態と Command の列を得る（Layer 2 の評価関数で DMN の行を決める）。
-3. `setupIsolation` → `givenState(initial, data)` → `executeAction(action, outcome)` → `getCurrentState` / `getFiredCommands` → `teardownIsolation` の順にアダプターを呼ぶ。
-4. 次状態と、Command の列（順序を含む）が期待と一致することを確かめる。
+1. `setupIsolation(ports)` で、初期状態の本番システムを代役につないで作る。
+2. 1手ごとに、入力・問い合わせの答え・outcome をランダムに決める。現在の状態で実行でき（`from`）、事前条件（`where`）を満たすアクションの中から1つを選ぶ。
+3. 仕様の case を具体値で実行し、期待される次状態と Command の列を得る（Layer 2 の評価関数で DMN の行を決める）。
+4. `executeAction(action, input)` を呼び、`getCurrentState` の結果と、その手の間に代役が受けた指示の列（順序を含む）が期待と一致することを確かめる。
+5. 一致すれば次の手へ進む。最後に `teardownIsolation` を呼ぶ。
 
-不一致が見つかると fast-check が入力を最小化し、シード・パス・最小の入力・期待値と実際の値を報告します。`node aac/verify.ts --seed X --path Y` で同じ反例を再現できます。
-
-複数ステップの経路探索（アクション列の生成と、その Shrinking）は今後の課題です。その際は以下のステートマシン記述子へ変換して PBT エンジンに渡す設計です。
-
-```typescript
-// --- 計画中 ---
-import * as fc from "fast-check";
-
-/**
- * PBTステートマシン（fast-check）が直接解釈できるアクション記述子
- */
-export interface PBTActionDescriptor<State, Input> {
-  name: string;
-
-  // State-Driven: 事前条件で弾かれる無駄なテストを避けるため、現在の状態に応じた入力を生成
-  arbitrary: (state: State) => fc.Arbitrary<Input>;
-
-  // Layer 1の where/while と Layer 2の評価ロジックを合成
-  check: (state: State) => boolean;
-
-  // Layer 1の状態遷移（次状態と副作用のインテント）の導出
-  transition: (state: State, input: Input) => { nextState: State, effects: DomainCommand[] };
-}
-
-```
+不一致が見つかると fast-check がアクション列を最小化し、シード・パス・**最短のアクション列**・期待値と実際の値を報告します。例えば「決済後のキャンセルで返金されない」という不具合は、「決済成功 → キャンセル」の2手として報告されます。`node aac/verify.ts --seed X --path Y` で同じ反例を再現できます。
 
 ## 4. イベントストーミング＆DFDの自動生成
 
