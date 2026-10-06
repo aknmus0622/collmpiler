@@ -4,6 +4,36 @@ export type Lone<T> = T | undefined;
 export type Some<T> = [T, ...T[]];
 export type Many<T> = T[];
 
+// --- ドメインモデル ---
+// 型は実行時に消えるため、状態・データ・Command は「値」として宣言し、型はそこから導出する。
+// 値として残るので IR に出力でき、PBT の入力生成にもそのまま使える。
+export type FieldSchema = "boolean" | "number" | "string" | readonly string[];
+
+export type DomainModel = {
+  initial: string;
+  states: readonly string[];
+  data: Record<string, FieldSchema>;
+  commands: Record<string, Record<string, FieldSchema>>;
+};
+
+type FieldType<F> = F extends "boolean"
+  ? boolean
+  : F extends "number"
+    ? number
+    : F extends "string"
+      ? string
+      : F extends readonly (infer Value)[]
+        ? Value
+        : never;
+
+type Shape<Fields> = { -readonly [K in keyof Fields]: FieldType<Fields[K]> };
+
+export type DataOf<M extends DomainModel> = Shape<M["data"]>;
+export type StatesOf<M extends DomainModel> = { [Name in M["states"][number]]: DataOf<M> };
+export type CommandsOf<M extends DomainModel> = {
+  [Action in keyof M["commands"]]: { action: Action; payload: Shape<M["commands"][Action]> };
+}[keyof M["commands"]];
+
 // --- DMN ---
 // 文字列キーに加え、必ず "default" キーを要求する
 export type DecisionTable<Outputs> = Record<string, Outputs> & { default: Outputs };
@@ -59,6 +89,18 @@ export function bindDecisionDetails<Conditions extends string>(
     table,
     evaluate: (state: object) => evaluate(table, state) as Conditions,
   };
+}
+
+// --- 事前条件 (where) ---
+const preconditions = new Map<string, Predicate>();
+
+export function bindPreconditions<Conditions extends string>(impl: Record<Conditions, Predicate>) {
+  for (const [text, predicate] of Object.entries<Predicate>(impl)) preconditions.set(text, predicate);
+  return impl;
+}
+
+export function getPrecondition(text: string): Predicate | undefined {
+  return preconditions.get(text);
 }
 
 // --- 振る舞い定義 ---
