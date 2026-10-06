@@ -35,7 +35,9 @@ function header(ir: Ir): string {
 const union = (values: readonly string[]) => values.map((value) => JSON.stringify(value)).join(" | ") || "never";
 
 function fieldType(schema: FieldSchema): string {
-  return typeof schema === "string" ? schema : union(schema);
+  if (schema === "integer") return "number";
+  if (typeof schema === "string") return schema;
+  return Array.isArray(schema) ? union(schema) : "number";
 }
 
 function shape(fields: Record<string, FieldSchema>): string {
@@ -50,7 +52,6 @@ export function generateContract(ir: Ir): string {
   const model = requireModel(ir);
   const behaviors = [...ir.behaviors].sort((a, b) => (a.name < b.name ? -1 : 1));
   const queries = Object.keys(model.queries).sort().map((name) => `${name}(): ${fieldType(model.queries[name])}`);
-  const outcomes = behaviors.map((b) => `${b.name}(): ${union(Object.keys(b.transitions).sort())}`);
   const commands = Object.keys(model.commands).sort().map((name) => `${name}(payload: ${shape(model.commands[name])}): void`);
 
   return `${header(ir)}
@@ -65,10 +66,11 @@ ${behaviors.map((b) => `  | { name: ${JSON.stringify(b.name)}; input: ${shape(mo
  * whatever seams your production code has.
  */
 export type Ports = {
-  /** Values the system asks its environment for. Answers can differ between actions: ask when needed, do not cache. */
+  /**
+   * Values the system asks its environment for (a clock, configuration, the response of an external service).
+   * Answers can differ between actions: ask when needed, do not cache.
+   */
   queries: ${members(queries)};
-  /** The external result that decides how an action turns out. Only valid while that action is executing. */
-  outcomes: ${members(outcomes)};
   /** Side effects the system performs on its environment. Calls are recorded in order and compared with the spec. */
   commands: ${members(commands)};
 };

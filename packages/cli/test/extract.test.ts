@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { applyDecision, defineBehaviors } from "@aac/core";
+import { applyDecision, bindSpecification, defineBehaviors } from "@aac/core";
 import { extract, stableStringify } from "../src/extract.ts";
 import type { ExtractOptions } from "../src/extract.ts";
 
@@ -14,11 +14,14 @@ const Rules = {
   "default": { discount: 0, effects: [] },
 } as const;
 
+const Model = { initial: "A", states: ["A"], data: {}, actions: {}, queries: {}, commands: {} } as const;
+bindSpecification(Model, { conditions: { "ゴールドの場合": (state) => (state as { rank?: string }).rank === "Gold" } });
+
 async function run(caseFn: (state: any) => unknown, options?: ExtractOptions) {
-  const behaviors = defineBehaviors({ B: { cases: { C: caseFn as any } } });
+  const behaviors = defineBehaviors({ B: { cases: { default: caseFn as any } } });
   const { ir, diagnostics } = await extract({ behaviors, tables: { Rules } }, { lint: false, ...options });
   return {
-    transition: ir.behaviors[0].transitions.C as any,
+    transition: ir.behaviors[0].transitions.default as any,
     codes: diagnostics.map((d) => `${d.severity}:${d.code}`),
     messages: diagnostics.map((d) => d.message),
   };

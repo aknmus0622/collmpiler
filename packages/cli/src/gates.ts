@@ -177,6 +177,8 @@ export async function exitGate(
   // 5. PBT (別プロセス。LLM が書いたコードはここで初めて実行される)
   const { result, crash } = runVerify(ctx);
   if (!result) return { feedback: { kind: "crash", output: crash ?? "" } };
+  // 仕様やハーネス側の問題は実装の誤りではないので、エージェントに差し戻さずに止める
+  if (result.status === "error") throw new Error(`PBT を実行できませんでした: ${result.message}`);
   if (result.status !== "pass") return { feedback: { kind: "pbt", result } };
 
   // 6. ミューテーション: 本番コードを壊して PBT が落ちることを確かめる。合否の基準はゲート (judge) が持つ

@@ -9,6 +9,7 @@ import { DEFAULT_GUIDE } from "./guide.ts";
 import { loadSpecs } from "./loader.ts";
 import { builtinMutation } from "./mutation.ts";
 import type { MutationStrategy } from "./mutation.ts";
+import { selfCheck } from "./runtime.ts";
 import type { ImplementationStrategy } from "./strategy.ts";
 
 // 仕様 → IR → [入口ゲート → Strategy (エージェントが実装) → 出口ゲート] のループ。
@@ -46,13 +47,20 @@ export async function implement(options: ImplementOptions) {
   const outDir = resolve(process.cwd(), options.out);
   const log = options.log ?? (() => {});
 
-  const { ir: extracted, diagnostics } = await extract(await loadSpecs(specsDir));
+  const spec = await loadSpecs(specsDir);
+  const { ir: extracted, diagnostics } = await extract(spec);
   const errors = diagnostics.filter((d) => d.severity === "error");
   if (errors.length > 0) {
     throw new Error(`仕様にエラーがあります:\n${errors.map((d) => `  ${d.behavior}.${d.case}: ${d.message}`).join("\n")}`);
   }
   const ir = JSON.parse(stableStringify(extracted)) as Ir;
   requireModel(ir);
+
+  // 仕様の事前検査。仕様自身の誤りは、エージェントを呼ぶ前に人に報告する
+  const checked = await selfCheck(spec, { seed: 1 });
+  if (!checked.ok) {
+    throw new Error(`仕様に誤りがあります: ${checked.message}\n  再現するアクション列: ${JSON.stringify(checked.steps)}`);
+  }
 
   // 検証を決定的にするため、シードは仕様のハッシュから決める
   const seed = Number.parseInt(specHash(ir).slice("sha256:".length, "sha256:".length + 7), 16);

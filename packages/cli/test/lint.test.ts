@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { applyDecision, defineBehaviors } from "@aac/core";
+import { applyDecision, bindSpecification, defineBehaviors } from "@aac/core";
 import { extract } from "../src/extract.ts";
 import { lintCase } from "../src/lint.ts";
 
 const Rules = { "default": { discount: 0, effects: [] } } as const;
+const Model = { initial: "A", states: ["A"], data: {}, actions: {}, queries: {}, commands: {} } as const;
+bindSpecification(Model, { conditions: { "変数を使い回す場合": () => false, "フォールバックを書く場合": () => false } });
 const receipt = (discount: unknown) => ({ action: "SendReceipt", payload: { discount } });
 
 const token = (fn: (state: any) => unknown) => lintCase(fn.toString())?.token;
@@ -71,21 +73,21 @@ test("extract: Proxy 単体では盲点だった書き方が forbidden-syntax �
   const behaviors = defineBehaviors({
     B: {
       cases: {
-        VarReuse: (state) => {
+        "変数を使い回す場合": (state: any) => {
           const discount = applyDecision(Rules, state).discount;
           if (discount === 0) return state.FREE();
           return state.PAID({ effects: [receipt(discount)] });
         },
-        Fallback: (state) => state.PAID({ effects: [receipt(applyDecision(Rules, state).discount ?? 0.5)] }),
-        Ok: (state) => state.PAID({ effects: [receipt(applyDecision(Rules, state).discount)] }),
+        "フォールバックを書く場合": (state: any) => state.PAID({ effects: [receipt(applyDecision(Rules, state).discount ?? 0.5)] }),
+        default: (state: any) => state.PAID({ effects: [receipt(applyDecision(Rules, state).discount)] }),
       },
     },
   });
   const { ir, diagnostics } = await extract({ behaviors, tables: { Rules } });
   assert.deepEqual(
-    diagnostics.map((d) => `${d.case}:${d.code}`),
-    ["Fallback:forbidden-syntax", "VarReuse:forbidden-syntax"],
+    diagnostics.map((d) => `${d.case}:${d.code}`).sort(),
+    ["フォールバックを書く場合:forbidden-syntax", "変数を使い回す場合:forbidden-syntax"],
   );
-  assert.match(diagnostics[1].message, /3 行目 `if`/);
-  assert.deepEqual(Object.keys(ir.behaviors[0].transitions), ["Ok"]);
+  assert.match(diagnostics.find((d) => d.case === "変数を使い回す場合")!.message, /3 行目 `if`/);
+  assert.deepEqual(Object.keys(ir.behaviors[0].transitions), ["default"]);
 });

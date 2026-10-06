@@ -58,33 +58,43 @@ ${guide.trim()}
 The IR describes one component by its boundary.
 
 - \`model.states\` / \`model.initial\`: the state names and the starting state.
-- \`model.actions\`: the actions that drive the component, each with the fields of its input. An array lists the
-  allowed values; a string is a primitive type.
+- \`model.actions\`: the actions that drive the component, each with the fields of its input.
 - \`model.data\`: what the component remembers between actions. Nothing is set in the initial state; a
   transition's \`set\` says which fields it stores, and later actions can depend on them.
-- \`model.queries\`: values the component asks its environment for (clock, configuration, ...). In the test they
-  are answered by \`ports.queries\`, and the answers can change from one action to the next.
+- \`model.queries\`: values the component asks its environment for (a clock, configuration, the response of an
+  external service, ...). In the test they are answered by \`ports.queries\`, and the answers can change from
+  one action to the next.
 - \`model.commands\`: the side effects the component may perform on its environment, with their payload fields.
   In the test they are received by \`ports.commands\`.
-- \`decisions\`: decision tables. Each key of \`rows\` is a condition written in natural language; decide what it
-  means in terms of the remembered data, the query answers, the input of the action, and the current state. At most one non-default row matches
-  (hit policy: unique); \`default\` applies when no other row matches.
+- Field types: an array lists the allowed values; a string is a primitive type (\`integer\` is a whole number);
+  an object such as \`{"type": "integer", "min": 0, "max": 1000000}\` is a number with constraints (\`around\`
+  lists thresholds the test will probe closely, including the values just below and above them).
+- \`model.formulas\`: named computations. The name is a natural-language description of how the value is
+  computed, including rounding; implement exactly what it says. The value is the declared result type.
+- \`model.invariants\`: natural-language properties that always hold for the state and the remembered data.
+  They are not tested directly; treat them as facts you can rely on.
+- **Conditions are written in natural language** everywhere they appear: as the row keys of decision tables, as
+  \`preconditions\`, and as the keys of \`transitions\`. Decide what each condition means in terms of the
+  remembered data, the query answers, the input of the action, and the current state. The same sentence always
+  means the same thing. Among the conditions of one table (or of one action's transitions) at most one holds;
+  \`default\` applies when none does.
+- \`decisions\`: decision tables. \`rows\` maps each condition to the values chosen when it holds.
 - \`behaviors\`: actions. \`from\` lists the states in which the action can be executed, and \`preconditions\`
-  are natural-language conditions that must also hold; behaviour outside them is not tested. Each key of
-  \`transitions\` is an outcome: the external result that decides how the action turns out (for example whether a
-  payment succeeded). In the test, \`ports.outcomes.<Action>()\` returns the outcome of the action being executed.
-  The transition gives the resulting \`nextState\`, the \`emittedCommands\` in order, and optionally \`set\`.
+  must also hold; behaviour outside them is not tested. \`transitions\` maps each condition to what happens
+  when it holds: the resulting \`nextState\`, the \`emittedCommands\` in order, and optionally \`set\`.
 - Inside a transition, \`{"$ref": "input:<field>"}\`, \`{"$ref": "data:<field>"}\` and \`{"$ref": "query:<field>"}\`
-  mean the value of that action input, remembered field, or query answer. \`{"$ref": "decision:<Table>.<column>"}\` means the value of that column in the row that
-  matches, and \`{"$spread": "decision:<Table>.<column>"}\` means all elements of that column's array, inserted
-  at that position. \`payloadSchema\` and \`event\` are informational and are not part of the command.
+  mean the value of that action input, remembered field, or query answer. \`{"$ref": "formula:<name>"}\` means
+  the result of that named computation. \`{"$ref": "decision:<Table>.<column>"}\` means the value of that column
+  in the row that matches, and \`{"$spread": "decision:<Table>.<column>"}\` means all elements of that column's
+  array, inserted at that position. \`payloadSchema\` and \`event\` are informational and are not part of the
+  command.
 
 ## How your work is tested
 
 The test harness is not available in this directory. When you finish, the harness collects your files and
 runs many randomly generated trials. One trial is: \`setupIsolation(ports)\`, then a sequence of several
 \`executeAction(action)\` calls on the same system, then \`teardownIsolation()\`. Before each action the
-harness chooses new query answers and an outcome. After each action, \`getCurrentState()\` and the commands
+harness chooses new query answers. After each action, \`getCurrentState()\` and the commands
 received by \`ports.commands\` during that action (including their order) must match the specification exactly.
 If they do not, you will be asked again with a minimal counterexample: the shortest sequence of actions that
 shows the difference.

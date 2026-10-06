@@ -35,6 +35,11 @@ export async function loadSpecs(dir: string): Promise<SpecInput> {
       }
     }
   }
+  for (const [name, behavior] of Object.entries(input.behaviors)) {
+    if (typeof behavior.cases?.default !== "function") {
+      throw new Error(`behavior "${name}" の cases に "default" がありません`);
+    }
+  }
   if (input.model) {
     const declared = Object.keys(input.model.actions).sort().join(", ");
     const defined = Object.keys(input.behaviors).sort().join(", ");

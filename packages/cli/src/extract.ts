@@ -1,5 +1,5 @@
-import { ABSTRACT_APPLY, getBinding, getPrecondition } from "@aac/core";
-import type { DomainModel } from "@aac/core";
+import { ABSTRACT_APPLY, ABSTRACT_FORMULA, getCondition, getFormula, getInvariant } from "@aac/core";
+import type { DomainModel, FieldSchema } from "@aac/core";
 import { lintCase } from "./lint.ts";
 
 // レコーディング Proxy による抽象実行: cases の関数を「記号的な state」で1回走らせ、
@@ -40,7 +40,7 @@ export class AbstractExecutionError extends Error {
   }
 }
 
-type Origin = { kind: "state" } | { kind: "decision"; table: string };
+type Origin = { kind: "state" } | { kind: "decision"; table: string } | { kind: "formula"; name: string };
 type Node = { origin: Origin; path: string[]; used: boolean };
 type Context = {
   nodes: Node[];
@@ -57,7 +57,12 @@ const SPREAD = Symbol("aac.spread");
 const TRANSITION = Symbol("aac.transition");
 
 function label(node: Node): string {
-  const head = node.origin.kind === "state" ? "state" : `decision:${node.origin.table}`;
+  const head =
+    node.origin.kind === "state"
+      ? "state"
+      : node.origin.kind === "decision"
+        ? `decision:${node.origin.table}`
+        : `formula:${node.origin.name}`;
   return node.path.length === 0 ? head : `${head}.${node.path.join(".")}`;
 }
 
@@ -77,6 +82,9 @@ function symbolic(ctx: Context, origin: Origin, path: string[]): any {
       if (prop === META) return node;
       if (prop === ABSTRACT_APPLY) {
         return isStateRoot ? (table: object) => applyAbstract(ctx, table) : undefined;
+      }
+      if (prop === ABSTRACT_FORMULA) {
+        return isStateRoot ? (name: string) => symbolic(ctx, { kind: "formula", name }, []) : undefined;
       }
       // これが無いと `await` が thenable とみなして then() を呼び、symbolic-call で落ちる
       if (prop === "then") return undefined;
@@ -170,6 +178,12 @@ function stateRef(ctx: Context, node: Node): string {
 function useRef(ctx: Context, node: Node): string {
   node.used = true;
   if (node.origin.kind === "state") return stateRef(ctx, node);
+  if (node.origin.kind === "formula") {
+    if (ctx.model && !(node.origin.name in (ctx.model.formulas ?? {}))) {
+      throw new AbstractExecutionError("unknown-formula", `モデルの formulas に "${node.origin.name}" が無い`);
+    }
+    return label(node);
+  }
   if (node.origin.kind === "decision" && node.path.length > 0) {
     const column = node.path[0];
     if (!columnsOf(ctx, node.origin.table).includes(column)) {
@@ -203,6 +217,9 @@ function serializeItem(ctx: Context, item: unknown): unknown {
   return spread ? { $spread: useRef(ctx, spread) } : serialize(ctx, item);
 }
 
+const schemaType = (schema: FieldSchema | undefined): string =>
+  schema === undefined ? "unknown" : typeof schema === "string" ? schema : Array.isArray(schema) ? "string" : (schema as { type: string }).type;
+
 function typeName(value: unknown): string {
   if (value === null) return "null";
   if (Array.isArray(value)) return "array";
@@ -217,8 +234,9 @@ function schemaOf(ctx: Context, value: unknown): unknown {
       const model = ctx.model;
       const [field] = node.path;
       const schema = model?.data[field] ?? model?.queries[field] ?? model?.actions[ctx.action]?.[field];
-      return schema === undefined ? "unknown" : typeof schema === "string" ? schema : "string";
+      return schemaType(schema);
     }
+    if (node.origin.kind === "formula") return schemaType(ctx.model?.formulas?.[node.origin.name]);
     const rows = Object.values(ctx.tables[node.origin.table]);
     const types = rows.map((row) => typeName(node.path.reduce((cur: any, key) => cur?.[key], row)));
     return [...new Set(types)].sort().join(" | ");
@@ -327,16 +345,16 @@ export async function extract(input: SpecInput, options: ExtractOptions = {}) {
         report("error", error.code, error.message);
       }
     }
-    for (const text of behavior.where ?? []) {
-      if (getPrecondition(text)) continue;
+    const unbound = (caseName: string, text: string) =>
       diagnostics.push({
         severity: "error",
-        code: "unbound-precondition",
+        code: "unbound-condition",
         behavior: name,
-        case: "",
-        message: `where "${text}" に bindPreconditions による評価関数が登録されていない`,
+        case: caseName,
+        message: `条件 "${text}" に bindSpecification による評価関数が登録されていない`,
       });
-    }
+    for (const text of behavior.where ?? []) if (!getCondition(text)) unbound("", text);
+    for (const text of Object.keys(behavior.cases)) if (text !== "default" && !getCondition(text)) unbound(text, text);
     behaviors.push({
       name,
       from: [...(behavior.from ?? input.model?.states ?? [])],
@@ -345,10 +363,26 @@ export async function extract(input: SpecInput, options: ExtractOptions = {}) {
     });
   }
 
+  const specError = (code: string, message: string) =>
+    diagnostics.push({ severity: "error", code, behavior: "", case: "", message });
+
   const decisions: Record<string, unknown> = {};
   for (const [name, table] of Object.entries(input.tables)) {
-    const bound = getBinding(table) !== undefined;
-    if (bound || usedTables.has(name)) decisions[name] = { bound, rows: table };
+    const missing = Object.keys(table).filter((row) => row !== "default" && !getCondition(row));
+    if (usedTables.has(name)) {
+      for (const row of missing) {
+        specError("unbound-condition", `決定表 ${name} の条件 "${row}" に bindSpecification による評価関数が登録されていない`);
+      }
+    }
+    if (usedTables.has(name) || missing.length === 0) decisions[name] = { bound: missing.length === 0, rows: table };
+  }
+  for (const formula of Object.keys(input.model?.formulas ?? {})) {
+    if (!getFormula(formula)) specError("unbound-formula", `計算 "${formula}" に bindSpecification による関数が登録されていない`);
+  }
+  for (const invariant of input.model?.invariants ?? []) {
+    if (!getInvariant(invariant)) {
+      specError("unbound-invariant", `不変条件 "${invariant}" に bindSpecification による関数が登録されていない`);
+    }
   }
 
   const ir = { irVersion: IR_VERSION, behaviors, decisions, ...(input.model ? { model: input.model } : {}) };
