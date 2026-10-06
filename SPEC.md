@@ -187,26 +187,36 @@ PBTエンジンがエラーを発見した場合、巨大なログダンプを�
 
 #### ドメインモデル（値が源泉、型は導出）
 
-部品を**境界だけ**で記述します。どの層の部品（ドメイン、ユースケース、UI）も、外から見れば次の3種類の境界しか持ちません。
+部品を**境界だけ**で記述します。どの層の部品（ドメイン、ユースケース、UI）も、外から見れば次の境界しか持ちません。
 
-| 境界 | 意味 | 例 |
+| 宣言 | 意味 | 例 |
 | --- | --- | --- |
-| `input` | アクションの入力（外から部品を動かす呼び出しの引数） | 会員ランク |
+| `actions` | 外から部品を動かすアクションと、その入力 | 注文する（会員ランクを受け取る）、出荷する（入力なし） |
 | `queries` | 依存への問い合わせ（部品が外に尋ねて答えをもらう値） | 時計、設定 |
 | `commands` | 依存への指示（部品が外に対して行う副作用） | 領収書の送信、返金 |
+| `data` | 部品が覚えているデータ。遷移の `set` で書き、後のアクションで読む | 注文時の会員ランク |
 
 これらと状態名は値として宣言し、TypeScript の型はそこから導出します。値として残るので、IR に出力でき、PBT の入力生成にも、LLM への情報提供にもそのまま使えます。
 
 ```typescript
 // --- specs/order.model.ts (Layer 1) ---
-import type { CommandsOf, DomainModel, StatesOf } from "@aac/core";
+import type { CommandsOf, DomainModel } from "@aac/core";
+
+const Rank = ["Gold", "Silver", "Bronze"] as const;   // 配列は列挙
 
 export const OrderModel = {
-  initial: "PENDING",
-  states: ["PENDING", "PAID", "SHIPPED", "CANCELLED"],
-  // アクションの入力
-  input: {
-    rank: ["Gold", "Silver", "Bronze"],   // 配列は列挙
+  initial: "DRAFT",
+  states: ["DRAFT", "PENDING", "PAID", "SHIPPED", "CANCELLED"],
+  // 注文が覚えているデータ（初期状態では未設定）
+  data: {
+    rank: Rank,
+  },
+  // アクションと、その入力
+  actions: {
+    PlaceOrder: { customerRank: Rank },
+    Checkout: {},
+    Ship: {},
+    Cancel: {},
   },
   // 依存への問い合わせ
   queries: {
@@ -215,25 +225,24 @@ export const OrderModel = {
   },
   // 依存への指示（仕様として許可される副作用）
   commands: {
+    SendOrderConfirmation: {},
     SendReceipt: { discount: "number" },
     IssueCoupon: { type: ["Premium", "Standard"] },
     NotifyPaymentFailure: {},
-    SendShippingNotice: {},
+    SendShippingNotice: { priority: "boolean" },
     Refund: {},
   },
 } as const satisfies DomainModel;
 
-export type OrderStates = StatesOf<typeof OrderModel>;
 export type DomainCommand = CommandsOf<typeof OrderModel>;
 ```
 
-条件の評価関数と case が読めるデータは、入力・問い合わせの答え・現在の状態名（`status`）です。
+条件の評価関数と case が読めるデータは、現在の状態名（`status`）、覚えているデータ、問い合わせの答え、そのアクションの入力です。これらは同じ階層で見えるため、`data`・`queries`・入力のフィールド名は重複できません（入力どうしは、アクションが違えば同名で構いません）。覚えているデータは未設定があり得るので、型の上でも省略可能として扱われます。
 
 現在の制約と今後の課題:
 
-* 入力はモデル全体で1つで、アクションごとには分けられません。
-* 状態が持つのは状態名だけです。前のアクションの入力を後のアクションで使う、といったデータの持ち越しは表現できません。
 * 多重度（`One<T>` / `Lone<T>` / `Some<T>` / `Many<T>`）は型としてのみ提供しています。型は IR に出せないため、値として宣言できる形への拡張が必要です。数値の範囲などの制約、値オブジェクトの不変条件も同じ枠組みで扱う予定です。
+* 計算の仕様（金額に割引率を掛ける、など）は書けません。case 本体で演算を禁止しているためで、別の書き方の設計が必要です。
 * 部品どうしの組み合わせ（ある部品の依存を、代役ではなく別の本物の部品につなぐ）は未実装です。
 
 #### デシジョンテーブルと振る舞い
@@ -263,19 +272,36 @@ export const CampaignRules = {
   "default": { discount: 0.0, effects: [] } // 必須フォールバック
 } as const satisfies DecisionTable<CampaignOutputs>;
 
-// --- specs/cancel.dmn.ts (Layer 1) ---
+// --- specs/cancel.dmn.ts / shipping.dmn.ts (Layer 1) ---
 export const CancelRules = {
   "決済済みの注文の場合": { effects: [{ action: "Refund", payload: {} }] },
   "default": { effects: [] }
 } as const satisfies DecisionTable<CancelOutputs>;
 
+export const ShippingRules = {
+  "ゴールド会員の場合": { priority: true },
+  "default": { priority: false }
+} as const satisfies DecisionTable<ShippingOutputs>;
+
 // --- specs/order.spec.ts (Layer 1) ---
 import { defineBehaviors, applyDecision } from "@aac/core";
 import { CampaignRules } from "./campaign.dmn.ts";
 import { CancelRules } from "./cancel.dmn.ts";
-import type { OrderStates, DomainCommand } from "./order.model.ts";
+import { ShippingRules } from "./shipping.dmn.ts";
+import type { OrderModel } from "./order.model.ts";
 
-export const behaviors = defineBehaviors<OrderStates, DomainCommand>({
+export const behaviors = defineBehaviors<typeof OrderModel>({
+  PlaceOrder: {
+    from: ["DRAFT"],
+    cases: {
+      "Placed": (state) => state.PENDING({
+        event: "Order placed",
+        // 入力の会員ランクを注文に覚えさせる（決済と出荷で使う）
+        set: { rank: state.customerRank },
+        effects: [{ action: "SendOrderConfirmation", payload: {} }]
+      })
+    }
+  },
   Checkout: {
     from: ["PENDING"],
     where: ["外部決済モジュールが有効な場合"],
@@ -301,10 +327,14 @@ export const behaviors = defineBehaviors<OrderStates, DomainCommand>({
   Ship: {
     from: ["PAID"],
     cases: {
-      "Shipped": (state) => state.SHIPPED({
-        event: "Order shipped",
-        effects: [{ action: "SendShippingNotice", payload: {} }]
-      })
+      "Shipped": (state) => {
+        const shipping = applyDecision(ShippingRules, state);
+
+        return state.SHIPPED({
+          event: "Order shipped",
+          effects: [{ action: "SendShippingNotice", payload: { priority: shipping.priority } }]
+        });
+      }
     }
   },
   Cancel: {
@@ -321,9 +351,11 @@ export const behaviors = defineBehaviors<OrderStates, DomainCommand>({
 
 ```
 
+* モデルの `actions` に宣言したアクションすべてに、振る舞いを1つずつ書きます。過不足は型エラーになり、読み込み時にも検査されます。
 * `from` は、そのアクションを実行できる状態です。省略すると全状態になります。
 * `where` は事前条件です。`from` と `where` を満たさない場合の挙動は仕様の対象外で、PBT も検証しません。
 * `cases` のキー（`"PaymentSuccess"` など）は、アクションの結果を決める外部要因の応答（outcome）です。決済の成否のように、依存先が返す結果を表します。
+* `set` は、遷移のときに覚えるデータです。書いたフィールドだけが更新されます。case の中で読めるのは、そのアクション自身の入力だけです（他のアクションの入力を読むと型エラー）。
 
 #### case 本体の構文制限
 
@@ -360,6 +392,12 @@ export const CancelEvaluator = bindDecisionDetails<keyof typeof CancelRules>(Can
   "default": () => true
 });
 
+// 注文時に覚えた会員ランクを、出荷のときに読む
+export const ShippingEvaluator = bindDecisionDetails<keyof typeof ShippingRules>(ShippingRules, {
+  "ゴールド会員の場合": (state) => state.rank === "Gold",
+  "default": () => true
+});
+
 // behaviors の where に書いた事前条件の評価関数
 export const Preconditions = bindPreconditions({
   "外部決済モジュールが有効な場合": (state) => state.paymentModuleActive
@@ -378,9 +416,10 @@ Layer 2 は PBT が期待値を算出するための「正解」であり、IR �
 {
   "irVersion": 1,
   "model": {
-    "initial": "PENDING",
-    "states": ["PENDING", "PAID", "SHIPPED", "CANCELLED"],
-    "input": { "rank": ["Gold", "Silver", "Bronze"] },
+    "initial": "DRAFT",
+    "states": ["DRAFT", "PENDING", "PAID", "SHIPPED", "CANCELLED"],
+    "data": { "rank": ["Gold", "Silver", "Bronze"] },
+    "actions": { "PlaceOrder": { "customerRank": ["Gold", "Silver", "Bronze"] }, "Checkout": {}, "Ship": {}, "Cancel": {} },
     "queries": { "isMonthEnd": "boolean", "paymentModuleActive": "boolean" },
     "commands": { "SendReceipt": { "discount": "number" }, "Refund": {}, ... }
   },
@@ -396,6 +435,18 @@ Layer 2 は PBT が期待値を算出するための「正解」であり、IR �
     "CancelRules": { ... }
   },
   "behaviors": [
+    {
+      "name": "PlaceOrder",
+      "from": ["DRAFT"],
+      "preconditions": [],
+      "transitions": {
+        "Placed": {
+          "nextState": "PENDING",
+          "set": { "rank": { "$ref": "input:customerRank" } },
+          "emittedCommands": [ { "action": "SendOrderConfirmation", "payload": {}, "payloadSchema": {} } ]
+        }
+      }
+    },
     {
       "name": "Checkout",
       "from": ["PENDING"],
@@ -421,6 +472,7 @@ Layer 2 は PBT が期待値を算出するための「正解」であり、IR �
 
 ```
 
+* `{"$ref": "input:<名前>"}`、`{"$ref": "data:<名前>"}`、`{"$ref": "query:<名前>"}` は、それぞれアクションの入力、覚えているデータ、問い合わせの答えを指します。
 * `{"$ref": "decision:<表>.<列>"}` は「現在の状態に一致した行の、その列の値」を指します。
 * `{"$spread": "decision:<表>.<列>"}` は、その列の配列の全要素をその位置に展開することを指します。
 * 事前条件と DMN の条件は自然言語のまま出力されます。識別子への変換や評価関数は含みません。
@@ -451,9 +503,14 @@ PBTエンジン（Layer 3）と本番システムを安全に接続し、決定�
 
 ```typescript
 // --- aac/adapter.contract.ts（生成物。コメントはエージェント向けに英語） ---
-export type StateName = "PENDING" | "PAID" | "SHIPPED" | "CANCELLED";
-export type ActionName = "Cancel" | "Checkout" | "Ship";
-export type ActionInput = { rank: "Gold" | "Silver" | "Bronze" };
+export type StateName = "DRAFT" | "PENDING" | "PAID" | "SHIPPED" | "CANCELLED";
+
+/** 実行するアクション1つ。名前と、それに対応する入力。 */
+export type Action =
+  | { name: "Cancel"; input: {} }
+  | { name: "Checkout"; input: {} }
+  | { name: "PlaceOrder"; input: { customerRank: "Gold" | "Silver" | "Bronze" } }
+  | { name: "Ship"; input: {} };
 
 export type Ports = {
   /** 問い合わせ。答えはアクションごとに変わり得るので、必要なときに尋ねる（保持しない）。 */
@@ -465,6 +522,7 @@ export type Ports = {
   outcomes: {
     Cancel(): "Cancelled";
     Checkout(): "PaymentFailure" | "PaymentSuccess";
+    PlaceOrder(): "Placed";
     Ship(): "Shipped";
   };
   /** 指示。呼び出しは発行順に記録され、仕様と照合される。 */
@@ -472,8 +530,9 @@ export type Ports = {
     IssueCoupon(payload: { type: "Premium" | "Standard" }): void;
     NotifyPaymentFailure(payload: {}): void;
     Refund(payload: {}): void;
+    SendOrderConfirmation(payload: {}): void;
     SendReceipt(payload: { discount: number }): void;
-    SendShippingNotice(payload: {}): void;
+    SendShippingNotice(payload: { priority: boolean }): void;
   };
 };
 
@@ -485,7 +544,7 @@ export interface TargetSystemAdapter {
   teardownIsolation(): Promise<void>;
 
   /** アクションを1つ実行する。1回の試行で、同じシステムに対して複数のアクションが順に実行される。 */
-  executeAction(action: ActionName, input: ActionInput): Promise<void>;
+  executeAction(action: Action): Promise<void>;
 
   /** 現在の状態名を返す（Upcaster等のマイグレーション処理は本番側で完了していること）。 */
   getCurrentState(): Promise<StateName>;
@@ -502,10 +561,12 @@ export interface TargetSystemAdapter {
 1. `setupIsolation(ports)` で、初期状態の本番システムを代役につないで作る。
 2. 1手ごとに、入力・問い合わせの答え・outcome をランダムに決める。現在の状態で実行でき（`from`）、事前条件（`where`）を満たすアクションの中から1つを選ぶ。
 3. 仕様の case を具体値で実行し、期待される次状態と Command の列を得る（Layer 2 の評価関数で DMN の行を決める）。
-4. `executeAction(action, input)` を呼び、`getCurrentState` の結果と、その手の間に代役が受けた指示の列（順序を含む）が期待と一致することを確かめる。
-5. 一致すれば次の手へ進む。最後に `teardownIsolation` を呼ぶ。
+4. `executeAction(action)` を呼び、`getCurrentState` の結果と、その手の間に代役が受けた指示の列（順序を含む）が期待と一致することを確かめる。
+5. 一致すれば、遷移の `set` を仕様側の「覚えているデータ」に反映して次の手へ進む。最後に `teardownIsolation` を呼ぶ。
 
-不一致が見つかると fast-check がアクション列を最小化し、シード・パス・**最短のアクション列**・期待値と実際の値を報告します。例えば「決済後のキャンセルで返金されない」という不具合は、「決済成功 → キャンセル」の2手として報告されます。`node aac/verify.ts --seed X --path Y` で同じ反例を再現できます。
+覚えているデータは、本番システムから直接は読みません。後のアクションの振る舞いを通してだけ確かめます（例えば、注文時の会員ランクを正しく覚えているかは、決済時の割引と出荷時の優先扱いで分かります）。
+
+不一致が見つかると fast-check がアクション列を最小化し、シード・パス・**最短のアクション列**・期待値と実際の値を報告します。例えば「決済後のキャンセルで返金されない」という不具合は、「注文 → 決済成功 → キャンセル」の3手として報告され、各手の時点で覚えているはずのデータも併せて示されます。`node aac/verify.ts --seed X --path Y` で同じ反例を再現できます。
 
 ## 4. イベントストーミング＆DFDの自動生成
 

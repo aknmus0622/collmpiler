@@ -48,7 +48,7 @@ aac-engine-monorepo/
 ユーザー（PdM・エンジニア）が `specs/` ディレクトリ内でインポートして使う、極めて薄いライブラリです。ランタイムのロジックはほぼ持ちません。
 
 * **責務:**
-* ドメインモデルの型定義 (`DomainModel`, `StatesOf<M>`, `CommandsOf<M>`)。値として宣言し、型を導出する
+* ドメインモデルの型定義 (`DomainModel`, `CommandsOf<M>`, `ContextOf<M, Action>`)。部品の境界を値として宣言し、型を導出する
 * 多重度DSLの型定義 (`One<T>`, `Some<T>`, `Many<T>`)
 * DMNの型定義 (`DecisionTable<T>`, `applyDecision()`)
 * 振る舞い定義のヘルパー (`defineBehaviors()`, `bindDecisionDetails()`, `bindPreconditions()`)
