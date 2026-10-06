@@ -6,9 +6,9 @@ Phase 1 spike. TypeScript targets only.
 
 **What works today**
 
-- **Write a spec as TypeScript data.** A component is described by its boundary: actions and their inputs,
-  queries to dependencies, commands to dependencies, and remembered data. Conditions, formulas, and invariants
-  are written as natural-language names and bound to functions separately.
+- **Write a spec as TypeScript data.** A component is described by its boundary and structure: states, actions
+  and their inputs, queries to dependencies, commands to dependencies, and remembered data. Conditions,
+  formulas, and invariants are written as natural-language names and bound to functions separately.
 - **Check the spec on its own.** Conflicting conditions, missing bindings, broken invariants, and values that
   do not fit their declared type are reported before any implementation exists.
 - **Have an LLM agent write the production code from the spec**, in an isolated directory. The framework
@@ -45,20 +45,19 @@ cancelled (`specs/`), and the implementation an LLM agent wrote from it (`exampl
 
 ### 1. Write the spec
 
-**The boundary of the component** (`specs/order.model.ts`). Everything is a value; types are derived from it.
+A spec is one **component** plus its **binding**. A scenario, a domain part, and a UI part are all written as
+components of the same shape.
+
+**Boundary and structure** (`specs/order.component.ts`). Pure data: no functions. Types are derived from it.
 
 ```ts
 const Rank = ["Gold", "Silver", "Bronze"] as const;
 const Yen = { type: "integer", min: 0, max: 1_000_000, around: [10_000] } as const;
 
-export const OrderModel = {
+const OrderBoundary = defineComponent({
   initial: "DRAFT",
   states: ["DRAFT", "PENDING", "PAID", "SHIPPED", "CANCELLED"],
   data: { rank: Rank, price: Yen },                       // what the order remembers
-  actions: {                                              // what drives it, with inputs
-    PlaceOrder: { customerRank: Rank, listPrice: Yen },
-    Checkout: {}, Ship: {}, Cancel: {},
-  },
   queries: {                                              // what it asks its dependencies
     isMonthEnd: "boolean",
     paymentModuleActive: "boolean",
@@ -73,10 +72,16 @@ export const OrderModel = {
     "Amount charged: price × (100 − discount percent) ÷ 100, rounded down to a whole yen": "integer",
   },
   invariants: ["Every order past the draft state has a member rank and a price"],
-} as const satisfies DomainModel;
+  actions: {                                              // what drives it: input, allowed states, preconditions
+    PlaceOrder: { input: { customerRank: Rank, listPrice: Yen }, from: ["DRAFT"] },
+    Checkout: { from: ["PENDING"], where: ["The external payment module is active"] },
+    Ship: { from: ["PAID"] },
+    Cancel: { from: ["PENDING", "PAID"] },
+  },
+});
 ```
 
-**A decision table** (`specs/campaign.dmn.ts`). Each row is a condition in natural language.
+**A decision table** (same file). Each row is a condition in natural language; cells are constants.
 
 ```ts
 export const CampaignRules = {
@@ -86,20 +91,25 @@ export const CampaignRules = {
   },
   "The customer is a Silver member": { discountPercent: 5, effects: [] },
   "default": { discountPercent: 0, effects: [] }
-} as const satisfies DecisionTable<CampaignOutputs>;
+} as const satisfies DecisionTable<{ discountPercent: number; effects: Command[] }>;
 ```
 
-**A behaviour** (`specs/order.spec.ts`). Cases are keyed by conditions too. A case contains no logic: it
+**Cases** (same file). Attaching what each action does completes the component. An action that does not
+branch is a single function; one that branches is a table keyed by conditions. A case contains no logic: it
 applies tables and formulas and maps the results to a transition.
 
 ```ts
-Checkout: {
-  from: ["PENDING"],
-  where: ["The external payment module is active"],
-  cases: {
+export const Order = OrderBoundary.cases({
+  PlaceOrder: (state) => state.PENDING({
+    event: "Order placed",
+    set: { rank: state.customerRank, price: state.listPrice },
+    effects: [{ action: "SendOrderConfirmation", payload: {} }]
+  }),
+
+  Checkout: {
     "The payment succeeded": (state) => {
       const campaign = applyDecision(CampaignRules, state);
-      const amount = applyFormula(OrderModel, "Amount charged: price × (100 − discount percent) ÷ 100, rounded down to a whole yen", state);
+      const amount = applyFormula(OrderBoundary, "Amount charged: price × (100 − discount percent) ÷ 100, rounded down to a whole yen", state);
 
       return state.PAID({
         event: "Payment completed",
@@ -113,15 +123,16 @@ Checkout: {
       event: "Payment failed",
       effects: [{ action: "NotifyPaymentFailure", payload: {} }]
     })
-  }
-},
+  },
+  // ...
+});
 ```
 
-**The binding** (`specs/vocabulary.ts`). This is what the names mean. It is the oracle for the tests and is
-never shown to the agent.
+**The binding** (`specs/order.binding.ts`). This is what the names mean. It is the oracle for the tests and is
+never shown to the agent. A missing binding, or a condition that nothing uses, is a compile error.
 
 ```ts
-export const Specification = bindSpecification(OrderModel, {
+export const Specification = bindSpecification(Order, {
   tables: { CampaignRules, CancelRules, ShippingRules },
   conditions: {
     "The customer is a Gold member and it is month-end": (state) => state.rank === "Gold" && state.isMonthEnd,
