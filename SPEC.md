@@ -28,8 +28,8 @@
 
 | 領域 | レイヤー | 責務と特性 | 書き手 |
 | --- | --- | --- | --- |
-| **IN SCOPE**(プラットフォーム) | **Layer 1: Spec** | 業務の真実（What）を宣言する純粋データ（ドメインモデルとDMN）。部品を境界（入力・依存への問い合わせ・依存への指示）だけで記述する。`as const` と `satisfies` で型安全にする。関数は `cases` のマッピングだけで、構文を制限する（§3.1）。 | 人 |
-|  | **Layer 2: Binding** | Layer 1 の自然言語キー（DMN の条件、`where` の事前条件）に評価関数（How）を結び付ける。 | 人 |
+| **IN SCOPE**(プラットフォーム) | **Layer 1: Spec** | 業務の真実（What）を宣言する純粋データ（ドメインモデルとDMN）。部品を境界（アクションと入力・依存への問い合わせ・依存への指示・覚えるデータ）だけで記述し、条件・計算・不変条件は自然言語の名前として書く。`as const` と `satisfies` で型安全にする。関数は `cases` のマッピングだけで、構文を制限する（§3.1）。 | 人 |
+|  | **Layer 2: Binding** | Layer 1 に自然言語で書いた名前（条件・計算・不変条件）に、評価関数（How）を結び付ける。PBT の正解として使い、IR には含めない。 | 人 |
 |  | **Universal IR** | Layer 1 をプラットフォームが抽象実行して出力する、**完全な言語非依存のJSON**。Layer 2 の関数は含まない。 | 生成 |
 |  | **Layer 3: Verification** | Layer 1, 2 から構築されるPBTエンジン。Target System をアダプター経由で操作して検証する。テスト側にのみ生成される。 | 生成 |
 | **境界線** | **Adapter Contract** | テストごとの状態リセット（`setupIsolation` / `teardownIsolation`）を強制し、決定論的なリプレイを可能にするインターフェース。本番システムの依存は、フレームワークが用意する代役（Ports）に置き換える。型は生成され、中身は実装エージェントが書く。 | 生成＋LLM |
@@ -83,6 +83,17 @@ PBTエンジンがエラーを発見した場合、巨大なログダンプを�
       ▼
  出力先の src/ を成果物として確定
 ```
+
+#### 仕様の事前検査（LLM を呼ぶ前）
+
+IR の抽出に続いて、仕様だけをランダムなアクション列で実行します（実装は使いません）。次のものを見つけたら、**仕様の誤りとして人に報告して止まり、LLM には渡しません。**
+
+* 2つの条件が同時に成り立つ（決定表でも、case の分かれ方でも）
+* 結び付けの無い条件・計算・不変条件がある
+* 不変条件が破れる（最短のアクション列つきで報告）
+* 覚えるデータや指示の値が、宣言した型・範囲に合わない（計算の結果が整数でない、など）
+
+PBT の実行中に同じ種類の問題が見つかった場合も、実装の誤りとは区別し、エージェントへは差し戻しません。
 
 #### 役割分担
 
@@ -191,10 +202,12 @@ PBTエンジンがエラーを発見した場合、巨大なログダンプを�
 
 | 宣言 | 意味 | 例 |
 | --- | --- | --- |
-| `actions` | 外から部品を動かすアクションと、その入力 | 注文する（会員ランクを受け取る）、出荷する（入力なし） |
-| `queries` | 依存への問い合わせ（部品が外に尋ねて答えをもらう値） | 時計、設定 |
+| `actions` | 外から部品を動かすアクションと、その入力 | 注文する（会員ランクと価格を受け取る）、出荷する（入力なし） |
+| `queries` | 依存への問い合わせ（部品が外に尋ねて答えをもらう値） | 時計、設定、決済サービスの応答 |
 | `commands` | 依存への指示（部品が外に対して行う副作用） | 領収書の送信、返金 |
-| `data` | 部品が覚えているデータ。遷移の `set` で書き、後のアクションで読む | 注文時の会員ランク |
+| `data` | 部品が覚えているデータ。遷移の `set` で書き、後のアクションで読む | 注文時の会員ランクと価格 |
+| `formulas` | 計算。名前（自然言語）と結果の型 | 請求金額 |
+| `invariants` | 不変条件。名前（自然言語） | 下書き以外の注文には会員ランクと価格がある |
 
 これらと状態名は値として宣言し、TypeScript の型はそこから導出します。値として残るので、IR に出力でき、PBT の入力生成にも、LLM への情報提供にもそのまま使えます。
 
@@ -203,73 +216,88 @@ PBTエンジンがエラーを発見した場合、巨大なログダンプを�
 import type { CommandsOf, DomainModel } from "@aac/core";
 
 const Rank = ["Gold", "Silver", "Bronze"] as const;   // 配列は列挙
+// 数値の制約。around は、その前後を PBT が重点的に生成するしきい値
+const Yen = { type: "integer", min: 0, max: 1_000_000, around: [10_000] } as const;
 
 export const OrderModel = {
   initial: "DRAFT",
   states: ["DRAFT", "PENDING", "PAID", "SHIPPED", "CANCELLED"],
-  // 注文が覚えているデータ（初期状態では未設定）
-  data: {
-    rank: Rank,
-  },
-  // アクションと、その入力
+  data: { rank: Rank, price: Yen },
   actions: {
-    PlaceOrder: { customerRank: Rank },
+    PlaceOrder: { customerRank: Rank, listPrice: Yen },
     Checkout: {},
     Ship: {},
     Cancel: {},
   },
-  // 依存への問い合わせ
   queries: {
     isMonthEnd: "boolean",                // 文字列はプリミティブ型
     paymentModuleActive: "boolean",
+    paymentResult: ["succeeded", "failed"],
   },
-  // 依存への指示（仕様として許可される副作用）
   commands: {
     SendOrderConfirmation: {},
-    SendReceipt: { discount: "number" },
+    SendReceipt: { discountPercent: "integer", amount: "integer" },
     IssueCoupon: { type: ["Premium", "Standard"] },
     NotifyPaymentFailure: {},
     SendShippingNotice: { priority: "boolean" },
     Refund: {},
   },
+  // 計算。名前に式と丸め方を書く
+  formulas: {
+    "請求金額（価格 ×（100 − 割引率）÷ 100、1円未満切り捨て）": "integer",
+  },
+  // 不変条件。どのアクションの後でも成り立つべき性質
+  invariants: [
+    "下書き以外の注文には、会員ランクと価格が設定されている",
+  ],
 } as const satisfies DomainModel;
 
 export type DomainCommand = CommandsOf<typeof OrderModel>;
 ```
 
-条件の評価関数と case が読めるデータは、現在の状態名（`status`）、覚えているデータ、問い合わせの答え、そのアクションの入力です。これらは同じ階層で見えるため、`data`・`queries`・入力のフィールド名は重複できません（入力どうしは、アクションが違えば同名で構いません）。覚えているデータは未設定があり得るので、型の上でも省略可能として扱われます。
+* **名前の重複**: 条件・計算・case からは、状態名（`status`）、覚えているデータ、問い合わせの答え、アクションの入力が同じ階層で見えます。そのため `data`・`queries`・入力のフィールド名は重複できません（入力どうしは、アクションが違えば同名で構いません）。覚えているデータは未設定があり得るので、型の上でも省略可能です。
+* **数値**: 金額は整数で扱い、丸め方を計算の名前に明記します。小数の計算は式の順序だけで結果がずれ、正解と実装が正当な理由なく食い違うためです。例の割引率も整数のパーセントで持っています。
+* **しきい値**: 条件に数値の境目があるときは、`around` に宣言します。ちょうどその値と前後の値を重点的に生成しないと、「以上」と「より大きい」の取り違えを見逃します。
 
-現在の制約と今後の課題:
+今後の課題:
 
-* 多重度（`One<T>` / `Lone<T>` / `Some<T>` / `Many<T>`）は型としてのみ提供しています。型は IR に出せないため、値として宣言できる形への拡張が必要です。数値の範囲などの制約、値オブジェクトの不変条件も同じ枠組みで扱う予定です。
-* 計算の仕様（金額に割引率を掛ける、など）は書けません。case 本体で演算を禁止しているためで、別の書き方の設計が必要です。
+* 多重度（`One<T>` / `Lone<T>` / `Some<T>` / `Many<T>`）は型としてのみ提供しています。値として宣言できる形への拡張が必要です。
+* 戻り値を持つ操作（値オブジェクトの演算など）は書けません。アクションの結果は「次の状態」と「指示」だけです。
 * 部品どうしの組み合わせ（ある部品の依存を、代役ではなく別の本物の部品につなぐ）は未実装です。
+
+#### 自然言語の名前と、3種類の役割
+
+条件・計算・不変条件は、Layer 1 には**自然言語の名前だけ**を書き、中身は Layer 2 で結び付けます（§3.2）。IR に載るのは名前（と型）だけで、それを解釈して実装するのが LLM の仕事です。解釈が正しいかは、Layer 2 を正解として PBT が判定します。
+
+| 種類 | 名前が現れる場所 | 使われ方 |
+| --- | --- | --- |
+| 条件 | 決定表の行、事前条件（`where`）、case の分かれ方 | どの行・どの case に当たるかを決める。同時に成り立つのは1つまで（Hit Policy: Unique）。どれも成り立たなければ `default` |
+| 計算 | モデルの `formulas` | 指示の中身や、覚えるデータの値になる |
+| 不変条件 | モデルの `invariants` | 仕様自身の矛盾を見つける（実装ではなく仕様を検証する） |
+
+同じ文は、どこに書かれても同じ意味になります。
 
 #### デシジョンテーブルと振る舞い
 
-プラットフォームが提供する `DecisionTable` 型により、フォールバック（`default`）の記述をコンパイルレベルで強制します。
+決定表は「どの条件に当たるかを選び、定数を返す」ものです。セルに計算は書きません。表が率や区分といったパラメータを決め、計算がそれを使って金額を出す、という分担です。`DecisionTable` 型により、フォールバック（`default`）の記述をコンパイルレベルで強制します。
 
 ```typescript
-// --- packages/core ---
-// DMNのコア型。文字列キーに加え、必ず "default" キーを要求する
-export type DecisionTable<Outputs> = Record<string, Outputs> & { "default": Outputs };
-
 // --- specs/campaign.dmn.ts (Layer 1) ---
 import type { DecisionTable } from "@aac/core";
 import type { DomainCommand } from "./order.model.ts";
 
-export type CampaignOutputs = { discount: number; effects: DomainCommand[] };
+export type CampaignOutputs = { discountPercent: number; effects: DomainCommand[] };
 
 // 【真の源泉】
 // as const: キーを厳密な文字列リテラルとして推論させ、Layer 2でのInferred Dictionaryを実現する。
 // satisfies: as constの推論を保ちつつ、defaultの記述漏れや型エラーを厳格にチェックする。
 export const CampaignRules = {
   "ゴールド会員であり、かつ月末の場合": {
-    discount: 0.20,
+    discountPercent: 20,
     effects: [{ action: "IssueCoupon", payload: { type: "Premium" } }]
   },
-  "シルバー会員の場合": { discount: 0.05, effects: [] },
-  "default": { discount: 0.0, effects: [] } // 必須フォールバック
+  "シルバー会員の場合": { discountPercent: 5, effects: [] },
+  "default": { discountPercent: 0, effects: [] } // 必須フォールバック
 } as const satisfies DecisionTable<CampaignOutputs>;
 
 // --- specs/cancel.dmn.ts / shipping.dmn.ts (Layer 1) ---
@@ -279,25 +307,22 @@ export const CancelRules = {
 } as const satisfies DecisionTable<CancelOutputs>;
 
 export const ShippingRules = {
-  "ゴールド会員の場合": { priority: true },
+  "ゴールド会員、または1万円以上の注文の場合": { priority: true },
   "default": { priority: false }
 } as const satisfies DecisionTable<ShippingOutputs>;
 
 // --- specs/order.spec.ts (Layer 1) ---
-import { defineBehaviors, applyDecision } from "@aac/core";
-import { CampaignRules } from "./campaign.dmn.ts";
-import { CancelRules } from "./cancel.dmn.ts";
-import { ShippingRules } from "./shipping.dmn.ts";
-import type { OrderModel } from "./order.model.ts";
+import { defineBehaviors, applyDecision, applyFormula } from "@aac/core";
+import { OrderModel } from "./order.model.ts";
 
 export const behaviors = defineBehaviors<typeof OrderModel>({
   PlaceOrder: {
     from: ["DRAFT"],
     cases: {
-      "Placed": (state) => state.PENDING({
+      "default": (state) => state.PENDING({
         event: "Order placed",
-        // 入力の会員ランクを注文に覚えさせる（決済と出荷で使う）
-        set: { rank: state.customerRank },
+        // 入力の会員ランクと価格を注文に覚えさせる（決済と出荷で使う）
+        set: { rank: state.customerRank, price: state.listPrice },
         effects: [{ action: "SendOrderConfirmation", payload: {} }]
       })
     }
@@ -306,19 +331,20 @@ export const behaviors = defineBehaviors<typeof OrderModel>({
     from: ["PENDING"],
     where: ["外部決済モジュールが有効な場合"],
     cases: {
-      "PaymentSuccess": (state) => {
-        // ロジックは持たず、表データ(DMN)を適用（applyDecision）し、その結果をマッピングするのみ
+      "決済に成功した場合": (state) => {
+        // ロジックは持たず、表データ(DMN)と計算を適用し、その結果をマッピングするのみ
         const campaign = applyDecision(CampaignRules, state);
+        const amount = applyFormula(OrderModel, "請求金額（価格 ×（100 − 割引率）÷ 100、1円未満切り捨て）", state);
 
         return state.PAID({
           event: "Payment completed",
           effects: [
-            { action: "SendReceipt", payload: { discount: campaign.discount } },
+            { action: "SendReceipt", payload: { discountPercent: campaign.discountPercent, amount } },
             ...campaign.effects
           ]
         });
       },
-      "PaymentFailure": (state) => state.PENDING({
+      "default": (state) => state.PENDING({
         event: "Payment failed",
         effects: [{ action: "NotifyPaymentFailure", payload: {} }]
       })
@@ -327,7 +353,7 @@ export const behaviors = defineBehaviors<typeof OrderModel>({
   Ship: {
     from: ["PAID"],
     cases: {
-      "Shipped": (state) => {
+      "default": (state) => {
         const shipping = applyDecision(ShippingRules, state);
 
         return state.SHIPPED({
@@ -340,7 +366,7 @@ export const behaviors = defineBehaviors<typeof OrderModel>({
   Cancel: {
     from: ["PENDING", "PAID"],
     cases: {
-      "Cancelled": (state) => {
+      "default": (state) => {
         const cancel = applyDecision(CancelRules, state);
 
         return state.CANCELLED({ event: "Order cancelled", effects: [...cancel.effects] });
@@ -354,7 +380,7 @@ export const behaviors = defineBehaviors<typeof OrderModel>({
 * モデルの `actions` に宣言したアクションすべてに、振る舞いを1つずつ書きます。過不足は型エラーになり、読み込み時にも検査されます。
 * `from` は、そのアクションを実行できる状態です。省略すると全状態になります。
 * `where` は事前条件です。`from` と `where` を満たさない場合の挙動は仕様の対象外で、PBT も検証しません。
-* `cases` のキー（`"PaymentSuccess"` など）は、アクションの結果を決める外部要因の応答（outcome）です。決済の成否のように、依存先が返す結果を表します。
+* `cases` は「遷移を出力とする決定表」です。キーは条件で、決定表と同じく `default` が必須です。次の状態・指示・覚えるデータを、条件ごとに変えられます。外部サービスの応答で分かれる場合は、その応答を `queries` に宣言し、条件で読みます（上の `paymentResult`）。
 * `set` は、遷移のときに覚えるデータです。書いたフィールドだけが更新されます。case の中で読めるのは、そのアクション自身の入力だけです（他のアクションの入力を読むと型エラー）。
 
 #### case 本体の構文制限
@@ -364,46 +390,50 @@ export const behaviors = defineBehaviors<typeof OrderModel>({
 * **書けるもの:** `const` 宣言、`return`、リテラル、プロパティ参照、関数呼び出し、配列・オブジェクトのスプレッド、分割代入。
 * **書けないもの:** `if` / `switch` / 三項演算子、比較（`===`, `>` 等）、論理演算（`&&`, `||`, `??`, `!`, `?.`）、算術・文字列連結・テンプレートリテラルへの埋め込み、既定値、`let` / 再代入、ループ、`try`、`async` / `await`。
 
-**分岐と演算はすべて DMN の行と列に寄せます。** 例えば「割引の2倍」が必要なら、計算結果を列として表に持たせます。
+**分岐は条件（決定表の行、case のキー）に、演算は計算（`formulas`）に寄せます。** case 本体は、それらを適用した結果を遷移に並べるだけです。
 
-### 3.2. Layer 2: 逆引き推論とバインディング (Binding)
+### 3.2. Layer 2: 仕様の結び付け (Binding)
 
-Layer 1の自然言語キーから型を自動抽出し（Inferred Dictionary）、実装漏れをコンパイルエラーとして防ぎます。`where` の事前条件にも同様に評価関数を結び付けます（こちらの漏れは IR 抽出時のエラーになります）。
+Layer 1 に自然言語で書いた名前に、評価関数を結び付けます。結び付けは `bindSpecification` の1か所にまとめます。
 
 ```typescript
 // --- specs/vocabulary.ts (Layer 2) ---
-import { bindDecisionDetails, bindPreconditions } from "@aac/core";
-import { CampaignRules } from "./campaign.dmn.ts";
+import { applyDecision, bindSpecification } from "@aac/core";
 
-// Layer 1のキーから推論（二重管理・ボイラープレートの排除）
-type CampaignConditions = keyof typeof CampaignRules;
+export const Specification = bindSpecification(OrderModel, {
+  // ここに渡した決定表の行は、結び付けの漏れがコンパイルエラーになる
+  tables: { CampaignRules, CancelRules, ShippingRules },
 
-// 実行時に複数の true が出た場合は RuleConflictError (Hit Policy: Unique) を投げる。
-// "default" はフォールバックであり、Unique 判定の対象外。
-export const CampaignEvaluator = bindDecisionDetails<CampaignConditions>(CampaignRules, {
-  "ゴールド会員であり、かつ月末の場合": (state) => state.rank === "Gold" && state.isMonthEnd,
-  "シルバー会員の場合": (state) => state.rank === "Silver",
-  "default": () => true
-});
+  // 条件: 決定表の行、事前条件 (where)、case の分かれ方。
+  // 同時に複数が成立した場合は RuleConflictError (Hit Policy: Unique)
+  conditions: {
+    "ゴールド会員であり、かつ月末の場合": (state) => state.rank === "Gold" && state.isMonthEnd,
+    "シルバー会員の場合": (state) => state.rank === "Silver",
+    "決済済みの注文の場合": (state) => state.status === "PAID",
+    "ゴールド会員、または1万円以上の注文の場合": (state) => state.rank === "Gold" || (state.price ?? 0) >= 10_000,
+    "外部決済モジュールが有効な場合": (state) => state.paymentModuleActive,
+    "決済に成功した場合": (state) => state.paymentResult === "succeeded"
+  },
 
-// 条件は現在の状態名 (status) も参照できる
-export const CancelEvaluator = bindDecisionDetails<keyof typeof CancelRules>(CancelRules, {
-  "決済済みの注文の場合": (state) => state.status === "PAID",
-  "default": () => true
-});
+  // 計算（決定表の結果を使える）
+  formulas: {
+    "請求金額（価格 ×（100 − 割引率）÷ 100、1円未満切り捨て）": (state) =>
+      Math.floor(((state.price ?? 0) * (100 - applyDecision(CampaignRules, state).discountPercent)) / 100)
+  },
 
-// 注文時に覚えた会員ランクを、出荷のときに読む
-export const ShippingEvaluator = bindDecisionDetails<keyof typeof ShippingRules>(ShippingRules, {
-  "ゴールド会員の場合": (state) => state.rank === "Gold",
-  "default": () => true
-});
-
-// behaviors の where に書いた事前条件の評価関数
-export const Preconditions = bindPreconditions({
-  "外部決済モジュールが有効な場合": (state) => state.paymentModuleActive
+  // 不変条件: 仕様自身の矛盾を見つけるためのもの
+  invariants: {
+    "下書き以外の注文には、会員ランクと価格が設定されている": (state) =>
+      state.status === "DRAFT" || (state.rank !== undefined && state.price !== undefined)
+  }
 });
 
 ```
+
+* **型**: 評価関数の `state` はモデルから型が決まります。フィールド名の typo はコンパイルエラーになります。
+* **漏れの検出**: `tables` に渡した決定表の行、モデルの `formulas` と `invariants` は、結び付けが漏れるとコンパイルエラーになります。事前条件と case の条件は型では追えないため、IR 抽出時のエラーになります。
+* **同じ文は1つの意味**: 同じ名前を別の関数に結び付けるとエラーになります。
+* **不変条件が見るもの**: 状態名と覚えているデータだけです（問い合わせや入力は見ません）。検証するのは仕様であって実装ではありません。覚えているデータを本番システムから読まない方針のため、実装に対しては確かめられません。IR には名前を載せるので、LLM には前提として伝わります。
 
 Layer 2 は PBT が期待値を算出するための「正解」であり、IR には含まれません。したがって LLM エージェントには渡りません（§2.3）。
 
@@ -418,21 +448,24 @@ Layer 2 は PBT が期待値を算出するための「正解」であり、IR �
   "model": {
     "initial": "DRAFT",
     "states": ["DRAFT", "PENDING", "PAID", "SHIPPED", "CANCELLED"],
-    "data": { "rank": ["Gold", "Silver", "Bronze"] },
-    "actions": { "PlaceOrder": { "customerRank": ["Gold", "Silver", "Bronze"] }, "Checkout": {}, "Ship": {}, "Cancel": {} },
-    "queries": { "isMonthEnd": "boolean", "paymentModuleActive": "boolean" },
-    "commands": { "SendReceipt": { "discount": "number" }, "Refund": {}, ... }
+    "data": { "rank": ["Gold", "Silver", "Bronze"], "price": { "type": "integer", "min": 0, "max": 1000000, "around": [10000] } },
+    "actions": { "PlaceOrder": { "customerRank": [ ... ], "listPrice": { ... } }, "Checkout": {}, "Ship": {}, "Cancel": {} },
+    "queries": { "isMonthEnd": "boolean", "paymentModuleActive": "boolean", "paymentResult": ["succeeded", "failed"] },
+    "commands": { "SendReceipt": { "discountPercent": "integer", "amount": "integer" }, "Refund": {}, ... },
+    "formulas": { "請求金額（価格 ×（100 − 割引率）÷ 100、1円未満切り捨て）": "integer" },
+    "invariants": ["下書き以外の注文には、会員ランクと価格が設定されている"]
   },
   "decisions": {
     "CampaignRules": {
       "bound": true,
       "rows": {
-        "ゴールド会員であり、かつ月末の場合": { "discount": 0.2, "effects": [ ... ] },
-        "シルバー会員の場合": { "discount": 0.05, "effects": [] },
-        "default": { "discount": 0, "effects": [] }
+        "ゴールド会員であり、かつ月末の場合": { "discountPercent": 20, "effects": [ ... ] },
+        "シルバー会員の場合": { "discountPercent": 5, "effects": [] },
+        "default": { "discountPercent": 0, "effects": [] }
       }
     },
-    "CancelRules": { ... }
+    "CancelRules": { ... },
+    "ShippingRules": { ... }
   },
   "behaviors": [
     {
@@ -440,9 +473,9 @@ Layer 2 は PBT が期待値を算出するための「正解」であり、IR �
       "from": ["DRAFT"],
       "preconditions": [],
       "transitions": {
-        "Placed": {
+        "default": {
           "nextState": "PENDING",
-          "set": { "rank": { "$ref": "input:customerRank" } },
+          "set": { "rank": { "$ref": "input:customerRank" }, "price": { "$ref": "input:listPrice" } },
           "emittedCommands": [ { "action": "SendOrderConfirmation", "payload": {}, "payloadSchema": {} } ]
         }
       }
@@ -452,17 +485,19 @@ Layer 2 は PBT が期待値を算出するための「正解」であり、IR �
       "from": ["PENDING"],
       "preconditions": ["外部決済モジュールが有効な場合"],
       "transitions": {
-        "PaymentSuccess": {
+        "決済に成功した場合": {
           "nextState": "PAID",
           "event": "Payment completed",
           "emittedCommands": [
             { "action": "SendReceipt",
-              "payload": { "discount": { "$ref": "decision:CampaignRules.discount" } },
-              "payloadSchema": { "discount": "number" } },
+              "payload": {
+                "discountPercent": { "$ref": "decision:CampaignRules.discountPercent" },
+                "amount": { "$ref": "formula:請求金額（価格 ×（100 − 割引率）÷ 100、1円未満切り捨て）" } },
+              "payloadSchema": { "discountPercent": "number", "amount": "integer" } },
             { "$spread": "decision:CampaignRules.effects" }
           ]
         },
-        "PaymentFailure": { "nextState": "PENDING", ... }
+        "default": { "nextState": "PENDING", ... }
       }
     },
     { "name": "Cancel", "from": ["PENDING", "PAID"], ... },
@@ -472,10 +507,12 @@ Layer 2 は PBT が期待値を算出するための「正解」であり、IR �
 
 ```
 
+* `transitions` のキーは条件の文です（どれも成り立たなければ `default`）。
 * `{"$ref": "input:<名前>"}`、`{"$ref": "data:<名前>"}`、`{"$ref": "query:<名前>"}` は、それぞれアクションの入力、覚えているデータ、問い合わせの答えを指します。
+* `{"$ref": "formula:<名前>"}` は、その名前の計算の結果を指します。
 * `{"$ref": "decision:<表>.<列>"}` は「現在の状態に一致した行の、その列の値」を指します。
 * `{"$spread": "decision:<表>.<列>"}` は、その列の配列の全要素をその位置に展開することを指します。
-* 事前条件と DMN の条件は自然言語のまま出力されます。識別子への変換や評価関数は含みません。
+* 条件・計算・不変条件は自然言語の名前のまま出力されます。評価関数は含みません。
 * `irVersion`（整数、単調増加）が唯一の互換性契約です。
 
 ### 3.4. Layer 3: PBT Verification Engine
@@ -509,21 +546,15 @@ export type StateName = "DRAFT" | "PENDING" | "PAID" | "SHIPPED" | "CANCELLED";
 export type Action =
   | { name: "Cancel"; input: {} }
   | { name: "Checkout"; input: {} }
-  | { name: "PlaceOrder"; input: { customerRank: "Gold" | "Silver" | "Bronze" } }
+  | { name: "PlaceOrder"; input: { customerRank: "Gold" | "Silver" | "Bronze"; listPrice: number } }
   | { name: "Ship"; input: {} };
 
 export type Ports = {
-  /** 問い合わせ。答えはアクションごとに変わり得るので、必要なときに尋ねる（保持しない）。 */
+  /** 問い合わせ（時計、設定、外部サービスの応答）。答えはアクションごとに変わり得るので、必要なときに尋ねる（保持しない）。 */
   queries: {
     isMonthEnd(): boolean;
     paymentModuleActive(): boolean;
-  };
-  /** アクションの結果を決める外部要因の応答。そのアクションの実行中だけ有効。 */
-  outcomes: {
-    Cancel(): "Cancelled";
-    Checkout(): "PaymentFailure" | "PaymentSuccess";
-    PlaceOrder(): "Placed";
-    Ship(): "Shipped";
+    paymentResult(): "succeeded" | "failed";
   };
   /** 指示。呼び出しは発行順に記録され、仕様と照合される。 */
   commands: {
@@ -531,7 +562,7 @@ export type Ports = {
     NotifyPaymentFailure(payload: {}): void;
     Refund(payload: {}): void;
     SendOrderConfirmation(payload: {}): void;
-    SendReceipt(payload: { discount: number }): void;
+    SendReceipt(payload: { amount: number; discountPercent: number }): void;
     SendShippingNotice(payload: { priority: boolean }): void;
   };
 };
@@ -559,14 +590,16 @@ export interface TargetSystemAdapter {
 1回の試行は、初期状態から始まるアクション列（最大8手）です。
 
 1. `setupIsolation(ports)` で、初期状態の本番システムを代役につないで作る。
-2. 1手ごとに、入力・問い合わせの答え・outcome をランダムに決める。現在の状態で実行でき（`from`）、事前条件（`where`）を満たすアクションの中から1つを選ぶ。
-3. 仕様の case を具体値で実行し、期待される次状態と Command の列を得る（Layer 2 の評価関数で DMN の行を決める）。
+2. 1手ごとに、入力と問い合わせの答えをランダムに決める。数値は、範囲の端としきい値（`around`）の前後を重点的に生成する。現在の状態で実行でき（`from`）、事前条件（`where`）を満たすアクションの中から1つを選ぶ。
+3. Layer 2 の評価関数で、成り立つ case を決める。その case を具体値で実行し、期待される次状態と Command の列を得る（決定表の行と計算も、Layer 2 で評価する）。
 4. `executeAction(action)` を呼び、`getCurrentState` の結果と、その手の間に代役が受けた指示の列（順序を含む）が期待と一致することを確かめる。
 5. 一致すれば、遷移の `set` を仕様側の「覚えているデータ」に反映して次の手へ進む。最後に `teardownIsolation` を呼ぶ。
 
+仕様側の評価で問題が起きた場合（条件の衝突、不変条件の破れなど）は、実装の誤りではなく仕様の誤りとして報告します（§2.3 の事前検査）。
+
 覚えているデータは、本番システムから直接は読みません。後のアクションの振る舞いを通してだけ確かめます（例えば、注文時の会員ランクを正しく覚えているかは、決済時の割引と出荷時の優先扱いで分かります）。
 
-不一致が見つかると fast-check がアクション列を最小化し、シード・パス・**最短のアクション列**・期待値と実際の値を報告します。例えば「決済後のキャンセルで返金されない」という不具合は、「注文 → 決済成功 → キャンセル」の3手として報告され、各手の時点で覚えているはずのデータも併せて示されます。`node aac/verify.ts --seed X --path Y` で同じ反例を再現できます。
+不一致が見つかると fast-check がアクション列を最小化し、シード・パス・**最短のアクション列**・期待値と実際の値を報告します。例えば「決済後のキャンセルで返金されない」という不具合は、「注文 → 決済成功 → キャンセル」の3手として報告され、各手の時点で覚えているはずのデータと、成り立った条件も併せて示されます。`node aac/verify.ts --seed X --path Y` で同じ反例を再現できます。
 
 ## 4. イベントストーミング＆DFDの自動生成
 

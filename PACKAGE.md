@@ -50,8 +50,8 @@ aac-engine-monorepo/
 * **責務:**
 * ドメインモデルの型定義 (`DomainModel`, `CommandsOf<M>`, `ContextOf<M, Action>`)。部品の境界を値として宣言し、型を導出する
 * 多重度DSLの型定義 (`One<T>`, `Some<T>`, `Many<T>`)
-* DMNの型定義 (`DecisionTable<T>`, `applyDecision()`)
-* 振る舞い定義のヘルパー (`defineBehaviors()`, `bindDecisionDetails()`, `bindPreconditions()`)
+* DMNの型定義 (`DecisionTable<T>`, `applyDecision()`) と計算 (`applyFormula()`)
+* 振る舞い定義 (`defineBehaviors()`) と、自然言語の名前への結び付け (`bindSpecification()`)
 
 
 * **依存関係:** 外部依存ゼロ（ピュアTS）。
