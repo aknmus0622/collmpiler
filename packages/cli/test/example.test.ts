@@ -12,7 +12,7 @@ const checkout = (data: object) => behaviors.Checkout.cases.PaymentSuccess(creat
 test("具体実行: ゴールド会員かつ月末", () => {
   assert.deepEqual(checkout({ rank: "Gold", isMonthEnd: true }), {
     nextState: "PAID",
-    event: "決済完了",
+    event: "Payment completed",
     effects: [
       { action: "SendReceipt", payload: { discount: 0.2 } },
       { action: "IssueCoupon", payload: { type: "Premium" } },

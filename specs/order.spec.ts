@@ -11,7 +11,7 @@ export const behaviors = defineBehaviors<OrderStates, DomainCommand>({
         const campaign = applyDecision(CampaignRules, state);
 
         return state.PAID({
-          event: "決済完了",
+          event: "Payment completed",
           effects: [
             { action: "SendReceipt", payload: { discount: campaign.discount } },
             ...campaign.effects
