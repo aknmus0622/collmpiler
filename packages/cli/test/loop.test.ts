@@ -54,10 +54,13 @@ test("ループ: PBT の反例 → 余計なもの検査の違反 → 合格", a
   assert.equal(status, "pass");
   assert.deepEqual(attempts.map((a) => a.feedback?.kind ?? "pass"), ["pbt", "check", "pass"]);
 
-  // 1回目: シルバー会員の割引違いが、最小の反例として報告される
+  // 1回目: シルバー会員の割引違いが、最小の反例 (1手) として報告される
   const first = attempts[0].feedback;
   assert.ok(first?.kind === "pbt" && first.result.status === "fail");
-  assert.equal(first.result.given.data.rank, "Silver");
+  assert.deepEqual(
+    first.result.steps.map((s) => [s.from, s.action, s.outcome, s.input.rank]),
+    [["PENDING", "Checkout", "PaymentSuccess", "Silver"]],
+  );
   assert.deepEqual(first.result.expected, {
     state: "PAID",
     commands: [{ action: "SendReceipt", payload: { discount: 0.05 } }],
@@ -80,6 +83,22 @@ test("ループ: PBT の反例 → 余計なもの検査の違反 → 合格", a
   // 合格した実装と採点基準は出力先に揃う
   assert.deepEqual(readdirSync(join(out, "aac")).sort(), ["adapter.contract.ts", "adapter.ts", "ir.json", "verify.ts"]);
   assert.deepEqual(readdirSync(join(out, "src")), ["order-service.ts"]);
+});
+
+test("複数ステップ: 2手でしか現れない不具合を、最小のアクション列まで縮めて報告する", async () => {
+  const { attempts } = await run(["norefund"], 1);
+  const feedback = attempts[0].feedback;
+  assert.ok(feedback?.kind === "pbt" && feedback.result.status === "fail");
+  // 決済に成功してからキャンセルしたときだけ、返金が必要になる
+  assert.deepEqual(
+    feedback.result.steps.map((s) => [s.from, s.action, s.outcome]),
+    [
+      ["PENDING", "Checkout", "PaymentSuccess"],
+      ["PAID", "Cancel", "Cancelled"],
+    ],
+  );
+  assert.deepEqual(feedback.result.expected, { state: "CANCELLED", commands: [{ action: "Refund", payload: {} }] });
+  assert.deepEqual(feedback.result.actual, { state: "CANCELLED", commands: [] });
 });
 
 test("隔離: エージェントに渡るのは許可した4ファイルだけで、リポジトリへの手がかりを含まない", async () => {
@@ -227,12 +246,12 @@ test("検査: 生成ファイルの書き換え・削除、余計なファイル
   ]);
 });
 
-test("検査: アダプターは data の中身・数値・ルール名に触れられない", async () => {
+test("検査: アダプターは入力の中身・数値・ルール名に触れられない", async () => {
   const { rules, edit } = await workspace();
   edit("aac/adapter.ts", (text) =>
     text.replace(
-      "service.load(state, data);",
-      'service.load(state, data);\n    if (data.isMonthEnd) service.outbox.push({ rate: 0.2, why: "シルバー会員の場合", tpl: `${data.rank}` });',
+      'if (action === "Ship")',
+      'if (input.rank) ports.commands.SendReceipt({ discount: 0.2, why: "シルバー会員の場合", tpl: `${"Gold"}` } as never);\n    if (action === "Ship")',
     ),
   );
   assert.deepEqual(rules(), Array(4).fill("aac/adapter.ts:adapter-logic"));

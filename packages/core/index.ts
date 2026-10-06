@@ -5,14 +5,20 @@ export type Some<T> = [T, ...T[]];
 export type Many<T> = T[];
 
 // --- ドメインモデル ---
-// 型は実行時に消えるため、状態・データ・Command は「値」として宣言し、型はそこから導出する。
+// 型は実行時に消えるため、部品の境界は「値」として宣言し、型はそこから導出する。
 // 値として残るので IR に出力でき、PBT の入力生成にもそのまま使える。
+//
+// 部品は境界だけで記述する:
+//   input    … アクションの入力（外から部品を動かす呼び出しの引数）
+//   queries  … 依存への問い合わせ（部品が外に尋ねて答えをもらう値。時計・設定など）
+//   commands … 依存への指示（部品が外に対して行う副作用）
 export type FieldSchema = "boolean" | "number" | "string" | readonly string[];
 
 export type DomainModel = {
   initial: string;
   states: readonly string[];
-  data: Record<string, FieldSchema>;
+  input: Record<string, FieldSchema>;
+  queries: Record<string, FieldSchema>;
   commands: Record<string, Record<string, FieldSchema>>;
 };
 
@@ -28,7 +34,8 @@ type FieldType<F> = F extends "boolean"
 
 type Shape<Fields> = { -readonly [K in keyof Fields]: FieldType<Fields[K]> };
 
-export type DataOf<M extends DomainModel> = Shape<M["data"]>;
+// 条件の評価関数と case が読めるデータ: 入力、問い合わせの答え、現在の状態名 (status)
+export type DataOf<M extends DomainModel> = Shape<M["input"]> & Shape<M["queries"]> & { status: M["states"][number] };
 export type StatesOf<M extends DomainModel> = { [Name in M["states"][number]]: DataOf<M> };
 export type CommandsOf<M extends DomainModel> = {
   [Action in keyof M["commands"]]: { action: Action; payload: Shape<M["commands"][Action]> };
@@ -119,6 +126,8 @@ export type StateHandle<States, Command> = Readonly<States[keyof States]> & {
 };
 
 export type Behavior<States, Command> = {
+  // このアクションを実行できる状態。省略時は全状態
+  from?: readonly (keyof States & string)[];
   where?: readonly string[];
   cases: Record<string, (state: StateHandle<States, Command>) => Transition<Command>>;
 };

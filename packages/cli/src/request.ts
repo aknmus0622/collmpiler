@@ -36,32 +36,42 @@ harness. Your work is accepted when the rule check and the property-based test b
   specification.
 - Do not edit \`${TEST_DIR}/${FILES.ir}\` or \`${TEST_DIR}/${FILES.contract}\`, and do not create files outside
   \`${SOURCE_DIR}/\`. Only \`${SOURCE_DIR}/\` and \`${TEST_DIR}/${FILES.adapter}\` are collected from this directory.
-- The adapter must stay thin. It may import only \`./${FILES.contract}\` and files under \`../${SOURCE_DIR}/\`. It
-  must not contain numeric literals, must not reference state data fields or their values, and must not mention
-  decision rule names. Pass the \`data\` argument of \`givenState\` to production code unchanged; all business
-  logic belongs in \`${SOURCE_DIR}/\`.
+- The adapter must stay thin: it only builds your system, connects it to the \`ports\` it receives, and forwards
+  calls. It may import only \`./${FILES.contract}\` and files under \`../${SOURCE_DIR}/\`. It must not contain
+  numeric literals, must not reference input fields or their values, and must not mention decision rule names.
+  Pass the \`input\` argument of \`executeAction\` to production code unchanged; all business logic belongs in
+  \`${SOURCE_DIR}/\`.
 
 ## How to read the IR
 
+The IR describes one component by its boundary.
+
 - \`model.states\` / \`model.initial\`: the state names and the starting state.
-- \`model.data\`: the fields of the state data. An array lists the allowed values; a string is a primitive type.
-- \`model.commands\`: the side effects the system may emit, with their payload fields.
+- \`model.input\`: the fields passed to an action. An array lists the allowed values; a string is a primitive type.
+- \`model.queries\`: values the component asks its environment for (clock, configuration, ...). In the test they
+  are answered by \`ports.queries\`, and the answers can change from one action to the next.
+- \`model.commands\`: the side effects the component may perform on its environment, with their payload fields.
+  In the test they are received by \`ports.commands\`.
 - \`decisions\`: decision tables. Each key of \`rows\` is a condition written in natural language; decide what it
-  means in terms of \`model.data\`. At most one non-default row matches a given state (hit policy: unique);
-  \`default\` applies when no other row matches.
-- \`behaviors\`: actions. \`preconditions\` are natural-language conditions on the state; behaviour when they do
-  not hold is not tested. Each key of \`transitions\` is an outcome passed to \`executeAction(action, outcome)\`.
+  means in terms of the input, the query answers, and the current state. At most one non-default row matches
+  (hit policy: unique); \`default\` applies when no other row matches.
+- \`behaviors\`: actions. \`from\` lists the states in which the action can be executed, and \`preconditions\`
+  are natural-language conditions that must also hold; behaviour outside them is not tested. Each key of
+  \`transitions\` is an outcome: the external result that decides how the action turns out (for example whether a
+  payment succeeded). In the test, \`ports.outcomes.<Action>()\` returns the outcome of the action being executed.
   The transition gives the resulting \`nextState\` and the \`emittedCommands\`, in order.
 - Inside a transition, \`{"$ref": "decision:<Table>.<column>"}\` means the value of that column in the row that
-  matches the current state, and \`{"$spread": "decision:<Table>.<column>"}\` means all elements of that column's
-  array, inserted at that position. \`payloadSchema\` is informational and is not part of the command.
+  matches, and \`{"$spread": "decision:<Table>.<column>"}\` means all elements of that column's array, inserted
+  at that position. \`payloadSchema\` and \`event\` are informational and are not part of the command.
 
 ## How your work is tested
 
 The test harness is not available in this directory. When you finish, the harness collects your files and
-runs, for many randomly generated states: \`setupIsolation\` → \`givenState(initial, data)\` →
-\`executeAction(action, outcome)\` → \`getCurrentState\` / \`getFiredCommands\` → \`teardownIsolation\`. The
-resulting state and the emitted commands (including their order) must match the specification exactly. If
-they do not, you will be asked again with a minimal counterexample.
+runs many randomly generated trials. One trial is: \`setupIsolation(ports)\`, then a sequence of several
+\`executeAction(action, input)\` calls on the same system, then \`teardownIsolation()\`. Before each action the
+harness chooses new query answers and an outcome. After each action, \`getCurrentState()\` and the commands
+received by \`ports.commands\` during that action (including their order) must match the specification exactly.
+If they do not, you will be asked again with a minimal counterexample: the shortest sequence of actions that
+shows the difference.
 ${feedback ? `\n## Feedback from the previous attempt\n\n${renderFeedback(feedback)}\n` : ""}`;
 }

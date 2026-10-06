@@ -41,5 +41,5 @@ export async function loadSpecs(dir: string): Promise<SpecInput> {
 }
 
 function isDomainModel(value: object): value is DomainModel {
-  return "states" in value && Array.isArray(value.states) && "data" in value && "commands" in value;
+  return "states" in value && Array.isArray(value.states) && "input" in value && "queries" in value && "commands" in value;
 }

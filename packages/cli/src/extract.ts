@@ -8,7 +8,10 @@ import { lintCase } from "./lint.ts";
 export const IR_VERSION = 1;
 
 export type SpecInput = {
-  behaviors: Record<string, { where?: readonly string[]; cases: Record<string, (state: any) => unknown> }>;
+  behaviors: Record<
+    string,
+    { from?: readonly string[]; where?: readonly string[]; cases: Record<string, (state: any) => unknown> }
+  >;
   // export 名 → DecisionTable。applyDecision に渡された表の名前解決に使う
   tables: Record<string, object>;
   model?: DomainModel;
@@ -290,7 +293,12 @@ export async function extract(input: SpecInput, options: ExtractOptions = {}) {
         message: `where "${text}" に bindPreconditions による評価関数が登録されていない`,
       });
     }
-    behaviors.push({ name, preconditions: [...(behavior.where ?? [])], transitions });
+    behaviors.push({
+      name,
+      from: [...(behavior.from ?? input.model?.states ?? [])],
+      preconditions: [...(behavior.where ?? [])],
+      transitions,
+    });
   }
 
   const decisions: Record<string, unknown> = {};

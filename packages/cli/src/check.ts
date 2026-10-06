@@ -79,10 +79,10 @@ export function checkWorkspace(out: string, ir: Ir, specs: string): Violation[] 
     const tokens = scan(readFileSync(adapterPath, "utf8"));
     checkImports(adapterPath, tokens, true);
 
-    // data の中身に触れられなければ、アダプター内で業務上の分岐はできない
-    const dataFields = new Set(Object.keys(model.data));
+    // 入力の中身に触れられなければ、アダプター内で業務上の分岐はできない（問い合わせ・指示の名前は配線に必要なので可）
+    const dataFields = new Set(Object.keys(model.input));
     const dataValues = new Set([
-      ...Object.values(model.data).flatMap((schema) => (typeof schema === "string" ? [] : schema)),
+      ...Object.values(model.input).flatMap((schema) => (typeof schema === "string" ? [] : schema)),
       ...Object.values(ir.decisions).flatMap((decision) => Object.keys(decision.rows)),
     ]);
     const seen = new Set<string>();
@@ -94,10 +94,10 @@ export function checkWorkspace(out: string, ir: Ir, specs: string): Violation[] 
     for (const token of tokens) {
       if (token.kind === "number") logic("number", `Numeric literal ${token.text} found.`);
       if (token.kind === "word" && dataFields.has(token.text)) {
-        logic(token.text, `State data field "${token.text}" is referenced. Pass \`data\` through unchanged.`);
+        logic(token.text, `Input field "${token.text}" is referenced. Pass \`input\` through unchanged.`);
       }
       if (token.kind === "string" && dataValues.has(token.text)) {
-        logic(token.text, `State data value or rule name "${token.text}" is referenced.`);
+        logic(token.text, `Input value or rule name "${token.text}" is referenced.`);
       }
     }
   }

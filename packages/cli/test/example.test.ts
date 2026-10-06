@@ -41,5 +41,6 @@ test("specs/ の IR 出力は実行ごとにバイト一致する", () => {
   const compile = () => execFileSync(process.execPath, ["packages/cli/src/compile.ts", "specs"], { encoding: "utf8" });
   const first = compile();
   assert.equal(first, compile());
-  assert.equal(JSON.parse(first).behaviors[0].transitions.PaymentSuccess.nextState, "PAID");
+  const checkout = JSON.parse(first).behaviors.find((b: { name: string }) => b.name === "Checkout");
+  assert.equal(checkout.transitions.PaymentSuccess.nextState, "PAID");
 });

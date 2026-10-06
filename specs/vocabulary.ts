@@ -1,5 +1,6 @@
 import { bindDecisionDetails, bindPreconditions } from "@aac/core";
 import { CampaignRules } from "./campaign.dmn.ts";
+import { CancelRules } from "./cancel.dmn.ts";
 
 // Layer 1のキーから推論（二重管理・ボイラープレートの排除）
 type CampaignConditions = keyof typeof CampaignRules;
@@ -8,6 +9,11 @@ type CampaignConditions = keyof typeof CampaignRules;
 export const CampaignEvaluator = bindDecisionDetails<CampaignConditions>(CampaignRules, {
   "ゴールド会員であり、かつ月末の場合": (state) => state.rank === "Gold" && state.isMonthEnd,
   "シルバー会員の場合": (state) => state.rank === "Silver",
+  "default": () => true
+});
+
+export const CancelEvaluator = bindDecisionDetails<keyof typeof CancelRules>(CancelRules, {
+  "決済済みの注文の場合": (state) => state.status === "PAID",
   "default": () => true
 });
 

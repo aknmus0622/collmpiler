@@ -5,19 +5,29 @@ import type { FieldSchema } from "@aac/core";
 import { loadSpecs } from "./loader.ts";
 
 // 生成された verify.ts から呼ばれる PBT ランタイム。
-// 期待値は仕様 (Layer 1/2) を具体値で実行して得る。実際の値はアダプター経由で本番システムから得る。
+// 1回の試行は「初期状態から始まるアクション列」。期待値は仕様 (Layer 1/2) を具体値で実行して得る。
+// 本番システムの依存は代役 (Ports) に置き換え、問い合わせには生成した答えを返し、指示は記録して照合する。
 
-export type Adapter = {
-  setupIsolation(): Promise<void>;
-  teardownIsolation(): Promise<void>;
-  givenState(state: any, data: any): Promise<void>;
-  executeAction(action: any, outcome: any): Promise<void>;
-  getCurrentState(): Promise<unknown>;
-  getFiredCommands(): Promise<unknown[]>;
+type Fn = (...args: any[]) => any;
+
+export type Ports = {
+  queries: Record<string, Fn>;
+  outcomes: Record<string, Fn>;
+  commands: Record<string, Fn>;
 };
 
-type Scenario = { action: string; outcome: string; data: Record<string, unknown> };
+export type Adapter = {
+  setupIsolation(ports: any): Promise<void>;
+  teardownIsolation(): Promise<void>;
+  executeAction(action: any, input: any): Promise<void>;
+  getCurrentState(): Promise<unknown>;
+};
+
+type Values = Record<string, unknown>;
+type RawStep = { pick: number; outcomePick: number; input: Values; queries: Values };
 type Observation = { state: unknown; commands: unknown };
+
+export type Step = { from: string; action: string; input: Values; queries: Values; outcome: string };
 
 export type PbtResult =
   | { status: "pass"; seed: number; numRuns: number }
@@ -27,15 +37,15 @@ export type PbtResult =
       path: string;
       numRuns: number;
       numShrinks: number;
-      given: { state: string; data: Record<string, unknown> };
-      action: string;
-      outcome: string;
+      // 初期状態から実行したアクション列。最後の1つで不一致が起きた（空なら初期状態が違う）
+      steps: Step[];
       expected: Observation;
       actual: Observation | { error: string };
     }
   | { status: "error"; message: string };
 
 export const RESULT_PREFIX = "AAC_RESULT ";
+const MAX_STEPS = 8;
 
 function arbitraryOf(schema: FieldSchema): fc.Arbitrary<unknown> {
   if (schema === "boolean") return fc.boolean();
@@ -44,7 +54,11 @@ function arbitraryOf(schema: FieldSchema): fc.Arbitrary<unknown> {
   return fc.constantFrom(...schema);
 }
 
+const recordOf = (fields: Record<string, FieldSchema>) =>
+  fc.record(Object.fromEntries(Object.entries(fields).map(([key, schema]) => [key, arbitraryOf(schema)])));
+
 const plain = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+const messageOf = (error: unknown) => (error instanceof Error ? `${error.name}: ${error.message}` : String(error));
 
 export async function runPbt(options: { specs: string; adapter: Adapter; args?: string[] }): Promise<PbtResult> {
   const { values } = parseArgs({
@@ -69,62 +83,104 @@ async function check(
   const input = await loadSpecs(specs);
   const model = input.model;
   if (!model) return { status: "error", message: "仕様に DomainModel がありません" };
+  const actions = Object.keys(input.behaviors).sort();
+  if (actions.length === 0) return { status: "error", message: "検証する behavior がありません" };
 
-  const refs = Object.entries(input.behaviors).flatMap(([action, behavior]) =>
-    Object.keys(behavior.cases).map((outcome) => ({ action, outcome })),
-  );
-  if (refs.length === 0) return { status: "error", message: "検証する behavior がありません" };
+  // 1試行を実行し、不一致があればその内容を返す
+  const trial = async (raw: RawStep[]) => {
+    const steps: Step[] = [];
+    let current: Step | undefined;
+    let recorded: unknown[] = [];
 
-  const expectedOf = ({ action, outcome, data }: Scenario): Observation => {
-    const transition = input.behaviors[action].cases[outcome](createState(data)) as any;
-    return plain({ state: transition.nextState, commands: transition.effects });
-  };
+    const ports: Ports = {
+      queries: Object.fromEntries(
+        Object.keys(model.queries).map((name) => [
+          name,
+          () => {
+            if (!current) throw new Error(`ports.queries.${name}() was called before any action; ask during the action instead`);
+            return current.queries[name];
+          },
+        ]),
+      ),
+      outcomes: Object.fromEntries(
+        actions.map((action) => [
+          action,
+          () => {
+            if (current?.action !== action) throw new Error(`ports.outcomes.${action}() was called while "${action}" was not executing`);
+            return current.outcome;
+          },
+        ]),
+      ),
+      commands: Object.fromEntries(
+        Object.keys(model.commands).map((action) => [
+          action,
+          (payload: unknown) => void recorded.push({ action, payload: plain(payload ?? {}) }),
+        ]),
+      ),
+    };
 
-  const actualOf = async ({ action, outcome, data }: Scenario): Promise<Observation | { error: string }> => {
+    let expected: Observation = { state: model.initial, commands: [] };
     try {
-      await adapter.setupIsolation();
+      await adapter.setupIsolation(ports);
       try {
-        await adapter.givenState(model.initial, structuredClone(data));
-        await adapter.executeAction(action, outcome);
-        return plain({ state: await adapter.getCurrentState(), commands: await adapter.getFiredCommands() });
+        let status = model.initial;
+        const initial = plain({ state: await adapter.getCurrentState(), commands: recorded });
+        if (!isDeepStrictEqual(expected, initial)) return { steps, expected, actual: initial };
+
+        for (const { pick, outcomePick, input: actionInput, queries } of raw) {
+          const data = { status, ...actionInput, ...queries };
+          // 現在の状態で実行でき、事前条件 (where) を満たすアクションだけが対象
+          const enabled = actions.filter((name) => {
+            const behavior = input.behaviors[name];
+            return (
+              (behavior.from ?? model.states).includes(status) &&
+              (behavior.where ?? []).every((text) => getPrecondition(text)?.(data))
+            );
+          });
+          if (enabled.length === 0) continue;
+          const action = enabled[pick % enabled.length];
+          const outcomes = Object.keys(input.behaviors[action].cases).sort();
+          const outcome = outcomes[outcomePick % outcomes.length];
+
+          const transition = input.behaviors[action].cases[outcome](createState(data)) as any;
+          expected = plain({ state: transition.nextState, commands: transition.effects });
+
+          current = { from: status, action, input: actionInput, queries, outcome };
+          steps.push(current);
+          recorded = [];
+          await adapter.executeAction(action, structuredClone(actionInput));
+          const actual = plain({ state: await adapter.getCurrentState(), commands: recorded });
+          if (!isDeepStrictEqual(expected, actual)) return { steps, expected, actual };
+          status = transition.nextState;
+        }
       } finally {
         await adapter.teardownIsolation();
       }
     } catch (error) {
-      return { error: error instanceof Error ? `${error.name}: ${error.message}` : String(error) };
+      return { steps, expected, actual: { error: messageOf(error) } };
     }
+    return undefined;
   };
 
-  const scenarios = fc.record({
-    ref: fc.constantFrom(...refs),
-    data: fc.record(Object.fromEntries(Object.entries(model.data).map(([key, schema]) => [key, arbitraryOf(schema)]))),
-  });
-
-  const property = fc.asyncProperty(scenarios, async ({ ref, data }) => {
-    // 事前条件 (where) を満たす状態だけを検証する
-    fc.pre((input.behaviors[ref.action].where ?? []).every((text) => getPrecondition(text)?.(data)));
-    const scenario = { ...ref, data };
-    return isDeepStrictEqual(expectedOf(scenario), await actualOf(scenario));
-  });
-
-  const details = await fc.check(property, params);
+  const sequences = fc.array(
+    fc.record({ pick: fc.nat(), outcomePick: fc.nat(), input: recordOf(model.input), queries: recordOf(model.queries) }),
+    { minLength: 1, maxLength: MAX_STEPS },
+  );
+  const details = await fc.check(
+    fc.asyncProperty(sequences, async (raw) => (await trial(raw)) === undefined),
+    params,
+  );
   if (!details.failed) return { status: "pass", seed: details.seed, numRuns: details.numRuns };
-  if (!details.counterexample) {
-    return { status: "error", message: "事前条件を満たす入力を生成できませんでした" };
-  }
+  if (!details.counterexample) return { status: "error", message: "反例を特定できませんでした" };
 
-  const [{ ref, data }] = details.counterexample;
-  const scenario = { ...ref, data };
+  const failure = await trial(details.counterexample[0]);
+  if (!failure) return { status: "error", message: "反例を再現できませんでした（本番システムが非決定的な可能性があります）" };
   return {
     status: "fail",
     seed: details.seed,
     path: details.counterexamplePath ?? "",
     numRuns: details.numRuns,
     numShrinks: details.numShrinks,
-    given: { state: model.initial, data },
-    action: ref.action,
-    outcome: ref.outcome,
-    expected: expectedOf(scenario),
-    actual: await actualOf(scenario),
+    ...failure,
   };
 }

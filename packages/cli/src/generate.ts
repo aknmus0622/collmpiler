@@ -8,7 +8,7 @@ import { stableStringify } from "./extract.ts";
 
 export type Ir = {
   irVersion: number;
-  behaviors: { name: string; preconditions: string[]; transitions: Record<string, unknown> }[];
+  behaviors: { name: string; from: string[]; preconditions: string[]; transitions: Record<string, unknown> }[];
   decisions: Record<string, { bound: boolean; rows: Record<string, unknown> }>;
   model?: DomainModel;
 };
@@ -40,54 +40,56 @@ function fieldType(schema: FieldSchema): string {
 
 function shape(fields: Record<string, FieldSchema>): string {
   const entries = Object.keys(fields).sort().map((key) => `${key}: ${fieldType(fields[key])}`);
-  return `{ ${entries.join("; ")} }`;
+  return entries.length === 0 ? "{}" : `{ ${entries.join("; ")} }`;
 }
 
+const members = (lines: string[]) => (lines.length === 0 ? "{}" : `{\n${lines.map((line) => `    ${line};`).join("\n")}\n  }`);
+
+// アダプターの契約。エージェントが読むのでコメントは英語。
 export function generateContract(ir: Ir): string {
   const model = requireModel(ir);
-  const commands = Object.keys(model.commands)
-    .sort()
-    .map((action) => `  | { action: ${JSON.stringify(action)}; payload: ${shape(model.commands[action])} }`);
-  const outcomes = [...new Set(ir.behaviors.flatMap((behavior) => Object.keys(behavior.transitions)))].sort();
+  const behaviors = [...ir.behaviors].sort((a, b) => (a.name < b.name ? -1 : 1));
+  const queries = Object.keys(model.queries).sort().map((name) => `${name}(): ${fieldType(model.queries[name])}`);
+  const outcomes = behaviors.map((b) => `${b.name}(): ${union(Object.keys(b.transitions).sort())}`);
+  const commands = Object.keys(model.commands).sort().map((name) => `${name}(payload: ${shape(model.commands[name])}): void`);
 
   return `${header(ir)}
 export type StateName = ${union(model.states)};
-export type StateData = ${shape(model.data)};
-export type Command =
-${commands.join("\n")};
-export type ActionName = ${union(ir.behaviors.map((behavior) => behavior.name))};
-export type Outcome = ${union(outcomes)};
+export type ActionName = ${union(behaviors.map((b) => b.name))};
+export type ActionInput = ${shape(model.input)};
 
-// PBT はこのインターフェースだけを通して本番システムを操作する
+/**
+ * Stand-ins for everything the system depends on. The test harness owns them; connect them to
+ * whatever seams your production code has.
+ */
+export type Ports = {
+  /** Values the system asks its environment for. Answers can differ between actions: ask when needed, do not cache. */
+  queries: ${members(queries)};
+  /** The external result that decides how an action turns out. Only valid while that action is executing. */
+  outcomes: ${members(outcomes)};
+  /** Side effects the system performs on its environment. Calls are recorded in order and compared with the spec. */
+  commands: ${members(commands)};
+};
+
+/** The test harness drives the production system only through this interface. */
 export interface TargetSystemAdapter {
-  /** 【分離契約】1回の試行の開始前に呼ばれる。本番システムをまっさらな状態にする。 */
-  setupIsolation(): Promise<void>;
-  /** 【分離契約】試行の終了後（成功・失敗問わず）に呼ばれる。副作用を完全に破棄する。 */
+  /** Called before each trial. Build a fresh system in the initial state, connected to \`ports\`. */
+  setupIsolation(ports: Ports): Promise<void>;
+  /** Called after each trial, pass or fail. Discard everything the trial created. */
   teardownIsolation(): Promise<void>;
-  /** 検証の出発点となる状態を本番システムに用意する。data は加工せずそのまま本番コードへ渡す。 */
-  givenState(state: StateName, data: StateData): Promise<void>;
-  /** アクションを実行する。outcome は IR の transitions のキー（アクションの結果の種類）。 */
-  executeAction(action: ActionName, outcome: Outcome): Promise<void>;
-  /** 現在の状態名を返す。 */
+  /** Execute one action. A trial executes several actions in sequence on the same system. */
+  executeAction(action: ActionName, input: ActionInput): Promise<void>;
+  /** The current state of the system. */
   getCurrentState(): Promise<StateName>;
-  /** setupIsolation 以降に発行された Command を発行順に返す。 */
-  getFiredCommands(): Promise<Command[]>;
 }
 `;
 }
 
 export function generateAdapterSkeleton(): string {
-  const methods = [
-    "setupIsolation()",
-    "teardownIsolation()",
-    "givenState(state, data)",
-    "executeAction(action, outcome)",
-    "getCurrentState()",
-    "getFiredCommands()",
-  ];
+  const methods = ["setupIsolation(ports)", "teardownIsolation()", "executeAction(action, input)", "getCurrentState()"];
   return `import type { TargetSystemAdapter } from "./${FILES.contract}";
 
-// ../${SOURCE_DIR}/ の本番コードを import し、各メソッドから呼び出す。業務ロジックはここに書かない。
+// Import the production code from ../${SOURCE_DIR}/ and forward each call to it. No business logic here.
 export const adapter: TargetSystemAdapter = {
 ${methods.map((method) => `  async ${method} {\n    throw new Error("not implemented");\n  },`).join("\n")}
 };

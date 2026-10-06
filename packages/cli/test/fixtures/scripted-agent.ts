@@ -1,74 +1,92 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-// LLM の代役。AAC_SCRIPT (例: "buggy,cheat,correct") の順に、決まった実装を書き出す。
-// ループ (失敗 → 差し戻し → 修正) を LLM なしで再現するためのもの。
+// LLM の代役。決まった実装を書き出す。ループ (失敗 → 差し戻し → 修正) を LLM なしで再現するためのもの。
+//   buggy    … シルバー会員の割引が違う（1手で見つかる）
+//   norefund … 決済後のキャンセルで返金しない（決済 → キャンセルの2手でしか見つからない）
+//   cheat    … 業務ロジックをアダプターに書く
+//   correct  … 正しい実装
 
-export type Step = "buggy" | "cheat" | "correct";
+export type Step = "buggy" | "norefund" | "cheat" | "correct";
 
-const source = (silverDiscount: string) => `export type Order = { rank: string; isMonthEnd: boolean; paymentModuleActive: boolean };
+const source = (step: Step) => `export type Deps = {
+  isMonthEnd(): boolean;
+  paymentModuleActive(): boolean;
+  charge(): string;
+  send(action: string, payload: object): void;
+};
 
 export class OrderService {
   status = "PENDING";
-  outbox: object[] = [];
-  order: Order | undefined;
+  deps: Deps;
 
-  load(status: string, order: Order) {
-    this.status = status;
-    this.order = order;
+  constructor(deps: Deps) {
+    this.deps = deps;
   }
 
-  checkout(outcome: string) {
-    const order = this.order;
-    if (!order || outcome !== "PaymentSuccess") return;
-    if (order.rank === "Gold" && order.isMonthEnd) {
-      this.outbox.push({ action: "SendReceipt", payload: { discount: 0.2 } });
-      this.outbox.push({ action: "IssueCoupon", payload: { type: "Premium" } });
-    } else if (order.rank === "Silver") {
-      this.outbox.push({ action: "SendReceipt", payload: { discount: ${silverDiscount} } });
+  checkout(customer: { rank: string }) {
+    if (this.status !== "PENDING" || !this.deps.paymentModuleActive()) return;
+    if (this.deps.charge() !== "PaymentSuccess") {
+      this.deps.send("NotifyPaymentFailure", {});
+      return;
+    }
+    if (customer.rank === "Gold" && this.deps.isMonthEnd()) {
+      this.deps.send("SendReceipt", { discount: 0.2 });
+      this.deps.send("IssueCoupon", { type: "Premium" });
+    } else if (customer.rank === "Silver") {
+      this.deps.send("SendReceipt", { discount: ${step === "buggy" ? "0.5" : "0.05"} });
     } else {
-      this.outbox.push({ action: "SendReceipt", payload: { discount: 0 } });
+      this.deps.send("SendReceipt", { discount: 0 });
     }
     this.status = "PAID";
+  }
+
+  ship() {
+    if (this.status !== "PAID") return;
+    this.deps.send("SendShippingNotice", {});
+    this.status = "SHIPPED";
+  }
+
+  cancel() {
+    if (this.status !== "PENDING" && this.status !== "PAID") return;
+${step === "norefund" ? "" : `    if (this.status === "PAID") this.deps.send("Refund", {});\n`}    this.status = "CANCELLED";
   }
 }
 `;
 
-const adapter = (body: string) => `import type { Command, StateName, TargetSystemAdapter } from "./adapter.contract.ts";
+const adapter = (step: Step) => `import type { Ports, StateName, TargetSystemAdapter } from "./adapter.contract.ts";
 import { OrderService } from "../src/order-service.ts";
 
-let service = new OrderService();
+let service: OrderService | undefined;
 
 export const adapter: TargetSystemAdapter = {
-  async setupIsolation() {
-    service = new OrderService();
+  async setupIsolation(ports: Ports) {
+    service = new OrderService({
+      isMonthEnd: () => ports.queries.isMonthEnd(),
+      paymentModuleActive: () => ports.queries.paymentModuleActive(),
+      charge: () => ports.outcomes.Checkout(),
+      send: (action, payload) => (ports.commands as Record<string, (payload: never) => void>)[action](payload as never),
+    });
   },
-  async teardownIsolation() {},
-  async givenState(state, data) {
-    service.load(state, data);
+  async teardownIsolation() {
+    service = undefined;
   },
-  async executeAction(action, outcome) {
-${body}
+  async executeAction(action, input) {
+${step === "cheat" ? `    if (input.rank === "Silver") return;\n` : ""}    if (action === "Checkout") service?.checkout(input);
+    if (action === "Ship") service?.ship();
+    if (action === "Cancel") service?.cancel();
   },
   async getCurrentState() {
-    return service.status as StateName;
-  },
-  async getFiredCommands() {
-    return service.outbox as Command[];
+    return (service?.status ?? "PENDING") as StateName;
   },
 };
 `;
 
-const FORWARD = `    if (action === "Checkout") service.checkout(outcome);`;
-// 業務ロジックをアダプター側に書いてしまう例
-const CHEAT = `    if (service.order?.rank === "Silver") service.outbox.push({ action: "SendReceipt", payload: { discount: 0.05 } });
-    else if (action === "Checkout") service.checkout(outcome);`;
-
 export function write(step: Step, dir: string) {
   mkdirSync(join(dir, "src"), { recursive: true });
   mkdirSync(join(dir, "aac"), { recursive: true });
-  writeFileSync(join(dir, "src/order-service.ts"), source(step === "correct" ? "0.05" : "0.5"));
-  writeFileSync(join(dir, "aac/adapter.ts"), adapter(step === "cheat" ? CHEAT : FORWARD));
+  writeFileSync(join(dir, "src/order-service.ts"), source(step));
+  writeFileSync(join(dir, "aac/adapter.ts"), adapter(step));
 }
 
 // ループから起動されたとき (AAC_ATTEMPT がある) だけ書き出す。
