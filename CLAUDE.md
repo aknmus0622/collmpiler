@@ -4,27 +4,37 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository state
 
-Early Phase 1 spike. The design documents (written in Japanese) are still the bulk of the repo; the code so far is:
+Phase 1 spike. The design documents (written in Japanese) are still the bulk of the repo. The code:
 
-- `packages/core/index.ts` — multiplicity types, `DecisionTable`, `defineBehaviors`, `applyDecision`, `bindDecisionDetails`, `createState` (concrete execution).
-- `packages/cli/src/` — `loader.ts` (the single `SpecLoader`), `extract.ts` (recording-Proxy abstract execution → IR), `compile.ts` (temporary entry point; there is no `aac` bin yet).
-- `packages/cli/src/lint.ts` — token whitelist applied to each case body before extraction (see below).
-- `specs/` — the `SPEC.md` example.
-- `packages/cli/test/extract.test.ts` — pins down what the recording Proxy can and cannot capture, including known blind spots. Update it when extraction behaviour changes.
+- `packages/core/index.ts` — `DomainModel` (value-level states/data/commands, with types derived from it), `DecisionTable`, `defineBehaviors`, `applyDecision`, `bindDecisionDetails`, `bindPreconditions`, `createState` (concrete execution). Zero dependencies.
+- `packages/cli/src/` (no `aac` bin yet; `compile.ts` and `implement.ts` are temporary entry points)
+  - `loader.ts` — the single `SpecLoader`.
+  - `extract.ts` — recording-Proxy abstract execution → IR. `lint.ts` — token whitelist applied to each case body first.
+  - `generate.ts` — IR → test-side files. `runtime.ts` — PBT runtime (fast-check) called by the generated `verify.ts`.
+  - `check.ts` + `scan.ts` — mechanical checks on what the LLM wrote. `loop.ts` — agent → check → PBT → feedback loop.
+- `specs/` — the `SPEC.md` example (`order.model.ts`, `campaign.dmn.ts`, `order.spec.ts` are Layer 1; `vocabulary.ts` is Layer 2).
+- `examples/checkout-ts/` — `src/` is production code written by an LLM agent from the IR; `aac/` is the generated test side. Do not hand-edit `src/` to make verification pass; rerun the loop.
+- Run tests through `pnpm test` (explicit glob). A bare `node --test` executes every file under any `test/` directory, including fixtures and temporary work directories.
+- Tests: `extract.test.ts` pins what the Proxy can and cannot capture, `lint.test.ts` the case-body whitelist, `loop.test.ts` the loop and the checks (using `test/fixtures/scripted-agent.ts` as a stand-in LLM). Update them when behaviour changes.
 
-The repo is a colocated Jujutsu (`.jj/`) + git repository, so `git` normally shows a detached `HEAD`.
+The repo is a colocated Jujutsu (`.jj/`) + git repository, so `git` normally shows a detached `HEAD`. Commit with `jj`.
 
 ## Commands
 
 ```bash
 pnpm install
-pnpm test                                             # node --test, all *.test.ts
+pnpm test                                             # all packages/**/*.test.ts
 node --test packages/cli/test/extract.test.ts         # one file
-node --test --test-name-pattern="スプレッド"           # one test by name
+node --test --test-name-pattern="スプレッド" "packages/**/*.test.ts"   # tests by name
 pnpm -s run ir                                        # specs/ -> IR JSON on stdout, diagnostics on stderr
+pnpm --filter example-checkout-ts verify              # PBT against examples/checkout-ts (add -- --seed N --path P to replay)
+
+# Have an agent (re)write an implementation; any command works, it runs with cwd = --out
+pnpm -s run implement --out examples/checkout-ts --max-attempts 3 \
+  --agent 'claude -p "Read aac/REQUEST.md and carry out the request." --permission-mode acceptEdits --allowedTools "Read,Write,Edit,Glob,Grep,Bash(node aac/verify.ts:*)"'
 ```
 
-`typescript` is deliberately not a dependency, so there is no type-check script; `tsconfig.json` exists for editors and for an externally installed `tsc -p .`.
+`typescript` is deliberately not a dependency, so there is no type-check script; `tsconfig.json` exists for editors and for an externally installed `tsc -p .`. `fast-check` (in `@aac/cli`) is the only third-party dependency.
 
 ## What is being built
 
@@ -41,42 +51,38 @@ The same thing goes by several names across the docs: `co-llm-piler` (repo), `aa
 | `SELF_HOSTING.md` | Stage 0/1/2 bootstrap and fixed-point verification of the compiler |
 | `DISTRIBUTION.md` | How the `aac` CLI is built and shared; the most recent and most concrete doc |
 
-`DISTRIBUTION.md` is the newest and **overrides the others where they conflict**:
+`DISTRIBUTION.md` is the most concrete on layout and distribution and **overrides `PACKAGE.md` and `SELF_HOSTING.md` where they conflict**; `SPEC.md` has been updated to match the code and is authoritative for the layers, the IR, and the LLM loop:
 
-- Near-term layout is its §6 (`packages/core`, `packages/cli`, `specs/`), not the full `PACKAGE.md` tree. `plugins/` and `packages/compiler` are not to be created yet; generators live as functions in `packages/cli/src/emit.ts`.
-- Spec extraction is planned as a recording `Proxy` (abstract execution) in `packages/cli/src/extract.ts`, rather than the TypeScript Compiler API walk described in `PACKAGE.md`. Whether this holds up for real specs is the open question of Phase 1 (§9).
-- The self-hosting fixed-point check compares **IR and generated sources** (§8), not `stage1.js` vs `stage2.js` as in `SELF_HOSTING.md`, because no `.js` is built.
+- Near-term layout is `DISTRIBUTION.md` §6, not the full `PACKAGE.md` tree. `plugins/` and `packages/compiler` are not to be created yet.
+- The self-hosting fixed-point check compares **IR and generated sources** (`DISTRIBUTION.md` §8), not `stage1.js` vs `stage2.js` as in `SELF_HOSTING.md`, because no `.js` is built.
+- Open questions are tracked in `DISTRIBUTION.md` §9 (multi-step path exploration, value objects and constraints, how strict the thin-adapter check should be, agent isolation).
 
-## Architecture (planned)
+## Architecture
 
 Layers, from `SPEC.md`:
 
-- **Layer 1 – Spec**: pure data, no functions. Decision tables (DMN) keyed by natural-language condition strings, declared with `as const satisfies DecisionTable<T>`; a `"default"` key is mandatory. Behaviours are declared with `defineBehaviors`.
-- **Layer 2 – Binding**: the predicate functions for each natural-language key, typed from `keyof typeof <Rules>` so a missing binding is a compile error. Hit policy is Unique (multiple matches throw `RuleConflictError`).
-- **Universal IR**: flat, language-independent JSON compiled from Layers 1 and 2. The docs call it both "Layer 1.5" and "Layer 2.5" — same thing.
-- **Layer 3 – Verification**: state-driven PBT generated from the IR per target language (fast-check for TS; rapid/gopter for Go; proptest for Rust), with shrinking, state diff, and deterministic replay.
-- **Adapter Contract**: `TargetSystemAdapter` (`setupIsolation` / `teardownIsolation` / `executeAction` / `getCurrentState` / `getFiredCommands`) is the only boundary to the target system; per-run isolation is what makes replay deterministic.
+- **Layer 1 – Spec**: pure data. A `DomainModel` value, and decision tables (DMN) keyed by natural-language condition strings, declared with `as const satisfies DecisionTable<T>`; a `"default"` key is mandatory. Behaviours are declared with `defineBehaviors`; `where` lists preconditions, and each key of `cases` is an outcome of the action.
+- **Layer 2 – Binding**: the predicate functions for each natural-language key (`bindDecisionDetails`, `bindPreconditions`), typed from `keyof typeof <Rules>` so a missing binding is a compile error. Hit policy is Unique (multiple non-default matches throw `RuleConflictError`).
+- **Universal IR**: flat, language-independent JSON extracted from Layer 1 (older docs call it "Layer 1.5" or "Layer 2.5").
+- **Layer 3 – Verification**: PBT generated on the test side (fast-check for TS today, single-step; rapid/proptest and multi-step path exploration are planned).
+- **Adapter Contract**: `TargetSystemAdapter` (`setupIsolation` / `teardownIsolation` / `givenState` / `executeAction` / `getCurrentState` / `getFiredCommands`) is the only boundary to the target system. It must stay a thin forwarder; `check.ts` rejects adapters that touch state data.
 
-Roadmap (`PACKAGE.md` §5): Phase 1 is `packages/core` plus dynamic evaluation in Node with fast-check, no compiler package and no other languages. IR extraction, multi-language generators, and Mermaid/observability follow in Phases 2–4.
-
-## Case bodies: no branching, no operators
-
-The recording Proxy cannot observe `===`, truthiness, `??`, `||`, or destructuring defaults, so a case that branches yields a silently wrong IR (only one path recorded). The decision is to keep the Proxy approach and forbid such syntax: `lint.ts` allows only `const`, `return`, literals, property access, calls, spread, and destructuring, and anything else is a `forbidden-syntax` error. All branching and arithmetic belongs in the DecisionTable rows/columns — when a spec seems to need an `if`, add a row or column instead of relaxing the lint. The lint works on `fn.toString()` with a hand-written tokenizer to stay dependency-free; it does not see into helper functions called from a case.
+Roadmap (`PACKAGE.md` §5): Phase 1 (core, dynamic evaluation in Node with fast-check, the LLM implementation loop) is in progress; IR extraction was pulled forward from Phase 2 because the LLM needs it as input. Multi-language generators and Mermaid/observability follow in Phases 3–4.
 
 ## Decided constraints for implementation
 
 From `DISTRIBUTION.md`; these are settled decisions, not suggestions:
 
 - **Node is the only allowed runtime dependency.** No Bun, Deno, single binaries, or Docker. No npm publishing for now — the git repo is the distribution channel.
-- **No build step.** `.ts` files run directly via Node type stripping; `packages/cli/package.json` `bin` points straight at `./bin/aac.ts`, shared through a pnpm workspace (`"@aac/cli": "workspace:*"`).
+- **No build step.** `.ts` files run directly via Node type stripping; `packages/cli/package.json` `bin` will point straight at `./bin/aac.ts`, shared through a pnpm workspace (`"@aac/cli": "workspace:*"`).
 - **Node >= 22.18** (`.node-version` is to be `24`), enforced via `engines`, `engine-strict=true` in `.npmrc`, and a version guard at the top of `bin/aac.ts`.
 - Because of type stripping: no `enum`, no `namespace`, and relative imports must include the `.ts` extension. Use `as const` + unions instead of `enum`.
 - Node refuses to type-strip `.ts` whose real path is inside `node_modules`. A workspace link is fine; a git dependency or tarball install is not. This is why specs live in this repo (`specs/`) for now, and it — not npm publishing — is the trigger for ever adding a build.
-- **Keep third-party dependencies at zero for as long as possible** (`packages/core` must stay pure TS with none). Use `util.parseArgs` for CLI arguments.
+- **Keep third-party dependencies minimal** (`packages/core` must stay pure TS with none; `fast-check` in `@aac/cli` is the one accepted exception). Use `util.parseArgs` for CLI arguments.
 - Resolve paths against `process.cwd()`, never the script location (the `.bin` shim runs with the caller's cwd).
 - Keep all spec loading behind a single `SpecLoader` (`packages/cli/src/loader.ts`).
 - **Output must be deterministic**: sorted JSON keys, fixed indentation and line endings. Generated file headers carry only `ir-version` and `spec-hash` — never timestamps or the CLI version. The integer, monotonically increasing IR version is the sole compatibility contract.
 
 ## Planned CLI (not yet available)
 
-`pnpm aac compile <specs>` (TS -> IR), `pnpm aac generate` (IR -> code), `pnpm aac test --seed 123` (PBT / deterministic replay), per `DISTRIBUTION.md` §6.
+`pnpm aac compile` / `generate` / `test --seed 123` / `implement`, per `DISTRIBUTION.md` §6 and `PACKAGE.md` §3.
