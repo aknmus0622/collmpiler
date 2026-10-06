@@ -12,7 +12,8 @@ Phase 1 spike. The design documents (written in Japanese) are still the bulk of 
   - `extract.ts` — recording-Proxy abstract execution → IR. `lint.ts` — token whitelist applied to each case body first.
   - `generate.ts` — IR → test-side files. `runtime.ts` — PBT runtime (fast-check) called by the generated `verify.ts`.
   - `strategy.ts` — the swappable implementation step (an external agent command). `gates.ts` — entry gate (isolated sandbox with allowlisted inputs) and exit gate (collect allowlisted outputs, checks, PBT). `request.ts` — the agent-facing request text. `loop.ts` — entry gate → strategy → exit gate → feedback.
-  - `check.ts` + `scan.ts` — mechanical checks on what the LLM wrote.
+  - `check.ts` + `scan.ts` — mechanical checks on what the LLM wrote (imports and generated files only; adapter contents are unrestricted).
+  - `mutation.ts` — the mutation gate: a swappable `MutationStrategy` (built-in literal mutation) plus `judge`, the pass rule owned by the gate. `guide.ts` — default design guidance embedded in the request.
 - `specs/` — the `SPEC.md` example (`order.model.ts`, `campaign.dmn.ts`, `order.spec.ts` are Layer 1; `vocabulary.ts` is Layer 2).
 - `examples/checkout-ts/` — `src/` is production code written by an LLM agent from the IR; `aac/` is the generated test side. Do not hand-edit `src/` to make verification pass; rerun the loop.
 - Run tests through `pnpm test` (explicit glob). A bare `node --test` executes every file under any `test/` directory, including fixtures and temporary work directories.
@@ -31,7 +32,8 @@ pnpm -s run ir                                        # specs/ -> IR JSON on std
 pnpm --filter example-checkout-ts verify              # PBT against examples/checkout-ts (add -- --seed N --path P to replay)
 
 # Have an agent (re)write an implementation. Any command works; it runs in an isolated temp directory.
-# --fresh discards the existing src/ and adapter; --transcripts <dir> saves the agent's stdout per attempt.
+# --fresh discards the existing src/ and adapter; --transcripts <dir> saves the agent's stdout per attempt;
+# --guide <file> replaces the default design guidance; --mutation auto|builtin|off selects the mutation strategy.
 pnpm -s run implement --out examples/checkout-ts --fresh --max-attempts 3 \
   --agent 'claude -p "Read aac/REQUEST.md and carry out the request." --permission-mode acceptEdits'
 ```
@@ -69,17 +71,18 @@ Layers, from `SPEC.md`:
 - **Layer 3 – Verification**: PBT generated on the test side (fast-check for TS today; rapid/proptest planned). A trial is a sequence of actions from the initial state; failures shrink to the shortest sequence.
 - **Adapter Contract**: `TargetSystemAdapter` (`setupIsolation(ports)` / `teardownIsolation` / `executeAction(action, input)` / `getCurrentState`) is the only boundary to the target system. The harness-owned `Ports` fakes answer queries and outcomes and record commands; there is deliberately no way to inject state into the system — states are reached by executing actions.
 
-Decided but not yet implemented (`SPEC.md` §2.3, end of the exit-gate section): production code must carry zero constraints, so the adapter always adapts to the production code's seams; the token-level thin-adapter rule in `check.ts` is therefore temporary and will be replaced by a mutation gate (itself a swappable strategy, with the pass rule owned by the gate), and project-supplied design guidance will be embedded in the request.
-
 Roadmap (`PACKAGE.md` §5): Phase 1 (core, dynamic evaluation in Node with fast-check, the LLM implementation loop) is in progress; IR extraction was pulled forward from Phase 2 because the LLM needs it as input. Multi-language generators and Mermaid/observability follow in Phases 3–4.
 
 ## LLM as the compiler
 
-The framework generates **test-side code only**; it never places types, signatures, or files in production code. The pipeline (`SPEC.md` §2.3): specs → IR → **entry gate** (temp directory outside the repo holding only the IR, adapter contract, adapter, `REQUEST.md`, and any previous `src/`) → **strategy** (an external agent command writes `src/` and fills `aac/adapter.ts` there) → **exit gate** (audit the sandbox, copy only `src/` and the adapter to `--out`, regenerate `ir.json` / contract / `verify.ts` there, run `check.ts`, run PBT) → on any failure the violation or minimal counterexample goes into the next `REQUEST.md`.
+The framework generates **test-side code only**; it never places types, signatures, or files in production code. The pipeline (`SPEC.md` §2.3): specs → IR → **entry gate** (temp directory outside the repo holding only the IR, adapter contract, adapter, `REQUEST.md`, and any previous `src/`) → **strategy** (an external agent command writes `src/` and fills `aac/adapter.ts` there) → **exit gate** (audit the sandbox, copy only `src/` and the adapter to `--out`, regenerate `ir.json` / contract / `verify.ts` there, run `check.ts`, run PBT, run the mutation gate) → on any failure the violation, minimal counterexample, or surviving mutation goes into the next `REQUEST.md`.
 
 Invariants to preserve when changing this:
 
 - Isolation belongs to the gates, not to strategies. Nothing that points at the repo may enter the sandbox: no spec sources, no `verify.ts` (it contains the specs path), no repo paths in file contents or environment variables. A new strategy must not need to re-implement any of this.
+- Production code carries zero constraints: no framework imports or types, no required naming, no required DI, no shared vocabulary with the spec. The adapter always adapts to the production code, so never restrict what the adapter may contain; whether business decisions really live in `src/` is established by mutation, not by inspecting the adapter.
+- Anything you want the implementer to do about design goes into the guide (`guide.ts`, or `--guide <file>`), which is advice and never a pass/fail rule. The guide must not mention business rules.
+- The mutation pass rule lives in `judge`, not in a strategy. A strategy only breaks code and reports which mutants survived; record which strategy ran in the result.
 - The agent sees the IR only. Layer 2 predicates are the oracle and must never be emitted into the IR or the request; interpreting the natural-language condition keys is the LLM's job, and PBT judges it.
 - Test cases are never LLM-written. Expected values come from executing the spec concretely (`createState` + `applyDecision`).
 - Generated files are a pure function of the IR (no timestamps, no versions); `check.ts` relies on byte-equality with a regeneration. The PBT seed is derived from the spec hash so verification is deterministic.
