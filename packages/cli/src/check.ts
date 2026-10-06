@@ -32,7 +32,8 @@ export function checkWorkspace(out: string, ir: Ir, specs: string): Violation[] 
       report(join(outDir, entry), "unexpected-file", `Only ${SOURCE_DIR}/ and ${TEST_DIR}/ may be written.`);
     }
   }
-  const testFiles = new Set<string>(Object.values(FILES));
+  // 依頼文は作業場所にしか置かれない
+  const testFiles = new Set<string>([FILES.ir, FILES.contract, FILES.adapter, FILES.verify]);
   for (const entry of readdirSync(testDir)) {
     if (!testFiles.has(entry)) {
       report(join(testDir, entry), "unexpected-file", `Do not add files to ${TEST_DIR}/. Put code in ${SOURCE_DIR}/.`);

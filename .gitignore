@@ -3,4 +3,3 @@ node_modules
 .pnpm-store
 *.swp
 .tmp
-examples/*/aac/REQUEST.md

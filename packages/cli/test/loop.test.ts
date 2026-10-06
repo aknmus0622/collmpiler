@@ -1,32 +1,56 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { checkWorkspace } from "../src/check.ts";
 import { extract, stableStringify } from "../src/extract.ts";
+import { scrubEnv } from "../src/gates.ts";
 import { generateAdapterSkeleton, generateContract, generateVerify } from "../src/generate.ts";
 import type { Ir } from "../src/generate.ts";
 import { loadSpecs } from "../src/loader.ts";
 import { implement } from "../src/loop.ts";
+import { commandStrategy } from "../src/strategy.ts";
+import type { Assignment, ImplementationStrategy } from "../src/strategy.ts";
 import { write } from "./fixtures/scripted-agent.ts";
+import type { Step } from "./fixtures/scripted-agent.ts";
 
-// 作業ディレクトリは packages/cli 配下に置く（verify.ts が @aac/cli/runtime を解決できる場所）
+// 出力先は packages/cli 配下に置く（verify.ts が @aac/cli/runtime を解決できる場所）
+const repoRoot = join(import.meta.dirname, "../../..");
 const tmpRoot = join(import.meta.dirname, ".tmp");
-const specsDir = join(import.meta.dirname, "../../../specs");
-const agent = `"${process.execPath}" "${join(import.meta.dirname, "fixtures/scripted-agent.ts")}"`;
+const specsDir = join(repoRoot, "specs");
 
 mkdirSync(tmpRoot, { recursive: true });
 after(() => rmSync(tmpRoot, { recursive: true, force: true }));
 const workdir = () => mkdtempSync(join(tmpRoot, "w-"));
 
-async function run(script: string, maxAttempts: number) {
-  process.env.AAC_SCRIPT = script;
+// LLM の代役の Strategy。決まった実装を順に書き出し、作業場所で見えたものを記録する
+function scripted(steps: Step[], extra?: (assignment: Assignment) => void) {
+  const seen: { dir: string; files: Record<string, string> }[] = [];
+  const strategy: ImplementationStrategy = {
+    name: `scripted(${steps.join(",")})`,
+    run(assignment) {
+      const files: Record<string, string> = {};
+      for (const name of readdirSync(assignment.dir, { recursive: true }) as string[]) {
+        const path = join(assignment.dir, name);
+        if (!name.includes(".")) continue;
+        files[name.split("\\").join("/")] = readFileSync(path, "utf8");
+      }
+      seen.push({ dir: assignment.dir, files });
+      write(steps[Math.min(assignment.attempt, steps.length) - 1], assignment.dir);
+      extra?.(assignment);
+    },
+  };
+  return { strategy, seen };
+}
+
+async function run(steps: Step[], maxAttempts: number, extra?: (assignment: Assignment) => void) {
   const out = workdir();
-  return { out, ...(await implement({ specs: specsDir, out, agent, maxAttempts })) };
+  const { strategy, seen } = scripted(steps, extra);
+  return { out, seen, ...(await implement({ specs: specsDir, out, strategy, maxAttempts })) };
 }
 
 test("ループ: PBT の反例 → 余計なもの検査の違反 → 合格", async () => {
-  const { out, status, attempts } = await run("buggy,cheat,correct", 3);
+  const { out, seen, status, attempts } = await run(["buggy", "cheat", "correct"], 3);
   assert.equal(status, "pass");
   assert.deepEqual(attempts.map((a) => a.feedback?.kind ?? "pass"), ["pbt", "check", "pass"]);
 
@@ -48,20 +72,94 @@ test("ループ: PBT の反例 → 余計なもの検査の違反 → 合格", a
   assert.ok(second?.kind === "check");
   assert.deepEqual([...new Set(second.violations.map((v) => v.rule))], ["adapter-logic"]);
 
-  // 差し戻しの内容は依頼ファイルに書かれる
-  assert.match(readFileSync(join(out, "aac/REQUEST.md"), "utf8"), /attempt 3[\s\S]*adapter-logic/);
+  // 差し戻しは次の依頼文に載り、前回の成果も作業場所に引き継がれる
+  assert.match(seen[1].files["aac/REQUEST.md"], /attempt 2[\s\S]*"discount": 0.5/);
+  assert.match(seen[2].files["aac/REQUEST.md"], /attempt 3[\s\S]*adapter-logic/);
+  assert.ok("src/order-service.ts" in seen[1].files);
+
+  // 合格した実装と採点基準は出力先に揃う
+  assert.deepEqual(readdirSync(join(out, "aac")).sort(), ["adapter.contract.ts", "adapter.ts", "ir.json", "verify.ts"]);
+  assert.deepEqual(readdirSync(join(out, "src")), ["order-service.ts"]);
+});
+
+test("隔離: エージェントに渡るのは許可した4ファイルだけで、リポジトリへの手がかりを含まない", async () => {
+  const { seen, attempts } = await run(["correct"], 1);
+  const inputs = ["aac/REQUEST.md", "aac/adapter.contract.ts", "aac/adapter.ts", "aac/ir.json"];
+  assert.deepEqual(Object.keys(seen[0].files).sort(), inputs);
+  assert.deepEqual(attempts[0].inputs, inputs);
+
+  // 作業場所はリポジトリの外にあり、終了後は消える
+  assert.ok(!seen[0].dir.startsWith(repoRoot));
+  assert.ok(!existsSync(seen[0].dir));
+
+  // 仕様のソース・PBT のグルー・リポジトリのパス・Layer 2 の評価関数は渡らない
+  const everything = Object.values(seen[0].files).join("\n");
+  assert.ok(!everything.includes(repoRoot));
+  assert.ok(!everything.includes("specs/"));
+  assert.ok(!everything.includes("verify.ts"));
+  assert.ok(!everything.includes('=== "Gold"'));
+});
+
+test("隔離: 環境変数からリポジトリのパスを取り除く", () => {
+  const env = scrubEnv(
+    { PWD: "/repo/sub", INIT_CWD: "/repo", PATH: "/repo/node_modules/.bin:/usr/bin:/bin", HOME: "/home/u", LANG: "C" },
+    ["/repo"],
+  );
+  assert.deepEqual(env, { PATH: "/usr/bin:/bin", HOME: "/home/u", LANG: "C" });
+});
+
+test("出口ゲート: 許可した出力以外は取り出さず、違反として差し戻す", async () => {
+  const { out, attempts } = await run(["correct"], 1, ({ dir }) => {
+    writeFileSync(join(dir, "notes.md"), "memo");
+    writeFileSync(join(dir, "aac/helper.ts"), "export {};");
+    writeFileSync(join(dir, "aac/ir.json"), "{}");
+    rmSync(join(dir, "aac/adapter.contract.ts"));
+    symlinkSync(join(specsDir, "vocabulary.ts"), join(dir, "src/oracle.ts"));
+  });
+  const feedback = attempts[0].feedback;
+  assert.ok(feedback?.kind === "check");
+  assert.deepEqual(feedback.violations.map((v) => `${v.file}:${v.rule}`).sort(), [
+    "aac/adapter.contract.ts:generated-file-modified",
+    "aac/helper.ts:unexpected-file",
+    "aac/ir.json:generated-file-modified",
+    "notes.md:unexpected-file",
+    "src/oracle.ts:unexpected-file",
+  ]);
+  assert.ok(!existsSync(join(out, "notes.md")));
+  assert.ok(!existsSync(join(out, "aac/helper.ts")));
+  assert.ok(!existsSync(join(out, "src/oracle.ts")));
+  // 採点基準は作業場所での改ざんの影響を受けない
+  assert.notEqual(readFileSync(join(out, "aac/ir.json"), "utf8"), "{}");
 });
 
 test("ループ: 上限回数まで直らなければ失敗で止まる", async () => {
-  const { status, attempts } = await run("buggy", 2);
+  const { status, attempts } = await run(["buggy"], 2);
   assert.equal(status, "fail");
   assert.equal(attempts.length, 2);
 });
 
 test("ループ: 検証は決定的 (同じ実装なら同じシード・同じ反例)", async () => {
-  const a = await run("buggy", 1);
-  const b = await run("buggy", 1);
+  const a = await run(["buggy"], 1);
+  const b = await run(["buggy"], 1);
   assert.deepEqual(a.attempts, b.attempts);
+});
+
+test("ループ: fresh を指定すると既存の実装を引き継がない", async () => {
+  const first = await run(["correct"], 1);
+  const { strategy, seen } = scripted(["correct"]);
+  await implement({ specs: specsDir, out: first.out, strategy, maxAttempts: 1 });
+  assert.ok("src/order-service.ts" in seen[0].files);
+  await implement({ specs: specsDir, out: first.out, strategy, maxAttempts: 1, fresh: true });
+  assert.ok(!("src/order-service.ts" in seen[1].files));
+  assert.equal(seen[1].files["aac/adapter.ts"], generateAdapterSkeleton());
+});
+
+test("コマンド Strategy: 外部コマンドを作業場所で起動する", async () => {
+  process.env.AAC_SCRIPT = "buggy,correct";
+  const strategy = commandStrategy(`"${process.execPath}" "${join(import.meta.dirname, "fixtures/scripted-agent.ts")}"`);
+  const { status, attempts } = await implement({ specs: specsDir, out: workdir(), strategy, maxAttempts: 2 });
+  assert.equal(status, "pass");
+  assert.equal(attempts.length, 2);
 });
 
 // --- 余計なもの検査 ---
