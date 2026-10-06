@@ -1,6 +1,6 @@
 import { defineBehaviors, applyDecision } from "@aac/core";
 import { CampaignRules } from "./campaign.dmn.ts";
-import type { OrderStates, DomainCommand } from "./vocabulary.ts";
+import type { OrderStates, DomainCommand } from "./order.model.ts";
 
 export const behaviors = defineBehaviors<OrderStates, DomainCommand>({
   Checkout: {

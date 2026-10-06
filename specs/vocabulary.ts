@@ -1,4 +1,4 @@
-import { bindDecisionDetails } from "@aac/core";
+import { bindDecisionDetails, bindPreconditions } from "@aac/core";
 import { CampaignRules } from "./campaign.dmn.ts";
 
 // Layer 1のキーから推論（二重管理・ボイラープレートの排除）
@@ -11,11 +11,7 @@ export const CampaignEvaluator = bindDecisionDetails<CampaignConditions>(Campaig
   "default": () => true
 });
 
-// 仕様として許可される副作用（Command）の型定義
-export type DomainCommand =
-  | { action: "SendReceipt"; payload: { discount: number } }
-  | { action: "IssueCoupon"; payload: { type: "Premium" | "Standard" } };
-
-// SPEC.md では未定義。状態名 → その状態が持つデータ、として定義した。
-type OrderData = { rank: "Gold" | "Silver" | "Bronze"; isMonthEnd: boolean };
-export type OrderStates = { PENDING: OrderData; PAID: OrderData };
+// behaviors の where に書いた事前条件の評価関数
+export const Preconditions = bindPreconditions({
+  "外部決済モジュールが有効な場合": (state) => state.paymentModuleActive
+});

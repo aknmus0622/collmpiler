@@ -1,5 +1,5 @@
 import type { DecisionTable } from "@aac/core";
-import type { DomainCommand } from "./vocabulary.ts";
+import type { DomainCommand } from "./order.model.ts";
 
 export type CampaignOutputs = { discount: number; effects: DomainCommand[] };
 
