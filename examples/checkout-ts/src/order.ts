@@ -1,22 +1,15 @@
-import type { Clock } from "./calendar.ts";
-import { isLastDayOfMonth } from "./calendar.ts";
-import { billingAmount, campaignFor } from "./campaign.ts";
-import { requiresRefund } from "./cancellation.ts";
-import { isPriorityShipment } from "./shipping.ts";
-import type { CouponIssuer, CustomerNotifier, CustomerRank, OrderStatus, PaymentGateway } from "./types.ts";
+import type { OrderDependencies } from "./dependencies.ts";
+import { amountCharged, campaignFor, isPriorityShipment } from "./rules.ts";
+import type { MemberRank } from "./rules.ts";
 
-export type OrderDependencies = {
-  clock: Clock;
-  payments: PaymentGateway;
-  notifier: CustomerNotifier;
-  coupons: CouponIssuer;
-};
+export type OrderStatus = "DRAFT" | "PENDING" | "PAID" | "SHIPPED" | "CANCELLED";
 
-type OrderDetails = { rank: CustomerRank; price: number };
+type OrderDetails = { rank: MemberRank; price: number };
 
-/** Raised when an operation is not allowed for the order as it currently stands. */
-export class OrderOperationError extends Error {}
-
+/**
+ * The lifecycle of a single order. A request that is not valid in the current
+ * status is ignored and reported by returning false.
+ */
 export class Order {
   private readonly deps: OrderDependencies;
   private currentStatus: OrderStatus = "DRAFT";
@@ -30,61 +23,51 @@ export class Order {
     return this.currentStatus;
   }
 
-  place(rank: CustomerRank, price: number): void {
-    this.requireStatus("place", "DRAFT");
-    this.details = { rank, price };
+  place(rank: MemberRank, listPrice: number): boolean {
+    if (this.currentStatus !== "DRAFT") return false;
+    this.details = { rank, price: listPrice };
     this.currentStatus = "PENDING";
     this.deps.notifier.orderConfirmed();
+    return true;
   }
 
-  checkout(): void {
-    this.requireStatus("check out", "PENDING");
-    const { rank, price } = this.placedDetails();
-    const { payments, notifier, coupons, clock } = this.deps;
-    if (!payments.isAvailable()) {
-      throw new OrderOperationError("Payment is currently unavailable");
+  checkout(): boolean {
+    const details = this.details;
+    if (this.currentStatus !== "PENDING" || details === null) return false;
+    if (!this.deps.payments.isAvailable()) return false;
+
+    if (this.deps.payments.charge() !== "succeeded") {
+      this.deps.notifier.paymentFailed();
+      return true;
     }
 
-    const campaign = campaignFor(rank, isLastDayOfMonth(clock.today()));
-    const amount = billingAmount(price, campaign.discountPercent);
-    if (payments.charge(amount) !== "succeeded") {
-      notifier.paymentFailed();
-      return;
-    }
-
+    const campaign = campaignFor(details.rank, this.deps.calendar.isMonthEnd());
     this.currentStatus = "PAID";
-    notifier.receipt(amount, campaign.discountPercent);
-    for (const coupon of campaign.coupons) {
-      coupons.issue(coupon);
+    this.deps.notifier.receipt(
+      amountCharged(details.price, campaign.discountPercent),
+      campaign.discountPercent,
+    );
+    if (campaign.coupon !== null) {
+      this.deps.coupons.issue(campaign.coupon);
     }
+    return true;
   }
 
-  ship(): void {
-    this.requireStatus("ship", "PAID");
-    const { rank, price } = this.placedDetails();
+  ship(): boolean {
+    const details = this.details;
+    if (this.currentStatus !== "PAID" || details === null) return false;
     this.currentStatus = "SHIPPED";
-    this.deps.notifier.shipped(isPriorityShipment(rank, price));
+    this.deps.notifier.shippingNotice(isPriorityShipment(details.rank, details.price));
+    return true;
   }
 
-  cancel(): void {
-    this.requireStatus("cancel", "PENDING", "PAID");
-    const refund = requiresRefund(this.currentStatus);
+  cancel(): boolean {
+    const wasPaid = this.currentStatus === "PAID";
+    if (!wasPaid && this.currentStatus !== "PENDING") return false;
     this.currentStatus = "CANCELLED";
-    if (refund) {
+    if (wasPaid) {
       this.deps.payments.refund();
     }
-  }
-
-  private requireStatus(operation: string, ...allowed: OrderStatus[]): void {
-    if (!allowed.includes(this.currentStatus)) {
-      throw new OrderOperationError(`Cannot ${operation} an order that is ${this.currentStatus}`);
-    }
-  }
-
-  private placedDetails(): OrderDetails {
-    if (this.details === null) {
-      throw new OrderOperationError("Order has not been placed");
-    }
-    return this.details;
+    return true;
   }
 }

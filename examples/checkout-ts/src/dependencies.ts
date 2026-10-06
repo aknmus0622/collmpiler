@@ -1,26 +1,31 @@
-export type CustomerRank = "Gold" | "Silver" | "Bronze";
-
-export type CouponType = "Premium" | "Standard";
-
-export type OrderStatus = "DRAFT" | "PENDING" | "PAID" | "SHIPPED" | "CANCELLED";
+import type { CouponType } from "./rules.ts";
 
 export type PaymentOutcome = "succeeded" | "failed";
 
-/** External payment module. */
 export interface PaymentGateway {
   isAvailable(): boolean;
-  charge(amount: number): PaymentOutcome;
+  charge(): PaymentOutcome;
   refund(): void;
 }
 
-/** Messages sent to the customer. */
+export interface BusinessCalendar {
+  isMonthEnd(): boolean;
+}
+
 export interface CustomerNotifier {
   orderConfirmed(): void;
   receipt(amount: number, discountPercent: number): void;
   paymentFailed(): void;
-  shipped(priority: boolean): void;
+  shippingNotice(priority: boolean): void;
 }
 
 export interface CouponIssuer {
   issue(type: CouponType): void;
 }
+
+export type OrderDependencies = {
+  payments: PaymentGateway;
+  calendar: BusinessCalendar;
+  notifier: CustomerNotifier;
+  coupons: CouponIssuer;
+};
