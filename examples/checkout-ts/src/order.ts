@@ -1,84 +1,95 @@
-export type OrderState = "PENDING" | "PAID" | "SHIPPED" | "CANCELLED";
-export type OrderAction = "Cancel" | "Checkout" | "Ship";
-export type MemberRank = "Gold" | "Silver" | "Bronze";
-export type CouponType = "Premium" | "Standard";
-export type OrderInput = { rank: MemberRank };
+import { campaignBenefit } from "./campaign.ts";
+import type { CouponType, MemberRank } from "./campaign.ts";
 
-export type OrderEnvironment = {
-  queries: {
-    isMonthEnd(): boolean;
-    paymentModuleActive(): boolean;
-  };
-  outcomes: {
-    Cancel(): "Cancelled";
-    Checkout(): "PaymentFailure" | "PaymentSuccess";
-    Ship(): "Shipped";
-  };
-  commands: {
-    IssueCoupon(payload: { type: CouponType }): void;
-    NotifyPaymentFailure(payload: {}): void;
-    Refund(payload: {}): void;
-    SendReceipt(payload: { discount: number }): void;
-    SendShippingNotice(payload: {}): void;
-  };
+export type OrderStatus = "PENDING" | "PAID" | "SHIPPED" | "CANCELLED";
+
+export type PaymentResult = "succeeded" | "failed";
+
+export interface Clock {
+  today(): Date;
+}
+
+export interface PaymentGateway {
+  isAvailable(): boolean;
+  charge(): PaymentResult;
+  refund(): void;
+}
+
+export interface CustomerNotifier {
+  sendReceipt(discountRate: number): void;
+  notifyPaymentFailure(): void;
+  sendShippingNotice(): void;
+}
+
+export interface CouponIssuer {
+  issue(type: CouponType): void;
+}
+
+export type OrderDependencies = {
+  clock: Clock;
+  payments: PaymentGateway;
+  notifier: CustomerNotifier;
+  coupons: CouponIssuer;
 };
 
-type Campaign = { discount: number; coupon: CouponType | null };
+/** A cancelled order must be refunded only if it has already been paid for. */
+export function requiresRefund(status: OrderStatus): boolean {
+  return status === "PAID";
+}
 
-function campaignFor(rank: MemberRank, isMonthEnd: boolean): Campaign {
-  if (rank === "Gold" && isMonthEnd) return { discount: 0.2, coupon: "Premium" };
-  if (rank === "Silver") return { discount: 0.05, coupon: null };
-  return { discount: 0, coupon: null };
+export function canCancel(status: OrderStatus): boolean {
+  return status === "PENDING" || status === "PAID";
 }
 
 export class Order {
-  private state: OrderState = "PENDING";
-  private readonly env: OrderEnvironment;
+  private currentStatus: OrderStatus = "PENDING";
+  private readonly clock: Clock;
+  private readonly payments: PaymentGateway;
+  private readonly notifier: CustomerNotifier;
+  private readonly coupons: CouponIssuer;
 
-  constructor(env: OrderEnvironment) {
-    this.env = env;
+  constructor(deps: OrderDependencies) {
+    this.clock = deps.clock;
+    this.payments = deps.payments;
+    this.notifier = deps.notifier;
+    this.coupons = deps.coupons;
   }
 
-  currentState(): OrderState {
-    return this.state;
+  get status(): OrderStatus {
+    return this.currentStatus;
   }
 
-  execute(action: OrderAction, input: OrderInput): void {
-    switch (action) {
-      case "Cancel":
-        return this.cancel();
-      case "Checkout":
-        return this.checkout(input);
-      case "Ship":
-        return this.ship();
+  checkout(rank: MemberRank): void {
+    if (this.currentStatus !== "PENDING" || !this.payments.isAvailable()) {
+      return;
     }
+    if (this.payments.charge() === "failed") {
+      this.notifier.notifyPaymentFailure();
+      return;
+    }
+    const benefit = campaignBenefit(rank, this.clock.today());
+    this.notifier.sendReceipt(benefit.discountRate);
+    for (const type of benefit.coupons) {
+      this.coupons.issue(type);
+    }
+    this.currentStatus = "PAID";
   }
 
   cancel(): void {
-    if (this.state !== "PENDING" && this.state !== "PAID") return;
-    const wasPaid = this.state === "PAID";
-    this.env.outcomes.Cancel();
-    this.state = "CANCELLED";
-    if (wasPaid) this.env.commands.Refund({});
-  }
-
-  checkout(input: OrderInput): void {
-    if (this.state !== "PENDING") return;
-    if (!this.env.queries.paymentModuleActive()) return;
-    if (this.env.outcomes.Checkout() === "PaymentFailure") {
-      this.env.commands.NotifyPaymentFailure({});
+    if (!canCancel(this.currentStatus)) {
       return;
     }
-    const campaign = campaignFor(input.rank, this.env.queries.isMonthEnd());
-    this.state = "PAID";
-    this.env.commands.SendReceipt({ discount: campaign.discount });
-    if (campaign.coupon !== null) this.env.commands.IssueCoupon({ type: campaign.coupon });
+    if (requiresRefund(this.currentStatus)) {
+      this.payments.refund();
+    }
+    this.currentStatus = "CANCELLED";
   }
 
   ship(): void {
-    if (this.state !== "PAID") return;
-    this.env.outcomes.Ship();
-    this.state = "SHIPPED";
-    this.env.commands.SendShippingNotice({});
+    if (this.currentStatus !== "PAID") {
+      return;
+    }
+    this.notifier.sendShippingNotice();
+    this.currentStatus = "SHIPPED";
   }
 }
