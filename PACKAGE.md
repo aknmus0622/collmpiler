@@ -48,10 +48,10 @@ aac-engine-monorepo/
 ユーザー（PdM・エンジニア）が `specs/` ディレクトリ内でインポートして使う、極めて薄いライブラリです。ランタイムのロジックはほぼ持ちません。
 
 * **責務:**
-* ドメインモデルの型定義 (`DomainModel`, `CommandsOf<M>`, `ContextOf<M, Action>`)。部品の境界を値として宣言し、型を導出する
+* コンポーネントの定義 (`defineComponent(...).cases(...)`)。部品の境界と構造を値として宣言し、型を導出する
 * 多重度DSLの型定義 (`One<T>`, `Some<T>`, `Many<T>`)
 * DMNの型定義 (`DecisionTable<T>`, `applyDecision()`) と計算 (`applyFormula()`)
-* 振る舞い定義 (`defineBehaviors()`) と、自然言語の名前への結び付け (`bindSpecification()`)
+* 自然言語の名前への結び付け (`bindSpecification()`)
 
 
 * **依存関係:** 外部依存ゼロ（ピュアTS）。
@@ -62,7 +62,7 @@ aac-engine-monorepo/
 
 * **責務:**
 * TypeScript Compiler API を用いて AST（抽象構文木）を走査。
-* `defineBehaviors` や `DecisionTable` の構造を静的解析（またはSandbox上での安全な動的評価）し、情報を抽出。
+* `defineComponent` や `DecisionTable` の構造を静的解析（またはSandbox上での安全な動的評価）し、情報を抽出。
 * 抽出したデータを言語非依存の **Universal IR (`universal-spec.ir.json`)** にシリアライズして出力。
 
 

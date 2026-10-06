@@ -28,7 +28,7 @@
 
 | 領域 | レイヤー | 責務と特性 | 書き手 |
 | --- | --- | --- | --- |
-| **IN SCOPE**(プラットフォーム) | **Layer 1: Spec** | 業務の真実（What）を宣言する純粋データ（ドメインモデルとDMN）。部品を境界（アクションと入力・依存への問い合わせ・依存への指示・覚えるデータ）だけで記述し、条件・計算・不変条件は自然言語の名前として書く。`as const` と `satisfies` で型安全にする。関数は `cases` のマッピングだけで、構文を制限する（§3.1）。 | 人 |
+| **IN SCOPE**(プラットフォーム) | **Layer 1: Spec** | 業務の真実（What）を宣言する。部品を境界と構造（状態・アクション・依存への問い合わせ・依存への指示・覚えるデータ）の純粋データで記述し、そこにアクションごとの case を取り付けてコンポーネントとする。条件・計算・不変条件は自然言語の名前として書く。`as const` と `satisfies` で型安全にする。関数は `cases` のマッピングだけで、構文を制限する（§3.1）。 | 人 |
 |  | **Layer 2: Binding** | Layer 1 に自然言語で書いた名前（条件・計算・不変条件）に、評価関数（How）を結び付ける。PBT の正解として使い、IR には含めない。 | 人 |
 |  | **Universal IR** | Layer 1 をプラットフォームが抽象実行して出力する、**完全な言語非依存のJSON**。Layer 2 の関数は含まない。 | 生成 |
 |  | **Layer 3: Verification** | Layer 1, 2 から構築されるPBTエンジン。Target System をアダプター経由で操作して検証する。テスト側にのみ生成される。 | 生成 |
@@ -192,43 +192,47 @@ PBT の実行中に同じ種類の問題が見つかった場合も、実装の�
 
 各レイヤーの実体となる TypeScript スキーマおよびコード設計です。
 
-### 3.1. Layer 1: ドメインモデルと自然言語DMN (Spec)
+### 3.1. Layer 1: コンポーネントと自然言語DMN (Spec)
 
-ランタイムライブラリを排除し、純粋なデータ定義のみで業務ルールを宣言します。
+ランタイムライブラリを排除し、純粋なデータ定義を中心に業務ルールを宣言します。書くものは3つです。
 
-#### ドメインモデル（値が源泉、型は導出）
+| 書くもの | 内容 | Layer |
+| --- | --- | --- |
+| コンポーネント | 境界と構造（純粋データ）に、アクションごとの case を取り付けたもの | 1 |
+| 決定表 | 条件から定数を選ぶ表 | 1 |
+| 結び付け | 自然言語の名前に対する評価関数（§3.2） | 2 |
 
-部品を**境界だけ**で記述します。どの層の部品（ドメイン、ユースケース、UI）も、外から見れば次の境界しか持ちません。
+シナリオ（ユースケース）、ドメインの部品、UI の部品は、どれも同じ形のコンポーネントとして書きます。
+
+#### コンポーネントの境界と構造（値が源泉、型は導出）
+
+部品を**境界と構造だけ**で記述します。どの層の部品も、外から見れば次のものしか持ちません。ここまでは関数を含まない純粋データです。
 
 | 宣言 | 意味 | 例 |
 | --- | --- | --- |
-| `actions` | 外から部品を動かすアクションと、その入力 | 注文する（会員ランクと価格を受け取る）、出荷する（入力なし） |
+| `states` / `initial` | 状態名と初期状態 | 下書き、決済待ち、決済済み |
+| `actions` | 外から部品を動かすアクション。入力（`input`）、実行できる状態（`from`）、事前条件（`where`） | 注文する（会員ランクと価格を受け取る。下書きのときだけ） |
 | `queries` | 依存への問い合わせ（部品が外に尋ねて答えをもらう値） | 時計、設定、決済サービスの応答 |
 | `commands` | 依存への指示（部品が外に対して行う副作用） | 領収書の送信、返金 |
 | `data` | 部品が覚えているデータ。遷移の `set` で書き、後のアクションで読む | 注文時の会員ランクと価格 |
 | `formulas` | 計算。名前（自然言語）と結果の型 | 請求金額 |
 | `invariants` | 不変条件。名前（自然言語） | 下書き以外の注文には会員ランクと価格がある |
 
-これらと状態名は値として宣言し、TypeScript の型はそこから導出します。値として残るので、IR に出力でき、PBT の入力生成にも、LLM への情報提供にもそのまま使えます。
+`states`・`initial`・`actions` 以外は省略できます。値として宣言するので、IR に出力でき、PBT の入力生成にも、LLM への情報提供にもそのまま使えます。TypeScript の型はここから導出します。
 
 ```typescript
-// --- specs/order.model.ts (Layer 1) ---
-import type { CommandsOf, DomainModel } from "@aac/core";
+// --- specs/order.component.ts (Layer 1) ---
+import { applyDecision, applyFormula, defineComponent } from "@aac/core";
+import type { CommandsOf, DecisionTable } from "@aac/core";
 
 const Rank = ["Gold", "Silver", "Bronze"] as const;   // 配列は列挙
 // 数値の制約。around は、その前後を PBT が重点的に生成するしきい値
 const Yen = { type: "integer", min: 0, max: 1_000_000, around: [10_000] } as const;
 
-export const OrderModel = {
+const OrderBoundary = defineComponent({
   initial: "DRAFT",
   states: ["DRAFT", "PENDING", "PAID", "SHIPPED", "CANCELLED"],
   data: { rank: Rank, price: Yen },
-  actions: {
-    PlaceOrder: { customerRank: Rank, listPrice: Yen },
-    Checkout: {},
-    Ship: {},
-    Cancel: {},
-  },
   queries: {
     isMonthEnd: "boolean",                // 文字列はプリミティブ型
     paymentModuleActive: "boolean",
@@ -250,11 +254,19 @@ export const OrderModel = {
   invariants: [
     "Every order past the draft state has a member rank and a price",
   ],
-} as const satisfies DomainModel;
-
-export type DomainCommand = CommandsOf<typeof OrderModel>;
+  // アクション: 入力、実行できる状態 (from)、事前条件 (where)
+  actions: {
+    PlaceOrder: { input: { customerRank: Rank, listPrice: Yen }, from: ["DRAFT"] },
+    Checkout: { from: ["PENDING"], where: ["The external payment module is active"] },
+    Ship: { from: ["PAID"] },
+    Cancel: { from: ["PENDING", "PAID"] },
+  },
+});
 ```
 
+* **型の付け方**: `defineComponent` に直接書いた値は、`as const` を付けなくても文字列リテラルや列挙として推論されます。ただし `Rank` のように変数に取り出した配列には `as const` が必要です。忘れると `string[]` に広がって列挙の検査が効かなくなるため、広がった配列は型エラーにしています。
+* **構造の検査**: `initial` と `from` に `states` にない名前を書くと型エラーになります。
+* **`from` と `where`**: `from` を省略すると全状態で実行できます。`from` と `where` を満たさない場合の挙動は仕様の対象外で、PBT も検証しません。構造がデータだけで書かれているので、状態遷移図をここから直接作れます。
 * **名前の重複**: 条件・計算・case からは、状態名（`status`）、覚えているデータ、問い合わせの答え、アクションの入力が同じ階層で見えます。そのため `data`・`queries`・入力のフィールド名は重複できません（入力どうしは、アクションが違えば同名で構いません）。覚えているデータは未設定があり得るので、型の上でも省略可能です。
 * **数値**: 金額は整数で扱い、丸め方を計算の名前に明記します。小数の計算は式の順序だけで結果がずれ、正解と実装が正当な理由なく食い違うためです。例の割引率も整数のパーセントで持っています。
 * **しきい値**: 条件に数値の境目があるときは、`around` に宣言します。ちょうどその値と前後の値を重点的に生成しないと、「以上」と「より大きい」の取り違えを見逃します。
@@ -263,7 +275,7 @@ export type DomainCommand = CommandsOf<typeof OrderModel>;
 
 * 多重度（`One<T>` / `Lone<T>` / `Some<T>` / `Many<T>`）は型としてのみ提供しています。値として宣言できる形への拡張が必要です。
 * 戻り値を持つ操作（値オブジェクトの演算など）は書けません。アクションの結果は「次の状態」と「指示」だけです。
-* 部品どうしの組み合わせ（ある部品の依存を、代役ではなく別の本物の部品につなぐ）は未実装です。
+* 読み込めるコンポーネントは1つだけです。複数のコンポーネントと、その組み合わせ（ある部品の依存を、代役ではなく別の本物の部品につなぐ）は未実装です。
 
 #### 自然言語の名前と、3種類の役割
 
@@ -271,26 +283,22 @@ export type DomainCommand = CommandsOf<typeof OrderModel>;
 
 | 種類 | 名前が現れる場所 | 使われ方 |
 | --- | --- | --- |
-| 条件 | 決定表の行、事前条件（`where`）、case の分かれ方 | どの行・どの case に当たるかを決める。同時に成り立つのは1つまで（Hit Policy: Unique）。どれも成り立たなければ `default` |
-| 計算 | モデルの `formulas` | 指示の中身や、覚えるデータの値になる |
-| 不変条件 | モデルの `invariants` | 仕様自身の矛盾を見つける（実装ではなく仕様を検証する） |
+| 条件 | 決定表の行、事前条件（`where`）、case のキー | どの行・どの case に当たるかを決める。同時に成り立つのは1つまで（Hit Policy: Unique）。どれも成り立たなければ `default` |
+| 計算 | コンポーネントの `formulas` | 指示の中身や、覚えるデータの値になる |
+| 不変条件 | コンポーネントの `invariants` | 仕様自身の矛盾を見つける（実装ではなく仕様を検証する） |
 
 同じ文は、どこに書かれても同じ意味になります。
 
-#### デシジョンテーブルと振る舞い
+#### 決定表
 
-決定表は「どの条件に当たるかを選び、定数を返す」ものです。セルに計算は書きません。表が率や区分といったパラメータを決め、計算がそれを使って金額を出す、という分担です。`DecisionTable` 型により、フォールバック（`default`）の記述をコンパイルレベルで強制します。
+決定表は「どの条件に当たるかを選び、定数を返す」ものです。セルに計算は書きません。表が率や区分といったパラメータを決め、計算がそれを使って金額を出す、という分担です。`DecisionTable` 型により、フォールバック（`default`）の記述をコンパイルレベルで強制します。セルに書く指示の型は、コンポーネントの境界から導出します。
 
 ```typescript
-// --- specs/campaign.dmn.ts (Layer 1) ---
-import type { DecisionTable } from "@aac/core";
-import type { DomainCommand } from "./order.model.ts";
+// --- specs/order.component.ts（続き） ---
+type Command = CommandsOf<typeof OrderBoundary>;
 
-export type CampaignOutputs = { discountPercent: number; effects: DomainCommand[] };
-
-// 【真の源泉】
-// as const: キーを厳密な文字列リテラルとして推論させ、Layer 2でのInferred Dictionaryを実現する。
-// satisfies: as constの推論を保ちつつ、defaultの記述漏れや型エラーを厳格にチェックする。
+// as const: キーを厳密な文字列リテラルとして推論させる（結び付けの漏れを型で検出するため）
+// satisfies: as const の推論を保ちつつ、default の記述漏れや型エラーを検査する
 export const CampaignRules = {
   "The customer is a Gold member and it is month-end": {
     discountPercent: 20,
@@ -298,89 +306,77 @@ export const CampaignRules = {
   },
   "The customer is a Silver member": { discountPercent: 5, effects: [] },
   "default": { discountPercent: 0, effects: [] } // 必須フォールバック
-} as const satisfies DecisionTable<CampaignOutputs>;
+} as const satisfies DecisionTable<{ discountPercent: number; effects: Command[] }>;
 
-// --- specs/cancel.dmn.ts / shipping.dmn.ts (Layer 1) ---
 export const CancelRules = {
   "The order has been paid": { effects: [{ action: "Refund", payload: {} }] },
   "default": { effects: [] }
-} as const satisfies DecisionTable<CancelOutputs>;
+} as const satisfies DecisionTable<{ effects: Command[] }>;
 
 export const ShippingRules = {
   "The customer is a Gold member, or the order is 10,000 yen or more": { priority: true },
   "default": { priority: false }
-} as const satisfies DecisionTable<ShippingOutputs>;
+} as const satisfies DecisionTable<{ priority: boolean }>;
+```
 
-// --- specs/order.spec.ts (Layer 1) ---
-import { defineBehaviors, applyDecision, applyFormula } from "@aac/core";
-import { OrderModel } from "./order.model.ts";
+決定表は名前で IR に出すため、`export` が必要です。
 
-export const behaviors = defineBehaviors<typeof OrderModel>({
-  PlaceOrder: {
-    from: ["DRAFT"],
-    cases: {
-      "default": (state) => state.PENDING({
-        event: "Order placed",
-        // 入力の会員ランクと価格を注文に覚えさせる（決済と出荷で使う）
-        set: { rank: state.customerRank, price: state.listPrice },
-        effects: [{ action: "SendOrderConfirmation", payload: {} }]
-      })
-    }
-  },
+#### case（アクションごとの遷移）
+
+境界と構造に `.cases()` で case を取り付けると、コンポーネントが完成します。境界 → 決定表 → case の順に書くのは、決定表が境界の型を使い、case が決定表を使うためです。決定表が要らなければ、`defineComponent({...}).cases({...})` と1つの式で書けます。
+
+```typescript
+// --- specs/order.component.ts（続き） ---
+export const Order = OrderBoundary.cases({
+  // 条件で分かれないアクションは、関数1つで書く
+  PlaceOrder: (state) => state.PENDING({
+    event: "Order placed",
+    // 入力の会員ランクと価格を注文に覚えさせる（決済と出荷で使う）
+    set: { rank: state.customerRank, price: state.listPrice },
+    effects: [{ action: "SendOrderConfirmation", payload: {} }]
+  }),
+
+  // 条件で分かれるアクションは、条件をキーにした表で書く。default が必須
   Checkout: {
-    from: ["PENDING"],
-    where: ["The external payment module is active"],
-    cases: {
-      "The payment succeeded": (state) => {
-        // ロジックは持たず、表データ(DMN)と計算を適用し、その結果をマッピングするのみ
-        const campaign = applyDecision(CampaignRules, state);
-        const amount = applyFormula(OrderModel, "Amount charged: price × (100 − discount percent) ÷ 100, rounded down to a whole yen", state);
+    "The payment succeeded": (state) => {
+      // ロジックは持たず、表データ(DMN)と計算を適用し、その結果をマッピングするのみ
+      const campaign = applyDecision(CampaignRules, state);
+      const amount = applyFormula(OrderBoundary, "Amount charged: price × (100 − discount percent) ÷ 100, rounded down to a whole yen", state);
 
-        return state.PAID({
-          event: "Payment completed",
-          effects: [
-            { action: "SendReceipt", payload: { discountPercent: campaign.discountPercent, amount } },
-            ...campaign.effects
-          ]
-        });
-      },
-      "default": (state) => state.PENDING({
-        event: "Payment failed",
-        effects: [{ action: "NotifyPaymentFailure", payload: {} }]
-      })
-    }
+      return state.PAID({
+        event: "Payment completed",
+        effects: [
+          { action: "SendReceipt", payload: { discountPercent: campaign.discountPercent, amount } },
+          ...campaign.effects
+        ]
+      });
+    },
+    "default": (state) => state.PENDING({
+      event: "Payment failed",
+      effects: [{ action: "NotifyPaymentFailure", payload: {} }]
+    })
   },
-  Ship: {
-    from: ["PAID"],
-    cases: {
-      "default": (state) => {
-        const shipping = applyDecision(ShippingRules, state);
 
-        return state.SHIPPED({
-          event: "Order shipped",
-          effects: [{ action: "SendShippingNotice", payload: { priority: shipping.priority } }]
-        });
-      }
-    }
+  Ship: (state) => {
+    const shipping = applyDecision(ShippingRules, state);
+
+    return state.SHIPPED({
+      event: "Order shipped",
+      effects: [{ action: "SendShippingNotice", payload: { priority: shipping.priority } }]
+    });
   },
-  Cancel: {
-    from: ["PENDING", "PAID"],
-    cases: {
-      "default": (state) => {
-        const cancel = applyDecision(CancelRules, state);
 
-        return state.CANCELLED({ event: "Order cancelled", effects: [...cancel.effects] });
-      }
-    }
+  Cancel: (state) => {
+    const cancel = applyDecision(CancelRules, state);
+
+    return state.CANCELLED({ event: "Order cancelled", effects: [...cancel.effects] });
   }
 });
 
 ```
 
-* モデルの `actions` に宣言したアクションすべてに、振る舞いを1つずつ書きます。過不足は型エラーになり、読み込み時にも検査されます。
-* `from` は、そのアクションを実行できる状態です。省略すると全状態になります。
-* `where` は事前条件です。`from` と `where` を満たさない場合の挙動は仕様の対象外で、PBT も検証しません。
-* `cases` は「遷移を出力とする決定表」です。キーは条件で、決定表と同じく `default` が必須です。次の状態・指示・覚えるデータを、条件ごとに変えられます。外部サービスの応答で分かれる場合は、その応答を `queries` に宣言し、条件で読みます（上の `paymentResult`）。
+* 境界に宣言したアクションすべてに、case を1つずつ書きます。過不足は型エラーになります。
+* case は「遷移を出力とする決定表」です。キーは条件で、決定表と同じく `default` が必須です。次の状態・指示・覚えるデータを、条件ごとに変えられます。外部サービスの応答で分かれる場合は、その応答を `queries` に宣言し、条件で読みます（上の `paymentResult`）。関数1つで書いた case は、`default` だけの表と同じ意味です。
 * `set` は、遷移のときに覚えるデータです。書いたフィールドだけが更新されます。case の中で読めるのは、そのアクション自身の入力だけです（他のアクションの入力を読むと型エラー）。
 
 #### case 本体の構文制限
@@ -397,14 +393,15 @@ export const behaviors = defineBehaviors<typeof OrderModel>({
 Layer 1 に自然言語で書いた名前に、評価関数を結び付けます。結び付けは `bindSpecification` の1か所にまとめます。
 
 ```typescript
-// --- specs/vocabulary.ts (Layer 2) ---
+// --- specs/order.binding.ts (Layer 2) ---
 import { applyDecision, bindSpecification } from "@aac/core";
+import { CampaignRules, CancelRules, Order, ShippingRules } from "./order.component.ts";
 
-export const Specification = bindSpecification(OrderModel, {
-  // ここに渡した決定表の行は、結び付けの漏れがコンパイルエラーになる
+export const Specification = bindSpecification(Order, {
+  // このコンポーネントの case が使う決定表
   tables: { CampaignRules, CancelRules, ShippingRules },
 
-  // 条件: 決定表の行、事前条件 (where)、case の分かれ方。
+  // 条件: 決定表の行、事前条件 (where)、case のキー。
   // 同時に複数が成立した場合は RuleConflictError (Hit Policy: Unique)
   conditions: {
     "The customer is a Gold member and it is month-end": (state) => state.rank === "Gold" && state.isMonthEnd,
@@ -430,8 +427,9 @@ export const Specification = bindSpecification(OrderModel, {
 
 ```
 
-* **型**: 評価関数の `state` はモデルから型が決まります。フィールド名の typo はコンパイルエラーになります。
-* **漏れの検出**: `tables` に渡した決定表の行、モデルの `formulas` と `invariants` は、結び付けが漏れるとコンパイルエラーになります。事前条件と case の条件は型では追えないため、IR 抽出時のエラーになります。
+* **漏れも余りもコンパイルエラー**: 結び付けるべき条件は、事前条件・case のキー・`tables` に渡した決定表の行から型で集めます。結び付けの漏れも、どこにも使われていない条件（typo）も、型エラーになります。計算と不変条件も同様です。
+* **型**: 評価関数の `state` はコンポーネントから型が決まります。フィールド名の typo はコンパイルエラーになります。
+* **`tables` の渡し忘れ**: 決定表を `tables` に入れ忘れると、その行は型では検査されません。その場合も、IR 抽出時と仕様の事前検査でエラーになります。
 * **同じ文は1つの意味**: 同じ名前を別の関数に結び付けるとエラーになります。
 * **不変条件が見るもの**: 状態名と覚えているデータだけです（問い合わせや入力は見ません）。検証するのは仕様であって実装ではありません。覚えているデータを本番システムから読まない方針のため、実装に対しては確かめられません。IR には名前を載せるので、LLM には前提として伝わります。
 
@@ -439,7 +437,7 @@ Layer 2 は PBT が期待値を算出するための「正解」であり、IR �
 
 ### 3.3. Universal IR (中間表現へのコンパイル)
 
-プラットフォームは Layer 1 を抽象実行し、フラットな JSON (Universal IR) を出力します。キーはソートされ、同じ仕様からは常にバイト一致する出力が得られます。
+プラットフォームはコンポーネントを読み込み、case を抽象実行して、フラットな JSON (Universal IR) を出力します。IR では、アクションの入力を `model.actions` に、`from`・事前条件・遷移を `behaviors` に分けて出します。キーはソートされ、同じ仕様からは常にバイト一致する出力が得られます。
 
 ```json
 // --- aac/ir.json（抜粋） ---
