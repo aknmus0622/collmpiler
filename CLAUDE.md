@@ -7,12 +7,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Phase 1 spike. The design documents (written in Japanese) are still the bulk of the repo. The code:
 
 - `packages/core/index.ts` — `defineComponent(...).cases(...)` (a component declared as a value, with types derived from it), `DecisionTable`, `applyDecision`, `applyFormula`, `bindSpecification`, `createState` (concrete execution). Zero dependencies. `packages/core/test/*.check.ts` are type-level checks: they are verified by `tsc` passing (wrong usages carry `@ts-expect-error`), not by the test runner.
-- `packages/cli/src/` (no `aac` bin yet; `compile.ts` and `implement.ts` are temporary entry points)
+- `packages/cli/src/` (no `aac` bin yet; `compile.ts`, `implement.ts` and `draft-binding.ts` are temporary entry points)
   - `loader.ts` — the single `SpecLoader`. It normalizes a component into the internal `SpecModel` + behaviours form the rest of the CLI uses (inputs under `model.actions`; `from` / `where` / cases under behaviours), so the IR shape is independent of how the component is written.
   - `extract.ts` — recording-Proxy abstract execution → IR. `lint.ts` — token whitelist applied to each case body first.
   - `generate.ts` — IR → test-side files. `runtime.ts` — PBT runtime (fast-check) called by the generated `verify.ts`, plus `selfCheck`, the spec-only simulation run before any agent.
   - `strategy.ts` — how an agent session is launched (an external command). `gates.ts` — per-phase entry gate (isolated sandbox with allowlisted inputs) and exit gate (collect allowlisted outputs, checks, PBT). `request.ts` — the three phase-specific request texts. `loop.ts` — the design → wiring → implementation pipeline with feedback and restarts.
   - `check.ts` + `scan.ts` — mechanical checks on what the LLM wrote (imports and generated files only; adapter contents are unrestricted).
+  - `draft.ts` — has an agent draft the Layer 2 binding into `<name>.binding.draft.ts` (entry point `draft-binding.ts`). Separate from the implementation pipeline.
   - `mutation.ts` — the mutation gate: a swappable `MutationStrategy` (built-in literal mutation) plus `judge`, the pass rule owned by the gate. `guide.ts` — default design guidance embedded in the request.
 - `specs/` — the example: `order.component.ts` (Layer 1: boundary, decision tables, cases) and `order.binding.ts` (Layer 2). Only one component can be loaded at present.
 - `examples/checkout-ts/` — `src/` is production code written by an LLM agent from the IR; `aac/` is the generated test side. Do not hand-edit `src/` to make verification pass; rerun the loop.
@@ -30,6 +31,10 @@ node --test packages/cli/test/extract.test.ts         # one file
 node --test --test-name-pattern="スプレッド" "packages/**/*.test.ts"   # tests by name
 pnpm -s run ir                                        # specs/ -> IR JSON on stdout, diagnostics on stderr; also runs the spec self-check
 pnpm --filter example-checkout-ts verify              # PBT against examples/checkout-ts (add -- --seed N --path P to replay)
+
+# Have an agent draft the binding (Layer 2) for names that are not bound yet. The result is
+# specs/<name>.binding.draft.ts, ignored until a person reviews it and drops ".draft" from the name.
+pnpm -s run draft-binding --agent 'claude -p "Read aac/REQUEST.md and carry out the request." --permission-mode acceptEdits'
 
 # Have an agent (re)write an implementation in three sessions (design, wiring, implementation).
 # Any command works; each session runs in an isolated temp directory. --from <phase> starts later in the pipeline.
@@ -96,6 +101,7 @@ Invariants to preserve when changing this:
 - Anything the framework only has to *judge* (conditions, formulas, invariants) is a natural-language name in Layer 1 plus a function in Layer 2; anything it has to *generate* or match exactly (states, actions, inputs, queries, commands, numeric constraints, `from`) is data. Do not put arithmetic or branching in case bodies or table cells: add a condition or a formula.
 - Spec errors are never the implementer's problem. `selfCheck` (`runtime.ts`) simulates the spec alone before any agent runs, and a `SpecError` during PBT yields `status: "error"`, which stops the loop instead of becoming feedback.
 - Money and other exact quantities are integers, with rounding spelled out in the formula's name; float arithmetic makes the oracle and a correct implementation disagree for no good reason.
+- The binding is the oracle, so an LLM never produces it unreviewed. `draft-binding` writes `*.draft.ts`, which `loadSpecs` ignores unless called with `{ drafts: true }` (used only to check a draft); a person reads it and renames it to put it into use. Never make drafts load by default, and never let the implementation pipeline read one.
 - The agent sees the IR only. Layer 2 predicates are the oracle and must never be emitted into the IR or the request; interpreting the natural-language condition keys is the LLM's job, and PBT judges it.
 - Test cases are never LLM-written. Expected values come from executing the spec concretely (`createState` + `applyDecision`).
 - Generated files are a pure function of the IR (no timestamps, no versions); `check.ts` relies on byte-equality with a regeneration. The PBT seed is derived from the spec hash so verification is deterministic.
