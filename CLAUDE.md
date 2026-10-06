@@ -11,7 +11,7 @@ Phase 1 spike. The design documents (written in Japanese) are still the bulk of 
   - `loader.ts` — the single `SpecLoader`. It normalizes a component into the internal `SpecModel` + behaviours form the rest of the CLI uses (inputs under `model.actions`; `from` / `where` / cases under behaviours), so the IR shape is independent of how the component is written.
   - `extract.ts` — recording-Proxy abstract execution → IR. `lint.ts` — token whitelist applied to each case body first.
   - `generate.ts` — IR → test-side files. `runtime.ts` — PBT runtime (fast-check) called by the generated `verify.ts`, plus `selfCheck`, the spec-only simulation run before any agent.
-  - `strategy.ts` — the swappable implementation step (an external agent command). `gates.ts` — entry gate (isolated sandbox with allowlisted inputs) and exit gate (collect allowlisted outputs, checks, PBT). `request.ts` — the agent-facing request text. `loop.ts` — entry gate → strategy → exit gate → feedback.
+  - `strategy.ts` — how an agent session is launched (an external command). `gates.ts` — per-phase entry gate (isolated sandbox with allowlisted inputs) and exit gate (collect allowlisted outputs, checks, PBT). `request.ts` — the three phase-specific request texts. `loop.ts` — the design → wiring → implementation pipeline with feedback and restarts.
   - `check.ts` + `scan.ts` — mechanical checks on what the LLM wrote (imports and generated files only; adapter contents are unrestricted).
   - `mutation.ts` — the mutation gate: a swappable `MutationStrategy` (built-in literal mutation) plus `judge`, the pass rule owned by the gate. `guide.ts` — default design guidance embedded in the request.
 - `specs/` — the example: `order.component.ts` (Layer 1: boundary, decision tables, cases) and `order.binding.ts` (Layer 2). Only one component can be loaded at present.
@@ -31,7 +31,8 @@ node --test --test-name-pattern="スプレッド" "packages/**/*.test.ts"   # te
 pnpm -s run ir                                        # specs/ -> IR JSON on stdout, diagnostics on stderr; also runs the spec self-check
 pnpm --filter example-checkout-ts verify              # PBT against examples/checkout-ts (add -- --seed N --path P to replay)
 
-# Have an agent (re)write an implementation. Any command works; it runs in an isolated temp directory.
+# Have an agent (re)write an implementation in three sessions (design, wiring, implementation).
+# Any command works; each session runs in an isolated temp directory. --from <phase> starts later in the pipeline.
 # --fresh discards the existing src/ and adapter; --transcripts <dir> saves the agent's stdout per attempt;
 # --guide <file> replaces the default design guidance; --mutation auto|builtin|off selects the mutation strategy.
 pnpm -s run implement --out examples/checkout-ts --fresh --max-attempts 3 \
@@ -75,10 +76,19 @@ Roadmap (`PACKAGE.md` §5): Phase 1 (core, dynamic evaluation in Node with fast-
 
 ## LLM as the compiler
 
-The framework generates **test-side code only**; it never places types, signatures, or files in production code. The pipeline (`SPEC.md` §2.3): specs → IR → **entry gate** (temp directory outside the repo holding only the IR, adapter contract, adapter, `REQUEST.md`, and any previous `src/`) → **strategy** (an external agent command writes `src/` and fills `aac/adapter.ts` there) → **exit gate** (audit the sandbox, copy only `src/` and the adapter to `--out`, regenerate `ir.json` / contract / `verify.ts` there, run `check.ts`, run PBT, run the mutation gate) → on any failure the violation, minimal counterexample, or surviving mutation goes into the next `REQUEST.md`.
+The framework generates **test-side code only**; it never places types, signatures, or files in production code. The pipeline (`SPEC.md` §2.3): specs → spec self-check → IR → three TDD phases, each a separate agent session wrapped in an **entry gate** (temp directory outside the repo holding only that phase's allowlisted inputs) and an **exit gate** (audit the sandbox, copy only that phase's writable paths to `--out`, regenerate `ir.json` / contract / `verify.ts` there, run `check.ts`, then the phase's own check):
+
+| Phase | Agent sees | Agent writes | Phase check |
+| --- | --- | --- | --- |
+| `design` | IR, guide | `src/` skeleton (signatures; bodies throw `"not implemented"`) | loads; quotes no spec sentence |
+| `wiring` | adapter contract, skeleton — **not the IR** | `aac/adapter.ts` | PBT must fail for the "not implemented" reason (red) |
+| `implementation` | IR, skeleton, guide — **not the adapter or contract** | `src/` bodies | PBT passes (green); mutation gate |
+
+A failed check goes into the same phase's next `REQUEST.md`; when a phase exhausts its attempts the whole pipeline restarts from `design` (the failing phase cannot be attributed mechanically). If `--out` already holds `src/` and an adapter, the run starts at `implementation`.
 
 Invariants to preserve when changing this:
 
+- What each phase may see is the mechanism, not a detail: the wiring phase never sees the IR (so the adapter cannot encode business decisions) and the design/implementation phases never see the adapter contract (so production code is not shaped by the harness). Do not add an input to a phase, and do not mention `ports` or the harness in the design/implementation requests or the default guide, without re-examining these two properties. The skeleton is the one channel between them; `gates.ts` rejects skeletons that quote spec sentences.
 - Isolation belongs to the gates, not to strategies. Nothing that points at the repo may enter the sandbox: no spec sources, no `verify.ts` (it contains the specs path), no repo paths in file contents or environment variables. A new strategy must not need to re-implement any of this.
 - Production code carries zero constraints: no framework imports or types, no required naming, no required DI, no shared vocabulary with the spec. The adapter always adapts to the production code, so never restrict what the adapter may contain; whether business decisions really live in `src/` is established by mutation, not by inspecting the adapter.
 - Anything you want the implementer to do about design goes into the guide (`guide.ts`, or `--guide <file>`), which is advice and never a pass/fail rule. The guide must not mention business rules.
