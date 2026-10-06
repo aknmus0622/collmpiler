@@ -9,6 +9,9 @@ import { generateAdapterSkeleton, generateContract, generateVerify } from "../sr
 import type { Ir } from "../src/generate.ts";
 import { loadSpecs } from "../src/loader.ts";
 import { implement } from "../src/loop.ts";
+import type { ImplementOptions } from "../src/loop.ts";
+import { judge } from "../src/mutation.ts";
+import type { MutationStrategy } from "../src/mutation.ts";
 import { commandStrategy } from "../src/strategy.ts";
 import type { Assignment, ImplementationStrategy } from "../src/strategy.ts";
 import { write } from "./fixtures/scripted-agent.ts";
@@ -43,16 +46,21 @@ function scripted(steps: Step[], extra?: (assignment: Assignment) => void) {
   return { strategy, seen };
 }
 
-async function run(steps: Step[], maxAttempts: number, extra?: (assignment: Assignment) => void) {
+async function run(
+  steps: Step[],
+  maxAttempts: number,
+  extra?: (assignment: Assignment) => void,
+  options: Partial<ImplementOptions> = {},
+) {
   const out = workdir();
   const { strategy, seen } = scripted(steps, extra);
-  return { out, seen, ...(await implement({ specs: specsDir, out, strategy, maxAttempts })) };
+  return { out, seen, ...(await implement({ specs: specsDir, out, strategy, maxAttempts, runs: 60, ...options })) };
 }
 
-test("ループ: PBT の反例 → 余計なもの検査の違反 → 合格", async () => {
+test("ループ: PBT の反例 → ミューテーションで発覚 → 合格", async () => {
   const { out, seen, status, attempts } = await run(["buggy", "cheat", "correct"], 3);
   assert.equal(status, "pass");
-  assert.deepEqual(attempts.map((a) => a.feedback?.kind ?? "pass"), ["pbt", "check", "pass"]);
+  assert.deepEqual(attempts.map((a) => a.feedback?.kind ?? "pass"), ["pbt", "mutation", "pass"]);
 
   // 1回目: シルバー会員の割引違いが、最小の反例 (1手) として報告される
   const first = attempts[0].feedback;
@@ -70,19 +78,64 @@ test("ループ: PBT の反例 → 余計なもの検査の違反 → 合格", a
     commands: [{ action: "SendReceipt", payload: { discount: 0.5 } }],
   });
 
-  // 2回目: アダプターに業務ロジックを書いたので PBT の前に弾かれる
+  // 2回目: PBT には合格するが、アダプターが肩代わりしているので、本番コードの割引率を変えても落ちない
   const second = attempts[1].feedback;
-  assert.ok(second?.kind === "check");
-  assert.deepEqual([...new Set(second.violations.map((v) => v.rule))], ["adapter-logic"]);
+  assert.ok(second?.kind === "mutation");
+  assert.deepEqual(second.violations.map((v) => `${v.file}:${v.rule}`), ["src/order-service.ts:mutation-survived"]);
+  assert.match(second.violations[0].message, /Changing 0\.05/);
+
+  // 3回目: 壊した箇所はすべて検出される。使った Strategy と件数は結果に残る
+  const third = attempts[2].mutation;
+  assert.equal(third?.strategy, "builtin");
+  assert.ok(third.mutants >= 6 && third.killed === third.mutants);
 
   // 差し戻しは次の依頼文に載り、前回の成果も作業場所に引き継がれる
   assert.match(seen[1].files["aac/REQUEST.md"], /attempt 2[\s\S]*"discount": 0.5/);
-  assert.match(seen[2].files["aac/REQUEST.md"], /attempt 3[\s\S]*adapter-logic/);
+  assert.match(seen[2].files["aac/REQUEST.md"], /attempt 3[\s\S]*mutation-survived/);
   assert.ok("src/order-service.ts" in seen[1].files);
 
   // 合格した実装と採点基準は出力先に揃う
   assert.deepEqual(readdirSync(join(out, "aac")).sort(), ["adapter.contract.ts", "adapter.ts", "ir.json", "verify.ts"]);
   assert.deepEqual(readdirSync(join(out, "src")), ["order-service.ts"]);
+});
+
+test("ミューテーション: 決定表の値がアダプターにしか無ければ不合格", async () => {
+  const { attempts } = await run(["moved"], 1);
+  const feedback = attempts[0].feedback;
+  assert.ok(feedback?.kind === "mutation");
+  assert.deepEqual(feedback.violations.map((v) => `${v.file}:${v.rule}`), ["aac/adapter.ts:decision-in-adapter"]);
+});
+
+test("ミューテーション: ゲートを外すと、アダプターの肩代わりは見逃される", async () => {
+  const { status, attempts } = await run(["cheat"], 1, undefined, { mutation: null });
+  assert.equal(status, "pass");
+  assert.equal(attempts[0].mutation, undefined);
+});
+
+test("ミューテーション: Strategy は差し替えられ、合否の基準はゲートが持つ", async () => {
+  const stub = (killed: boolean): MutationStrategy => ({
+    name: "stub",
+    run: () => ({
+      strategy: "stub",
+      mutants: [{ file: "src/order-service.ts", line: 1, original: "0.05", mutated: "0.06", value: 0.05, killed }],
+    }),
+  });
+  const pass = await run(["correct"], 1, undefined, { mutation: stub(true) });
+  assert.equal(pass.status, "pass");
+  assert.deepEqual(pass.attempts[0].mutation, { strategy: "stub", mutants: 1, killed: 1, survivors: [] });
+
+  const fail = await run(["correct"], 1, undefined, { mutation: stub(false) });
+  assert.equal(fail.status, "fail");
+  assert.equal(fail.attempts[0].feedback?.kind, "mutation");
+});
+
+test("ミューテーション: 決定表の値が本番コードに見つからないときは、何か1つでも検出されればよい", () => {
+  const mutant = (killed: boolean) => ({ file: "src/a.ts", line: 1, original: "20", mutated: "(20+1)", killed });
+  assert.deepEqual(judge({ strategy: "x", mutants: [mutant(true), mutant(false)] }, [0.2], ""), []);
+  assert.deepEqual(
+    judge({ strategy: "x", mutants: [mutant(false)] }, [0.2], "").map((v) => v.rule),
+    ["mutation-ineffective"],
+  );
 });
 
 test("複数ステップ: 2手でしか現れない不具合を、最小のアクション列まで縮めて報告する", async () => {
@@ -102,7 +155,7 @@ test("複数ステップ: 2手でしか現れない不具合を、最小のア�
 });
 
 test("隔離: エージェントに渡るのは許可した4ファイルだけで、リポジトリへの手がかりを含まない", async () => {
-  const { seen, attempts } = await run(["correct"], 1);
+  const { seen, attempts } = await run(["correct"], 1, undefined, { mutation: null });
   const inputs = ["aac/REQUEST.md", "aac/adapter.contract.ts", "aac/adapter.ts", "aac/ir.json"];
   assert.deepEqual(Object.keys(seen[0].files).sort(), inputs);
   assert.deepEqual(attempts[0].inputs, inputs);
@@ -164,11 +217,11 @@ test("ループ: 検証は決定的 (同じ実装なら同じシード・同じ�
 });
 
 test("ループ: fresh を指定すると既存の実装を引き継がない", async () => {
-  const first = await run(["correct"], 1);
+  const first = await run(["correct"], 1, undefined, { mutation: null });
   const { strategy, seen } = scripted(["correct"]);
-  await implement({ specs: specsDir, out: first.out, strategy, maxAttempts: 1 });
+  await implement({ specs: specsDir, out: first.out, strategy, maxAttempts: 1, mutation: null });
   assert.ok("src/order-service.ts" in seen[0].files);
-  await implement({ specs: specsDir, out: first.out, strategy, maxAttempts: 1, fresh: true });
+  await implement({ specs: specsDir, out: first.out, strategy, maxAttempts: 1, fresh: true, mutation: null });
   assert.ok(!("src/order-service.ts" in seen[1].files));
   assert.equal(seen[1].files["aac/adapter.ts"], generateAdapterSkeleton());
 });
@@ -176,7 +229,7 @@ test("ループ: fresh を指定すると既存の実装を引き継がない", 
 test("コマンド Strategy: 外部コマンドを作業場所で起動する", async () => {
   process.env.AAC_SCRIPT = "buggy,correct";
   const strategy = commandStrategy(`"${process.execPath}" "${join(import.meta.dirname, "fixtures/scripted-agent.ts")}"`);
-  const { status, attempts } = await implement({ specs: specsDir, out: workdir(), strategy, maxAttempts: 2 });
+  const { status, attempts } = await implement({ specs: specsDir, out: workdir(), strategy, maxAttempts: 2, mutation: null });
   assert.equal(status, "pass");
   assert.equal(attempts.length, 2);
 });
@@ -246,15 +299,10 @@ test("検査: 生成ファイルの書き換え・削除、余計なファイル
   ]);
 });
 
-test("検査: アダプターは入力の中身・数値・ルール名に触れられない", async () => {
-  const { rules, edit } = await workspace();
-  edit("aac/adapter.ts", (text) =>
-    text.replace(
-      'if (action === "Ship")',
-      'if (input.rank) ports.commands.SendReceipt({ discount: 0.2, why: "シルバー会員の場合", tpl: `${"Gold"}` } as never);\n    if (action === "Ship")',
-    ),
-  );
-  assert.deepEqual(rules(), Array(4).fill("aac/adapter.ts:adapter-logic"));
+test("検査: アダプターの中身は字面では制限しない (判断の肩代わりはミューテーションで見つける)", async () => {
+  const { out, rules } = await workspace();
+  write("cheat", out);
+  assert.deepEqual(rules(), []);
 });
 
 test("検査: アダプターは仕様や IR を import できない", async () => {

@@ -2,10 +2,12 @@ import { rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { extract, stableStringify } from "./extract.ts";
 import { entryGate, exitGate } from "./gates.ts";
-import type { Feedback, GateContext } from "./gates.ts";
+import type { Feedback, GateContext, MutationSummary } from "./gates.ts";
 import { FILES, SOURCE_DIR, TEST_DIR, requireModel, specHash } from "./generate.ts";
 import type { Ir } from "./generate.ts";
 import { loadSpecs } from "./loader.ts";
+import { builtinMutation } from "./mutation.ts";
+import type { MutationStrategy } from "./mutation.ts";
 import type { ImplementationStrategy } from "./strategy.ts";
 
 // 仕様 → IR → [入口ゲート → Strategy (エージェントが実装) → 出口ゲート] のループ。
@@ -17,6 +19,8 @@ export type ImplementOptions = {
   strategy: ImplementationStrategy;
   maxAttempts?: number;
   runs?: number;
+  // ミューテーションのゲートの Strategy。省略時は自前、null で無効
+  mutation?: MutationStrategy | null;
   // true なら出力先の既存の本番コードとアダプターを捨てて、雛形から始める
   fresh?: boolean;
   // true なら作業場所を消さずに残す (調査用)
@@ -30,6 +34,7 @@ export type Attempt = {
   // エージェントに渡したファイルの一覧 (隔離の証跡)
   inputs: string[];
   sandbox?: string;
+  mutation?: MutationSummary;
   feedback?: Feedback;
 };
 
@@ -48,7 +53,14 @@ export async function implement(options: ImplementOptions) {
 
   // 検証を決定的にするため、シードは仕様のハッシュから決める
   const seed = Number.parseInt(specHash(ir).slice("sha256:".length, "sha256:".length + 7), 16);
-  const ctx: GateContext = { ir, specsDir, outDir, seed, runs: options.runs ?? 200 };
+  const ctx: GateContext = {
+    ir,
+    specsDir,
+    outDir,
+    seed,
+    runs: options.runs ?? 200,
+    mutation: options.mutation === null ? undefined : (options.mutation ?? builtinMutation),
+  };
 
   if (options.fresh) {
     rmSync(join(outDir, SOURCE_DIR), { recursive: true, force: true });
@@ -60,20 +72,22 @@ export async function implement(options: ImplementOptions) {
 
   for (let attempt = 1; attempt <= (options.maxAttempts ?? 3); attempt++) {
     const sandbox = entryGate(ctx, attempt, feedback);
+    let mutation: MutationSummary | undefined;
     try {
       log(`[${attempt}] strategy: ${options.strategy.name} (in ${sandbox.dir})`);
       await options.strategy.run({ dir: sandbox.dir, attempt, env: sandbox.env });
-      feedback = exitGate(ctx, sandbox);
+      ({ feedback, mutation } = await exitGate(ctx, sandbox));
     } finally {
       if (!options.keepSandbox) rmSync(sandbox.dir, { recursive: true, force: true });
     }
 
-    log(`[${attempt}] exit gate: ${describe(feedback)}`);
+    log(`[${attempt}] exit gate: ${describe(feedback)}${mutation ? ` (mutation: ${mutation.strategy}, ${mutation.killed}/${mutation.mutants} killed)` : ""}`);
     attempts.push({
       attempt,
       ok: feedback === undefined,
       inputs: Object.keys(sandbox.inputs).sort(),
       ...(options.keepSandbox ? { sandbox: sandbox.dir } : {}),
+      ...(mutation ? { mutation } : {}),
       ...(feedback ? { feedback } : {}),
     });
     if (!feedback) return { status: "pass" as const, attempts, seed };
@@ -83,6 +97,8 @@ export async function implement(options: ImplementOptions) {
 
 function describe(feedback: Feedback | undefined): string {
   if (!feedback) return "pass";
-  if (feedback.kind === "check") return `rejected (${[...new Set(feedback.violations.map((v) => v.rule))].join(", ")})`;
+  if (feedback.kind === "check" || feedback.kind === "mutation") {
+    return `rejected (${[...new Set(feedback.violations.map((v) => v.rule))].join(", ")})`;
+  }
   return feedback.kind === "pbt" ? `pbt ${feedback.result.status}` : "crashed";
 }

@@ -1,9 +1,18 @@
-// 依存ゼロの簡易トークナイザ。LLM が書いたコードの検査 (check.ts) に使う。
+// 依存ゼロの簡易トークナイザ。LLM が書いたコードの検査 (check.ts) と変異 (mutation.ts) に使う。
 // 完全な JS パーサではない: 正規表現リテラルの開始は直前のトークンから推定する。
 
-export type Token = { kind: "word" | "number" | "string" | "regex" | "punct"; text: string };
+export type Token = {
+  kind: "word" | "number" | "string" | "regex" | "punct";
+  // string はエスケープを解いた値、それ以外はソース上の表記
+  text: string;
+  // ソース上の範囲 [start, end)
+  start: number;
+  end: number;
+  // テンプレートリテラル由来の string（そのまま置換できない）
+  template?: boolean;
+};
 
-const IDENTIFIER = /[\p{ID_Start}$_#][\p{ID_Continue}$‌‍]*/uy;
+const IDENTIFIER = /[\p{ID_Start}$_#][\p{ID_Continue}$\u200c\u200d]*/uy;
 const NUMBER = /0[xXoObB][\da-fA-F_]+n?|(?:\d[\d_]*\.?[\d_]*|\.\d[\d_]*)(?:[eE][+-]?\d+)?n?/y;
 const REGEX_AFTER_WORD = new Set(["return", "typeof", "case", "in", "of", "do", "else", "void", "delete", "throw", "new", "await", "yield"]);
 
@@ -15,9 +24,11 @@ function decode(inner: string): string {
   }
 }
 
-export function scan(source: string): Token[] {
+export function scan(source: string, base = 0): Token[] {
   const tokens: Token[] = [];
   let i = 0;
+  const push = (kind: Token["kind"], text: string, start: number, end: number, template?: boolean) =>
+    tokens.push({ kind, text, start: base + start, end: base + end, ...(template ? { template } : {}) });
 
   const regexAllowed = () => {
     const prev = tokens.at(-1);
@@ -39,7 +50,7 @@ export function scan(source: string): Token[] {
     } else if (ch === '"' || ch === "'") {
       let j = i + 1;
       while (j < source.length && source[j] !== ch) j += source[j] === "\\" ? 2 : 1;
-      tokens.push({ kind: "string", text: decode(source.slice(i + 1, j)) });
+      push("string", decode(source.slice(i + 1, j)), i, j + 1);
       i = j + 1;
     } else if (ch === "`") {
       // テンプレートリテラル: 文字列部分は string、${...} の中身は再帰的にトークン化する
@@ -54,14 +65,14 @@ export function scan(source: string): Token[] {
             else if (source[k] === "}") depth--;
             k++;
           }
-          tokens.push(...scan(source.slice(j + 2, k - 1)));
+          tokens.push(...scan(source.slice(j + 2, k - 1), base + j + 2));
           j = k;
         } else {
           text += source[j] === "\\" ? source.slice(j, j + 2) : source[j];
           j += source[j] === "\\" ? 2 : 1;
         }
       }
-      tokens.push({ kind: "string", text: decode(text) });
+      push("string", decode(text), i, j + 1, true);
       i = j + 1;
     } else if (ch === "/" && regexAllowed()) {
       let j = i + 1;
@@ -74,23 +85,32 @@ export function scan(source: string): Token[] {
       }
       j++;
       while (/[a-z]/i.test(source[j] ?? "")) j++;
-      tokens.push({ kind: "regex", text: source.slice(i, j) });
+      push("regex", source.slice(i, j), i, j);
       i = j;
     } else {
       NUMBER.lastIndex = i;
       IDENTIFIER.lastIndex = i;
       const number = NUMBER.exec(source)?.[0];
       const word = number ? undefined : IDENTIFIER.exec(source)?.[0];
-      if (number) tokens.push({ kind: "number", text: number });
-      else if (word) tokens.push({ kind: "word", text: word });
-      else tokens.push({ kind: "punct", text: ch });
-      i += (number ?? word ?? ch).length;
+      const text = number ?? word ?? ch;
+      push(number ? "number" : word ? "word" : "punct", text, i, i + text.length);
+      i += text.length;
     }
   }
   return tokens;
 }
 
 export type Imports = { specifiers: string[]; dynamic: boolean };
+
+const isSpecifier = (tokens: Token[], index: number) => {
+  const prev = tokens[index - 1];
+  const before = tokens[index - 2];
+  return (
+    prev?.kind === "word" &&
+    (prev.text === "import" || prev.text === "from") &&
+    !(before?.kind === "punct" && before.text === ".")
+  );
+};
 
 // import / export ... from の指定子と、動的ロード (import() / require()) の有無
 export function importsOf(tokens: Token[]): Imports {
@@ -99,11 +119,22 @@ export function importsOf(tokens: Token[]): Imports {
   tokens.forEach((token, index) => {
     const prev = tokens[index - 1];
     const next = tokens[index + 1];
+    if (token.kind === "string" && isSpecifier(tokens, index)) specifiers.push(token.text);
     if (token.kind !== "word" || (prev?.kind === "punct" && prev.text === ".")) return;
-    if ((token.text === "import" || token.text === "from") && next?.kind === "string") specifiers.push(next.text);
     if ((token.text === "import" || token.text === "require") && next?.kind === "punct" && next.text === "(") {
       dynamic = true;
     }
   });
   return { specifiers, dynamic };
+}
+
+// 実行時に意味を持つリテラル（import の指定子とテンプレートを除く）
+export function literalsOf(tokens: Token[]): Token[] {
+  return tokens.filter(
+    (token, index) =>
+      (token.kind === "number" ||
+        (token.kind === "string" && !token.template && !isSpecifier(tokens, index)) ||
+        (token.kind === "word" && (token.text === "true" || token.text === "false"))) &&
+      !(token.kind === "word" && tokens[index - 1]?.kind === "punct" && tokens[index - 1].text === "."),
+  );
 }

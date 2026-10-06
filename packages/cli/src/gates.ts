@@ -8,6 +8,8 @@ import type { Violation } from "./check.ts";
 import { stableStringify } from "./extract.ts";
 import { FILES, SOURCE_DIR, TEST_DIR, generateAdapterSkeleton, generateContract, generateVerify } from "./generate.ts";
 import type { Ir } from "./generate.ts";
+import { decisionValues, judge } from "./mutation.ts";
+import type { MutationStrategy } from "./mutation.ts";
 import { renderRequest } from "./request.ts";
 import { RESULT_PREFIX } from "./runtime.ts";
 import type { PbtResult } from "./runtime.ts";
@@ -17,12 +19,30 @@ import type { PbtResult } from "./runtime.ts";
 //   出口ゲート: 許可した出力だけを取り出し、余計なもの検査と PBT にかける
 // 仕様のソース・PBT のグルー (verify.ts)・リポジトリのパスは、作業場所に一切渡さない。
 
-export type GateContext = { ir: Ir; specsDir: string; outDir: string; seed: number; runs: number };
+export type GateContext = {
+  ir: Ir;
+  specsDir: string;
+  outDir: string;
+  seed: number;
+  runs: number;
+  // undefined ならミューテーションのゲートを省く
+  mutation: MutationStrategy | undefined;
+};
+
+// どの Strategy で何個壊し、何個検出したか（毎回結果に記録する）
+export type MutationSummary = {
+  strategy: string;
+  mutants: number;
+  killed: number;
+  // 壊しても PBT が落ちなかった箇所。不合格の理由にならないものも含めて報告する
+  survivors: { file: string; line: number; original: string }[];
+};
 
 export type Feedback =
   | { kind: "check"; violations: Violation[] }
   | { kind: "pbt"; result: PbtResult }
-  | { kind: "crash"; output: string };
+  | { kind: "crash"; output: string }
+  | { kind: "mutation"; violations: Violation[] };
 
 export type Sandbox = {
   dir: string;
@@ -90,7 +110,23 @@ export function scrubEnv(env: NodeJS.ProcessEnv, hidden: string[]): NodeJS.Proce
   return clean;
 }
 
-export function exitGate(ctx: GateContext, sandbox: Sandbox): Feedback | undefined {
+function runVerify(ctx: GateContext): { result?: PbtResult; crash?: string } {
+  const run = spawnSync(
+    process.execPath,
+    [join(TEST_DIR, FILES.verify), "--seed", String(ctx.seed), "--runs", String(ctx.runs)],
+    { cwd: ctx.outDir, encoding: "utf8", timeout: 120_000 },
+  );
+  const line = run.stdout?.split("\n").find((text) => text.startsWith(RESULT_PREFIX));
+  if (line) return { result: JSON.parse(line.slice(RESULT_PREFIX.length)) as PbtResult };
+  const output = `${run.stderr ?? ""}${run.error?.message ?? ""}`.trim().slice(-2000);
+  // スタックトレースに含まれるリポジトリのパスを差し戻しに載せない
+  return { crash: [ctx.outDir, ctx.specsDir, process.cwd()].reduce((text, path) => text.split(path).join("."), output) };
+}
+
+export async function exitGate(
+  ctx: GateContext,
+  sandbox: Sandbox,
+): Promise<{ feedback?: Feedback; mutation?: MutationSummary }> {
   const testDir = join(ctx.outDir, TEST_DIR);
   const violations: Violation[] = [];
   const outputs: string[] = [];
@@ -134,21 +170,29 @@ export function exitGate(ctx: GateContext, sandbox: Sandbox): Feedback | undefin
 
   // 4. 余計なもの検査
   violations.push(...checkWorkspace(ctx.outDir, ctx.ir, ctx.specsDir));
-  if (violations.length > 0) return { kind: "check", violations };
+  if (violations.length > 0) return { feedback: { kind: "check", violations } };
 
   // 5. PBT (別プロセス。LLM が書いたコードはここで初めて実行される)
-  const run = spawnSync(
-    process.execPath,
-    [join(TEST_DIR, FILES.verify), "--seed", String(ctx.seed), "--runs", String(ctx.runs)],
-    { cwd: ctx.outDir, encoding: "utf8", timeout: 120_000 },
-  );
-  const line = run.stdout?.split("\n").find((text) => text.startsWith(RESULT_PREFIX));
-  if (!line) {
-    const output = `${run.stderr ?? ""}${run.error?.message ?? ""}`.trim().slice(-2000);
-    // スタックトレースに含まれるリポジトリのパスを差し戻しに載せない
-    const scrubbed = [ctx.outDir, ctx.specsDir, process.cwd()].reduce((text, path) => text.split(path).join("."), output);
-    return { kind: "crash", output: scrubbed };
-  }
-  const result = JSON.parse(line.slice(RESULT_PREFIX.length)) as PbtResult;
-  return result.status === "pass" ? undefined : { kind: "pbt", result };
+  const { result, crash } = runVerify(ctx);
+  if (!result) return { feedback: { kind: "crash", output: crash ?? "" } };
+  if (result.status !== "pass") return { feedback: { kind: "pbt", result } };
+
+  // 6. ミューテーション: 本番コードを壊して PBT が落ちることを確かめる。合否の基準はゲート (judge) が持つ
+  if (!ctx.mutation) return {};
+  const values = decisionValues(ctx.ir);
+  const report = await ctx.mutation.run({
+    sourceDir: join(ctx.outDir, SOURCE_DIR),
+    values,
+    test: () => runVerify(ctx).result?.status === "pass",
+  });
+  const mutation = {
+    strategy: report.strategy,
+    mutants: report.mutants.length,
+    killed: report.mutants.filter((mutant) => mutant.killed).length,
+    survivors: report.mutants
+      .filter((mutant) => !mutant.killed)
+      .map(({ file, line, original }) => ({ file, line, original })),
+  };
+  const survived = judge(report, values, readFileSync(join(ctx.outDir, ADAPTER), "utf8"));
+  return survived.length > 0 ? { feedback: { kind: "mutation", violations: survived }, mutation } : { mutation };
 }

@@ -4,10 +4,14 @@ import { join } from "node:path";
 // LLM の代役。決まった実装を書き出す。ループ (失敗 → 差し戻し → 修正) を LLM なしで再現するためのもの。
 //   buggy    … シルバー会員の割引が違う（1手で見つかる）
 //   norefund … 決済後のキャンセルで返金しない（決済 → キャンセルの2手でしか見つからない）
-//   cheat    … 業務ロジックをアダプターに書く
+//   cheat    … 本番コードは正しいが、シルバー会員の決済をアダプターが肩代わりする（本番側の該当コードは死んでいる）
+//   moved    … 本番コードは割引が違い、正しい割引率はアダプターにだけ書かれている
 //   correct  … 正しい実装
 
-export type Step = "buggy" | "norefund" | "cheat" | "correct";
+export type Step = "buggy" | "norefund" | "cheat" | "moved" | "correct";
+
+const wrongDiscount = (step: Step) => step === "buggy" || step === "moved";
+const intercepts = (step: Step) => step === "cheat" || step === "moved";
 
 const source = (step: Step) => `export type Deps = {
   isMonthEnd(): boolean;
@@ -34,7 +38,7 @@ export class OrderService {
       this.deps.send("SendReceipt", { discount: 0.2 });
       this.deps.send("IssueCoupon", { type: "Premium" });
     } else if (customer.rank === "Silver") {
-      this.deps.send("SendReceipt", { discount: ${step === "buggy" ? "0.5" : "0.05"} });
+      this.deps.send("SendReceipt", { discount: ${wrongDiscount(step) ? "0.5" : "0.05"} });
     } else {
       this.deps.send("SendReceipt", { discount: 0 });
     }
@@ -54,13 +58,29 @@ ${step === "norefund" ? "" : `    if (this.status === "PAID") this.deps.send("Re
 }
 `;
 
+// 業務上の判断をアダプター側で行ってしまう例
+const INTERCEPT = `    if (
+      action === "Checkout" &&
+      input.rank === "Silver" &&
+      service?.status === "PENDING" &&
+      saved?.queries.paymentModuleActive() &&
+      saved.outcomes.Checkout() === "PaymentSuccess"
+    ) {
+      saved.commands.SendReceipt({ discount: 0.05 });
+      service.status = "PAID";
+      return;
+    }
+`;
+
 const adapter = (step: Step) => `import type { Ports, StateName, TargetSystemAdapter } from "./adapter.contract.ts";
 import { OrderService } from "../src/order-service.ts";
 
 let service: OrderService | undefined;
+let saved: Ports | undefined;
 
 export const adapter: TargetSystemAdapter = {
   async setupIsolation(ports: Ports) {
+    saved = ports;
     service = new OrderService({
       isMonthEnd: () => ports.queries.isMonthEnd(),
       paymentModuleActive: () => ports.queries.paymentModuleActive(),
@@ -72,7 +92,7 @@ export const adapter: TargetSystemAdapter = {
     service = undefined;
   },
   async executeAction(action, input) {
-${step === "cheat" ? `    if (input.rank === "Silver") return;\n` : ""}    if (action === "Checkout") service?.checkout(input);
+${intercepts(step) ? INTERCEPT : ""}    if (action === "Checkout") service?.checkout(input);
     if (action === "Ship") service?.ship();
     if (action === "Cancel") service?.cancel();
   },

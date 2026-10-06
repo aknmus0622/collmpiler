@@ -11,6 +11,10 @@ function renderFeedback(feedback: Feedback): string {
   if (feedback.kind === "crash") {
     return `The previous attempt crashed before producing a test result:\n\n\`\`\`\n${feedback.output}\n\`\`\``;
   }
+  if (feedback.kind === "mutation") {
+    const lines = feedback.violations.map((v) => `- \`${v.file}\` [${v.rule}] ${v.message}`);
+    return `The previous attempt passed the property-based test, but failed the mutation check. The harness changes values in your production code one at a time and expects the test to fail each time:\n\n${lines.join("\n")}`;
+  }
   return `The previous attempt failed the property-based test. Minimal counterexample:\n\n\`\`\`json\n${JSON.stringify(feedback.result, null, 2)}\n\`\`\``;
 }
 
@@ -18,7 +22,7 @@ export function renderRequest(attempt: number, feedback: Feedback | undefined): 
   return `# Implementation request (attempt ${attempt})
 
 Implement a system that satisfies the specification in \`${TEST_DIR}/${FILES.ir}\`, then connect it to the test
-harness. Your work is accepted when the rule check and the property-based test both pass.
+harness. Your work is accepted when the rule check, the property-based test, and the mutation check all pass.
 
 ## What to write
 
@@ -36,11 +40,12 @@ harness. Your work is accepted when the rule check and the property-based test b
   specification.
 - Do not edit \`${TEST_DIR}/${FILES.ir}\` or \`${TEST_DIR}/${FILES.contract}\`, and do not create files outside
   \`${SOURCE_DIR}/\`. Only \`${SOURCE_DIR}/\` and \`${TEST_DIR}/${FILES.adapter}\` are collected from this directory.
-- The adapter must stay thin: it only builds your system, connects it to the \`ports\` it receives, and forwards
-  calls. It may import only \`./${FILES.contract}\` and files under \`../${SOURCE_DIR}/\`. It must not contain
-  numeric literals, must not reference input fields or their values, and must not mention decision rule names.
-  Pass the \`input\` argument of \`executeAction\` to production code unchanged; all business logic belongs in
-  \`${SOURCE_DIR}/\`.
+- The adapter may import only \`./${FILES.contract}\` and files under \`../${SOURCE_DIR}/\`. Its job is to build
+  your system and connect it to the \`ports\` it receives, translating between the two where needed.
+- Business decisions must be made in \`${SOURCE_DIR}/\`, never in the adapter. This is verified by mutation: after
+  the tests pass, the harness changes the decision values in your production code one at a time (a discount
+  rate, a coupon type, ...) and expects the tests to fail each time. A value that can be changed without
+  failing a test means the decision is being made somewhere else, or the code is dead.
 
 ## How to read the IR
 

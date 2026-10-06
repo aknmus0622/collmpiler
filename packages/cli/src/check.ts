@@ -1,14 +1,16 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { stableStringify } from "./extract.ts";
-import { FILES, SOURCE_DIR, TEST_DIR, generateContract, generateVerify, requireModel } from "./generate.ts";
+import { FILES, SOURCE_DIR, TEST_DIR, generateContract, generateVerify } from "./generate.ts";
 import type { Ir } from "./generate.ts";
 import { importsOf, scan } from "./scan.ts";
 
 // LLM が書いたものに「余計なもの」が無いかの検査。PBT の前に走り、違反は LLM に差し戻す。
 //  1. 本番コードがフレームワーク・仕様・テスト側に依存していないこと
 //  2. 生成したテスト側ファイル（採点基準）が書き換えられていないこと
-//  3. アダプターが薄いこと（業務ロジックを持たない）
+//  3. アダプターが仕様や採点基準を import していないこと
+// アダプターの中身は制限しない（本番コードの作りに合わせるのはアダプターの仕事）。
+// 業務上の判断がアダプターに書かれていないかは、ミューテーションのゲート (mutation.ts) が確かめる。
 // メッセージはエージェントに渡すため英語。
 
 export type Violation = { file: string; rule: string; message: string };
@@ -20,7 +22,6 @@ const isInside = (dir: string, path: string) => path === dir || path.startsWith(
 export function checkWorkspace(out: string, ir: Ir, specs: string): Violation[] {
   const outDir = resolve(process.cwd(), out);
   const specsDir = resolve(process.cwd(), specs);
-  const model = requireModel(ir);
   const testDir = join(outDir, TEST_DIR);
   const sourceDir = join(outDir, SOURCE_DIR);
   const violations: Violation[] = [];
@@ -78,28 +79,6 @@ export function checkWorkspace(out: string, ir: Ir, specs: string): Violation[] 
   } else {
     const tokens = scan(readFileSync(adapterPath, "utf8"));
     checkImports(adapterPath, tokens, true);
-
-    // 入力の中身に触れられなければ、アダプター内で業務上の分岐はできない（問い合わせ・指示の名前は配線に必要なので可）
-    const dataFields = new Set(Object.keys(model.input));
-    const dataValues = new Set([
-      ...Object.values(model.input).flatMap((schema) => (typeof schema === "string" ? [] : schema)),
-      ...Object.values(ir.decisions).flatMap((decision) => Object.keys(decision.rows)),
-    ]);
-    const seen = new Set<string>();
-    const logic = (key: string, message: string) => {
-      if (seen.has(key)) return;
-      seen.add(key);
-      report(adapterPath, "adapter-logic", `${message} The adapter must only forward calls; move this logic to ${SOURCE_DIR}/.`);
-    };
-    for (const token of tokens) {
-      if (token.kind === "number") logic("number", `Numeric literal ${token.text} found.`);
-      if (token.kind === "word" && dataFields.has(token.text)) {
-        logic(token.text, `Input field "${token.text}" is referenced. Pass \`input\` through unchanged.`);
-      }
-      if (token.kind === "string" && dataValues.has(token.text)) {
-        logic(token.text, `Input value or rule name "${token.text}" is referenced.`);
-      }
-    }
   }
 
   // --- 本番コード ---
