@@ -58,20 +58,24 @@ ${guide.trim()}
 The IR describes one component by its boundary.
 
 - \`model.states\` / \`model.initial\`: the state names and the starting state.
-- \`model.input\`: the fields passed to an action. An array lists the allowed values; a string is a primitive type.
+- \`model.actions\`: the actions that drive the component, each with the fields of its input. An array lists the
+  allowed values; a string is a primitive type.
+- \`model.data\`: what the component remembers between actions. Nothing is set in the initial state; a
+  transition's \`set\` says which fields it stores, and later actions can depend on them.
 - \`model.queries\`: values the component asks its environment for (clock, configuration, ...). In the test they
   are answered by \`ports.queries\`, and the answers can change from one action to the next.
 - \`model.commands\`: the side effects the component may perform on its environment, with their payload fields.
   In the test they are received by \`ports.commands\`.
 - \`decisions\`: decision tables. Each key of \`rows\` is a condition written in natural language; decide what it
-  means in terms of the input, the query answers, and the current state. At most one non-default row matches
+  means in terms of the remembered data, the query answers, the input of the action, and the current state. At most one non-default row matches
   (hit policy: unique); \`default\` applies when no other row matches.
 - \`behaviors\`: actions. \`from\` lists the states in which the action can be executed, and \`preconditions\`
   are natural-language conditions that must also hold; behaviour outside them is not tested. Each key of
   \`transitions\` is an outcome: the external result that decides how the action turns out (for example whether a
   payment succeeded). In the test, \`ports.outcomes.<Action>()\` returns the outcome of the action being executed.
-  The transition gives the resulting \`nextState\` and the \`emittedCommands\`, in order.
-- Inside a transition, \`{"$ref": "decision:<Table>.<column>"}\` means the value of that column in the row that
+  The transition gives the resulting \`nextState\`, the \`emittedCommands\` in order, and optionally \`set\`.
+- Inside a transition, \`{"$ref": "input:<field>"}\`, \`{"$ref": "data:<field>"}\` and \`{"$ref": "query:<field>"}\`
+  mean the value of that action input, remembered field, or query answer. \`{"$ref": "decision:<Table>.<column>"}\` means the value of that column in the row that
   matches, and \`{"$spread": "decision:<Table>.<column>"}\` means all elements of that column's array, inserted
   at that position. \`payloadSchema\` and \`event\` are informational and are not part of the command.
 
@@ -79,7 +83,7 @@ The IR describes one component by its boundary.
 
 The test harness is not available in this directory. When you finish, the harness collects your files and
 runs many randomly generated trials. One trial is: \`setupIsolation(ports)\`, then a sequence of several
-\`executeAction(action, input)\` calls on the same system, then \`teardownIsolation()\`. Before each action the
+\`executeAction(action)\` calls on the same system, then \`teardownIsolation()\`. Before each action the
 harness chooses new query answers and an outcome. After each action, \`getCurrentState()\` and the commands
 received by \`ports.commands\` during that action (including their order) must match the specification exactly.
 If they do not, you will be asked again with a minimal counterexample: the shortest sequence of actions that

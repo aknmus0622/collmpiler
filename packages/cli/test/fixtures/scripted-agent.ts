@@ -2,8 +2,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 // LLM の代役。決まった実装を書き出す。ループ (失敗 → 差し戻し → 修正) を LLM なしで再現するためのもの。
-//   buggy    … シルバー会員の割引が違う（1手で見つかる）
-//   norefund … 決済後のキャンセルで返金しない（決済 → キャンセルの2手でしか見つからない）
+//   buggy    … シルバー会員の割引が違う（注文 → 決済の2手で見つかる）
+//   norefund … 決済後のキャンセルで返金しない（注文 → 決済 → キャンセルの3手でしか見つからない）
 //   cheat    … 本番コードは正しいが、シルバー会員の決済をアダプターが肩代わりする（本番側の該当コードは死んでいる）
 //   moved    … 本番コードは割引が違い、正しい割引率はアダプターにだけ書かれている
 //   correct  … 正しい実装
@@ -21,23 +21,31 @@ const source = (step: Step) => `export type Deps = {
 };
 
 export class OrderService {
-  status = "PENDING";
+  status = "DRAFT";
+  rank = "";
   deps: Deps;
 
   constructor(deps: Deps) {
     this.deps = deps;
   }
 
-  checkout(customer: { rank: string }) {
+  place(rank: string) {
+    if (this.status !== "DRAFT") return;
+    this.rank = rank;
+    this.deps.send("SendOrderConfirmation", {});
+    this.status = "PENDING";
+  }
+
+  checkout() {
     if (this.status !== "PENDING" || !this.deps.paymentModuleActive()) return;
     if (this.deps.charge() !== "PaymentSuccess") {
       this.deps.send("NotifyPaymentFailure", {});
       return;
     }
-    if (customer.rank === "Gold" && this.deps.isMonthEnd()) {
+    if (this.rank === "Gold" && this.deps.isMonthEnd()) {
       this.deps.send("SendReceipt", { discount: 0.2 });
       this.deps.send("IssueCoupon", { type: "Premium" });
-    } else if (customer.rank === "Silver") {
+    } else if (this.rank === "Silver") {
       this.deps.send("SendReceipt", { discount: ${wrongDiscount(step) ? "0.5" : "0.05"} });
     } else {
       this.deps.send("SendReceipt", { discount: 0 });
@@ -47,7 +55,7 @@ export class OrderService {
 
   ship() {
     if (this.status !== "PAID") return;
-    this.deps.send("SendShippingNotice", {});
+    this.deps.send("SendShippingNotice", { priority: this.rank === "Gold" });
     this.status = "SHIPPED";
   }
 
@@ -60,9 +68,9 @@ ${step === "norefund" ? "" : `    if (this.status === "PAID") this.deps.send("Re
 
 // 業務上の判断をアダプター側で行ってしまう例
 const INTERCEPT = `    if (
-      action === "Checkout" &&
-      input.rank === "Silver" &&
-      service?.status === "PENDING" &&
+      action.name === "Checkout" &&
+      service?.rank === "Silver" &&
+      service.status === "PENDING" &&
       saved?.queries.paymentModuleActive() &&
       saved.outcomes.Checkout() === "PaymentSuccess"
     ) {
@@ -91,13 +99,14 @@ export const adapter: TargetSystemAdapter = {
   async teardownIsolation() {
     service = undefined;
   },
-  async executeAction(action, input) {
-${intercepts(step) ? INTERCEPT : ""}    if (action === "Checkout") service?.checkout(input);
-    if (action === "Ship") service?.ship();
-    if (action === "Cancel") service?.cancel();
+  async executeAction(action) {
+${intercepts(step) ? INTERCEPT : ""}    if (action.name === "PlaceOrder") service?.place(action.input.customerRank);
+    if (action.name === "Checkout") service?.checkout();
+    if (action.name === "Ship") service?.ship();
+    if (action.name === "Cancel") service?.cancel();
   },
   async getCurrentState() {
-    return (service?.status ?? "PENDING") as StateName;
+    return (service?.status ?? "DRAFT") as StateName;
   },
 };
 `;

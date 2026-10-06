@@ -19,15 +19,16 @@ export type Ports = {
 export type Adapter = {
   setupIsolation(ports: any): Promise<void>;
   teardownIsolation(): Promise<void>;
-  executeAction(action: any, input: any): Promise<void>;
+  executeAction(action: any): Promise<void>;
   getCurrentState(): Promise<unknown>;
 };
 
 type Values = Record<string, unknown>;
-type RawStep = { pick: number; outcomePick: number; input: Values; queries: Values };
+type RawStep = { pick: number; outcomePick: number; inputs: Record<string, Values>; queries: Values };
 type Observation = { state: unknown; commands: unknown };
 
-export type Step = { from: string; action: string; input: Values; queries: Values; outcome: string };
+// data は、そのアクションの実行前に部品が覚えているはずのデータ
+export type Step = { from: string; data: Values; action: string; input: Values; queries: Values; outcome: string };
 
 export type PbtResult =
   | { status: "pass"; seed: number; numRuns: number }
@@ -124,17 +125,19 @@ async function check(
       await adapter.setupIsolation(ports);
       try {
         let status = model.initial;
+        // 未設定のデータも undefined のキーとして持つ（createState が状態コンストラクタと区別できるように）
+        let data: Values = Object.fromEntries(Object.keys(model.data).map((field) => [field, undefined]));
         const initial = plain({ state: await adapter.getCurrentState(), commands: recorded });
         if (!isDeepStrictEqual(expected, initial)) return { steps, expected, actual: initial };
 
-        for (const { pick, outcomePick, input: actionInput, queries } of raw) {
-          const data = { status, ...actionInput, ...queries };
+        for (const { pick, outcomePick, inputs, queries } of raw) {
+          const contextOf = (name: string) => ({ status, ...data, ...queries, ...inputs[name] });
           // 現在の状態で実行でき、事前条件 (where) を満たすアクションだけが対象
           const enabled = actions.filter((name) => {
             const behavior = input.behaviors[name];
             return (
               (behavior.from ?? model.states).includes(status) &&
-              (behavior.where ?? []).every((text) => getPrecondition(text)?.(data))
+              (behavior.where ?? []).every((text) => getPrecondition(text)?.(contextOf(name)))
             );
           });
           if (enabled.length === 0) continue;
@@ -142,16 +145,17 @@ async function check(
           const outcomes = Object.keys(input.behaviors[action].cases).sort();
           const outcome = outcomes[outcomePick % outcomes.length];
 
-          const transition = input.behaviors[action].cases[outcome](createState(data)) as any;
+          const transition = input.behaviors[action].cases[outcome](createState(contextOf(action))) as any;
           expected = plain({ state: transition.nextState, commands: transition.effects });
 
-          current = { from: status, action, input: actionInput, queries, outcome };
+          current = { from: status, data: plain(data), action, input: inputs[action], queries, outcome };
           steps.push(current);
           recorded = [];
-          await adapter.executeAction(action, structuredClone(actionInput));
+          await adapter.executeAction({ name: action, input: structuredClone(inputs[action]) });
           const actual = plain({ state: await adapter.getCurrentState(), commands: recorded });
           if (!isDeepStrictEqual(expected, actual)) return { steps, expected, actual };
           status = transition.nextState;
+          data = { ...data, ...transition.set };
         }
       } finally {
         await adapter.teardownIsolation();
@@ -163,7 +167,12 @@ async function check(
   };
 
   const sequences = fc.array(
-    fc.record({ pick: fc.nat(), outcomePick: fc.nat(), input: recordOf(model.input), queries: recordOf(model.queries) }),
+    fc.record({
+      pick: fc.nat(),
+      outcomePick: fc.nat(),
+      inputs: fc.record(Object.fromEntries(actions.map((name) => [name, recordOf(model.actions[name] ?? {})]))),
+      queries: recordOf(model.queries),
+    }),
     { minLength: 1, maxLength: MAX_STEPS },
   );
   const details = await fc.check(

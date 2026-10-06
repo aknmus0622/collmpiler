@@ -9,17 +9,20 @@ export type Many<T> = T[];
 // 値として残るので IR に出力でき、PBT の入力生成にもそのまま使える。
 //
 // 部品は境界だけで記述する:
-//   input    … アクションの入力（外から部品を動かす呼び出しの引数）
+//   actions  … 外から部品を動かすアクションと、その入力
 //   queries  … 依存への問い合わせ（部品が外に尋ねて答えをもらう値。時計・設定など）
 //   commands … 依存への指示（部品が外に対して行う副作用）
+//   data     … 部品が覚えているデータ（遷移の set で書き、後のアクションで読む。初期状態では未設定）
 export type FieldSchema = "boolean" | "number" | "string" | readonly string[];
+export type Fields = Record<string, FieldSchema>;
 
 export type DomainModel = {
   initial: string;
   states: readonly string[];
-  input: Record<string, FieldSchema>;
-  queries: Record<string, FieldSchema>;
-  commands: Record<string, Record<string, FieldSchema>>;
+  data: Fields;
+  actions: Record<string, Fields>;
+  queries: Fields;
+  commands: Record<string, Fields>;
 };
 
 type FieldType<F> = F extends "boolean"
@@ -32,14 +35,20 @@ type FieldType<F> = F extends "boolean"
         ? Value
         : never;
 
-type Shape<Fields> = { -readonly [K in keyof Fields]: FieldType<Fields[K]> };
+type Shape<F> = { -readonly [K in keyof F]: FieldType<F[K]> };
 
-// 条件の評価関数と case が読めるデータ: 入力、問い合わせの答え、現在の状態名 (status)
-export type DataOf<M extends DomainModel> = Shape<M["input"]> & Shape<M["queries"]> & { status: M["states"][number] };
-export type StatesOf<M extends DomainModel> = { [Name in M["states"][number]]: DataOf<M> };
+export type DataOf<M extends DomainModel> = Shape<M["data"]>;
 export type CommandsOf<M extends DomainModel> = {
   [Action in keyof M["commands"]]: { action: Action; payload: Shape<M["commands"][Action]> };
 }[keyof M["commands"]];
+
+// 条件の評価関数と case が読めるデータ:
+// 現在の状態名 (status)、覚えているデータ（未設定があり得る）、問い合わせの答え、そのアクションの入力
+export type ContextOf<M extends DomainModel, Action extends keyof M["actions"]> = { status: M["states"][number] } & Partial<
+  DataOf<M>
+> &
+  Shape<M["queries"]> &
+  Shape<M["actions"][Action]>;
 
 // --- DMN ---
 // 文字列キーに加え、必ず "default" キーを要求する
@@ -111,46 +120,55 @@ export function getPrecondition(text: string): Predicate | undefined {
 }
 
 // --- 振る舞い定義 ---
-export type TransitionSpec<Command> = { event?: string; effects?: readonly Command[] };
+export type TransitionSpec<M extends DomainModel> = {
+  event?: string;
+  effects?: readonly CommandsOf<M>[];
+  // 覚えるデータ。ここに書いたフィールドだけが更新される
+  set?: Partial<DataOf<M>>;
+};
 
-export type Transition<Command = unknown> = {
+export type Transition<M extends DomainModel = any> = {
   readonly nextState: string;
   readonly event?: string;
-  readonly effects: readonly Command[];
+  readonly effects: readonly CommandsOf<M>[];
+  readonly set?: Partial<DataOf<M>>;
 };
 
-// States は「状態名 → その状態が持つデータ」のレコード。
 // state は現在のデータを読め、かつ状態名のコンストラクタで次状態を宣言できる。
-export type StateHandle<States, Command> = Readonly<States[keyof States]> & {
-  readonly [Name in keyof States]: (spec?: TransitionSpec<Command>) => Transition<Command>;
+export type StateHandle<M extends DomainModel, Action extends keyof M["actions"]> = Readonly<ContextOf<M, Action>> & {
+  readonly [Name in M["states"][number]]: (spec?: TransitionSpec<M>) => Transition<M>;
 };
 
-export type Behavior<States, Command> = {
+export type Behavior<M extends DomainModel, Action extends keyof M["actions"]> = {
   // このアクションを実行できる状態。省略時は全状態
-  from?: readonly (keyof States & string)[];
+  from?: readonly M["states"][number][];
   where?: readonly string[];
-  cases: Record<string, (state: StateHandle<States, Command>) => Transition<Command>>;
+  // キーは outcome（アクションの結果を決める外部要因の応答）
+  cases: Record<string, (state: StateHandle<M, Action>) => Transition<M>>;
 };
+
+// モデルの actions に宣言した全アクションに、振る舞いを1つずつ対応させる
+export type Behaviors<M extends DomainModel> = { [Action in keyof M["actions"]]: Behavior<M, Action> };
 
 export const BEHAVIORS = Symbol.for("aac.behaviors");
 
-export function defineBehaviors<States = any, Command = any>(
-  defs: Record<string, Behavior<States, Command>>,
-): Record<string, Behavior<States, Command>> {
+export function defineBehaviors<M extends DomainModel = any>(defs: Behaviors<M>): Behaviors<M> {
   Object.defineProperty(defs, BEHAVIORS, { value: true });
   return defs;
 }
 
-// 具体値での実行用（PBT のモデル側）。data に無いプロパティは状態コンストラクタとして振る舞う。
-export function createState<States, Command>(data: object): StateHandle<States, Command> {
-  return new Proxy(data, {
+// 具体値での実行用（PBT のモデル側）。context に無いプロパティは状態コンストラクタとして振る舞う。
+// 未設定のデータも、値 undefined のキーとして context に含めること。
+export function createState(context: object): any {
+  return new Proxy(context, {
     get(target, prop) {
       if (typeof prop === "symbol" || prop in target) return Reflect.get(target, prop);
-      return (spec: TransitionSpec<Command> = {}): Transition<Command> => ({
+      return (spec: TransitionSpec<any> = {}): Transition => ({
         nextState: prop,
         ...(spec.event === undefined ? {} : { event: spec.event }),
         effects: spec.effects ?? [],
+        ...(spec.set === undefined ? {} : { set: spec.set }),
       });
     },
-  }) as StateHandle<States, Command>;
+  });
 }

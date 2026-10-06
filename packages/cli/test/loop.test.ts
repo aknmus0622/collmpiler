@@ -63,12 +63,16 @@ test("ループ: PBT の反例 → ミューテーションで発覚 → 合格"
   assert.equal(status, "pass");
   assert.deepEqual(attempts.map((a) => a.feedback?.kind ?? "pass"), ["pbt", "mutation", "pass"]);
 
-  // 1回目: シルバー会員の割引違いが、最小の反例 (1手) として報告される
+  // 1回目: シルバー会員の割引違いが、最小の反例として報告される。
+  // 注文のときに覚えた会員ランクが、決済のときの data として示される
   const first = attempts[0].feedback;
   assert.ok(first?.kind === "pbt" && first.result.status === "fail");
   assert.deepEqual(
-    first.result.steps.map((s) => [s.from, s.action, s.outcome, s.input.rank]),
-    [["PENDING", "Checkout", "PaymentSuccess", "Silver"]],
+    first.result.steps.map((s) => [s.from, s.action, s.outcome, s.input, s.data]),
+    [
+      ["DRAFT", "PlaceOrder", "Placed", { customerRank: "Silver" }, {}],
+      ["PENDING", "Checkout", "PaymentSuccess", {}, { rank: "Silver" }],
+    ],
   );
   assert.deepEqual(first.result.expected, {
     state: "PAID",
@@ -148,7 +152,7 @@ test("設計方針: 既定の方針が依頼文に載り、プロジェクトの
   assert.ok(!custom.seen[0].files["aac/REQUEST.md"].includes(DEFAULT_GUIDE.trim()));
 });
 
-test("複数ステップ: 2手でしか現れない不具合を、最小のアクション列まで縮めて報告する", async () => {
+test("複数ステップ: 3手でしか現れない不具合を、最小のアクション列まで縮めて報告する", async () => {
   const { attempts } = await run(["norefund"], 1);
   const feedback = attempts[0].feedback;
   assert.ok(feedback?.kind === "pbt" && feedback.result.status === "fail");
@@ -156,6 +160,7 @@ test("複数ステップ: 2手でしか現れない不具合を、最小のア�
   assert.deepEqual(
     feedback.result.steps.map((s) => [s.from, s.action, s.outcome]),
     [
+      ["DRAFT", "PlaceOrder", "Placed"],
       ["PENDING", "Checkout", "PaymentSuccess"],
       ["PAID", "Cancel", "Cancelled"],
     ],

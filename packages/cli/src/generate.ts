@@ -55,8 +55,10 @@ export function generateContract(ir: Ir): string {
 
   return `${header(ir)}
 export type StateName = ${union(model.states)};
-export type ActionName = ${union(behaviors.map((b) => b.name))};
-export type ActionInput = ${shape(model.input)};
+
+/** One action to execute: its name and the input that goes with it. */
+export type Action =
+${behaviors.map((b) => `  | { name: ${JSON.stringify(b.name)}; input: ${shape(model.actions[b.name] ?? {})} }`).join("\n")};
 
 /**
  * Stand-ins for everything the system depends on. The test harness owns them; connect them to
@@ -78,7 +80,7 @@ export interface TargetSystemAdapter {
   /** Called after each trial, pass or fail. Discard everything the trial created. */
   teardownIsolation(): Promise<void>;
   /** Execute one action. A trial executes several actions in sequence on the same system. */
-  executeAction(action: ActionName, input: ActionInput): Promise<void>;
+  executeAction(action: Action): Promise<void>;
   /** The current state of the system. */
   getCurrentState(): Promise<StateName>;
 }
@@ -86,7 +88,7 @@ export interface TargetSystemAdapter {
 }
 
 export function generateAdapterSkeleton(): string {
-  const methods = ["setupIsolation(ports)", "teardownIsolation()", "executeAction(action, input)", "getCurrentState()"];
+  const methods = ["setupIsolation(ports)", "teardownIsolation()", "executeAction(action)", "getCurrentState()"];
   return `import type { TargetSystemAdapter } from "./${FILES.contract}";
 
 // Import the production code from ../${SOURCE_DIR}/ and forward each call to it. No business logic here.

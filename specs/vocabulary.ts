@@ -1,6 +1,7 @@
 import { bindDecisionDetails, bindPreconditions } from "@aac/core";
 import { CampaignRules } from "./campaign.dmn.ts";
 import { CancelRules } from "./cancel.dmn.ts";
+import { ShippingRules } from "./shipping.dmn.ts";
 
 // Layer 1のキーから推論（二重管理・ボイラープレートの排除）
 type CampaignConditions = keyof typeof CampaignRules;
@@ -14,6 +15,12 @@ export const CampaignEvaluator = bindDecisionDetails<CampaignConditions>(Campaig
 
 export const CancelEvaluator = bindDecisionDetails<keyof typeof CancelRules>(CancelRules, {
   "決済済みの注文の場合": (state) => state.status === "PAID",
+  "default": () => true
+});
+
+// 注文時に覚えた会員ランクを、出荷のときに読む
+export const ShippingEvaluator = bindDecisionDetails<keyof typeof ShippingRules>(ShippingRules, {
+  "ゴールド会員の場合": (state) => state.rank === "Gold",
   "default": () => true
 });
 

@@ -44,6 +44,9 @@ type Origin = { kind: "state" } | { kind: "decision"; table: string };
 type Node = { origin: Origin; path: string[]; used: boolean };
 type Context = {
   nodes: Node[];
+  model: DomainModel | undefined;
+  // 実行中の behavior 名（モデルがあるとき、入力フィールドの解決に使う）
+  action: string;
   tableNames: Map<object, string>;
   tables: Record<string, object>;
   usedTables: Set<string>;
@@ -142,8 +145,31 @@ function metaOf(value: unknown): Node | undefined {
   return typeof value === "function" ? (value as any)[META] : undefined;
 }
 
+// モデルがあれば、state の参照を「どの境界の値か」に解決する
+function stateRef(ctx: Context, node: Node): string {
+  const model = ctx.model;
+  if (!model || node.path.length === 0) return label(node);
+  const [field, ...rest] = node.path;
+  const kind =
+    field === "status"
+      ? "status"
+      : field in model.data
+        ? "data"
+        : field in model.queries
+          ? "query"
+          : field in (model.actions[ctx.action] ?? {})
+            ? "input"
+            : undefined;
+  if (kind === undefined) {
+    throw new AbstractExecutionError("unknown-field", `${label(node)}: モデルに "${field}" というデータ・問い合わせ・入力が無い`);
+  }
+  if (kind === "status") return "status";
+  return `${kind}:${[field, ...rest].join(".")}`;
+}
+
 function useRef(ctx: Context, node: Node): string {
   node.used = true;
+  if (node.origin.kind === "state") return stateRef(ctx, node);
   if (node.origin.kind === "decision" && node.path.length > 0) {
     const column = node.path[0];
     if (!columnsOf(ctx, node.origin.table).includes(column)) {
@@ -187,7 +213,12 @@ function typeName(value: unknown): string {
 function schemaOf(ctx: Context, value: unknown): unknown {
   const node = metaOf(value);
   if (node) {
-    if (node.origin.kind === "state") return "unknown";
+    if (node.origin.kind === "state") {
+      const model = ctx.model;
+      const [field] = node.path;
+      const schema = model?.data[field] ?? model?.queries[field] ?? model?.actions[ctx.action]?.[field];
+      return schema === undefined ? "unknown" : typeof schema === "string" ? schema : "string";
+    }
     const rows = Object.values(ctx.tables[node.origin.table]);
     const types = rows.map((row) => typeName(node.path.reduce((cur: any, key) => cur?.[key], row)));
     return [...new Set(types)].sort().join(" | ");
@@ -210,8 +241,14 @@ function commandsOf(ctx: Context, effects: unknown): unknown[] {
   });
 }
 
-async function runCase(input: SpecInput, tableNames: Map<object, string>, fn: (state: any) => unknown, allowAsync: boolean) {
-  const ctx: Context = { nodes: [], tableNames, tables: input.tables, usedTables: new Set() };
+async function runCase(
+  input: SpecInput,
+  tableNames: Map<object, string>,
+  action: string,
+  fn: (state: any) => unknown,
+  allowAsync: boolean,
+) {
+  const ctx: Context = { nodes: [], model: input.model, action, tableNames, tables: input.tables, usedTables: new Set() };
   const state = symbolic(ctx, { kind: "state" }, []);
   ctx.nodes[0].used = true;
 
@@ -232,6 +269,13 @@ async function runCase(input: SpecInput, tableNames: Map<object, string>, fn: (s
     emittedCommands: commandsOf(ctx, out.spec.effects),
   };
   if (out.spec.event !== undefined) transition.event = serialize(ctx, out.spec.event);
+  if (out.spec.set !== undefined) {
+    const unknown = Object.keys(out.spec.set).find((field) => input.model && !(field in input.model.data));
+    if (unknown !== undefined) {
+      throw new AbstractExecutionError("unknown-field", `set: モデルの data に "${unknown}" が無い`);
+    }
+    transition.set = serialize(ctx, out.spec.set);
+  }
 
   const unused = ctx.nodes.filter((node) => !node.used).map(label);
   return { transition, unused: [...new Set(unused)], usedTables: ctx.usedTables };
@@ -261,7 +305,7 @@ export async function extract(input: SpecInput, options: ExtractOptions = {}) {
         }
       }
       try {
-        const run = () => runCase(input, tableNames, behavior.cases[caseName], options.allowAsync ?? false);
+        const run = () => runCase(input, tableNames, name, behavior.cases[caseName], options.allowAsync ?? false);
         const first = await run();
         // 2回走らせて結果が変われば、乱数・時刻などの外部状態に依存している
         const second = await run();
