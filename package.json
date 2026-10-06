@@ -9,10 +9,13 @@
     "test": "node --test \"packages/**/*.test.ts\"",
     "ir": "node packages/cli/src/compile.ts specs",
     "implement": "node packages/cli/src/implement.ts",
-    "draft-binding": "node packages/cli/src/draft-binding.ts"
+    "draft-binding": "node packages/cli/src/draft-binding.ts",
+    "typecheck": "tsc -p ."
   },
   "devDependencies": {
     "@aac/cli": "workspace:*",
-    "@aac/core": "workspace:*"
+    "@aac/core": "workspace:*",
+    "@types/node": "^26.6.4",
+    "typescript": "^7.0.2"
   }
 }
