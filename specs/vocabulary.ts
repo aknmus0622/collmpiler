@@ -4,31 +4,32 @@ import { CancelRules } from "./cancel.dmn.ts";
 import { ShippingRules } from "./shipping.dmn.ts";
 import { OrderModel } from "./order.model.ts";
 
-// Layer 1 に自然言語で書いた名前に、評価関数を結び付ける。同じ文は、どこに書かれても同じ意味になる。
+// Binds every natural-language name in the spec to a function.
+// The same sentence means the same thing wherever it appears.
 export const Specification = bindSpecification(OrderModel, {
-  // ここに渡した決定表の行は、結び付けの漏れがコンパイルエラーになる
+  // A missing binding for any row of these tables is a compile error.
   tables: { CampaignRules, CancelRules, ShippingRules },
 
-  // 条件: 決定表の行、事前条件 (where)、case の分かれ方。
-  // 同時に複数が成立した場合は RuleConflictError (Hit Policy: Unique)
+  // Conditions: decision-table rows, preconditions (where), and the keys of cases.
+  // At most one may hold at a time; more than one is a RuleConflictError (hit policy: unique).
   conditions: {
-    "ゴールド会員であり、かつ月末の場合": (state) => state.rank === "Gold" && state.isMonthEnd,
-    "シルバー会員の場合": (state) => state.rank === "Silver",
-    "決済済みの注文の場合": (state) => state.status === "PAID",
-    "ゴールド会員、または1万円以上の注文の場合": (state) => state.rank === "Gold" || (state.price ?? 0) >= 10_000,
-    "外部決済モジュールが有効な場合": (state) => state.paymentModuleActive,
-    "決済に成功した場合": (state) => state.paymentResult === "succeeded"
+    "The customer is a Gold member and it is month-end": (state) => state.rank === "Gold" && state.isMonthEnd,
+    "The customer is a Silver member": (state) => state.rank === "Silver",
+    "The order has been paid": (state) => state.status === "PAID",
+    "The customer is a Gold member, or the order is 10,000 yen or more": (state) => state.rank === "Gold" || (state.price ?? 0) >= 10_000,
+    "The external payment module is active": (state) => state.paymentModuleActive,
+    "The payment succeeded": (state) => state.paymentResult === "succeeded"
   },
 
-  // 計算
+  // Formulas
   formulas: {
-    "請求金額（価格 ×（100 − 割引率）÷ 100、1円未満切り捨て）": (state) =>
+    "Amount charged: price × (100 − discount percent) ÷ 100, rounded down to a whole yen": (state) =>
       Math.floor(((state.price ?? 0) * (100 - applyDecision(CampaignRules, state).discountPercent)) / 100)
   },
 
-  // 不変条件: 仕様自身の矛盾を見つけるためのもの
+  // Invariants: these check the spec itself, not the implementation.
   invariants: {
-    "下書き以外の注文には、会員ランクと価格が設定されている": (state) =>
+    "Every order past the draft state has a member rank and a price": (state) =>
       state.status === "DRAFT" || (state.rank !== undefined && state.price !== undefined)
   }
 });

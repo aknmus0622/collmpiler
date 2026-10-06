@@ -71,7 +71,7 @@ test("ループ: PBT の反例 → ミューテーションで発覚 → 合格"
     first.result.steps.map((s) => [s.from, s.action, s.case, s.input, s.data]),
     [
       ["DRAFT", "PlaceOrder", "default", { customerRank: "Silver", listPrice: 0 }, {}],
-      ["PENDING", "Checkout", "決済に成功した場合", {}, { rank: "Silver", price: 0 }],
+      ["PENDING", "Checkout", "The payment succeeded", {}, { rank: "Silver", price: 0 }],
     ],
   );
   assert.deepEqual(first.result.expected, {
@@ -164,7 +164,7 @@ test("複数ステップ: 3手でしか現れない不具合を、最小のア�
     feedback.result.steps.map((s) => [s.from, s.action, s.case]),
     [
       ["DRAFT", "PlaceOrder", "default"],
-      ["PENDING", "Checkout", "決済に成功した場合"],
+      ["PENDING", "Checkout", "The payment succeeded"],
       ["PAID", "Cancel", "default"],
     ],
   );

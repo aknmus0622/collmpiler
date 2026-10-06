@@ -1,17 +1,15 @@
 import type { DecisionTable } from "@aac/core";
 import type { DomainCommand } from "./order.model.ts";
 
-// 割引率は整数のパーセントで持つ（小数だと金額の計算に誤差が出る）
+// The discount is a whole-number percentage (fractions would make the amount calculation inexact).
 export type CampaignOutputs = { discountPercent: number; effects: DomainCommand[] };
 
-// 【真の源泉】
-// as const: キーを厳密な文字列リテラルとして推論させ、Layer 2でのInferred Dictionaryを実現する。
-// satisfies: as constの推論を保ちつつ、defaultの記述漏れや型エラーを厳格にチェックする。
+// Each key is a condition written in natural language; `default` is mandatory.
 export const CampaignRules = {
-  "ゴールド会員であり、かつ月末の場合": {
+  "The customer is a Gold member and it is month-end": {
     discountPercent: 20,
     effects: [{ action: "IssueCoupon", payload: { type: "Premium" } }]
   },
-  "シルバー会員の場合": { discountPercent: 5, effects: [] },
-  "default": { discountPercent: 0, effects: [] } // 必須フォールバック
+  "The customer is a Silver member": { discountPercent: 5, effects: [] },
+  "default": { discountPercent: 0, effects: [] }
 } as const satisfies DecisionTable<CampaignOutputs>;

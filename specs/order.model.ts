@@ -1,32 +1,32 @@
 import type { CommandsOf, DomainModel } from "@aac/core";
 
 const Rank = ["Gold", "Silver", "Bronze"] as const;
-// 金額は円の整数で扱う。around は、その前後を PBT が重点的に生成するしきい値
+// Money is a whole number of yen. `around` lists thresholds the property-based test probes closely.
 const Yen = { type: "integer", min: 0, max: 1_000_000, around: [10_000] } as const;
 
-// 注文という部品の境界。状態・データ・アクション・依存の唯一の源泉で、型はここから導出する。
+// The boundary of the "order" component. This value is the single source of truth; types are derived from it.
 export const OrderModel = {
   initial: "DRAFT",
   states: ["DRAFT", "PENDING", "PAID", "SHIPPED", "CANCELLED"],
-  // 注文が覚えているデータ（初期状態では未設定）
+  // What the order remembers between actions (nothing is set in the initial state)
   data: {
     rank: Rank,
     price: Yen,
   },
-  // アクションと、その入力
+  // Actions and their inputs
   actions: {
     PlaceOrder: { customerRank: Rank, listPrice: Yen },
     Checkout: {},
     Ship: {},
     Cancel: {},
   },
-  // 依存への問い合わせ（時計・設定・外部サービスの応答など、部品が外に尋ねる値）
+  // Queries to dependencies: values the component asks for (clock, configuration, an external service's response)
   queries: {
     isMonthEnd: "boolean",
     paymentModuleActive: "boolean",
     paymentResult: ["succeeded", "failed"],
   },
-  // 依存への指示（仕様として許可される副作用）
+  // Commands to dependencies: the side effects the spec allows
   commands: {
     SendOrderConfirmation: {},
     SendReceipt: { discountPercent: "integer", amount: "integer" },
@@ -35,13 +35,13 @@ export const OrderModel = {
     SendShippingNotice: { priority: "boolean" },
     Refund: {},
   },
-  // 計算。名前に式と丸め方を書く。中身は Layer 2 で結び付ける
+  // Formulas: the name states the calculation and the rounding. The function is bound in vocabulary.ts.
   formulas: {
-    "請求金額（価格 ×（100 − 割引率）÷ 100、1円未満切り捨て）": "integer",
+    "Amount charged: price × (100 − discount percent) ÷ 100, rounded down to a whole yen": "integer",
   },
-  // 不変条件。どのアクションの後でも成り立つべき性質
+  // Invariants: properties that must hold after every action
   invariants: [
-    "下書き以外の注文には、会員ランクと価格が設定されている",
+    "Every order past the draft state has a member rank and a price",
   ],
 } as const satisfies DomainModel;
 

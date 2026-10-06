@@ -10,7 +10,7 @@ export const behaviors = defineBehaviors<typeof OrderModel>({
     cases: {
       "default": (state) => state.PENDING({
         event: "Order placed",
-        // 入力の会員ランクと価格を注文に覚えさせる（決済と出荷で使う）
+        // Remember the rank and the price; checkout and shipping depend on them.
         set: { rank: state.customerRank, price: state.listPrice },
         effects: [{ action: "SendOrderConfirmation", payload: {} }]
       })
@@ -18,12 +18,12 @@ export const behaviors = defineBehaviors<typeof OrderModel>({
   },
   Checkout: {
     from: ["PENDING"],
-    where: ["外部決済モジュールが有効な場合"],
+    where: ["The external payment module is active"],
     cases: {
-      "決済に成功した場合": (state) => {
-        // ロジックは持たず、表データ(DMN)と計算を適用し、その結果をマッピングするのみ
+      "The payment succeeded": (state) => {
+        // No logic here: apply the decision table and the formula, then map their results.
         const campaign = applyDecision(CampaignRules, state);
-        const amount = applyFormula(OrderModel, "請求金額（価格 ×（100 − 割引率）÷ 100、1円未満切り捨て）", state);
+        const amount = applyFormula(OrderModel, "Amount charged: price × (100 − discount percent) ÷ 100, rounded down to a whole yen", state);
 
         return state.PAID({
           event: "Payment completed",

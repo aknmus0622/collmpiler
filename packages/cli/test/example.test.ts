@@ -12,7 +12,7 @@ import { selfCheck } from "../src/runtime.ts";
 
 // SPEC.md の例 (specs/) を、具体値と抽象実行の両方で通す
 
-const success = behaviors.Checkout.cases["決済に成功した場合"];
+const success = behaviors.Checkout.cases["The payment succeeded"];
 const order = (data: object) => createState({ status: "PENDING", rank: undefined, price: undefined, ...data });
 
 test("具体実行: ゴールド会員かつ月末は20%引きで、請求金額は計算で決まる", () => {
@@ -28,7 +28,7 @@ test("具体実行: ゴールド会員かつ月末は20%引きで、請求金額
 
 test("具体実行: どの条件にも当たらなければ default", () => {
   const state = { status: "PENDING", rank: "Bronze", isMonthEnd: true, price: 500 };
-  assert.equal(evaluateConditions(["ゴールド会員であり、かつ月末の場合", "シルバー会員の場合"], state), "default");
+  assert.equal(evaluateConditions(["The customer is a Gold member and it is month-end", "The customer is a Silver member"], state), "default");
   assert.deepEqual(success(order(state)).effects, [{ action: "SendReceipt", payload: { discountPercent: 0, amount: 500 } }]);
 });
 
@@ -60,16 +60,16 @@ test("specs/ の IR 出力は実行ごとにバイト一致する", () => {
   const ir = JSON.parse(first);
   const find = (name: string) => ir.behaviors.find((b: { name: string }) => b.name === name);
   // case のキーは条件の文。state の参照は「どの境界の値か」に、計算は名前に解決されて IR に出る
-  const paid = find("Checkout").transitions["決済に成功した場合"];
+  const paid = find("Checkout").transitions["The payment succeeded"];
   assert.equal(paid.nextState, "PAID");
   assert.deepEqual(paid.emittedCommands[0].payload.amount, {
-    $ref: "formula:請求金額（価格 ×（100 − 割引率）÷ 100、1円未満切り捨て）",
+    $ref: "formula:Amount charged: price × (100 − discount percent) ÷ 100, rounded down to a whole yen",
   });
   assert.deepEqual(find("PlaceOrder").transitions.default.set, {
     rank: { $ref: "input:customerRank" },
     price: { $ref: "input:listPrice" },
   });
-  assert.deepEqual(ir.model.invariants, ["下書き以外の注文には、会員ランクと価格が設定されている"]);
+  assert.deepEqual(ir.model.invariants, ["Every order past the draft state has a member rank and a price"]);
 });
 
 test("specs/ は仕様の事前検査に合格する", async () => {
