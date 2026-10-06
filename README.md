@@ -11,8 +11,9 @@ Phase 1 spike. TypeScript targets only.
   formulas, and invariants are written as natural-language names and bound to functions separately.
 - **Check the spec on its own.** Conflicting conditions, missing bindings, broken invariants, and values that
   do not fit their declared type are reported before any implementation exists.
-- **Have an LLM agent write the production code from the spec**, in an isolated directory. The framework
-  generates test-side code only and places nothing in production code.
+- **Have an LLM agent write the production code from the spec**, test-first, in three isolated sessions:
+  design a skeleton, wire it to the test harness, then implement it. The framework generates test-side code
+  only and places nothing in production code.
 - **Verify the result.** Property-based tests run sequences of actions and shrink failures to the shortest
   sequence; a mutation gate confirms that the tested behaviour really comes from production code. Failures go
   back to the agent until it passes.
@@ -180,27 +181,40 @@ pnpm -s run implement --out examples/checkout-ts --fresh \
   --agent 'claude -p "Read aac/REQUEST.md and carry out the request." --permission-mode acceptEdits'
 ```
 
-Any command can be the agent. It runs in a temporary directory outside the repository that contains only the
-IR, the adapter contract, an adapter skeleton, and the request. When it finishes, the framework collects its
-files, runs the property-based test and the mutation gate, and sends any failure back for another attempt.
+Any command can be the agent. The work follows a test-driven flow in three steps, each a separate session
+that sees different things:
+
+| Step | The agent sees | The agent writes | Then the framework checks |
+| --- | --- | --- | --- |
+| 1. Design | the IR | a skeleton of the production code: signatures, no behaviour | that it loads |
+| 2. Wiring | the test harness contract and the skeleton, **not the IR** | the adapter | that the tests **fail** because nothing is implemented yet |
+| 3. Implementation | the IR and the skeleton, **not the adapter** | the bodies | that the tests pass, and the mutation gate |
+
+Because the wiring step never sees the spec, the adapter cannot make business decisions; because the other two
+steps never see the test harness, production code is not shaped by it. Each session runs in a temporary
+directory outside the repository, and a failed check is sent back to the same step for another attempt.
 
 ```text
-[1] strategy: claude -p "Read aac/REQUEST.md and carry out the request." ... (in /tmp/aac-hrDWMt)
-[1] exit gate: pass (mutation: builtin, 9/19 killed)
+[1] design #1: ok
+[1] wiring #1: ok (tests fail as expected: not implemented)
+[1] implementation #1: pass (mutation: builtin, 9/28 killed)
 ```
 
-Here the agent passed on its first attempt. The mutations that survived are reported but do not fail the
-run: they are return values that nothing observes. A run fails only when changing a value from a decision
-table leaves the tests passing.
+Here every step passed on its first attempt. The mutations that survived are reported but do not fail the
+run: the agent chose to have its clock return a date and to compute "month-end" itself, and the spec, which
+only speaks of a month-end flag, cannot exercise that calendar logic. A run fails only when changing a value
+from a decision table leaves the tests passing.
 
 ### 4. What you get
 
 ```text
 examples/checkout-ts/
 ├── src/                      written by the agent; no framework imports, no framework types
-│   ├── rules.ts
+│   ├── types.ts
+│   ├── ports.ts              the dependencies, in the production code's own terms
+│   ├── rules.ts              the business decisions, as pure functions
 │   ├── order.ts
-│   └── dependencies.ts
+│   └── index.ts
 └── aac/                      the test side
     ├── ir.json               generated
     ├── adapter.contract.ts   generated
@@ -208,12 +222,12 @@ examples/checkout-ts/
     └── adapter.ts            skeleton generated, filled in by the agent
 ```
 
-**Production code** (`src/rules.ts`). The agent turned the natural-language names into code: the formula with
-its rounding, and the 10,000-yen threshold.
+**Production code** (`src/rules.ts`). The agent turned the natural-language names into code: the decision
+table, the formula with its rounding, and the 10,000-yen threshold.
 
 ```ts
-export function campaignFor(rank: MemberRank, isMonthEnd: boolean): Campaign {
-  if (rank === "Gold" && isMonthEnd) {
+export function campaignFor(rank: CustomerRank, monthEnd: boolean): CampaignOutcome {
+  if (rank === "Gold" && monthEnd) {
     return { discountPercent: 20, coupon: "Premium" };
   }
   if (rank === "Silver") {
@@ -222,34 +236,36 @@ export function campaignFor(rank: MemberRank, isMonthEnd: boolean): Campaign {
   return { discountPercent: 0, coupon: null };
 }
 
-/** Price after discount, rounded down to a whole yen. */
 export function amountCharged(price: number, discountPercent: number): number {
   return Math.floor((price * (100 - discountPercent)) / 100);
 }
 
-export function isPriorityShipment(rank: MemberRank, price: number): boolean {
-  if (rank === "Gold" || price >= 10000) {
-    return true;
-  }
-  return false;
+export function isPriorityShipment(rank: CustomerRank, price: number): boolean {
+  return rank === "Gold" || price >= PRIORITY_SHIPMENT_MIN_PRICE;
 }
 ```
 
 **The adapter** (`aac/adapter.ts`). Production code defines its dependencies in its own terms; the adapter
-connects them to the stand-ins the test harness provides.
+connects them to the stand-ins the test harness provides, translating where the two differ. Here the
+production clock returns a date, while the spec speaks of a month-end flag.
 
 ```ts
-order = new Order({
-  payments: {
-    isAvailable: () => ports.queries.paymentModuleActive(),
-    charge: () => ports.queries.paymentResult(),
-    refund: () => ports.commands.Refund({}),
-  },
-  calendar: {
-    isMonthEnd: () => ports.queries.isMonthEnd(),
-  },
-  // ...
-});
+const MONTH_END: CalendarDate = { year: 2026, month: 1, day: 31 };
+const NOT_MONTH_END: CalendarDate = { year: 2026, month: 1, day: 15 };
+
+function dependenciesFor(ports: Ports): OrderDependencies {
+  return {
+    clock: {
+      today: () => (ports.queries.isMonthEnd() ? MONTH_END : NOT_MONTH_END),
+    },
+    payments: {
+      isActive: () => ports.queries.paymentModuleActive(),
+      charge: () => ports.queries.paymentResult(),
+      refund: () => ports.commands.Refund({}),
+    },
+    // ...
+  };
+}
 ```
 
 ### 5. Verify again at any time
