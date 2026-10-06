@@ -8,7 +8,7 @@
       "name": "Cancel",
       "preconditions": [],
       "transitions": {
-        "Cancelled": {
+        "default": {
           "emittedCommands": [
             {
               "$spread": "decision:CancelRules.effects"
@@ -28,7 +28,7 @@
         "外部決済モジュールが有効な場合"
       ],
       "transitions": {
-        "PaymentFailure": {
+        "default": {
           "emittedCommands": [
             {
               "action": "NotifyPaymentFailure",
@@ -39,17 +39,21 @@
           "event": "Payment failed",
           "nextState": "PENDING"
         },
-        "PaymentSuccess": {
+        "決済に成功した場合": {
           "emittedCommands": [
             {
               "action": "SendReceipt",
               "payload": {
-                "discount": {
-                  "$ref": "decision:CampaignRules.discount"
+                "amount": {
+                  "$ref": "formula:請求金額（価格 ×（100 − 割引率）÷ 100、1円未満切り捨て）"
+                },
+                "discountPercent": {
+                  "$ref": "decision:CampaignRules.discountPercent"
                 }
               },
               "payloadSchema": {
-                "discount": "number"
+                "amount": "integer",
+                "discountPercent": "number"
               }
             },
             {
@@ -68,7 +72,7 @@
       "name": "PlaceOrder",
       "preconditions": [],
       "transitions": {
-        "Placed": {
+        "default": {
           "emittedCommands": [
             {
               "action": "SendOrderConfirmation",
@@ -79,6 +83,9 @@
           "event": "Order placed",
           "nextState": "PENDING",
           "set": {
+            "price": {
+              "$ref": "input:listPrice"
+            },
             "rank": {
               "$ref": "input:customerRank"
             }
@@ -93,7 +100,7 @@
       "name": "Ship",
       "preconditions": [],
       "transitions": {
-        "Shipped": {
+        "default": {
           "emittedCommands": [
             {
               "action": "SendShippingNotice",
@@ -118,11 +125,11 @@
       "bound": true,
       "rows": {
         "default": {
-          "discount": 0,
+          "discountPercent": 0,
           "effects": []
         },
         "ゴールド会員であり、かつ月末の場合": {
-          "discount": 0.2,
+          "discountPercent": 20,
           "effects": [
             {
               "action": "IssueCoupon",
@@ -133,7 +140,7 @@
           ]
         },
         "シルバー会員の場合": {
-          "discount": 0.05,
+          "discountPercent": 5,
           "effects": []
         }
       }
@@ -160,7 +167,7 @@
         "default": {
           "priority": false
         },
-        "ゴールド会員の場合": {
+        "ゴールド会員、または1万円以上の注文の場合": {
           "priority": true
         }
       }
@@ -176,7 +183,15 @@
           "Gold",
           "Silver",
           "Bronze"
-        ]
+        ],
+        "listPrice": {
+          "around": [
+            10000
+          ],
+          "max": 1000000,
+          "min": 0,
+          "type": "integer"
+        }
       },
       "Ship": {}
     },
@@ -191,23 +206,42 @@
       "Refund": {},
       "SendOrderConfirmation": {},
       "SendReceipt": {
-        "discount": "number"
+        "amount": "integer",
+        "discountPercent": "integer"
       },
       "SendShippingNotice": {
         "priority": "boolean"
       }
     },
     "data": {
+      "price": {
+        "around": [
+          10000
+        ],
+        "max": 1000000,
+        "min": 0,
+        "type": "integer"
+      },
       "rank": [
         "Gold",
         "Silver",
         "Bronze"
       ]
     },
+    "formulas": {
+      "請求金額（価格 ×（100 − 割引率）÷ 100、1円未満切り捨て）": "integer"
+    },
     "initial": "DRAFT",
+    "invariants": [
+      "下書き以外の注文には、会員ランクと価格が設定されている"
+    ],
     "queries": {
       "isMonthEnd": "boolean",
-      "paymentModuleActive": "boolean"
+      "paymentModuleActive": "boolean",
+      "paymentResult": [
+        "succeeded",
+        "failed"
+      ]
     },
     "states": [
       "DRAFT",

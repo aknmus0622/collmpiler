@@ -1,20 +1,26 @@
-import type { Calendar, CouponIssuer, CustomerNotifier, PaymentGateway } from "./dependencies.ts";
-import { campaignFor, priorityShipping, refundOnCancel } from "./policies.ts";
-import type { CustomerRank } from "./policies.ts";
-
-export type OrderStatus = "DRAFT" | "PENDING" | "PAID" | "SHIPPED" | "CANCELLED";
+import type { Clock } from "./calendar.ts";
+import { isLastDayOfMonth } from "./calendar.ts";
+import { billingAmount, campaignFor } from "./campaign.ts";
+import { requiresRefund } from "./cancellation.ts";
+import { isPriorityShipment } from "./shipping.ts";
+import type { CouponIssuer, CustomerNotifier, CustomerRank, OrderStatus, PaymentGateway } from "./types.ts";
 
 export type OrderDependencies = {
+  clock: Clock;
   payments: PaymentGateway;
-  calendar: Calendar;
   notifier: CustomerNotifier;
   coupons: CouponIssuer;
 };
 
+type OrderDetails = { rank: CustomerRank; price: number };
+
+/** Raised when an operation is not allowed for the order as it currently stands. */
+export class OrderOperationError extends Error {}
+
 export class Order {
-  private currentStatus: OrderStatus = "DRAFT";
-  private rank: CustomerRank | undefined = undefined;
   private readonly deps: OrderDependencies;
+  private currentStatus: OrderStatus = "DRAFT";
+  private details: OrderDetails | null = null;
 
   constructor(deps: OrderDependencies) {
     this.deps = deps;
@@ -24,42 +30,61 @@ export class Order {
     return this.currentStatus;
   }
 
-  place(customerRank: CustomerRank): void {
-    if (this.currentStatus !== "DRAFT") return;
-    this.rank = customerRank;
+  place(rank: CustomerRank, price: number): void {
+    this.requireStatus("place", "DRAFT");
+    this.details = { rank, price };
     this.currentStatus = "PENDING";
     this.deps.notifier.orderConfirmed();
   }
 
   checkout(): void {
-    if (this.currentStatus !== "PENDING" || this.rank === undefined) return;
-    if (!this.deps.payments.isAvailable()) return;
+    this.requireStatus("check out", "PENDING");
+    const { rank, price } = this.placedDetails();
+    const { payments, notifier, coupons, clock } = this.deps;
+    if (!payments.isAvailable()) {
+      throw new OrderOperationError("Payment is currently unavailable");
+    }
 
-    if (this.deps.payments.charge() === "declined") {
-      this.deps.notifier.paymentFailed();
+    const campaign = campaignFor(rank, isLastDayOfMonth(clock.today()));
+    const amount = billingAmount(price, campaign.discountPercent);
+    if (payments.charge(amount) !== "succeeded") {
+      notifier.paymentFailed();
       return;
     }
 
-    const campaign = campaignFor(this.rank, this.deps.calendar.isMonthEnd());
     this.currentStatus = "PAID";
-    this.deps.notifier.receipt(campaign.discount);
-    for (const type of campaign.coupons) {
-      this.deps.coupons.issue(type);
+    notifier.receipt(amount, campaign.discountPercent);
+    for (const coupon of campaign.coupons) {
+      coupons.issue(coupon);
     }
   }
 
   ship(): void {
-    if (this.currentStatus !== "PAID" || this.rank === undefined) return;
+    this.requireStatus("ship", "PAID");
+    const { rank, price } = this.placedDetails();
     this.currentStatus = "SHIPPED";
-    this.deps.notifier.shippingNotice(priorityShipping(this.rank));
+    this.deps.notifier.shipped(isPriorityShipment(rank, price));
   }
 
   cancel(): void {
-    if (this.currentStatus !== "PENDING" && this.currentStatus !== "PAID") return;
-    const refund = refundOnCancel(this.currentStatus === "PAID");
+    this.requireStatus("cancel", "PENDING", "PAID");
+    const refund = requiresRefund(this.currentStatus);
     this.currentStatus = "CANCELLED";
     if (refund) {
       this.deps.payments.refund();
     }
+  }
+
+  private requireStatus(operation: string, ...allowed: OrderStatus[]): void {
+    if (!allowed.includes(this.currentStatus)) {
+      throw new OrderOperationError(`Cannot ${operation} an order that is ${this.currentStatus}`);
+    }
+  }
+
+  private placedDetails(): OrderDetails {
+    if (this.details === null) {
+      throw new OrderOperationError("Order has not been placed");
+    }
+    return this.details;
   }
 }
