@@ -5,7 +5,9 @@ import { extract, stableStringify } from "../src/extract.ts";
 import type { ExtractOptions } from "../src/extract.ts";
 
 // レコーディング Proxy がどこまで通り、どこで破綻するかの記録。
-// 各テストは「現在の挙動」を固定する。"盲点" と付いたものは誤った IR が無警告で出るケース。
+// 各テストは「現在の挙動」を固定する。run() は構文制限 (lint) を外した Proxy 単体の挙動で、
+// "盲点" と付いたものは Proxy だけでは誤った IR が無警告で出るケース。
+// それらを lint が塞ぐことは lint.test.ts で確認している。
 
 const Rules = {
   "ゴールドの場合": { discount: 0.2, effects: [{ action: "IssueCoupon", payload: { type: "Premium" } }] },
@@ -14,7 +16,7 @@ const Rules = {
 
 async function run(caseFn: (state: any) => unknown, options?: ExtractOptions) {
   const behaviors = defineBehaviors({ B: { cases: { C: caseFn as any } } });
-  const { ir, diagnostics } = await extract({ behaviors, tables: { Rules } }, options);
+  const { ir, diagnostics } = await extract({ behaviors, tables: { Rules } }, { lint: false, ...options });
   return {
     transition: ir.behaviors[0].transitions.C as any,
     codes: diagnostics.map((d) => `${d.severity}:${d.code}`),

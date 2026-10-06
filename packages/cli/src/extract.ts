@@ -1,4 +1,5 @@
 import { ABSTRACT_APPLY, getBinding } from "@aac/core";
+import { lintCase } from "./lint.ts";
 
 // レコーディング Proxy による抽象実行: cases の関数を「記号的な state」で1回走らせ、
 // 返ってきた遷移記述から IR を組み立てる。
@@ -19,7 +20,11 @@ export type Diagnostic = {
   message: string;
 };
 
-export type ExtractOptions = { allowAsync?: boolean };
+export type ExtractOptions = {
+  allowAsync?: boolean;
+  // false にすると構文制限を外し、Proxy 単体の挙動を観察できる（テスト用）
+  lint?: boolean;
+};
 
 export class AbstractExecutionError extends Error {
   code: string;
@@ -239,6 +244,17 @@ export async function extract(input: SpecInput, options: ExtractOptions = {}) {
     for (const caseName of Object.keys(behavior.cases).sort()) {
       const report = (severity: Diagnostic["severity"], code: string, message: string) =>
         diagnostics.push({ severity, code, behavior: name, case: caseName, message });
+      if (options.lint ?? true) {
+        const found = lintCase(Function.prototype.toString.call(behavior.cases[caseName]));
+        if (found) {
+          report(
+            "error",
+            "forbidden-syntax",
+            `case の ${found.line} 行目 \`${found.token}\`: ${found.reason}。分岐と演算は DecisionTable に寄せること`,
+          );
+          continue;
+        }
+      }
       try {
         const run = () => runCase(input, tableNames, behavior.cases[caseName], options.allowAsync ?? false);
         const first = await run();
