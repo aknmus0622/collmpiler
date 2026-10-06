@@ -1,26 +1,24 @@
 import type { TargetSystemAdapter } from "./adapter.contract.ts";
-import { OrderSystem } from "../src/checkout.ts";
+import { Order } from "../src/order.ts";
 
-// ../src/ の本番コードを import し、各メソッドから呼び出す。業務ロジックはここに書かない。
-const system = new OrderSystem();
+let order: Order | null = null;
+
+function current(): Order {
+  if (order === null) throw new Error("setupIsolation has not been called");
+  return order;
+}
 
 export const adapter: TargetSystemAdapter = {
-  async setupIsolation() {
-    system.reset();
+  async setupIsolation(ports) {
+    order = new Order(ports);
   },
   async teardownIsolation() {
-    system.reset();
+    order = null;
   },
-  async givenState(state, data) {
-    system.load(state, data);
-  },
-  async executeAction(action, outcome) {
-    system.execute(action, outcome);
+  async executeAction(action, input) {
+    current().execute(action, input);
   },
   async getCurrentState() {
-    return system.currentState();
-  },
-  async getFiredCommands() {
-    return system.firedCommands();
+    return current().currentState();
   },
 };

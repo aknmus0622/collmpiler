@@ -1,11 +1,44 @@
 {
   "behaviors": [
     {
+      "from": [
+        "PENDING",
+        "PAID"
+      ],
+      "name": "Cancel",
+      "preconditions": [],
+      "transitions": {
+        "Cancelled": {
+          "emittedCommands": [
+            {
+              "$spread": "decision:CancelRules.effects"
+            }
+          ],
+          "event": "Order cancelled",
+          "nextState": "CANCELLED"
+        }
+      }
+    },
+    {
+      "from": [
+        "PENDING"
+      ],
       "name": "Checkout",
       "preconditions": [
         "外部決済モジュールが有効な場合"
       ],
       "transitions": {
+        "PaymentFailure": {
+          "emittedCommands": [
+            {
+              "action": "NotifyPaymentFailure",
+              "payload": {},
+              "payloadSchema": {}
+            }
+          ],
+          "event": "Payment failed",
+          "nextState": "PENDING"
+        },
         "PaymentSuccess": {
           "emittedCommands": [
             {
@@ -25,6 +58,26 @@
           ],
           "event": "Payment completed",
           "nextState": "PAID"
+        }
+      }
+    },
+    {
+      "from": [
+        "PAID"
+      ],
+      "name": "Ship",
+      "preconditions": [],
+      "transitions": {
+        "Shipped": {
+          "emittedCommands": [
+            {
+              "action": "SendShippingNotice",
+              "payload": {},
+              "payloadSchema": {}
+            }
+          ],
+          "event": "Order shipped",
+          "nextState": "SHIPPED"
         }
       }
     }
@@ -53,6 +106,22 @@
           "effects": []
         }
       }
+    },
+    "CancelRules": {
+      "bound": true,
+      "rows": {
+        "default": {
+          "effects": []
+        },
+        "決済済みの注文の場合": {
+          "effects": [
+            {
+              "action": "Refund",
+              "payload": {}
+            }
+          ]
+        }
+      }
     }
   },
   "irVersion": 1,
@@ -64,23 +133,30 @@
           "Standard"
         ]
       },
+      "NotifyPaymentFailure": {},
+      "Refund": {},
       "SendReceipt": {
         "discount": "number"
-      }
+      },
+      "SendShippingNotice": {}
     },
-    "data": {
-      "isMonthEnd": "boolean",
-      "paymentModuleActive": "boolean",
+    "initial": "PENDING",
+    "input": {
       "rank": [
         "Gold",
         "Silver",
         "Bronze"
       ]
     },
-    "initial": "PENDING",
+    "queries": {
+      "isMonthEnd": "boolean",
+      "paymentModuleActive": "boolean"
+    },
     "states": [
       "PENDING",
-      "PAID"
+      "PAID",
+      "SHIPPED",
+      "CANCELLED"
     ]
   }
 }
