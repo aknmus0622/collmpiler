@@ -105,7 +105,7 @@ PBT の実行中に同じ種類の問題が見つかった場合も、実装の�
 | 本番コード | LLM | 本番側（`src/`。構成もAPIも自由） | いいえ |
 
 * **テストケースは LLM に書かせません。** 採点基準を LLM に書かせると、実装とテストが同じ誤解をして合格してしまいます。
-* **LLM に見せるのは IR だけです。** 仕様の TypeScript（特に Layer 2 の評価関数）は見せません。自然言語の条件（「ゴールド会員であり、かつ月末の場合」）をデータ定義に照らして解釈し実装するのが LLM の仕事であり、その解釈が正しいかを Layer 2 を正解として PBT が判定します。これは「IR が実装に十分な情報を持っているか」の検証も兼ねます。
+* **LLM に見せるのは IR だけです。** 仕様の TypeScript（特に Layer 2 の評価関数）は見せません。自然言語の条件（「The customer is a Gold member and it is month-end」）をデータ定義に照らして解釈し実装するのが LLM の仕事であり、その解釈が正しいかを Layer 2 を正解として PBT が判定します。これは「IR が実装に十分な情報を持っているか」の検証も兼ねます。
 * **決定性は検証側で保ちます。** LLM の出力は毎回変わるので、合格した本番コードを成果物として保存します。出口ゲートは決定的で、PBT のシードは仕様のハッシュから決めます。
 
 #### 入口ゲート（隔離）
@@ -244,11 +244,11 @@ export const OrderModel = {
   },
   // 計算。名前に式と丸め方を書く
   formulas: {
-    "請求金額（価格 ×（100 − 割引率）÷ 100、1円未満切り捨て）": "integer",
+    "Amount charged: price × (100 − discount percent) ÷ 100, rounded down to a whole yen": "integer",
   },
   // 不変条件。どのアクションの後でも成り立つべき性質
   invariants: [
-    "下書き以外の注文には、会員ランクと価格が設定されている",
+    "Every order past the draft state has a member rank and a price",
   ],
 } as const satisfies DomainModel;
 
@@ -292,22 +292,22 @@ export type CampaignOutputs = { discountPercent: number; effects: DomainCommand[
 // as const: キーを厳密な文字列リテラルとして推論させ、Layer 2でのInferred Dictionaryを実現する。
 // satisfies: as constの推論を保ちつつ、defaultの記述漏れや型エラーを厳格にチェックする。
 export const CampaignRules = {
-  "ゴールド会員であり、かつ月末の場合": {
+  "The customer is a Gold member and it is month-end": {
     discountPercent: 20,
     effects: [{ action: "IssueCoupon", payload: { type: "Premium" } }]
   },
-  "シルバー会員の場合": { discountPercent: 5, effects: [] },
+  "The customer is a Silver member": { discountPercent: 5, effects: [] },
   "default": { discountPercent: 0, effects: [] } // 必須フォールバック
 } as const satisfies DecisionTable<CampaignOutputs>;
 
 // --- specs/cancel.dmn.ts / shipping.dmn.ts (Layer 1) ---
 export const CancelRules = {
-  "決済済みの注文の場合": { effects: [{ action: "Refund", payload: {} }] },
+  "The order has been paid": { effects: [{ action: "Refund", payload: {} }] },
   "default": { effects: [] }
 } as const satisfies DecisionTable<CancelOutputs>;
 
 export const ShippingRules = {
-  "ゴールド会員、または1万円以上の注文の場合": { priority: true },
+  "The customer is a Gold member, or the order is 10,000 yen or more": { priority: true },
   "default": { priority: false }
 } as const satisfies DecisionTable<ShippingOutputs>;
 
@@ -329,12 +329,12 @@ export const behaviors = defineBehaviors<typeof OrderModel>({
   },
   Checkout: {
     from: ["PENDING"],
-    where: ["外部決済モジュールが有効な場合"],
+    where: ["The external payment module is active"],
     cases: {
-      "決済に成功した場合": (state) => {
+      "The payment succeeded": (state) => {
         // ロジックは持たず、表データ(DMN)と計算を適用し、その結果をマッピングするのみ
         const campaign = applyDecision(CampaignRules, state);
-        const amount = applyFormula(OrderModel, "請求金額（価格 ×（100 − 割引率）÷ 100、1円未満切り捨て）", state);
+        const amount = applyFormula(OrderModel, "Amount charged: price × (100 − discount percent) ÷ 100, rounded down to a whole yen", state);
 
         return state.PAID({
           event: "Payment completed",
@@ -407,23 +407,23 @@ export const Specification = bindSpecification(OrderModel, {
   // 条件: 決定表の行、事前条件 (where)、case の分かれ方。
   // 同時に複数が成立した場合は RuleConflictError (Hit Policy: Unique)
   conditions: {
-    "ゴールド会員であり、かつ月末の場合": (state) => state.rank === "Gold" && state.isMonthEnd,
-    "シルバー会員の場合": (state) => state.rank === "Silver",
-    "決済済みの注文の場合": (state) => state.status === "PAID",
-    "ゴールド会員、または1万円以上の注文の場合": (state) => state.rank === "Gold" || (state.price ?? 0) >= 10_000,
-    "外部決済モジュールが有効な場合": (state) => state.paymentModuleActive,
-    "決済に成功した場合": (state) => state.paymentResult === "succeeded"
+    "The customer is a Gold member and it is month-end": (state) => state.rank === "Gold" && state.isMonthEnd,
+    "The customer is a Silver member": (state) => state.rank === "Silver",
+    "The order has been paid": (state) => state.status === "PAID",
+    "The customer is a Gold member, or the order is 10,000 yen or more": (state) => state.rank === "Gold" || (state.price ?? 0) >= 10_000,
+    "The external payment module is active": (state) => state.paymentModuleActive,
+    "The payment succeeded": (state) => state.paymentResult === "succeeded"
   },
 
   // 計算（決定表の結果を使える）
   formulas: {
-    "請求金額（価格 ×（100 − 割引率）÷ 100、1円未満切り捨て）": (state) =>
+    "Amount charged: price × (100 − discount percent) ÷ 100, rounded down to a whole yen": (state) =>
       Math.floor(((state.price ?? 0) * (100 - applyDecision(CampaignRules, state).discountPercent)) / 100)
   },
 
   // 不変条件: 仕様自身の矛盾を見つけるためのもの
   invariants: {
-    "下書き以外の注文には、会員ランクと価格が設定されている": (state) =>
+    "Every order past the draft state has a member rank and a price": (state) =>
       state.status === "DRAFT" || (state.rank !== undefined && state.price !== undefined)
   }
 });
@@ -452,15 +452,15 @@ Layer 2 は PBT が期待値を算出するための「正解」であり、IR �
     "actions": { "PlaceOrder": { "customerRank": [ ... ], "listPrice": { ... } }, "Checkout": {}, "Ship": {}, "Cancel": {} },
     "queries": { "isMonthEnd": "boolean", "paymentModuleActive": "boolean", "paymentResult": ["succeeded", "failed"] },
     "commands": { "SendReceipt": { "discountPercent": "integer", "amount": "integer" }, "Refund": {}, ... },
-    "formulas": { "請求金額（価格 ×（100 − 割引率）÷ 100、1円未満切り捨て）": "integer" },
-    "invariants": ["下書き以外の注文には、会員ランクと価格が設定されている"]
+    "formulas": { "Amount charged: price × (100 − discount percent) ÷ 100, rounded down to a whole yen": "integer" },
+    "invariants": ["Every order past the draft state has a member rank and a price"]
   },
   "decisions": {
     "CampaignRules": {
       "bound": true,
       "rows": {
-        "ゴールド会員であり、かつ月末の場合": { "discountPercent": 20, "effects": [ ... ] },
-        "シルバー会員の場合": { "discountPercent": 5, "effects": [] },
+        "The customer is a Gold member and it is month-end": { "discountPercent": 20, "effects": [ ... ] },
+        "The customer is a Silver member": { "discountPercent": 5, "effects": [] },
         "default": { "discountPercent": 0, "effects": [] }
       }
     },
@@ -483,16 +483,16 @@ Layer 2 は PBT が期待値を算出するための「正解」であり、IR �
     {
       "name": "Checkout",
       "from": ["PENDING"],
-      "preconditions": ["外部決済モジュールが有効な場合"],
+      "preconditions": ["The external payment module is active"],
       "transitions": {
-        "決済に成功した場合": {
+        "The payment succeeded": {
           "nextState": "PAID",
           "event": "Payment completed",
           "emittedCommands": [
             { "action": "SendReceipt",
               "payload": {
                 "discountPercent": { "$ref": "decision:CampaignRules.discountPercent" },
-                "amount": { "$ref": "formula:請求金額（価格 ×（100 − 割引率）÷ 100、1円未満切り捨て）" } },
+                "amount": { "$ref": "formula:Amount charged: price × (100 − discount percent) ÷ 100, rounded down to a whole yen" } },
               "payloadSchema": { "discountPercent": "number", "amount": "integer" } },
             { "$spread": "decision:CampaignRules.effects" }
           ]
