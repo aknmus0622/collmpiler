@@ -8,7 +8,8 @@
   "scripts": {
     "test": "node --test \"packages/**/*.test.ts\"",
     "ir": "node packages/cli/src/compile.ts specs",
-    "implement": "node packages/cli/src/implement.ts"
+    "implement": "node packages/cli/src/implement.ts",
+    "draft-binding": "node packages/cli/src/draft-binding.ts"
   },
   "devDependencies": {
     "@aac/cli": "workspace:*",

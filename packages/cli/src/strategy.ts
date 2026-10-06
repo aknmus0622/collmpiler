@@ -10,8 +10,9 @@ import type { Phase } from "./request.ts";
 export type Assignment = {
   // 入口ゲートが用意した作業場所。依頼は <dir>/aac/REQUEST.md
   dir: string;
-  // 実装のどの段階か（設計 / 配線 / 実装）。依頼文はすでにその段階のものになっている
-  phase: Phase;
+  // 実装のどの段階か（設計 / 配線 / 実装）。依頼文はすでにその段階のものになっている。
+  // "binding" は実装の流れとは別の、結び付けの下書き (draft.ts)
+  phase: Phase | "binding";
   attempt: number;
   // 入口ゲートがリポジトリのパスを取り除いた環境変数
   env: NodeJS.ProcessEnv;

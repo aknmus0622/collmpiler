@@ -42,9 +42,10 @@ function scripted(script: Script, extra?: (assignment: Assignment) => void) {
       for (const name of readdirSync(assignment.dir, { recursive: true }) as string[]) {
         if (name.includes(".")) files[name.split("\\").join("/")] = readFileSync(join(assignment.dir, name), "utf8");
       }
-      seen.push({ phase: assignment.phase, dir: assignment.dir, files });
-      const steps = script[assignment.phase] ?? ["correct"];
-      write(assignment.phase, steps[Math.min(calls[assignment.phase]++, steps.length - 1)], assignment.dir);
+      const phase = assignment.phase as Phase;
+      seen.push({ phase, dir: assignment.dir, files });
+      const steps = script[phase] ?? ["correct"];
+      write(phase, steps[Math.min(calls[phase]++, steps.length - 1)], assignment.dir);
       extra?.(assignment);
     },
   };

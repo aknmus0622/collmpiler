@@ -1,9 +1,12 @@
+import { parseArgs } from "node:util";
 import { extract, stableStringify } from "./extract.ts";
 import { loadSpecs } from "./loader.ts";
 import { selfCheck } from "./runtime.ts";
 
-// 暫定エントリ: node packages/cli/src/compile.ts <specs-dir>  → IR を stdout へ
-const spec = await loadSpecs(process.argv[2] ?? "specs");
+// 暫定エントリ: node packages/cli/src/compile.ts [specs-dir] [--drafts]  → IR を stdout へ
+// --drafts: 結び付けの下書き (*.draft.ts) を、確定版の代わりに読む（下書きの検査用）
+const { values, positionals } = parseArgs({ options: { drafts: { type: "boolean", default: false } }, allowPositionals: true });
+const spec = await loadSpecs(positionals[0] ?? "specs", { drafts: values.drafts });
 const { ir, diagnostics } = await extract(spec);
 for (const d of diagnostics) {
   console.error(`${d.severity}[${d.code}] ${d.behavior}.${d.case}: ${d.message}`);

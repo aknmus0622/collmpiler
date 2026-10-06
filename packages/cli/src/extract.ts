@@ -28,6 +28,8 @@ export type SpecInput = {
   // export 名 → DecisionTable。applyDecision に渡された表の名前解決に使う
   tables: Record<string, object>;
   model?: SpecModel;
+  // どのファイルのどの export か（結び付けの下書きを書くときに使う）
+  sources?: { component?: { file: string; exportName: string }; tables: Record<string, string> };
 };
 
 export type Diagnostic = {

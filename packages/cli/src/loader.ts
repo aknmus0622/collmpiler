@@ -5,12 +5,22 @@ import { COMPONENT } from "@aac/core";
 import type { Boundary } from "@aac/core";
 import type { SpecInput, SpecModel } from "./extract.ts";
 
+// 下書き (LLM が書き、人がまだ確定していない結び付け) のファイル名
+export const DRAFT_SUFFIX = ".draft.ts";
+
 // 仕様の読み込みはここ1箇所に閉じ込める。パスは process.cwd() 基準。
-export async function loadSpecs(dir: string): Promise<SpecInput> {
+// 下書き (*.draft.ts) は既定では読まない。人が確認して名前を変えるまで、正解として使われないようにするため。
+// drafts: true のときだけ下書きを読み、それが置き換える確定版 (X.draft.ts に対する X.ts) は読まない
+export async function loadSpecs(dir: string, options: { drafts?: boolean } = {}): Promise<SpecInput> {
   const root = resolve(process.cwd(), dir);
-  const files = (readdirSync(root, { recursive: true }) as string[])
+  const all = (readdirSync(root, { recursive: true }) as string[])
     .filter((file) => file.endsWith(".ts") && !file.endsWith(".d.ts"))
     .sort();
+  const drafts = all.filter((file) => file.endsWith(DRAFT_SUFFIX));
+  const replaced = new Set(drafts.map((file) => `${file.slice(0, -DRAFT_SUFFIX.length)}.ts`));
+  const files = options.drafts
+    ? all.filter((file) => !replaced.has(file))
+    : all.filter((file) => !file.endsWith(DRAFT_SUFFIX));
 
   const input: SpecInput = { behaviors: {}, tables: {} };
   for (const file of files) {
@@ -21,11 +31,13 @@ export async function loadSpecs(dir: string): Promise<SpecInput> {
       if ((value as any)[COMPONENT]) {
         if (input.model) throw new Error(`コンポーネントが複数あります (${file})。現在は1つだけ扱えます`);
         Object.assign(input, normalize(exportName, value as Boundary & { behaviors: Record<string, unknown> }));
+        input.sources = { ...input.sources, component: { file, exportName }, tables: input.sources?.tables ?? {} };
       } else if ("default" in value) {
         if (exportName in input.tables && input.tables[exportName] !== value) {
           throw new Error(`DecisionTable "${exportName}" が重複しています (${file})`);
         }
         input.tables[exportName] = value;
+        input.sources = { component: input.sources?.component, tables: { ...input.sources?.tables, [exportName]: file } };
       }
     }
   }
