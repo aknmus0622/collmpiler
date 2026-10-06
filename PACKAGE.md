@@ -1,3 +1,6 @@
+> **現状との関係:** 本書は長期的な到達点を描いたものです。当面の構成は `DISTRIBUTION.md` §6 に従い、`packages/core` と `packages/cli` だけを作っています（`packages/compiler` と `plugins/` は未作成で、相当する機能は `packages/cli/src/` 内にあります）。
+> また、フレームワークが生成するのは**テスト側のコードだけ**です。本番コードは IR を入力に LLM エージェントが書きます（`SPEC.md` §2.3）。
+
 ## 1. モノレポ・ツールチェーンの選定
 
 * **パッケージマネージャー:** `pnpm` (Workspace機能による高速な依存解決)
@@ -19,19 +22,20 @@ aac-engine-monorepo/
 ├── packages/                  # プラットフォームのコアモジュール
 │   ├── core/                  # (1) Layer 1/2 を記述するための型・ユーティリティ
 │   ├── compiler/              # (2) TS(AST) -> Universal IR に変換する中核エンジン
-│   ├── typia-transformer/     # (3) Typiaを用いたAOTバリデーション生成ラッパー
+│   ├── typia-transformer/     # (3) 【不採用】Typia はビルド時の変換が必要で、ビルドなし方針と衝突する。
+│   │                          #     代わりに値として書くドメインモデルから型を導出する (SPEC.md §3.1)
 │   └── cli/                   # (4) ユーザーが叩くCLIツール (npx aac build 等)
 │
-├── plugins/                   # 各言語・ツール向けのジェネレータ (Layer 1.5 -> Layer 3)
-│   ├── gen-typescript/        # TS向けPBT(fast-check)とZod/Typiaバリデーション生成
-│   ├── gen-golang/            # Go向けPBT(rapid)と構造体・バリデーション生成
-│   ├── gen-rust/              # Rust向けPBT(proptest)とstruct生成
+├── plugins/                   # 各言語・ツール向けのジェネレータ (IR -> Layer 3)。生成するのはテスト側のみ
+│   ├── gen-typescript/        # TS向けPBT(fast-check)のグルーとアダプター契約
+│   ├── gen-golang/            # Go向けPBT(rapid)のグルーとアダプター契約
+│   ├── gen-rust/              # Rust向けPBT(proptest)のグルーとアダプター契約
 │   └── gen-mermaid/           # IRからDFDやイベントストーミング図を生成するエクスポーター
 │
-└── examples/                  # テスト兼デモ用プロジェクト
-    ├── e-commerce-spec/       # (Layer 1/2) 共通の仕様定義パッケージ（TSのみ）
-    ├── e-commerce-go-backend/ # GoによるLayer 3実装とPBTテスト
-    └── e-commerce-ts-backend/ # TSによるLayer 3実装とPBTテスト
+└── examples/                  # テスト兼デモ用プロジェクト（本番コードは LLM エージェントが書いた成果物）
+    ├── e-commerce-spec/       # (Layer 1/2) 共通の仕様定義パッケージ（TSのみ）。現在はルートの specs/
+    ├── e-commerce-go-backend/ # Goの本番コード(src)とテスト側(aac)
+    └── e-commerce-ts-backend/ # TSの本番コード(src)とテスト側(aac)。現在は examples/checkout-ts
 
 ```
 
@@ -44,9 +48,10 @@ aac-engine-monorepo/
 ユーザー（PdM・エンジニア）が `specs/` ディレクトリ内でインポートして使う、極めて薄いライブラリです。ランタイムのロジックはほぼ持ちません。
 
 * **責務:**
+* ドメインモデルの型定義 (`DomainModel`, `StatesOf<M>`, `CommandsOf<M>`)。値として宣言し、型を導出する
 * 多重度DSLの型定義 (`One<T>`, `Some<T>`, `Many<T>`)
 * DMNの型定義 (`DecisionTable<T>`, `applyDecision()`)
-* 振る舞い定義のヘルパー (`defineBehaviors()`, `bindDecisionDetails()`)
+* 振る舞い定義のヘルパー (`defineBehaviors()`, `bindDecisionDetails()`, `bindPreconditions()`)
 
 
 * **依存関係:** 外部依存ゼロ（ピュアTS）。
@@ -72,6 +77,7 @@ aac-engine-monorepo/
 * `npx aac compile` (TS -> IR)
 * `npx aac generate` (IR -> Plugin経由で各言語のコード出力)
 * `npx aac test --seed 123` (PBTランナーのキック、Shrinkのログ制御)
+* `npx aac implement --agent "<command>"` (LLM エージェントに本番コードを書かせ、検査と PBT を合格するまで差し戻す)
 
 
 
@@ -82,9 +88,9 @@ aac-engine-monorepo/
 Compilerが出力した Universal IR（JSON）を入力として受け取り、各エコシステムのコードを出力する独立したモジュール群です。
 
 * **責務:**
-* **型定義の生成:** IRから、Goの `struct`、Rustの `enum` 等を生成。
+* **型定義の生成:** IRから、アダプター契約で使う型（Goの `struct`、Rustの `enum` 等）を**テスト側に**生成。本番コード用の型は生成しない。
 * **PBTエンジンの生成:** IRの `arbitrary`（入力生成）と `transition`（期待される次状態）の情報を、ターゲット言語のPBTライブラリ（`fast-check`, `gopter`, `proptest`）が解釈できるテストコードに変換。
-* **Adapter Contract の生成:** テスト対象システムが実装すべきインターフェース（`TargetSystemAdapter`）を生成。
+* **Adapter Contract の生成:** テスト側のアダプターが実装すべきインターフェース（`TargetSystemAdapter`）と、その雛形を生成。
 
 
 
@@ -129,12 +135,14 @@ export default defineConfig({
 これだけ巨大な構想を一気に作ると頓挫します。以下のフェーズで順にマイルストーンを置くことをお勧めします。
 
 * **Phase 1 (Proof of Concept):**
-* `packages/core` (多重度DSLとDMNの型) の実装。
-* `packages/compiler` は作らず、**TypeScript (Node.js) 上での動的評価**と `fast-check` だけを使って、`examples/e-commerce-ts-backend` を完成させる。（他言語展開はいったん後回し）。
+* `packages/core` (ドメインモデル、多重度DSL、DMNの型) の実装。
+* `packages/compiler` は作らず、**TypeScript (Node.js) 上での動的評価**と `fast-check` だけを使って、TS の例を完成させる。（他言語展開はいったん後回し）。
+* 本番コードを LLM エージェントに書かせるループ（生成 → エージェント → 余計なもの検査 → PBT → 差し戻し）を通す。
+* 残り: 複数ステップの経路探索、値オブジェクトと制約、多重度の値レベル化、`aac` コマンド。
 
 
 * **Phase 2 (Universal IR の抽出):**
-* 動的評価で動いている TS のステートマシン情報を JSON化（Universal IR化）するロジックを追加。
+* 動的評価で動いている TS のステートマシン情報を JSON化（Universal IR化）するロジックを追加。（LLM への入力として必要になったため、抽象実行による抽出は Phase 1 で先行実装済み）
 * `packages/compiler` を切り出す。
 
 
