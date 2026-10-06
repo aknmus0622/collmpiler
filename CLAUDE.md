@@ -11,7 +11,8 @@ Phase 1 spike. The design documents (written in Japanese) are still the bulk of 
   - `loader.ts` — the single `SpecLoader`.
   - `extract.ts` — recording-Proxy abstract execution → IR. `lint.ts` — token whitelist applied to each case body first.
   - `generate.ts` — IR → test-side files. `runtime.ts` — PBT runtime (fast-check) called by the generated `verify.ts`.
-  - `check.ts` + `scan.ts` — mechanical checks on what the LLM wrote. `loop.ts` — agent → check → PBT → feedback loop.
+  - `strategy.ts` — the swappable implementation step (an external agent command). `gates.ts` — entry gate (isolated sandbox with allowlisted inputs) and exit gate (collect allowlisted outputs, checks, PBT). `request.ts` — the agent-facing request text. `loop.ts` — entry gate → strategy → exit gate → feedback.
+  - `check.ts` + `scan.ts` — mechanical checks on what the LLM wrote.
 - `specs/` — the `SPEC.md` example (`order.model.ts`, `campaign.dmn.ts`, `order.spec.ts` are Layer 1; `vocabulary.ts` is Layer 2).
 - `examples/checkout-ts/` — `src/` is production code written by an LLM agent from the IR; `aac/` is the generated test side. Do not hand-edit `src/` to make verification pass; rerun the loop.
 - Run tests through `pnpm test` (explicit glob). A bare `node --test` executes every file under any `test/` directory, including fixtures and temporary work directories.
@@ -29,9 +30,10 @@ node --test --test-name-pattern="スプレッド" "packages/**/*.test.ts"   # te
 pnpm -s run ir                                        # specs/ -> IR JSON on stdout, diagnostics on stderr
 pnpm --filter example-checkout-ts verify              # PBT against examples/checkout-ts (add -- --seed N --path P to replay)
 
-# Have an agent (re)write an implementation; any command works, it runs with cwd = --out
-pnpm -s run implement --out examples/checkout-ts --max-attempts 3 \
-  --agent 'claude -p "Read aac/REQUEST.md and carry out the request." --permission-mode acceptEdits --allowedTools "Read,Write,Edit,Glob,Grep,Bash(node aac/verify.ts:*)"'
+# Have an agent (re)write an implementation. Any command works; it runs in an isolated temp directory.
+# --fresh discards the existing src/ and adapter; --transcripts <dir> saves the agent's stdout per attempt.
+pnpm -s run implement --out examples/checkout-ts --fresh --max-attempts 3 \
+  --agent 'claude -p "Read aac/REQUEST.md and carry out the request." --permission-mode acceptEdits'
 ```
 
 `typescript` is deliberately not a dependency, so there is no type-check script; `tsconfig.json` exists for editors and for an externally installed `tsc -p .`. `fast-check` (in `@aac/cli`) is the only third-party dependency.
@@ -68,6 +70,25 @@ Layers, from `SPEC.md`:
 - **Adapter Contract**: `TargetSystemAdapter` (`setupIsolation` / `teardownIsolation` / `givenState` / `executeAction` / `getCurrentState` / `getFiredCommands`) is the only boundary to the target system. It must stay a thin forwarder; `check.ts` rejects adapters that touch state data.
 
 Roadmap (`PACKAGE.md` §5): Phase 1 (core, dynamic evaluation in Node with fast-check, the LLM implementation loop) is in progress; IR extraction was pulled forward from Phase 2 because the LLM needs it as input. Multi-language generators and Mermaid/observability follow in Phases 3–4.
+
+## LLM as the compiler
+
+The framework generates **test-side code only**; it never places types, signatures, or files in production code. The pipeline (`SPEC.md` §2.3): specs → IR → **entry gate** (temp directory outside the repo holding only the IR, adapter contract, adapter, `REQUEST.md`, and any previous `src/`) → **strategy** (an external agent command writes `src/` and fills `aac/adapter.ts` there) → **exit gate** (audit the sandbox, copy only `src/` and the adapter to `--out`, regenerate `ir.json` / contract / `verify.ts` there, run `check.ts`, run PBT) → on any failure the violation or minimal counterexample goes into the next `REQUEST.md`.
+
+Invariants to preserve when changing this:
+
+- Isolation belongs to the gates, not to strategies. Nothing that points at the repo may enter the sandbox: no spec sources, no `verify.ts` (it contains the specs path), no repo paths in file contents or environment variables. A new strategy must not need to re-implement any of this.
+- The agent sees the IR only. Layer 2 predicates are the oracle and must never be emitted into the IR or the request; interpreting the natural-language condition keys is the LLM's job, and PBT judges it.
+- Test cases are never LLM-written. Expected values come from executing the spec concretely (`createState` + `applyDecision`).
+- Generated files are a pure function of the IR (no timestamps, no versions); `check.ts` relies on byte-equality with a regeneration. The PBT seed is derived from the spec hash so verification is deterministic.
+- `--out` must sit where `@aac/cli/runtime` resolves (a workspace package like `examples/*`, or under `packages/cli/` as the tests do).
+- Agent-facing text (`REQUEST.md`, check violations) is English; user-facing diagnostics are Japanese.
+
+Types vanish at runtime, so anything the IR or PBT needs must be declared as a value (`DomainModel`) with the type derived from it — never the other way round.
+
+## Case bodies: no branching, no operators
+
+The recording Proxy cannot observe `===`, truthiness, `??`, `||`, or destructuring defaults, so a case that branches yields a silently wrong IR (only one path recorded). The decision is to keep the Proxy approach and forbid such syntax: `lint.ts` allows only `const`, `return`, literals, property access, calls, spread, and destructuring, and anything else is a `forbidden-syntax` error. All branching and arithmetic belongs in the DecisionTable rows/columns — when a spec seems to need an `if`, add a row or column instead of relaxing the lint. The lint works on `fn.toString()` with a hand-written tokenizer to stay dependency-free; it does not see into helper functions called from a case.
 
 ## Decided constraints for implementation
 
