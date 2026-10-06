@@ -25,6 +25,8 @@ export type GateContext = {
   outDir: string;
   seed: number;
   runs: number;
+  // 依頼文に載せる設計方針
+  guide: string;
   // undefined ならミューテーションのゲートを省く
   mutation: MutationStrategy | undefined;
 };
@@ -76,7 +78,7 @@ export function entryGate(ctx: GateContext, attempt: number, feedback: Feedback 
   const inputs: Record<string, string> = {
     [`${TEST_DIR}/${FILES.ir}`]: stableStringify(ctx.ir),
     [`${TEST_DIR}/${FILES.contract}`]: generateContract(ctx.ir),
-    [REQUEST]: renderRequest(attempt, feedback),
+    [REQUEST]: renderRequest(attempt, feedback, ctx.guide),
     [ADAPTER]: existsSync(join(ctx.outDir, ADAPTER))
       ? readFileSync(join(ctx.outDir, ADAPTER), "utf8")
       : generateAdapterSkeleton(),

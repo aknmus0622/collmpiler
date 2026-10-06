@@ -5,6 +5,7 @@ import { entryGate, exitGate } from "./gates.ts";
 import type { Feedback, GateContext, MutationSummary } from "./gates.ts";
 import { FILES, SOURCE_DIR, TEST_DIR, requireModel, specHash } from "./generate.ts";
 import type { Ir } from "./generate.ts";
+import { DEFAULT_GUIDE } from "./guide.ts";
 import { loadSpecs } from "./loader.ts";
 import { builtinMutation } from "./mutation.ts";
 import type { MutationStrategy } from "./mutation.ts";
@@ -19,6 +20,8 @@ export type ImplementOptions = {
   strategy: ImplementationStrategy;
   maxAttempts?: number;
   runs?: number;
+  // 依頼文に載せる設計方針。省略時は既定の方針
+  guide?: string;
   // ミューテーションのゲートの Strategy。省略時は自前、null で無効
   mutation?: MutationStrategy | null;
   // true なら出力先の既存の本番コードとアダプターを捨てて、雛形から始める
@@ -59,6 +62,7 @@ export async function implement(options: ImplementOptions) {
     outDir,
     seed,
     runs: options.runs ?? 200,
+    guide: options.guide ?? DEFAULT_GUIDE,
     mutation: options.mutation === null ? undefined : (options.mutation ?? builtinMutation),
   };
 

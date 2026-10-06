@@ -18,7 +18,7 @@ function renderFeedback(feedback: Feedback): string {
   return `The previous attempt failed the property-based test. Minimal counterexample:\n\n\`\`\`json\n${JSON.stringify(feedback.result, null, 2)}\n\`\`\``;
 }
 
-export function renderRequest(attempt: number, feedback: Feedback | undefined): string {
+export function renderRequest(attempt: number, feedback: Feedback | undefined, guide: string): string {
   return `# Implementation request (attempt ${attempt})
 
 Implement a system that satisfies the specification in \`${TEST_DIR}/${FILES.ir}\`, then connect it to the test
@@ -46,6 +46,12 @@ harness. Your work is accepted when the rule check, the property-based test, and
   the tests pass, the harness changes the decision values in your production code one at a time (a discount
   rate, a coupon type, ...) and expects the tests to fail each time. A value that can be changed without
   failing a test means the decision is being made somewhere else, or the code is dead.
+
+## Design guidance
+
+This is guidance on how to design the code, not something the harness checks.
+
+${guide.trim()}
 
 ## How to read the IR
 

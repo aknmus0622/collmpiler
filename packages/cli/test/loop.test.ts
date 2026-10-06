@@ -7,6 +7,7 @@ import { extract, stableStringify } from "../src/extract.ts";
 import { scrubEnv } from "../src/gates.ts";
 import { generateAdapterSkeleton, generateContract, generateVerify } from "../src/generate.ts";
 import type { Ir } from "../src/generate.ts";
+import { DEFAULT_GUIDE } from "../src/guide.ts";
 import { loadSpecs } from "../src/loader.ts";
 import { implement } from "../src/loop.ts";
 import type { ImplementOptions } from "../src/loop.ts";
@@ -136,6 +137,15 @@ test("ミューテーション: 決定表の値が本番コードに見つから
     judge({ strategy: "x", mutants: [mutant(false)] }, [0.2], "").map((v) => v.rule),
     ["mutation-ineffective"],
   );
+});
+
+test("設計方針: 既定の方針が依頼文に載り、プロジェクトの方針で差し替えられる", async () => {
+  const standard = await run(["correct"], 1, undefined, { mutation: null });
+  assert.ok(standard.seen[0].files["aac/REQUEST.md"].includes(DEFAULT_GUIDE.trim()));
+
+  const custom = await run(["correct"], 1, undefined, { mutation: null, guide: "- Use the repository pattern." });
+  assert.match(custom.seen[0].files["aac/REQUEST.md"], /## Design guidance[\s\S]*- Use the repository pattern\./);
+  assert.ok(!custom.seen[0].files["aac/REQUEST.md"].includes(DEFAULT_GUIDE.trim()));
 });
 
 test("複数ステップ: 2手でしか現れない不具合を、最小のアクション列まで縮めて報告する", async () => {
