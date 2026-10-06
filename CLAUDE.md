@@ -6,11 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Phase 1 spike. The design documents (written in Japanese) are still the bulk of the repo. The code:
 
-- `packages/core/index.ts` — `DomainModel` (value-level states/data/commands, with types derived from it), `DecisionTable`, `defineBehaviors`, `applyDecision`, `bindDecisionDetails`, `bindPreconditions`, `createState` (concrete execution). Zero dependencies.
+- `packages/core/index.ts` — `DomainModel` (value-level states/data/commands, with types derived from it), `DecisionTable`, `defineBehaviors`, `applyDecision`, `applyFormula`, `bindSpecification`, `createState` (concrete execution). Zero dependencies.
 - `packages/cli/src/` (no `aac` bin yet; `compile.ts` and `implement.ts` are temporary entry points)
   - `loader.ts` — the single `SpecLoader`.
   - `extract.ts` — recording-Proxy abstract execution → IR. `lint.ts` — token whitelist applied to each case body first.
-  - `generate.ts` — IR → test-side files. `runtime.ts` — PBT runtime (fast-check) called by the generated `verify.ts`.
+  - `generate.ts` — IR → test-side files. `runtime.ts` — PBT runtime (fast-check) called by the generated `verify.ts`, plus `selfCheck`, the spec-only simulation run before any agent.
   - `strategy.ts` — the swappable implementation step (an external agent command). `gates.ts` — entry gate (isolated sandbox with allowlisted inputs) and exit gate (collect allowlisted outputs, checks, PBT). `request.ts` — the agent-facing request text. `loop.ts` — entry gate → strategy → exit gate → feedback.
   - `check.ts` + `scan.ts` — mechanical checks on what the LLM wrote (imports and generated files only; adapter contents are unrestricted).
   - `mutation.ts` — the mutation gate: a swappable `MutationStrategy` (built-in literal mutation) plus `judge`, the pass rule owned by the gate. `guide.ts` — default design guidance embedded in the request.
@@ -28,7 +28,7 @@ pnpm install
 pnpm test                                             # all packages/**/*.test.ts
 node --test packages/cli/test/extract.test.ts         # one file
 node --test --test-name-pattern="スプレッド" "packages/**/*.test.ts"   # tests by name
-pnpm -s run ir                                        # specs/ -> IR JSON on stdout, diagnostics on stderr
+pnpm -s run ir                                        # specs/ -> IR JSON on stdout, diagnostics on stderr; also runs the spec self-check
 pnpm --filter example-checkout-ts verify              # PBT against examples/checkout-ts (add -- --seed N --path P to replay)
 
 # Have an agent (re)write an implementation. Any command works; it runs in an isolated temp directory.
@@ -65,11 +65,11 @@ The same thing goes by several names across the docs: `co-llm-piler` (repo), `aa
 
 Layers, from `SPEC.md`:
 
-- **Layer 1 – Spec**: pure data. A `DomainModel` value describes a component by its boundary only — `actions` (what drives it, each with its input), `queries` (values it asks its dependencies for), `commands` (side effects on its dependencies), `data` (what it remembers between actions; unset initially), plus state names — and decision tables (DMN) keyed by natural-language condition strings, declared with `as const satisfies DecisionTable<T>`; a `"default"` key is mandatory. Behaviours are declared with `defineBehaviors<typeof Model>`, one per declared action: `from` lists the states it can run in, `where` lists preconditions, each key of `cases` is an outcome (the external result that decides how the action turns out), and a transition's `set` stores data. Conditions and cases see `status`, data, query answers, and that action's input in one flat namespace, so those field names must not collide (the loader rejects it).
-- **Layer 2 – Binding**: the predicate functions for each natural-language key (`bindDecisionDetails`, `bindPreconditions`), typed from `keyof typeof <Rules>` so a missing binding is a compile error. Hit policy is Unique (multiple non-default matches throw `RuleConflictError`).
+- **Layer 1 – Spec**: pure data. A `DomainModel` value describes a component by its boundary only — `actions` (what drives it, each with its input), `queries` (values it asks its dependencies for, including external services' responses), `commands` (side effects on its dependencies), `data` (what it remembers between actions; unset initially), `formulas` and `invariants` (natural-language names only), plus state names. Numeric fields can carry constraints (`{ type, min, max, around }`; `around` lists thresholds the PBT probes closely). Decision tables (DMN) are keyed by natural-language condition strings, declared with `as const satisfies DecisionTable<T>`, and return constants only; a `"default"` key is mandatory. Behaviours are declared with `defineBehaviors<typeof Model>`, one per declared action: `from` lists the states it can run in, `where` lists preconditions, and `cases` is a decision table whose keys are conditions (with a mandatory `default`) and whose outputs are transitions (`nextState`, `effects`, `set`).
+- **Layer 2 – Binding**: one `bindSpecification(Model, { tables, conditions, formulas, invariants })` call binds every natural-language name to a function. The same sentence means the same thing wherever it appears (rebinding it to a different function throws). Conditions are hit-policy Unique: more than one true is a `RuleConflictError`, none true means `default`. Conditions, cases and formulas see `status`, data, query answers, and action input in one flat namespace, so those field names must not collide (the loader rejects it). Invariants see only `status` and data, and verify the spec, not the implementation.
 - **Universal IR**: flat, language-independent JSON extracted from Layer 1 (older docs call it "Layer 1.5" or "Layer 2.5").
 - **Layer 3 – Verification**: PBT generated on the test side (fast-check for TS today; rapid/proptest planned). A trial is a sequence of actions from the initial state; failures shrink to the shortest sequence.
-- **Adapter Contract**: `TargetSystemAdapter` (`setupIsolation(ports)` / `teardownIsolation` / `executeAction(action)` / `getCurrentState`) is the only boundary to the target system. The harness-owned `Ports` fakes answer queries and outcomes and record commands; there is deliberately no way to inject state into the system — states are reached by executing actions, and remembered data is never read back directly, only observed through later behaviour.
+- **Adapter Contract**: `TargetSystemAdapter` (`setupIsolation(ports)` / `teardownIsolation` / `executeAction(action)` / `getCurrentState`) is the only boundary to the target system. The harness-owned `Ports` fakes answer queries and record commands; there is deliberately no way to inject state into the system — states are reached by executing actions, and remembered data is never read back directly, only observed through later behaviour.
 
 Roadmap (`PACKAGE.md` §5): Phase 1 (core, dynamic evaluation in Node with fast-check, the LLM implementation loop) is in progress; IR extraction was pulled forward from Phase 2 because the LLM needs it as input. Multi-language generators and Mermaid/observability follow in Phases 3–4.
 
@@ -83,6 +83,9 @@ Invariants to preserve when changing this:
 - Production code carries zero constraints: no framework imports or types, no required naming, no required DI, no shared vocabulary with the spec. The adapter always adapts to the production code, so never restrict what the adapter may contain; whether business decisions really live in `src/` is established by mutation, not by inspecting the adapter.
 - Anything you want the implementer to do about design goes into the guide (`guide.ts`, or `--guide <file>`), which is advice and never a pass/fail rule. The guide must not mention business rules.
 - The mutation pass rule lives in `judge`, not in a strategy. A strategy only breaks code and reports which mutants survived; record which strategy ran in the result.
+- Anything the framework only has to *judge* (conditions, formulas, invariants) is a natural-language name in Layer 1 plus a function in Layer 2; anything it has to *generate* or match exactly (states, actions, inputs, queries, commands, numeric constraints, `from`) is data. Do not put arithmetic or branching in case bodies or table cells: add a condition or a formula.
+- Spec errors are never the implementer's problem. `selfCheck` (`runtime.ts`) simulates the spec alone before any agent runs, and a `SpecError` during PBT yields `status: "error"`, which stops the loop instead of becoming feedback.
+- Money and other exact quantities are integers, with rounding spelled out in the formula's name; float arithmetic makes the oracle and a correct implementation disagree for no good reason.
 - The agent sees the IR only. Layer 2 predicates are the oracle and must never be emitted into the IR or the request; interpreting the natural-language condition keys is the LLM's job, and PBT judges it.
 - Test cases are never LLM-written. Expected values come from executing the spec concretely (`createState` + `applyDecision`).
 - Generated files are a pure function of the IR (no timestamps, no versions); `check.ts` relies on byte-equality with a regeneration. The PBT seed is derived from the spec hash so verification is deterministic.
