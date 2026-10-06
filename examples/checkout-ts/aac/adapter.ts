@@ -1,32 +1,30 @@
 import type { TargetSystemAdapter } from "./adapter.contract.ts";
 import { Order } from "../src/order.ts";
 
-// The harness answers "is it month end?" as a flag; production code asks a clock for today's date.
-const A_MONTH_END = new Date(Date.UTC(2024, 0, 31));
-const A_MID_MONTH_DAY = new Date(Date.UTC(2024, 0, 15));
-
 let order: Order | undefined;
 
 function current(): Order {
-  if (!order) throw new Error("setupIsolation has not been called");
+  if (order === undefined) throw new Error("setupIsolation has not been called");
   return order;
 }
 
+// Translates between the harness ports and the dependencies the production code defines.
 export const adapter: TargetSystemAdapter = {
   async setupIsolation(ports) {
     order = new Order({
-      clock: {
-        today: () => (ports.queries.isMonthEnd() ? A_MONTH_END : A_MID_MONTH_DAY),
-      },
       payments: {
         isAvailable: () => ports.queries.paymentModuleActive(),
-        charge: () => (ports.outcomes.Checkout() === "PaymentSuccess" ? "succeeded" : "failed"),
+        charge: () => (ports.outcomes.Checkout() === "PaymentSuccess" ? "charged" : "declined"),
         refund: () => ports.commands.Refund({}),
       },
+      calendar: {
+        isMonthEnd: () => ports.queries.isMonthEnd(),
+      },
       notifier: {
-        sendReceipt: (discountRate) => ports.commands.SendReceipt({ discount: discountRate }),
-        notifyPaymentFailure: () => ports.commands.NotifyPaymentFailure({}),
-        sendShippingNotice: () => ports.commands.SendShippingNotice({}),
+        orderConfirmed: () => ports.commands.SendOrderConfirmation({}),
+        paymentFailed: () => ports.commands.NotifyPaymentFailure({}),
+        receipt: (discount) => ports.commands.SendReceipt({ discount }),
+        shippingNotice: (priority) => ports.commands.SendShippingNotice({ priority }),
       },
       coupons: {
         issue: (type) => ports.commands.IssueCoupon({ type }),
@@ -36,17 +34,20 @@ export const adapter: TargetSystemAdapter = {
   async teardownIsolation() {
     order = undefined;
   },
-  async executeAction(action, input) {
+  async executeAction(action) {
     const target = current();
-    switch (action) {
-      case "Checkout":
-        target.checkout(input.rank);
+    switch (action.name) {
+      case "PlaceOrder":
+        target.place(action.input.customerRank);
         break;
-      case "Cancel":
-        target.cancel();
+      case "Checkout":
+        target.checkout();
         break;
       case "Ship":
         target.ship();
+        break;
+      case "Cancel":
+        target.cancel();
         break;
     }
   },

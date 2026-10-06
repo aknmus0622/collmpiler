@@ -1,95 +1,65 @@
-import { campaignBenefit } from "./campaign.ts";
-import type { CouponType, MemberRank } from "./campaign.ts";
+import type { Calendar, CouponIssuer, CustomerNotifier, PaymentGateway } from "./dependencies.ts";
+import { campaignFor, priorityShipping, refundOnCancel } from "./policies.ts";
+import type { CustomerRank } from "./policies.ts";
 
-export type OrderStatus = "PENDING" | "PAID" | "SHIPPED" | "CANCELLED";
-
-export type PaymentResult = "succeeded" | "failed";
-
-export interface Clock {
-  today(): Date;
-}
-
-export interface PaymentGateway {
-  isAvailable(): boolean;
-  charge(): PaymentResult;
-  refund(): void;
-}
-
-export interface CustomerNotifier {
-  sendReceipt(discountRate: number): void;
-  notifyPaymentFailure(): void;
-  sendShippingNotice(): void;
-}
-
-export interface CouponIssuer {
-  issue(type: CouponType): void;
-}
+export type OrderStatus = "DRAFT" | "PENDING" | "PAID" | "SHIPPED" | "CANCELLED";
 
 export type OrderDependencies = {
-  clock: Clock;
   payments: PaymentGateway;
+  calendar: Calendar;
   notifier: CustomerNotifier;
   coupons: CouponIssuer;
 };
 
-/** A cancelled order must be refunded only if it has already been paid for. */
-export function requiresRefund(status: OrderStatus): boolean {
-  return status === "PAID";
-}
-
-export function canCancel(status: OrderStatus): boolean {
-  return status === "PENDING" || status === "PAID";
-}
-
 export class Order {
-  private currentStatus: OrderStatus = "PENDING";
-  private readonly clock: Clock;
-  private readonly payments: PaymentGateway;
-  private readonly notifier: CustomerNotifier;
-  private readonly coupons: CouponIssuer;
+  private currentStatus: OrderStatus = "DRAFT";
+  private rank: CustomerRank | undefined = undefined;
+  private readonly deps: OrderDependencies;
 
   constructor(deps: OrderDependencies) {
-    this.clock = deps.clock;
-    this.payments = deps.payments;
-    this.notifier = deps.notifier;
-    this.coupons = deps.coupons;
+    this.deps = deps;
   }
 
   get status(): OrderStatus {
     return this.currentStatus;
   }
 
-  checkout(rank: MemberRank): void {
-    if (this.currentStatus !== "PENDING" || !this.payments.isAvailable()) {
-      return;
-    }
-    if (this.payments.charge() === "failed") {
-      this.notifier.notifyPaymentFailure();
-      return;
-    }
-    const benefit = campaignBenefit(rank, this.clock.today());
-    this.notifier.sendReceipt(benefit.discountRate);
-    for (const type of benefit.coupons) {
-      this.coupons.issue(type);
-    }
-    this.currentStatus = "PAID";
+  place(customerRank: CustomerRank): void {
+    if (this.currentStatus !== "DRAFT") return;
+    this.rank = customerRank;
+    this.currentStatus = "PENDING";
+    this.deps.notifier.orderConfirmed();
   }
 
-  cancel(): void {
-    if (!canCancel(this.currentStatus)) {
+  checkout(): void {
+    if (this.currentStatus !== "PENDING" || this.rank === undefined) return;
+    if (!this.deps.payments.isAvailable()) return;
+
+    if (this.deps.payments.charge() === "declined") {
+      this.deps.notifier.paymentFailed();
       return;
     }
-    if (requiresRefund(this.currentStatus)) {
-      this.payments.refund();
+
+    const campaign = campaignFor(this.rank, this.deps.calendar.isMonthEnd());
+    this.currentStatus = "PAID";
+    this.deps.notifier.receipt(campaign.discount);
+    for (const type of campaign.coupons) {
+      this.deps.coupons.issue(type);
     }
-    this.currentStatus = "CANCELLED";
   }
 
   ship(): void {
-    if (this.currentStatus !== "PAID") {
-      return;
-    }
-    this.notifier.sendShippingNotice();
+    if (this.currentStatus !== "PAID" || this.rank === undefined) return;
     this.currentStatus = "SHIPPED";
+    this.deps.notifier.shippingNotice(priorityShipping(this.rank));
+  }
+
+  cancel(): void {
+    if (this.currentStatus !== "PENDING" && this.currentStatus !== "PAID") return;
+    const refund = refundOnCancel(this.currentStatus === "PAID");
+    this.currentStatus = "CANCELLED";
+    if (refund) {
+      this.deps.payments.refund();
+    }
   }
 }

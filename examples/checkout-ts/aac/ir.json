@@ -63,6 +63,31 @@
     },
     {
       "from": [
+        "DRAFT"
+      ],
+      "name": "PlaceOrder",
+      "preconditions": [],
+      "transitions": {
+        "Placed": {
+          "emittedCommands": [
+            {
+              "action": "SendOrderConfirmation",
+              "payload": {},
+              "payloadSchema": {}
+            }
+          ],
+          "event": "Order placed",
+          "nextState": "PENDING",
+          "set": {
+            "rank": {
+              "$ref": "input:customerRank"
+            }
+          }
+        }
+      }
+    },
+    {
+      "from": [
         "PAID"
       ],
       "name": "Ship",
@@ -72,8 +97,14 @@
           "emittedCommands": [
             {
               "action": "SendShippingNotice",
-              "payload": {},
-              "payloadSchema": {}
+              "payload": {
+                "priority": {
+                  "$ref": "decision:ShippingRules.priority"
+                }
+              },
+              "payloadSchema": {
+                "priority": "boolean"
+              }
             }
           ],
           "event": "Order shipped",
@@ -122,10 +153,33 @@
           ]
         }
       }
+    },
+    "ShippingRules": {
+      "bound": true,
+      "rows": {
+        "default": {
+          "priority": false
+        },
+        "ゴールド会員の場合": {
+          "priority": true
+        }
+      }
     }
   },
   "irVersion": 1,
   "model": {
+    "actions": {
+      "Cancel": {},
+      "Checkout": {},
+      "PlaceOrder": {
+        "customerRank": [
+          "Gold",
+          "Silver",
+          "Bronze"
+        ]
+      },
+      "Ship": {}
+    },
     "commands": {
       "IssueCoupon": {
         "type": [
@@ -135,24 +189,28 @@
       },
       "NotifyPaymentFailure": {},
       "Refund": {},
+      "SendOrderConfirmation": {},
       "SendReceipt": {
         "discount": "number"
       },
-      "SendShippingNotice": {}
+      "SendShippingNotice": {
+        "priority": "boolean"
+      }
     },
-    "initial": "PENDING",
-    "input": {
+    "data": {
       "rank": [
         "Gold",
         "Silver",
         "Bronze"
       ]
     },
+    "initial": "DRAFT",
     "queries": {
       "isMonthEnd": "boolean",
       "paymentModuleActive": "boolean"
     },
     "states": [
+      "DRAFT",
       "PENDING",
       "PAID",
       "SHIPPED",
