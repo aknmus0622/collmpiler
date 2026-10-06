@@ -1,0 +1,24 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    devDependencies:
+      '@aac/cli':
+        specifier: workspace:*
+        version: link:packages/cli
+      '@aac/core':
+        specifier: workspace:*
+        version: link:packages/core
+
+  packages/cli:
+    dependencies:
+      '@aac/core':
+        specifier: workspace:*
+        version: link:../core
+
+  packages/core: {}

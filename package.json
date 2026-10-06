@@ -1,0 +1,14 @@
+{
+  "name": "co-llm-piler",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.18" },
+  "scripts": {
+    "test": "node --test",
+    "ir": "node packages/cli/src/compile.ts specs"
+  },
+  "devDependencies": {
+    "@aac/cli": "workspace:*",
+    "@aac/core": "workspace:*"
+  }
+}
