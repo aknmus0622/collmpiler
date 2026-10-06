@@ -1,13 +1,10 @@
 import { applyDecision, bindSpecification } from "@aac/core";
-import { CampaignRules } from "./campaign.dmn.ts";
-import { CancelRules } from "./cancel.dmn.ts";
-import { ShippingRules } from "./shipping.dmn.ts";
-import { OrderModel } from "./order.model.ts";
+import { CampaignRules, CancelRules, Order, ShippingRules } from "./order.component.ts";
 
-// Binds every natural-language name in the spec to a function.
+// Binds every natural-language name in the component to a function.
 // The same sentence means the same thing wherever it appears.
-export const Specification = bindSpecification(OrderModel, {
-  // A missing binding for any row of these tables is a compile error.
+// A missing binding, or a condition that nothing uses, is a compile error.
+export const Specification = bindSpecification(Order, {
   tables: { CampaignRules, CancelRules, ShippingRules },
 
   // Conditions: decision-table rows, preconditions (where), and the keys of cases.

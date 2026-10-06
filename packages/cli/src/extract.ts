@@ -1,11 +1,24 @@
 import { ABSTRACT_APPLY, ABSTRACT_FORMULA, getCondition, getFormula, getInvariant } from "@aac/core";
-import type { DomainModel, FieldSchema } from "@aac/core";
+import type { FieldSchema, Fields } from "@aac/core";
 import { lintCase } from "./lint.ts";
 
 // レコーディング Proxy による抽象実行: cases の関数を「記号的な state」で1回走らせ、
 // 返ってきた遷移記述から IR を組み立てる。
 
 export const IR_VERSION = 1;
+
+// コンポーネントを、抽出と検証が扱いやすい形に正規化したもの (loader が作る)。
+// actions は「アクション名 → 入力」だけを持ち、from / where / cases は behaviors 側に置く
+export type SpecModel = {
+  initial: string;
+  states: readonly string[];
+  data: Fields;
+  actions: Record<string, Fields>;
+  queries: Fields;
+  commands: Record<string, Fields>;
+  formulas?: Fields;
+  invariants?: readonly string[];
+};
 
 export type SpecInput = {
   behaviors: Record<
@@ -14,7 +27,7 @@ export type SpecInput = {
   >;
   // export 名 → DecisionTable。applyDecision に渡された表の名前解決に使う
   tables: Record<string, object>;
-  model?: DomainModel;
+  model?: SpecModel;
 };
 
 export type Diagnostic = {
@@ -44,7 +57,7 @@ type Origin = { kind: "state" } | { kind: "decision"; table: string } | { kind: 
 type Node = { origin: Origin; path: string[]; used: boolean };
 type Context = {
   nodes: Node[];
-  model: DomainModel | undefined;
+  model: SpecModel | undefined;
   // 実行中の behavior 名（モデルがあるとき、入力フィールドの解決に使う）
   action: string;
   tableNames: Map<object, string>;

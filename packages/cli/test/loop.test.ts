@@ -223,7 +223,7 @@ test("出口ゲート: 許可した出力以外は取り出さず、違反とし
     writeFileSync(join(dir, "aac/helper.ts"), "export {};");
     writeFileSync(join(dir, "aac/ir.json"), "{}");
     rmSync(join(dir, "aac/adapter.contract.ts"));
-    symlinkSync(join(specsDir, "vocabulary.ts"), join(dir, "src/oracle.ts"));
+    symlinkSync(join(specsDir, "order.binding.ts"), join(dir, "src/oracle.ts"));
   });
   const feedback = attempts[0].feedback;
   assert.ok(feedback?.kind === "check");
@@ -305,7 +305,7 @@ test("検査: 本番コードはフレームワーク・仕様・テスト側・
       `import { applyDecision } from "@aac/core";`,
       `import ir from "../aac/ir.json" with { type: "json" };`,
       `import { readFileSync } from "node:fs";`,
-      `export * from "../../../../../specs/campaign.dmn.ts";`,
+      `export * from "../../../../../specs/order.component.ts";`,
       text,
     ].join("\n"),
   );
@@ -344,6 +344,6 @@ test("検査: アダプターの中身は字面では制限しない (判断の�
 
 test("検査: アダプターは仕様や IR を import できない", async () => {
   const { rules, edit } = await workspace();
-  edit("aac/adapter.ts", (text) => `import { CampaignRules } from "../../../../../specs/campaign.dmn.ts";\n${text}`);
+  edit("aac/adapter.ts", (text) => `import { CampaignRules } from "../../../../../specs/order.component.ts";\n${text}`);
   assert.deepEqual(rules(), ["aac/adapter.ts:forbidden-import"]);
 });

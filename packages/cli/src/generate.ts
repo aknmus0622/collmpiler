@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { relative, sep } from "node:path";
-import type { DomainModel, FieldSchema } from "@aac/core";
+import type { FieldSchema } from "@aac/core";
 import { stableStringify } from "./extract.ts";
+import type { SpecModel } from "./extract.ts";
 
 // テスト側ファイルの生成。フレームワークが生成するのはテスト側だけで、本番コードには何も置かない。
 // 出力は IR だけから決まる（日時・CLI バージョンは埋めない）。
@@ -10,7 +11,7 @@ export type Ir = {
   irVersion: number;
   behaviors: { name: string; from: string[]; preconditions: string[]; transitions: Record<string, unknown> }[];
   decisions: Record<string, { bound: boolean; rows: Record<string, unknown> }>;
-  model?: DomainModel;
+  model?: SpecModel;
 };
 
 export const TEST_DIR = "aac";
@@ -111,7 +112,7 @@ await runPbt({ specs: fileURLToPath(new URL(${JSON.stringify(specs + "/")}, impo
 `;
 }
 
-export function requireModel(ir: Ir): DomainModel {
-  if (!ir.model) throw new Error("仕様に DomainModel がありません（状態・データ・Command の定義が必要です）");
+export function requireModel(ir: Ir): SpecModel {
+  if (!ir.model) throw new Error("仕様にコンポーネントがありません（defineComponent(...).cases(...) を export してください）");
   return ir.model;
 }

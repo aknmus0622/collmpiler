@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { applyDecision, bindSpecification, defineBehaviors } from "@aac/core";
+import { applyDecision, bindSpecification, defineComponent } from "@aac/core";
 import { extract } from "../src/extract.ts";
 import { lintCase } from "../src/lint.ts";
 
 const Rules = { "default": { discount: 0, effects: [] } } as const;
-const Model = { initial: "A", states: ["A"], data: {}, actions: {}, queries: {}, commands: {} } as const;
-bindSpecification(Model, { conditions: { "変数を使い回す場合": () => false, "フォールバックを書く場合": () => false } });
+// 下の extract のテストで使う条件を結び付けるための最小のコンポーネント
+const Tiny = defineComponent({ initial: "A", states: ["A"], actions: { Go: {} } }).cases({
+  Go: { "変数を使い回す場合": (state) => state.A(), "フォールバックを書く場合": (state) => state.A(), default: (state) => state.A() },
+});
+bindSpecification(Tiny, { conditions: { "変数を使い回す場合": () => false, "フォールバックを書く場合": () => false } });
 const receipt = (discount: unknown) => ({ action: "SendReceipt", payload: { discount } });
 
 const token = (fn: (state: any) => unknown) => lintCase(fn.toString())?.token;
@@ -70,7 +73,7 @@ test("禁止: 非同期・ループ・例外・再代入", () => {
 });
 
 test("extract: Proxy 単体では盲点だった書き方が forbidden-syntax エラーになり、IR に載らない", async () => {
-  const behaviors = defineBehaviors({
+  const behaviors = {
     B: {
       cases: {
         "変数を使い回す場合": (state: any) => {
@@ -82,7 +85,7 @@ test("extract: Proxy 単体では盲点だった書き方が forbidden-syntax �
         default: (state: any) => state.PAID({ effects: [receipt(applyDecision(Rules, state).discount)] }),
       },
     },
-  });
+  };
   const { ir, diagnostics } = await extract({ behaviors, tables: { Rules } });
   assert.deepEqual(
     diagnostics.map((d) => `${d.case}:${d.code}`).sort(),

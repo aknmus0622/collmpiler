@@ -1,8 +1,8 @@
 import { isDeepStrictEqual, parseArgs } from "node:util";
 import fc from "fast-check";
 import { createState, evaluateConditions, getCondition, getInvariant } from "@aac/core";
-import type { DomainModel, FieldSchema } from "@aac/core";
-import type { SpecInput } from "./extract.ts";
+import type { FieldSchema } from "@aac/core";
+import type { SpecInput, SpecModel } from "./extract.ts";
 import { loadSpecs } from "./loader.ts";
 
 // 生成された verify.ts から呼ばれる PBT ランタイム。
@@ -102,7 +102,7 @@ const plain = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 const messageOf = (error: unknown) => (error instanceof Error ? `${error.name}: ${error.message}` : String(error));
 
 // 仕様側のシミュレーション。実装には触れず、仕様だけで「次に何が起きるべきか」を進める
-function simulator(input: SpecInput, model: DomainModel) {
+function simulator(input: SpecInput, model: SpecModel) {
   const actions = Object.keys(input.behaviors).sort();
 
   const sequences = fc.array(
@@ -188,7 +188,7 @@ export async function selfCheck(
   params: { seed?: number; numRuns?: number } = {},
 ): Promise<{ ok: true; numRuns: number } | { ok: false; message: string; steps: Step[] }> {
   const model = input.model;
-  if (!model) return { ok: false, message: "仕様に DomainModel がありません", steps: [] };
+  if (!model) return { ok: false, message: "仕様にコンポーネントがありません", steps: [] };
   const sim = simulator(input, model);
 
   const walk = (raw: RawStep[]) => {
@@ -230,7 +230,7 @@ async function check(
 ): Promise<PbtResult> {
   const input = await loadSpecs(specs);
   const model = input.model;
-  if (!model) return { status: "error", message: "仕様に DomainModel がありません" };
+  if (!model) return { status: "error", message: "仕様にコンポーネントがありません" };
   const sim = simulator(input, model);
   if (sim.actions.length === 0) return { status: "error", message: "検証する behavior がありません" };
 

@@ -3,16 +3,16 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import { RuleConflictError, bindSpecification, createState, evaluateConditions } from "@aac/core";
-import { behaviors } from "../../../specs/order.spec.ts";
-import "../../../specs/vocabulary.ts";
+import { RuleConflictError, bindSpecification, createState, defineComponent, evaluateConditions } from "@aac/core";
+import { Order } from "../../../specs/order.component.ts";
+import "../../../specs/order.binding.ts";
 import { extract } from "../src/extract.ts";
 import { loadSpecs } from "../src/loader.ts";
 import { selfCheck } from "../src/runtime.ts";
 
 // SPEC.md の例 (specs/) を、具体値と抽象実行の両方で通す
 
-const success = behaviors.Checkout.cases["The payment succeeded"];
+const success = Order.behaviors.Checkout["The payment succeeded"];
 const order = (data: object) => createState({ status: "PENDING", rank: undefined, price: undefined, ...data });
 
 test("具体実行: ゴールド会員かつ月末は20%引きで、請求金額は計算で決まる", () => {
@@ -33,7 +33,7 @@ test("具体実行: どの条件にも当たらなければ default", () => {
 });
 
 test("具体実行: set で覚えるデータが遷移に含まれる", () => {
-  assert.deepEqual(behaviors.PlaceOrder.cases.default(order({ status: "DRAFT", customerRank: "Gold", listPrice: 300 })), {
+  assert.deepEqual(Order.behaviors.PlaceOrder(order({ status: "DRAFT", customerRank: "Gold", listPrice: 300 })), {
     nextState: "PENDING",
     event: "Order placed",
     effects: [{ action: "SendOrderConfirmation", payload: {} }],
@@ -41,16 +41,24 @@ test("具体実行: set で覚えるデータが遷移に含まれる", () => {
   });
 });
 
-const Tiny = { initial: "A", states: ["A"], data: {}, actions: {}, queries: {}, commands: {} } as const;
+// 任意の条件を結び付けるための最小のコンポーネント
+const tiny = (first: string, second: string) =>
+  defineComponent({ initial: "A", states: ["A"], actions: { Go: { where: [first, second] } } }).cases({ Go: (state) => state.A() });
 
 test("Hit Policy Unique: default 以外が複数成立すると RuleConflictError", () => {
-  bindSpecification(Tiny, { conditions: { "常に成り立つ条件その1": () => true, "常に成り立つ条件その2": () => true } });
+  bindSpecification(tiny("常に成り立つ条件その1", "常に成り立つ条件その2"), {
+    conditions: { "常に成り立つ条件その1": () => true, "常に成り立つ条件その2": () => true },
+  });
   assert.throws(() => evaluateConditions(["常に成り立つ条件その1", "常に成り立つ条件その2", "default"], {}), RuleConflictError);
 });
 
 test("結び付け: 同じ文を別の関数に結び付けるとエラー (同じ文は1つの意味)", () => {
-  bindSpecification(Tiny, { conditions: { "二重に結び付ける条件": () => true } });
-  assert.throws(() => bindSpecification(Tiny, { conditions: { "二重に結び付ける条件": () => false } }), /複数回、別の関数に/);
+  const component = tiny("二重に結び付ける条件", "もう1つの条件");
+  bindSpecification(component, { conditions: { "二重に結び付ける条件": () => true, "もう1つの条件": () => true } });
+  assert.throws(
+    () => bindSpecification(component, { conditions: { "二重に結び付ける条件": () => false, "もう1つの条件": () => true } }),
+    /複数回、別の関数に/,
+  );
 });
 
 test("specs/ の IR 出力は実行ごとにバイト一致する", () => {
@@ -83,45 +91,51 @@ const tmpRoot = join(import.meta.dirname, ".tmp-specs");
 mkdirSync(tmpRoot, { recursive: true });
 after(() => rmSync(tmpRoot, { recursive: true, force: true }));
 
-function specDir(model: string, behaviors: string, bindings = "conditions: {}") {
+// 仕様ファイルを一時ディレクトリに書き出す。boundary は defineComponent の中身、cases は .cases() の中身
+function specDir(boundary: string, cases: string, bindings = "conditions: {}") {
   const dir = mkdtempSync(join(tmpRoot, "s-"));
   writeFileSync(
-    join(dir, "x.spec.ts"),
-    `import { applyFormula, bindSpecification, defineBehaviors } from "@aac/core";
-export const Model = { initial: "A", states: ["A", "B"], ${model} };
-export const behaviors = defineBehaviors({ ${behaviors} });
-bindSpecification(Model, { ${bindings} });
+    join(dir, "x.component.ts"),
+    `import { applyFormula, bindSpecification, defineComponent } from "@aac/core";
+const Boundary = defineComponent({ initial: "A", states: ["A", "B"], ${boundary} });
+export const Component = Boundary.cases({ ${cases} });
+bindSpecification(Component, { ${bindings} });
 `,
   );
   return dir;
 }
-const empty = "data: {}, queries: {}, commands: {}";
-const noop = "{ cases: { default: (state) => state.A() } }";
+const noop = "(state) => state.A()";
 
-test("モデル: data・queries・入力の名前が重なるとエラー (条件から区別できないため)", async () => {
-  const dir = specDir(`data: { rank: "string" }, queries: {}, commands: {}, actions: { Place: { rank: "string" } }`, `Place: ${noop}`);
+test("コンポーネント: data・queries・入力の名前が重なるとエラー (条件から区別できないため)", async () => {
+  const dir = specDir(`data: { rank: "string" }, actions: { Place: { input: { rank: "string" } } }`, `Place: ${noop}`);
   await assert.rejects(loadSpecs(dir), /"rank" が重複しています \(data と actions の入力\)/);
 });
 
-test("モデル: 入力はアクションが違えば同名でよい", async () => {
-  const dir = specDir(`${empty}, actions: { Place: { note: "string" }, Amend: { note: "string" } }`, `Place: ${noop}, Amend: ${noop}`);
+test("コンポーネント: 入力はアクションが違えば同名でよい", async () => {
+  const dir = specDir(`actions: { Place: { input: { note: "string" } }, Amend: { input: { note: "string" } } }`, `Place: ${noop}, Amend: ${noop}`);
   assert.deepEqual(Object.keys((await loadSpecs(dir)).behaviors).sort(), ["Amend", "Place"]);
 });
 
-test("モデル: actions と behaviors が一致しなければエラー", async () => {
-  const dir = specDir(`${empty}, actions: { Place: {}, Ship: {} }`, `Place: ${noop}`);
-  await assert.rejects(loadSpecs(dir), /actions \(Place, Ship\) と behaviors \(Place\) が一致しません/);
+test("コンポーネント: 省略した宣言は空として扱い、関数1つの case は default だけの表になる", async () => {
+  const spec = await loadSpecs(specDir(`actions: { Place: { from: ["A"] }, Back: {} }`, `Place: ${noop}, Back: { default: ${noop} }`));
+  assert.deepEqual(spec.model, { initial: "A", states: ["A", "B"], data: {}, actions: { Place: {}, Back: {} }, queries: {}, commands: {} });
+  assert.deepEqual(Object.keys(spec.behaviors.Place.cases), ["default"]);
+  assert.deepEqual(spec.behaviors.Place.from, ["A"]);
+  assert.equal(spec.behaviors.Back.from, undefined);
 });
 
-test("振る舞い: cases に default が無ければエラー", async () => {
-  const dir = specDir(`${empty}, actions: { Place: {} }`, `Place: { cases: { "何かの場合": (state) => state.A() } }`);
-  await assert.rejects(loadSpecs(dir), /cases に "default" がありません/);
+test("コンポーネント: case の無いアクション、default の無い表はエラー", async () => {
+  await assert.rejects(loadSpecs(specDir(`actions: { Place: {}, Ship: {} }`, `Place: ${noop}`)), /アクション "Ship" に case がありません/);
+  await assert.rejects(
+    loadSpecs(specDir(`actions: { Place: {} }`, `Place: { "何かの場合": ${noop} }`)),
+    /アクション "Place" に case がありません/,
+  );
 });
 
 test("IR 抽出: 結び付けの無い条件・計算・不変条件はエラー", async () => {
   const dir = specDir(
-    `${empty}, actions: { Place: {} }, formulas: { "結び付けの無い計算": "integer" }, invariants: ["結び付けの無い不変条件"]`,
-    `Place: { where: ["結び付けの無い事前条件"], cases: { "結び付けの無い場合": (state) => state.A(), default: (state) => state.A() } }`,
+    `actions: { Place: { where: ["結び付けの無い事前条件"] } }, formulas: { "結び付けの無い計算": "integer" }, invariants: ["結び付けの無い不変条件"]`,
+    `Place: { "結び付けの無い場合": ${noop}, default: ${noop} }`,
   );
   const { diagnostics } = await extract(await loadSpecs(dir));
   assert.deepEqual(diagnostics.map((d) => d.code).sort(), [
@@ -134,8 +148,8 @@ test("IR 抽出: 結び付けの無い条件・計算・不変条件はエラー
 
 test("事前検査: 2つの条件が同時に成り立つ仕様を、実装なしで見つける", async () => {
   const dir = specDir(
-    `${empty}, actions: { Place: {} }`,
-    `Place: { cases: { "事前検査で衝突する条件その1": (state) => state.B(), "事前検査で衝突する条件その2": (state) => state.B(), default: (state) => state.A() } }`,
+    `actions: { Place: {} }`,
+    `Place: { "事前検査で衝突する条件その1": (state) => state.B(), "事前検査で衝突する条件その2": (state) => state.B(), default: ${noop} }`,
     `conditions: { "事前検査で衝突する条件その1": () => true, "事前検査で衝突する条件その2": () => true }`,
   );
   const result = await selfCheck(await loadSpecs(dir), { seed: 1 });
@@ -145,9 +159,9 @@ test("事前検査: 2つの条件が同時に成り立つ仕様を、実装な�
 
 test("事前検査: 不変条件が破れるアクション列を、最短で報告する", async () => {
   const dir = specDir(
-    `data: { note: "string" }, queries: {}, commands: {}, actions: { Place: {}, Back: {} }, invariants: ["Bの状態ではメモが設定されている"]`,
+    `data: { note: "string" }, actions: { Place: { from: ["A"] }, Back: { from: ["B"] } }, invariants: ["Bの状態ではメモが設定されている"]`,
     // Place がメモを覚え忘れている
-    `Place: { from: ["A"], cases: { default: (state) => state.B() } }, Back: { from: ["B"], cases: { default: (state) => state.A() } }`,
+    `Place: (state) => state.B(), Back: ${noop}`,
     `conditions: {}, invariants: { "Bの状態ではメモが設定されている": (state) => state.status !== "B" || state.note !== undefined }`,
   );
   const result = await selfCheck(await loadSpecs(dir), { seed: 1 });
@@ -158,8 +172,8 @@ test("事前検査: 不変条件が破れるアクション列を、最短で報
 
 test("事前検査: 計算の結果が宣言した型に合わなければ報告する", async () => {
   const dir = specDir(
-    `data: {}, queries: {}, commands: { Bill: { amount: "integer" } }, actions: { Place: {} }, formulas: { "半額（端数処理なし）": "integer" }`,
-    `Place: { cases: { default: (state) => state.A({ effects: [{ action: "Bill", payload: { amount: applyFormula(Model, "半額（端数処理なし）", state) } }] }) } }`,
+    `commands: { Bill: { amount: "integer" } }, actions: { Place: {} }, formulas: { "半額（端数処理なし）": "integer" }`,
+    `Place: (state) => state.A({ effects: [{ action: "Bill", payload: { amount: applyFormula(Boundary, "半額（端数処理なし）", state) } }] })`,
     `conditions: {}, formulas: { "半額（端数処理なし）": () => 1.5 }`,
   );
   const result = await selfCheck(await loadSpecs(dir), { seed: 1 });

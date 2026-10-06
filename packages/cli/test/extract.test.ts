@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { applyDecision, bindSpecification, defineBehaviors } from "@aac/core";
+import { applyDecision, bindSpecification, defineComponent } from "@aac/core";
 import { extract, stableStringify } from "../src/extract.ts";
 import type { ExtractOptions } from "../src/extract.ts";
 
@@ -14,11 +14,12 @@ const Rules = {
   "default": { discount: 0, effects: [] },
 } as const;
 
-const Model = { initial: "A", states: ["A"], data: {}, actions: {}, queries: {}, commands: {} } as const;
-bindSpecification(Model, { conditions: { "ゴールドの場合": (state) => (state as { rank?: string }).rank === "Gold" } });
+// 表 Rules の条件を結び付けるための最小のコンポーネント
+const Tiny = defineComponent({ initial: "A", states: ["A"], data: { rank: "string" }, actions: { Go: {} } }).cases({ Go: (state) => state.A() });
+bindSpecification(Tiny, { tables: { Rules }, conditions: { "ゴールドの場合": (state) => state.rank === "Gold" } });
 
 async function run(caseFn: (state: any) => unknown, options?: ExtractOptions) {
-  const behaviors = defineBehaviors({ B: { cases: { default: caseFn as any } } });
+  const behaviors = { B: { cases: { default: caseFn } } };
   const { ir, diagnostics } = await extract({ behaviors, tables: { Rules } }, { lint: false, ...options });
   return {
     transition: ir.behaviors[0].transitions.default as any,

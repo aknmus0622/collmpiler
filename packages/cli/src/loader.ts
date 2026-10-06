@@ -1,9 +1,9 @@
 import { readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { BEHAVIORS } from "@aac/core";
-import type { DomainModel } from "@aac/core";
-import type { SpecInput } from "./extract.ts";
+import { COMPONENT } from "@aac/core";
+import type { Boundary } from "@aac/core";
+import type { SpecInput, SpecModel } from "./extract.ts";
 
 // 仕様の読み込みはここ1箇所に閉じ込める。パスは process.cwd() 基準。
 export async function loadSpecs(dir: string): Promise<SpecInput> {
@@ -14,19 +14,13 @@ export async function loadSpecs(dir: string): Promise<SpecInput> {
 
   const input: SpecInput = { behaviors: {}, tables: {} };
   for (const file of files) {
-    // Layer 2 (bindDecisionDetails) は副作用で登録されるため、型しか import されていないファイルも必ず評価する
+    // Layer 2 (bindSpecification) は副作用で登録されるため、どこからも import されていないファイルも必ず評価する
     const mod = await import(pathToFileURL(join(root, file)).href);
     for (const [exportName, value] of Object.entries(mod)) {
       if (typeof value !== "object" || value === null) continue;
-      if ((value as any)[BEHAVIORS]) {
-        for (const [name, behavior] of Object.entries(value)) {
-          if (name in input.behaviors) throw new Error(`behavior "${name}" が重複しています (${file})`);
-          input.behaviors[name] = behavior as SpecInput["behaviors"][string];
-        }
-      } else if (isDomainModel(value)) {
-        if (input.model && input.model !== value) throw new Error(`DomainModel が複数あります (${file})`);
-        validateModel(exportName, value);
-        input.model = value;
+      if ((value as any)[COMPONENT]) {
+        if (input.model) throw new Error(`コンポーネントが複数あります (${file})。現在は1つだけ扱えます`);
+        Object.assign(input, normalize(exportName, value as Boundary & { behaviors: Record<string, unknown> }));
       } else if ("default" in value) {
         if (exportName in input.tables && input.tables[exportName] !== value) {
           throw new Error(`DecisionTable "${exportName}" が重複しています (${file})`);
@@ -35,35 +29,52 @@ export async function loadSpecs(dir: string): Promise<SpecInput> {
       }
     }
   }
-  for (const [name, behavior] of Object.entries(input.behaviors)) {
-    if (typeof behavior.cases?.default !== "function") {
-      throw new Error(`behavior "${name}" の cases に "default" がありません`);
-    }
-  }
-  if (input.model) {
-    const declared = Object.keys(input.model.actions).sort().join(", ");
-    const defined = Object.keys(input.behaviors).sort().join(", ");
-    if (declared !== defined) {
-      throw new Error(`モデルの actions (${declared}) と behaviors (${defined}) が一致しません`);
-    }
-  }
   return input;
 }
 
-function isDomainModel(value: object): value is DomainModel {
-  return "states" in value && Array.isArray(value.states) && "actions" in value && "queries" in value && "commands" in value;
+// コンポーネントを、抽出と検証が扱う形に正規化する。
+// 省略された宣言は空にし、関数1つで書かれた case は default だけの表にする
+function normalize(name: string, component: Boundary & { behaviors: Record<string, unknown> }) {
+  const model: SpecModel = {
+    initial: component.initial,
+    states: component.states,
+    data: component.data ?? {},
+    actions: Object.fromEntries(Object.entries(component.actions).map(([action, decl]) => [action, decl.input ?? {}])),
+    queries: component.queries ?? {},
+    commands: component.commands ?? {},
+    ...(component.formulas ? { formulas: component.formulas } : {}),
+    ...(component.invariants ? { invariants: component.invariants } : {}),
+  };
+  validateModel(name, model);
+
+  const behaviors: SpecInput["behaviors"] = {};
+  for (const [action, decl] of Object.entries(component.actions)) {
+    const cases = component.behaviors[action];
+    const table = typeof cases === "function" ? { default: cases } : cases;
+    if (typeof (table as { default?: unknown } | undefined)?.default !== "function") {
+      throw new Error(`コンポーネント "${name}" のアクション "${action}" に case がありません（表で書く場合は "default" が必須です）`);
+    }
+    const unknownState = (decl.from ?? []).find((state) => !component.states.includes(state));
+    if (unknownState !== undefined) {
+      throw new Error(`コンポーネント "${name}" のアクション "${action}" の from "${unknownState}" が states にありません`);
+    }
+    behaviors[action] = { from: decl.from, where: decl.where, cases: table as SpecInput["behaviors"][string]["cases"] };
+  }
+  const extra = Object.keys(component.behaviors).find((action) => !(action in component.actions));
+  if (extra !== undefined) throw new Error(`コンポーネント "${name}" の case "${extra}" に対応するアクションがありません`);
+  return { model, behaviors };
 }
 
-function validateModel(name: string, model: DomainModel) {
+function validateModel(name: string, model: SpecModel) {
   if (!model.states.includes(model.initial)) {
-    throw new Error(`DomainModel "${name}" の initial "${model.initial}" が states にありません`);
+    throw new Error(`コンポーネント "${name}" の initial "${model.initial}" が states にありません`);
   }
   // 条件と case からは data・queries・入力が同じ階層で見えるため、名前が重なると区別できない
   const owners = new Map<string, string>([["status", "予約語"]]);
   const claim = (field: string, owner: string, shared = false) => {
     const taken = owners.get(field);
     if (taken !== undefined && !(shared && taken === owner)) {
-      throw new Error(`DomainModel "${name}" のフィールド "${field}" が重複しています (${taken} と ${owner})`);
+      throw new Error(`コンポーネント "${name}" のフィールド "${field}" が重複しています (${taken} と ${owner})`);
     }
     owners.set(field, owner);
   };
