@@ -9,6 +9,8 @@ Phase 1 spike. TypeScript targets only.
 - **Write a spec as TypeScript data.** A component is described by its boundary and structure: states, actions
   and their inputs, queries to dependencies, commands to dependencies, and remembered data. Conditions,
   formulas, and invariants are written as natural-language names and bound to functions separately.
+- **Have an LLM draft the binding.** The draft is kept out of use until a person has reviewed it, and it
+  flags names that can be read in more than one way.
 - **Check the spec on its own.** Conflicting conditions, missing bindings, broken invariants, and values that
   do not fit their declared type are reported before any implementation exists.
 - **Have an LLM agent write the production code from the spec**, test-first, in three isolated sessions:
@@ -150,6 +152,26 @@ export const Specification = bindSpecification(Order, {
       state.status === "DRAFT" || (state.rank !== undefined && state.price !== undefined)
   }
 });
+```
+
+The binding does not have to be written from scratch. An agent can draft it:
+
+```bash
+pnpm -s run draft-binding \
+  --agent 'claude -p "Read aac/REQUEST.md and carry out the request." --permission-mode acceptEdits'
+```
+
+The draft goes to `specs/order.binding.draft.ts` and is ignored until you have read it and dropped `.draft`
+from its name, because the binding is what the implementation is judged against. The agent marks the names
+it found ambiguous:
+
+```ts
+// REVIEW: "the order is 10,000 yen or more" is read as the remembered `price` (the list price at
+// PlaceOrder). It could also mean the amount actually charged after the campaign discount, which
+// differs for discounted orders (e.g. a Silver order of 10,000 yen is charged 9,500 yen).
+"The customer is a Gold member, or the order is 10,000 yen or more": (state) => {
+  return state.rank === "Gold" || (state.price !== undefined && state.price >= 10_000);
+},
 ```
 
 ### 2. Check the spec
