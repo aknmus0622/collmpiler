@@ -19,7 +19,8 @@ const ALLOWED_TOP_LEVEL = new Set([TEST_DIR, SOURCE_DIR, "package.json", "node_m
 
 const isInside = (dir: string, path: string) => path === dir || path.startsWith(dir + sep);
 
-export function checkWorkspace(out: string, ir: Ir, specs: string): Violation[] {
+// scope: "source" は本番コードだけを調べる（アダプターがまだ無い、設計の段階用）
+export function checkWorkspace(out: string, ir: Ir, specs: string, scope: "all" | "source" = "all"): Violation[] {
   const outDir = resolve(process.cwd(), out);
   const specsDir = resolve(process.cwd(), specs);
   const testDir = join(outDir, TEST_DIR);
@@ -74,7 +75,9 @@ export function checkWorkspace(out: string, ir: Ir, specs: string): Violation[] 
 
   // --- アダプター ---
   const adapterPath = join(testDir, FILES.adapter);
-  if (!existsSync(adapterPath)) {
+  if (scope === "source") {
+    // アダプターは対象外
+  } else if (!existsSync(adapterPath)) {
     report(adapterPath, "missing-file", "The adapter is missing.");
   } else {
     const tokens = scan(readFileSync(adapterPath, "utf8"));

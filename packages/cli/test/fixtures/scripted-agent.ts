@@ -1,19 +1,73 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-// LLM の代役。決まった実装を書き出す。ループ (失敗 → 差し戻し → 修正) を LLM なしで再現するためのもの。
-//   buggy    … シルバー会員の割引率が違う（注文 → 決済の2手で見つかる）
-//   norefund … 決済後のキャンセルで返金しない（注文 → 決済 → キャンセルの3手でしか見つからない）
-//   boundary … 優先出荷のしきい値を「1万円より大きい」にしている（ちょうど1万円でだけ違う）
-//   rounding … 請求金額を切り捨てではなく四捨五入している
-//   cheat    … 本番コードは正しいが、シルバー会員の決済をアダプターが肩代わりする（本番側の該当コードは死んでいる）
-//   moved    … 本番コードは割引率が違い、正しい割引率はアダプターにだけ書かれている
-//   correct  … 正しい実装
+// LLM の代役。決まった成果物を書き出す。ループ (失敗 → 差し戻し → 修正) を LLM なしで再現するためのもの。
+// 段階ごとに書くものが違う:
+//   design … 骨組み
+//     correct  … 正しい骨組み（中身は "not implemented" を投げる）
+//     broken   … 構文エラーで読み込めない
+//     leaky    … 仕様の条件の文を、コメントにそのまま書き写している
+//   wiring … アダプター
+//     correct  … 正しい配線
+//     miswired … 存在しないメソッドを呼ぶ
+//     fake     … 本番コードを使わず、アダプターの中に実装を持つ（骨組みのままでもテストが通ってしまう）
+//     touch    … 配線は正しいが、本番コード（骨組み）を書き換える
+//     cheat    … シルバー会員の決済をアダプターが肩代わりする（本番側の該当コードが死ぬ）
+//   implementation … 本番コードの中身
+//     correct  … 正しい実装
+//     buggy    … シルバー会員の割引率が違う（注文 → 決済の2手で見つかる）
+//     norefund … 決済後のキャンセルで返金しない（注文 → 決済 → キャンセルの3手でしか見つからない）
+//     boundary … 優先出荷のしきい値を「1万円より大きい」にしている（ちょうど1万円でだけ違う）
+//     rounding … 請求金額を切り捨てではなく四捨五入している
 
-export type Step = "buggy" | "norefund" | "boundary" | "rounding" | "cheat" | "moved" | "correct";
+export type Phase = "design" | "wiring" | "implementation";
+export type Step =
+  | "correct" | "broken" | "leaky"
+  | "miswired" | "fake" | "touch" | "cheat"
+  | "buggy" | "norefund" | "boundary" | "rounding";
 
-const wrongDiscount = (step: Step) => step === "buggy" || step === "moved";
-const intercepts = (step: Step) => step === "cheat" || step === "moved";
+const wrongDiscount = (step: Step) => step === "buggy";
+const intercepts = (step: Step) => step === "cheat";
+
+const skeleton = `export type Deps = {
+  isMonthEnd(): boolean;
+  paymentModuleActive(): boolean;
+  charge(): string;
+  send(action: string, payload: object): void;
+};
+
+/** An order. \`status\` is the current state, using the specification's state names. */
+export class OrderService {
+  status = "DRAFT";
+  rank = "";
+  price = 0;
+  deps: Deps;
+
+  constructor(deps: Deps) {
+    this.deps = deps;
+  }
+
+  /** The PlaceOrder action. */
+  place(rank: string, price: number) {
+    throw new Error("not implemented");
+  }
+
+  /** The Checkout action. */
+  checkout() {
+    throw new Error("not implemented");
+  }
+
+  /** The Ship action. */
+  ship() {
+    throw new Error("not implemented");
+  }
+
+  /** The Cancel action. */
+  cancel() {
+    throw new Error("not implemented");
+  }
+}
+`;
 
 const source = (step: Step) => `export type Deps = {
   isMonthEnd(): boolean;
@@ -88,7 +142,7 @@ const INTERCEPT = `    if (
 `;
 
 const adapter = (step: Step) => `import type { Ports, StateName, TargetSystemAdapter } from "./adapter.contract.ts";
-import { OrderService } from "../src/order-service.ts";
+${step === "fake" ? source("correct").replaceAll("export ", "") : `import { OrderService } from "../src/order-service.ts";`}
 
 let service: OrderService | undefined;
 let saved: Ports | undefined;
@@ -107,7 +161,7 @@ export const adapter: TargetSystemAdapter = {
     service = undefined;
   },
   async executeAction(action) {
-${intercepts(step) ? INTERCEPT : ""}    if (action.name === "PlaceOrder") service?.place(action.input.customerRank, action.input.listPrice);
+${intercepts(step) ? INTERCEPT : ""}    if (action.name === "PlaceOrder") service?.${step === "miswired" ? "placeOrder" : "place"}(action.input.customerRank, action.input.listPrice);
     if (action.name === "Checkout") service?.checkout();
     if (action.name === "Ship") service?.ship();
     if (action.name === "Cancel") service?.cancel();
@@ -118,17 +172,31 @@ ${intercepts(step) ? INTERCEPT : ""}    if (action.name === "PlaceOrder") servic
 };
 `;
 
-export function write(step: Step, dir: string) {
+export function write(phase: Phase, step: Step, dir: string) {
   mkdirSync(join(dir, "src"), { recursive: true });
   mkdirSync(join(dir, "aac"), { recursive: true });
-  writeFileSync(join(dir, "src/order-service.ts"), source(step));
-  writeFileSync(join(dir, "aac/adapter.ts"), adapter(step));
+  if (phase === "design") {
+    const text =
+      step === "broken"
+        ? "export const = ;\n"
+        : step === "leaky"
+          ? `// Discount applies when: The customer is a Silver member\n${skeleton}`
+          : skeleton;
+    writeFileSync(join(dir, "src/order-service.ts"), text);
+  }
+  if (phase === "wiring") {
+    writeFileSync(join(dir, "aac/adapter.ts"), adapter(step));
+    if (step === "touch") writeFileSync(join(dir, "src/order-service.ts"), source("correct"));
+  }
+  if (phase === "implementation") writeFileSync(join(dir, "src/order-service.ts"), source(step));
 }
 
-// ループから起動されたとき (AAC_ATTEMPT がある) だけ書き出す。
+// ループから起動されたとき (AAC_PHASE がある) だけ書き出す。
 // `node --test` は test/ 配下の全ファイルを実行するため、素の実行では何もしない。
-if (import.meta.main && process.env.AAC_ATTEMPT) {
+// AAC_SCRIPT は実装の段階の試行ごとの成果物 (例: "buggy,correct")。他の段階は常に correct
+if (import.meta.main && process.env.AAC_PHASE) {
+  const phase = process.env.AAC_PHASE as Phase;
   const steps = (process.env.AAC_SCRIPT ?? "correct").split(",") as Step[];
-  const attempt = Number(process.env.AAC_ATTEMPT);
-  write(steps[Math.min(attempt, steps.length) - 1], process.cwd());
+  const attempt = Number(process.env.AAC_ATTEMPT ?? "1");
+  write(phase, phase === "implementation" ? steps[Math.min(attempt, steps.length) - 1] : "correct", process.cwd());
 }
