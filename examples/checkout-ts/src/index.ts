@@ -1,16 +1,7 @@
-/**
- * Public entry point of the order component.
- *
- * - `Order` (order.ts): the component itself; construct it with its dependencies, drive it
- *   with `place`, `checkout`, `ship` and `cancel`, and read `state` to observe it.
- * - ports.ts: the interfaces of the dependencies to supply.
- * - rules.ts: the pure business decisions the order relies on.
- * - types.ts: the value types shared by all of the above.
- */
-export { Order, OrderCommandRejected } from "./order.ts";
-export { amountCharged, campaignFor, isMonthEnd, isPriorityShipping } from "./rules.ts";
+export { Order } from "./order.ts";
+export { amountCharged, decideCampaign, isMonthEnd, isPriorityShipping } from "./policy.ts";
 export type {
-  Clock,
+  Calendar,
   CouponIssuer,
   CustomerNotifier,
   OrderDependencies,
@@ -20,8 +11,9 @@ export type {
   CalendarDate,
   CampaignTerms,
   CouponType,
-  CustomerRank,
-  OrderState,
+  MemberRank,
+  OrderStatus,
   PaymentResult,
+  PlaceOrderRequest,
   Receipt,
 } from "./types.ts";

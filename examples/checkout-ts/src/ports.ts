@@ -1,106 +1,67 @@
-/**
- * The dependencies of the order component. Each is supplied from outside when an `Order`
- * (order.ts) is constructed.
- *
- * None of the answers is cached by the component: every command asks again when it needs a
- * value. A command may ask a question zero, one, or several times, so implementations must be
- * prepared to answer whenever asked and must not treat a question as a side effect.
- */
 import type { CalendarDate, CouponType, PaymentResult, Receipt } from "./types.ts";
 
 /**
  * Source of the current business date.
+ *
+ * Replaces the specification's `isMonthEnd` query: instead of a flag, the order asks for today's
+ * date and works out for itself whether that date is the last day of its month. To answer
+ * `isMonthEnd = true`, return a date that is the last day of its month (for example 31 January);
+ * to answer `false`, return any other date (for example 15 January).
  */
-export interface Clock {
-  /**
-   * Returns today's calendar date. Asked during checkout.
-   *
-   * This replaces the specification's `isMonthEnd` query: the component derives that answer
-   * itself from the returned date (see `isMonthEnd` in rules.ts). To make the specification's
-   * `isMonthEnd` true, return a date that is the last day of its month (e.g. 2026-01-31); to
-   * make it false, return any other date (e.g. 2026-01-15).
-   */
+export interface Calendar {
+  /** Returns today's date. Asked each time the date is needed; the answer is never cached. */
   today(): CalendarDate;
 }
 
 /**
  * The external payment module.
+ *
+ * Covers the specification's `paymentModuleActive` and `paymentResult` queries and its `Refund`
+ * effect.
  */
 export interface PaymentGateway {
   /**
-   * Tells whether the payment module is currently available.
-   * Corresponds to the specification's `paymentModuleActive` query. Asked during checkout.
+   * Whether the payment module is currently active (specification query `paymentModuleActive`).
+   * Asked during checkout, each time it is needed.
    */
   isActive(): boolean;
 
   /**
-   * Attempts to charge the customer and reports the outcome.
-   * The return value corresponds to the specification's `paymentResult` query. Called during
-   * checkout; the call itself is not one of the specification's effects.
-   *
-   * @param amountYen the amount to charge, in whole yen.
+   * Attempts to collect `amount` whole yen for the order and reports the outcome (specification
+   * query `paymentResult`). Called once per checkout. The call itself is not one of the
+   * specification's effects; only its return value matters there.
    */
-  charge(amountYen: number): PaymentResult;
+  charge(amount: number): PaymentResult;
 
-  /**
-   * Returns the money taken for this order to the customer.
-   * Corresponds to the specification's `Refund` effect (no payload). May be called while
-   * cancelling.
-   */
+  /** Returns the customer's payment for the order (specification effect `Refund`, no payload). */
   refund(): void;
 }
 
-/**
- * Sends messages to the customer.
- */
+/** Sends messages about the order to the customer. Each method is one specification effect. */
 export interface CustomerNotifier {
-  /**
-   * Corresponds to the specification's `SendOrderConfirmation` effect (no payload).
-   * May be called while placing an order.
-   */
+  /** Specification effect `SendOrderConfirmation` (no payload). */
   sendOrderConfirmation(): void;
 
-  /**
-   * Corresponds to the specification's `SendReceipt` effect. May be called during checkout.
-   *
-   * @param receipt `receipt.amountYen` is the effect's `amount`, `receipt.discountPercent` is
-   *   the effect's `discountPercent`.
-   */
+  /** Specification effect `SendReceipt`; `receipt` carries its `amount` and `discountPercent`. */
   sendReceipt(receipt: Receipt): void;
 
-  /**
-   * Corresponds to the specification's `NotifyPaymentFailure` effect (no payload).
-   * May be called during checkout.
-   */
+  /** Specification effect `NotifyPaymentFailure` (no payload). */
   notifyPaymentFailure(): void;
 
-  /**
-   * Corresponds to the specification's `SendShippingNotice` effect. May be called while
-   * shipping.
-   *
-   * @param priority the effect's `priority` payload field.
-   */
+  /** Specification effect `SendShippingNotice`; `priority` is its `priority` payload field. */
   sendShippingNotice(priority: boolean): void;
 }
 
-/**
- * Issues coupons to the customer.
- */
+/** Issues coupons to the customer. */
 export interface CouponIssuer {
-  /**
-   * Corresponds to the specification's `IssueCoupon` effect. May be called during checkout.
-   *
-   * @param type the effect's `type` payload field.
-   */
-  issueCoupon(type: CouponType): void;
+  /** Specification effect `IssueCoupon`; `type` is its `type` payload field. */
+  issue(type: CouponType): void;
 }
 
-/**
- * Everything an order needs from its environment.
- */
+/** Everything an order needs from its environment. Supplied once, when the order is created. */
 export interface OrderDependencies {
-  readonly clock: Clock;
-  readonly paymentGateway: PaymentGateway;
+  readonly calendar: Calendar;
+  readonly payments: PaymentGateway;
   readonly notifier: CustomerNotifier;
-  readonly couponIssuer: CouponIssuer;
+  readonly coupons: CouponIssuer;
 }

@@ -1,68 +1,57 @@
 /**
- * Shared value types for the order component.
- */
-
-/**
  * Membership rank of the customer who places an order.
- * Corresponds to the specification's `customerRank` input and `rank` data field.
+ * Same names as the specification's `customerRank` input / `rank` data values.
  */
-export type CustomerRank = "Gold" | "Silver" | "Bronze";
+export type MemberRank = "Gold" | "Silver" | "Bronze";
 
 /**
- * Lifecycle state of an order. The names are the specification's state names, unchanged.
- *
- * - `DRAFT`: the order has been created but not yet placed (the starting state).
- * - `PENDING`: the order has been placed and awaits payment.
- * - `PAID`: payment has been taken.
- * - `SHIPPED`: the order has been handed over for shipping.
- * - `CANCELLED`: the order has been cancelled.
+ * Lifecycle state of an order. The values are the specification's state names, unchanged.
+ * A newly constructed order is in the specification's initial state.
  */
-export type OrderState = "DRAFT" | "PENDING" | "PAID" | "SHIPPED" | "CANCELLED";
+export type OrderStatus = "DRAFT" | "PENDING" | "PAID" | "SHIPPED" | "CANCELLED";
 
-/**
- * Kind of coupon that can be issued to a customer.
- * Corresponds to the `type` payload of the specification's `IssueCoupon` effect.
- */
+/** Kind of coupon that can be issued (the `type` payload of the specification's `IssueCoupon` effect). */
 export type CouponType = "Premium" | "Standard";
 
-/**
- * Outcome of a charge attempt reported by the payment gateway.
- * Corresponds to the specification's `paymentResult` query.
- */
+/** Outcome of a charge attempt. Same values as the specification's `paymentResult` query. */
 export type PaymentResult = "succeeded" | "failed";
 
 /**
- * A calendar date without time or time zone.
+ * A calendar day with no time-of-day and no time zone.
+ * `month` is 1-12 (1 = January) and `day` is the day of the month starting at 1.
  */
 export interface CalendarDate {
-  /** Full year, e.g. 2026. */
   readonly year: number;
-  /** Month of the year, 1 (January) to 12 (December). */
   readonly month: number;
-  /** Day of the month, starting at 1. */
   readonly day: number;
 }
 
 /**
- * The campaign terms that apply to one checkout.
- * Corresponds to one row of the specification's `campaign` decision table.
+ * Input of the PlaceOrder command.
+ * `customerRank` is the specification's `customerRank`; `listPrice` is the specification's
+ * `listPrice`, a whole number of yen.
  */
-export interface CampaignTerms {
-  /** Discount in whole percent (specification column `discountPercent`). */
-  readonly discountPercent: number;
-  /** Whether a coupon is issued at all (specification column `grantsCoupon`). */
-  readonly grantsCoupon: boolean;
-  /** The coupon type the campaign names (specification column `coupon`). */
-  readonly coupon: CouponType;
+export interface PlaceOrderRequest {
+  readonly customerRank: MemberRank;
+  readonly listPrice: number;
 }
 
 /**
- * Contents of the receipt sent to the customer after a successful payment.
- * Corresponds to the payload of the specification's `SendReceipt` effect.
+ * The campaign terms that apply to a checkout (one row of the specification's `campaign` decision).
+ * `discountPercent` is the specification's `discountPercent` column.
+ * `coupon` combines the `grantsCoupon` and `coupon` columns: it is the coupon type to issue,
+ * or `null` when no coupon is granted.
+ */
+export interface CampaignTerms {
+  readonly discountPercent: number;
+  readonly coupon: CouponType | null;
+}
+
+/**
+ * Content of a payment receipt (payload of the specification's `SendReceipt` effect).
+ * `amount` is the amount charged in whole yen; `discountPercent` is the discount applied.
  */
 export interface Receipt {
-  /** Amount charged, in whole yen (specification payload field `amount`). */
-  readonly amountYen: number;
-  /** Discount applied, in whole percent (specification payload field `discountPercent`). */
+  readonly amount: number;
   readonly discountPercent: number;
 }

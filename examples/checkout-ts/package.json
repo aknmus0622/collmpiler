@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "verify": "node aac/verify.ts"
+    "verify": "node aac/order.verify.ts"
   },
   "devDependencies": {
     "@aac/cli": "workspace:*"

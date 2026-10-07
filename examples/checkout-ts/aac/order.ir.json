@@ -134,12 +134,12 @@
           "grantsCoupon": true
         },
         "The customer is a Silver member": {
-          "coupon": "Standard",
+          "coupon": null,
           "discountPercent": 5,
           "grantsCoupon": false
         },
         "otherwise": {
-          "coupon": "Standard",
+          "coupon": null,
           "discountPercent": 0,
           "grantsCoupon": false
         }

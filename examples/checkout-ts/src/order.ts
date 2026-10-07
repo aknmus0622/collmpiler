@@ -1,160 +1,87 @@
+import { amountCharged, decideCampaign, isPriorityShipping } from "./policy.ts";
 import type { OrderDependencies } from "./ports.ts";
-import { amountCharged, campaignFor, isMonthEnd, isPriorityShipping } from "./rules.ts";
-import type { CustomerRank, OrderState } from "./types.ts";
-
-/** What an order remembers once it has been placed. */
-interface PlacedOrder {
-  readonly rank: CustomerRank;
-  readonly priceYen: number;
-}
+import type { MemberRank, OrderStatus, PlaceOrderRequest } from "./types.ts";
 
 /**
- * Thrown by an {@link Order} command that cannot be executed: the order is in a state the
- * command does not start from, or a precondition of the command does not hold. The order is
- * left unchanged and no effect is performed on any dependency.
- */
-export class OrderCommandRejected extends Error {
-  /** Name of the rejected method, e.g. `"checkout"`. */
-  readonly command: string;
-  /** State the order was in when the command was rejected. */
-  readonly state: OrderState;
-
-  /**
-   * @param command name of the rejected method.
-   * @param state state the order was in.
-   * @param reason human-readable explanation.
-   */
-  constructor(command: string, state: OrderState, reason: string) {
-    super(reason);
-    this.name = "OrderCommandRejected";
-    this.command = command;
-    this.state = state;
-  }
-}
-
-/**
- * One customer order, from draft to shipment or cancellation. This is the component the
- * specification describes; each of its four methods is one specification command.
+ * One customer order: the component described by the specification.
  *
- * A new instance is a fresh order in the specification's initial state. Commands are
- * synchronous: when a method returns, the state has been updated and every dependency call the
- * command makes has been made, in the order the specification lists the effects.
+ * Create one instance per order; it starts in the specification's initial state. Drive it with
+ * the four command methods and read the resulting state from `status`. All methods are
+ * synchronous: every dependency call a command makes has happened by the time it returns, in
+ * the order the specification lists the effects.
  *
- * The rank and price the order remembers (specification data `rank` and `price`) are internal
- * and are observable only through what later commands send to the dependencies.
+ * Each command is meant to be called only in the states, and under the preconditions, that the
+ * specification allows for it; what happens otherwise is unspecified.
  */
 export class Order {
   private readonly deps: OrderDependencies;
-  private current: OrderState = "DRAFT";
-  private placed: PlacedOrder | undefined;
+  private state: OrderStatus = "DRAFT";
+  // Set by placeOrder; every order past the draft state has both.
+  private rank: MemberRank = "Bronze";
+  private price = 0;
 
-  /**
-   * @param deps the clock, payment gateway, customer notifier and coupon issuer this order
-   *   uses. They are kept for the lifetime of the order and consulted anew by every command.
-   */
+  /** `deps` are the order's collaborators; they are kept and used by the command methods. */
   constructor(deps: OrderDependencies) {
     this.deps = deps;
   }
 
-  /**
-   * The current state of the order, under the specification's state names (see
-   * {@link OrderState}). Reading it has no side effects.
-   */
-  get state(): OrderState {
-    return this.current;
+  /** The current state, as a specification state name. */
+  get status(): OrderStatus {
+    return this.state;
   }
 
   /**
-   * Performs the specification's `PlaceOrder` command.
-   *
-   * Uses `deps.notifier`.
-   *
-   * @param customerRank the command's `customerRank` input.
-   * @param listPriceYen the command's `listPrice` input, in whole yen.
-   * @throws OrderCommandRejected if the command cannot be executed in the current state.
+   * Specification command `PlaceOrder`. Remembers the customer's rank and the list price from
+   * `request` (the specification's `rank` and `price` data) and tells the notifier to send the
+   * order confirmation.
    */
-  place(customerRank: CustomerRank, listPriceYen: number): void {
-    this.requireState("place", ["DRAFT"]);
-    this.placed = { rank: customerRank, priceYen: listPriceYen };
-    this.current = "PENDING";
+  placeOrder(request: PlaceOrderRequest): void {
+    this.rank = request.customerRank;
+    this.price = request.listPrice;
+    this.state = "PENDING";
     this.deps.notifier.sendOrderConfirmation();
   }
 
   /**
-   * Performs the specification's `Checkout` command (no input).
-   *
-   * Uses `deps.paymentGateway` (`isActive` for the specification's `paymentModuleActive`,
-   * `charge` for its `paymentResult`), `deps.clock` (for its `isMonthEnd`), `deps.notifier`
-   * and `deps.couponIssuer`.
-   *
-   * @throws OrderCommandRejected if the command cannot be executed in the current state or its
-   *   precondition does not hold.
+   * Specification command `Checkout` (no input). Asks the payment gateway whether it is active
+   * and for the charge outcome, and the calendar for today's date; depending on the outcome it
+   * tells the notifier to send a receipt or a payment-failure notice, and may tell the coupon
+   * issuer to issue a coupon.
    */
   checkout(): void {
-    const { rank, priceYen } = this.requirePlaced("checkout", ["PENDING"]);
-    const { paymentGateway, clock, notifier, couponIssuer } = this.deps;
-    if (!paymentGateway.isActive()) {
-      throw new OrderCommandRejected("checkout", this.current, "the payment module is not active");
+    const { calendar, payments, notifier, coupons } = this.deps;
+    if (!payments.isActive()) {
+      return;
     }
-
-    const campaign = campaignFor(rank, isMonthEnd(clock.today()));
-    const amountYen = amountCharged(priceYen, campaign.discountPercent);
-    if (paymentGateway.charge(amountYen) !== "succeeded") {
+    const terms = decideCampaign(this.rank, calendar.today());
+    const amount = amountCharged(this.price, terms.discountPercent);
+    if (payments.charge(amount) !== "succeeded") {
       notifier.notifyPaymentFailure();
       return;
     }
-
-    this.current = "PAID";
-    notifier.sendReceipt({ amountYen, discountPercent: campaign.discountPercent });
-    if (campaign.grantsCoupon) {
-      couponIssuer.issueCoupon(campaign.coupon);
+    this.state = "PAID";
+    notifier.sendReceipt({ amount, discountPercent: terms.discountPercent });
+    if (terms.coupon !== null) {
+      coupons.issue(terms.coupon);
     }
   }
 
   /**
-   * Performs the specification's `Ship` command (no input).
-   *
-   * Uses `deps.notifier`.
-   *
-   * @throws OrderCommandRejected if the command cannot be executed in the current state.
+   * Specification command `Ship` (no input). Tells the notifier to send the shipping notice.
    */
   ship(): void {
-    const { rank, priceYen } = this.requirePlaced("ship", ["PAID"]);
-    this.current = "SHIPPED";
-    this.deps.notifier.sendShippingNotice(isPriorityShipping(rank, priceYen));
+    this.state = "SHIPPED";
+    this.deps.notifier.sendShippingNotice(isPriorityShipping(this.rank, this.price));
   }
 
   /**
-   * Performs the specification's `Cancel` command (no input).
-   *
-   * Uses `deps.paymentGateway` (`refund`).
-   *
-   * @throws OrderCommandRejected if the command cannot be executed in the current state.
+   * Specification command `Cancel` (no input). May tell the payment gateway to refund.
    */
   cancel(): void {
-    this.requireState("cancel", ["PENDING", "PAID"]);
-    const wasPaid = this.current === "PAID";
-    this.current = "CANCELLED";
+    const wasPaid = this.state === "PAID";
+    this.state = "CANCELLED";
     if (wasPaid) {
-      this.deps.paymentGateway.refund();
+      this.deps.payments.refund();
     }
-  }
-
-  private requireState(command: string, from: readonly OrderState[]): void {
-    if (!from.includes(this.current)) {
-      throw new OrderCommandRejected(
-        command,
-        this.current,
-        `cannot ${command} an order in state ${this.current}`,
-      );
-    }
-  }
-
-  private requirePlaced(command: string, from: readonly OrderState[]): PlacedOrder {
-    this.requireState(command, from);
-    if (this.placed === undefined) {
-      throw new OrderCommandRejected(command, this.current, "the order has not been placed");
-    }
-    return this.placed;
   }
 }
