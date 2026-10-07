@@ -27,7 +27,8 @@ Phase 1 spike. TypeScript targets only.
 - Help with triaging surviving mutations: logic the spec cannot exercise versus code that is not needed
 - Operations that return values (value objects), and multiplicity declared as values
 - Composing components, and describing the UI layer
-- Target languages other than TypeScript (Go, Rust)
+- Target languages other than TypeScript (Go, Rust, Python): the per-language parts (test-side generation,
+  running the tests, static checks, mutation) grouped behind one interface
 - A single `aac` command in place of the current scripts
 - Stronger agent isolation (containers)
 - Diagrams generated from the IR, and a trace visualizer
