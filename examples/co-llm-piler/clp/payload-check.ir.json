@@ -1,0 +1,286 @@
+{
+  "behaviors": [
+    {
+      "asks": {
+        "fieldIsGiven": {
+          "input": {
+            "effect": {
+              "$ref": "data:effect"
+            },
+            "field": {
+              "$ref": "input:field"
+            }
+          },
+          "query": "fieldGiven"
+        }
+      },
+      "description": "A field the effect being walked declares. The walk stays where it is. If the specification gives no value for it, a missing-field diagnostic is reported for it.",
+      "from": [
+        "IN_EFFECT"
+      ],
+      "name": "DeclaredField",
+      "onlyIf": [],
+      "when": {
+        "The specification gives no value for the declared field": {
+          "effects": [
+            {
+              "name": "ReportDiagnostic",
+              "payload": {
+                "code": "missing-field",
+                "effect": {
+                  "$ref": "data:effect"
+                },
+                "field": {
+                  "$ref": "input:field"
+                }
+              }
+            }
+          ]
+        },
+        "otherwise": {
+          "effects": []
+        }
+      }
+    },
+    {
+      "asks": {
+        "declared": {
+          "input": {
+            "name": {
+              "$ref": "input:name"
+            }
+          },
+          "query": "effectDeclared"
+        }
+      },
+      "description": "The walk enters an effect and remembers its name.",
+      "from": [
+        "OUTSIDE"
+      ],
+      "name": "EnterEffect",
+      "onlyIf": [],
+      "when": {
+        "The entered effect is not declared": {
+          "does": "An unknown-effect diagnostic is reported for it.",
+          "effects": [
+            {
+              "name": "ReportDiagnostic",
+              "payload": {
+                "code": "unknown-effect",
+                "effect": {
+                  "$ref": "input:name"
+                },
+                "field": ""
+              }
+            }
+          ],
+          "goTo": "IN_UNKNOWN_EFFECT",
+          "set": {
+            "effect": {
+              "$ref": "input:name"
+            }
+          }
+        },
+        "otherwise": {
+          "effects": [],
+          "goTo": "IN_EFFECT",
+          "set": {
+            "effect": {
+              "$ref": "input:name"
+            }
+          }
+        }
+      }
+    },
+    {
+      "asks": {
+        "fieldIsDeclared": {
+          "input": {
+            "effect": {
+              "$ref": "data:effect"
+            },
+            "field": {
+              "$ref": "input:field"
+            }
+          },
+          "query": "fieldDeclared"
+        },
+        "fieldTakes": {
+          "input": {
+            "effect": {
+              "$ref": "data:effect"
+            },
+            "field": {
+              "$ref": "input:field"
+            }
+          },
+          "query": "fieldKind"
+        }
+      },
+      "description": "A field the specification gives to the effect being walked, with the kind of the value given. The walk stays where it is. In a declared effect: if the effect does not declare the field, a bad-value diagnostic is reported for it; otherwise, if the value's kind does not fit the kind the field takes, a bad-value diagnostic is reported for it. In an effect that is not declared, nothing is checked.",
+      "from": [
+        "IN_EFFECT",
+        "IN_UNKNOWN_EFFECT"
+      ],
+      "name": "GivenField",
+      "onlyIf": [],
+      "when": {
+        "The effect is declared and declares the given field, and the value's kind does not fit the kind the field takes": {
+          "effects": [
+            {
+              "name": "ReportDiagnostic",
+              "payload": {
+                "code": "bad-value",
+                "effect": {
+                  "$ref": "data:effect"
+                },
+                "field": {
+                  "$ref": "input:field"
+                }
+              }
+            }
+          ]
+        },
+        "The effect is declared and does not declare the given field": {
+          "effects": [
+            {
+              "name": "ReportDiagnostic",
+              "payload": {
+                "code": "bad-value",
+                "effect": {
+                  "$ref": "data:effect"
+                },
+                "field": {
+                  "$ref": "input:field"
+                }
+              }
+            }
+          ]
+        },
+        "otherwise": {
+          "effects": []
+        }
+      }
+    },
+    {
+      "from": [
+        "IN_EFFECT",
+        "IN_UNKNOWN_EFFECT"
+      ],
+      "name": "LeaveEffect",
+      "onlyIf": [],
+      "when": {
+        "otherwise": {
+          "effects": [],
+          "goTo": "OUTSIDE"
+        }
+      }
+    }
+  ],
+  "decisions": {
+    "compatibility": {
+      "rows": {
+        "The value and the field are of the same kind": {
+          "fits": true
+        },
+        "The value is an integer and the field takes a number": {
+          "fits": true
+        },
+        "The value is one of a fixed set of strings and the field takes a string": {
+          "fits": true
+        },
+        "otherwise": {
+          "fits": false
+        }
+      }
+    }
+  },
+  "descriptions": {
+    "component": "Checks the payload a specification gives to an effect, one effect at a time, and reports every mismatch with the effect's declaration: an effect that is not declared, a given field that is not declared, a given value whose kind does not fit the field, and a declared field that is not given.",
+    "data.effect": "The name of the effect being walked.",
+    "queries.effectDeclared": "Whether the specification declares an effect of this name.",
+    "queries.fieldDeclared": "Whether that effect declares a field of this name.",
+    "queries.fieldGiven": "Whether the specification gives a value for that field of that effect.",
+    "queries.fieldKind": "The kind of value that field of that effect takes.",
+    "states.IN_EFFECT": "Walking the fields of a declared effect.",
+    "states.IN_UNKNOWN_EFFECT": "Walking the fields of an effect that is not declared; its fields are not checked.",
+    "states.OUTSIDE": "Between effects."
+  },
+  "irVersion": 5,
+  "model": {
+    "commands": {
+      "DeclaredField": {
+        "field": "string"
+      },
+      "EnterEffect": {
+        "name": "string"
+      },
+      "GivenField": {
+        "field": "string",
+        "kind": [
+          "boolean",
+          "integer",
+          "number",
+          "string",
+          "enum"
+        ]
+      },
+      "LeaveEffect": {}
+    },
+    "data": {
+      "effect": "string"
+    },
+    "effects": {
+      "ReportDiagnostic": {
+        "code": [
+          "unknown-effect",
+          "missing-field",
+          "bad-value"
+        ],
+        "effect": "string",
+        "field": "string"
+      }
+    },
+    "init": "OUTSIDE",
+    "queries": {
+      "effectDeclared": {
+        "input": {
+          "name": "string"
+        },
+        "output": "boolean"
+      },
+      "fieldDeclared": {
+        "input": {
+          "effect": "string",
+          "field": "string"
+        },
+        "output": "boolean"
+      },
+      "fieldGiven": {
+        "input": {
+          "effect": "string",
+          "field": "string"
+        },
+        "output": "boolean"
+      },
+      "fieldKind": {
+        "input": {
+          "effect": "string",
+          "field": "string"
+        },
+        "output": [
+          "boolean",
+          "integer",
+          "number",
+          "string",
+          "enum"
+        ]
+      }
+    },
+    "states": [
+      "OUTSIDE",
+      "IN_EFFECT",
+      "IN_UNKNOWN_EFFECT"
+    ]
+  }
+}
