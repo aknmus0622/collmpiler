@@ -44,25 +44,30 @@ The IR describes one component by its boundary.
 - Field types: an array lists the allowed values; a string is a primitive type (\`integer\` is a whole number);
   an object such as \`{"type": "integer", "min": 0, "max": 1000000}\` is a number with constraints (\`around\`
   lists thresholds the test will probe closely, including the values just below and above them).
-- \`model.formulas\`: named computations. The name is a natural-language description of how the value is
-  computed, including rounding; implement exactly what it says. The value is the declared result type.
+- \`model.formulas\`: named computations. \`is\` describes in natural language how the value is computed,
+  including rounding; implement exactly what it says. \`type\` is the type of the result.
 - \`model.invariants\`: natural-language properties that always hold for the state and the remembered data.
   They are not tested directly; treat them as facts you can rely on.
 - **Conditions are written in natural language** everywhere they appear: as the row keys of decision tables, as
-  \`preconditions\`, and as the keys of \`transitions\`. Decide what each condition means in terms of the
-  remembered data, the query answers, the input of the action, and the current state. The same sentence always
-  means the same thing. Among the conditions of one table (or of one action's transitions) at most one holds;
-  \`default\` applies when none does.
+  \`preconditions\`, as the keys of \`transitions\`, and as the \`when\` of a command. Decide what each condition
+  means in terms of the remembered data, the query answers, the input of the action, and the current state.
+  The same sentence always means the same thing. Among the conditions of one table (or of one action's
+  transitions) at most one holds; \`otherwise\` applies when none does.
 - \`decisions\`: decision tables. \`rows\` maps each condition to the values chosen when it holds.
 - \`behaviors\`: actions. \`from\` lists the states in which the action can be executed, and \`preconditions\`
   must also hold; behaviour outside them is not tested. \`transitions\` maps each condition to what happens
-  when it holds: the resulting \`nextState\`, the \`emittedCommands\` in order, and optionally \`set\`.
-- Inside a transition, \`{"$ref": "input:<field>"}\`, \`{"$ref": "data:<field>"}\` and \`{"$ref": "query:<field>"}\`
-  mean the value of that action input, remembered field, or query answer. \`{"$ref": "formula:<name>"}\` means
-  the result of that named computation. \`{"$ref": "decision:<Table>.<column>"}\` means the value of that column
-  in the row that matches, and \`{"$spread": "decision:<Table>.<column>"}\` means all elements of that column's
-  array, inserted at that position. \`payloadSchema\` and \`event\` are informational and are not part of the
-  command.`;
+  when it holds:
+  - \`nextState\`: the resulting state.
+  - \`description\`: what happens, in prose. It explains the intent; the fields below are the precise form.
+  - \`emittedCommands\`: the commands to issue, in this order. A command with \`when\` is issued only if that
+    holds; \`when\` is either a condition sentence or a reference to a boolean value.
+  - \`set\`: the data to remember.
+- Values inside a transition are constants or references:
+  - \`{"$ref": "input:<field>"}\`, \`{"$ref": "data:<field>"}\`, \`{"$ref": "query:<field>"}\`: that action input,
+    remembered field, or query answer.
+  - \`{"$ref": "formula:<name>"}\`: the result of that computation.
+  - \`{"$ref": "decision:<table>.<column>"}\`: the value of that column in the row whose condition holds.
+  - \`{"$was": [<states>]}\`: true if the state before the action was one of those listed.`;
 
 const design = (target: Target, guide: string) => `Design the production code for the component specified in \`${TEST_DIR}/${FILES.ir}\`, and write it as a
 **skeleton** under \`${SOURCE_DIR}/\`: every type, every interface, and every exported class and function with its

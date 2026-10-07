@@ -1,24 +1,19 @@
-// --- 多重度DSL ---
+// 仕様を書くための型と関数。書くものは3つ:
+//
+//   決定表 (decisionTable)   … 条件から値を選ぶ表。値だけを返す
+//   コンポーネント (component) … 語彙、状態機械の骨組み、アクションの説明 (文)。関数は書かない
+//   結び付け (bind)           … アクションの構造 (宣言) と、名前の意味 (関数)
+//
+// 型は実行時に消えるため、すべて「値」として宣言し、型はそこから導出する。
+// 値として残るので IR に出力でき、PBT の入力生成にもそのまま使える。
+
+// --- 多重度DSL (型のみ) ---
 export type One<T> = T;
 export type Lone<T> = T | undefined;
 export type Some<T> = [T, ...T[]];
 export type Many<T> = T[];
 
-// --- コンポーネント ---
-// 型は実行時に消えるため、部品は「値」として宣言し、型はそこから導出する。
-// 値として残るので IR に出力でき、PBT の入力生成にもそのまま使える。
-//
-// 部品は境界と構造だけで記述する (defineComponent)。ここまでは関数を含まない純粋データ:
-//   states / initial … 状態名と初期状態
-//   actions    … 外から部品を動かすアクション。入力 (input)、実行できる状態 (from)、事前条件 (where)
-//   queries    … 依存への問い合わせ（部品が外に尋ねて答えをもらう値。時計・設定・外部サービスの応答など）
-//   commands   … 依存への指示（部品が外に対して行う副作用）
-//   data       … 部品が覚えているデータ（遷移の set で書き、後のアクションで読む。初期状態では未設定）
-//   formulas   … 計算。名前（自然言語）と結果の型だけを宣言し、中身は Layer 2 で結び付ける
-//   invariants … 不変条件。名前（自然言語）だけを宣言し、判定は Layer 2 で結び付ける
-//   assets     … 実装を LLM に依頼するときに添付する資料（設計の決まり、用語集など）。仕様の意味には影響しない
-// そこに .cases() で「アクションごとの遷移」を取り付けると、コンポーネントが完成する。
-
+// --- フィールドの型 ---
 // 数値の制約。around は、その前後を PBT が重点的に生成するしきい値
 export type NumberSchema = {
   readonly type: "integer" | "number";
@@ -26,18 +21,40 @@ export type NumberSchema = {
   readonly max?: number;
   readonly around?: readonly number[];
 };
-
 export type FieldSchema = "boolean" | "number" | "integer" | "string" | readonly string[] | NumberSchema;
 export type Fields = Record<string, FieldSchema>;
 
-export type ActionDeclaration = {
-  input?: Fields;
-  // このアクションを実行できる状態。省略時は全状態
-  from?: readonly string[];
-  // 事前条件（自然言語の条件）。満たさない場合の挙動は仕様の対象外
-  where?: readonly string[];
-};
+type FieldType<F> = F extends "boolean"
+  ? boolean
+  : F extends "number" | "integer" | NumberSchema
+    ? number
+    : F extends "string"
+      ? string
+      : F extends readonly (infer Value)[]
+        ? Value
+        : never;
 
+// --- 型エラーの説明 ---
+// 文字列リテラルと交差させても never に潰れないよう、オブジェクト型にしている（文面がエラーに残る）
+type Problem<Message extends string> = { readonly 誤り: Message };
+type KnownKeys<T, Allowed> = {
+  [K in keyof T]: K extends Allowed ? unknown : Problem<`"${K & string}" というキーはありません (書き間違い?)`>;
+};
+type OneOf<Actual, Allowed, What extends string> = Actual extends Allowed
+  ? unknown
+  : Problem<`"${Actual & string}" は ${What} にありません`>;
+// 列挙は、その場に書くか `as const` を付けた配列でなければならない。
+// 変数に取り出して `as const` を忘れると string[] に広がり、列挙の検査が効かなくなる
+type NoWide<F> = {
+  [K in keyof F]: F[K] extends readonly (infer Value)[]
+    ? string extends Value
+      ? Problem<"列挙は、その場に書くか as const を付けた配列で宣言してください">
+      : unknown
+    : unknown;
+};
+type NoWideIn<Group> = { [K in keyof Group]: NoWide<Group[K]> };
+
+// --- 添付資料 ---
 // 実装を LLM に依頼するときに添付する資料。file / dir / text で包んで assets に並べる。
 //   file("docs/architecture.md")   … ファイル（コンポーネントのファイルからの相対パス）
 //   dir("docs/conventions")        … ディレクトリの中のファイルすべて
@@ -56,140 +73,247 @@ export const file = (path: string, options: AssetOptions = {}): AssetDeclaration
 export const dir = (path: string, options: AssetOptions = {}): AssetDeclaration => ({ kind: "dir", path, ...options });
 export const text = (content: string, options: AssetOptions = {}): AssetDeclaration => ({ kind: "text", text: content, ...options });
 
-export type Boundary = {
+// --- 決定表 ---
+// 条件（自然言語）から値を選ぶ表。どの条件にも当たらないときの otherwise が必須で、全行が同じ列を持つ。
+// セルに書けるのは値だけ。指示や計算は書かない（表が決めるのは率や区分といったパラメータ）
+export type Constant = string | number | boolean;
+export type Table = Record<string, Record<string, Constant>>;
+type Columns<T> = T extends { otherwise: infer Row } ? keyof Row : never;
+type CheckTable<T> = T & { otherwise: unknown } & {
+  [Row in keyof T]: { [C in Columns<T>]: Constant } & KnownKeys<T[Row], Columns<T>>;
+};
+
+export function decisionTable<const T extends Table>(table: CheckTable<T>): T {
+  return table as T;
+}
+
+// --- 参照 ---
+// 結び付けの構造の中で、「どこから来る値か」を指す。関数だが、返すのは純粋なデータ
+export type Ref<Kind extends string, Path> = { readonly $ref: Kind; readonly path: Path };
+
+// 決定表の、当たった行の列の値
+export const decided = <const D extends string, const C extends string>(decision: D, column: C): Ref<"decided", readonly [D, C]> => ({
+  $ref: "decided",
+  path: [decision, column],
+});
+// 計算の結果
+export const calculated = <const N extends string>(name: N): Ref<"calculated", N> => ({ $ref: "calculated", path: name });
+// そのアクションの入力
+export const given = <const N extends string>(name: N): Ref<"given", N> => ({ $ref: "given", path: name });
+// 覚えているデータ
+export const remembered = <const N extends string>(name: N): Ref<"remembered", N> => ({ $ref: "remembered", path: name });
+// 問い合わせの答え
+export const asked = <const N extends string>(name: N): Ref<"asked", N> => ({ $ref: "asked", path: name });
+// アクションの実行前の状態が、挙げた状態のどれかであること（真偽値）
+export const was = <const S extends readonly string[]>(...states: S): Ref<"was", S> => ({ $ref: "was", path: states });
+
+// --- コンポーネント ---
+// 部品を、語彙と骨組みと文で記述する。関数は書かない。
+//   states / startsIn … 状態名と初期状態
+//   remembers    … 部品が覚えているデータ（結び付けの remember で書き、後のアクションで読む。初めは未設定）
+//   asks         … 依存への問い合わせ（部品が外に尋ねて答えをもらう値。時計・設定・外部サービスの応答など）
+//   tells        … 依存への指示（部品が外に対して行う副作用）
+//   decisions    … 使う決定表
+//   calculations … 計算。短い名前と、式を述べる文 (is) と、結果の型。中身は結び付けに書く
+//   alwaysTrue   … 不変条件（文）。判定は結び付けに書く
+//   actions      … 外から部品を動かすアクション。入力 (takes)、実行できる状態 (allowedIn)、事前条件 (onlyIf)、
+//                  そして何が起きるか: 遷移先 (goTo) と、説明の文 (does)。条件で分かれるなら when に並べる
+//   assets       … 実装を LLM に依頼するときに添付する資料。仕様の意味には影響しない
+export type Outcome = { goTo: string; does: string };
+export type ActionDeclaration = {
+  takes?: Fields;
+  // このアクションを実行できる状態。省略時は全状態
+  allowedIn?: readonly string[];
+  // 事前条件（条件の文）。満たさない場合の挙動は仕様の対象外
+  onlyIf?: readonly string[];
+  // 条件で分かれないとき
+  then?: Outcome;
+  // 条件で分かれるとき。キーは条件の文で、otherwise が必須
+  when?: Record<string, Outcome>;
+};
+export type Declaration = {
   assets?: readonly AssetDeclaration[];
-  initial: string;
   states: readonly string[];
-  data?: Fields;
-  queries?: Fields;
-  commands?: Record<string, Fields>;
-  formulas?: Fields;
-  invariants?: readonly string[];
+  startsIn: string;
+  remembers?: Fields;
+  asks?: Fields;
+  tells?: Record<string, Fields>;
+  decisions?: Record<string, Table>;
+  calculations?: Record<string, { is: string; type: FieldSchema }>;
+  alwaysTrue?: readonly string[];
   actions: Record<string, ActionDeclaration>;
 };
 
-// 列挙は、その場に書くか `as const` を付けた配列でなければならない。
-// 変数に取り出して `as const` を忘れると string[] に広がり、列挙の検査が効かなくなるため、型で拒否する
-type NoWide<F> = {
-  [K in keyof F]: F[K] extends readonly (infer Value)[]
-    ? string extends Value
-      ? "列挙は、その場に書くか as const を付けた配列で宣言してください"
-      : F[K]
-    : F[K];
-};
-type NoWideIn<Group> = { [K in keyof Group]: NoWide<Group[K]> };
+type Opt<T> = T extends object ? T : {};
+type States<B extends Declaration> = B["states"][number];
+type Remembers<B extends Declaration> = Opt<B["remembers"]>;
+type Asks<B extends Declaration> = Opt<B["asks"]>;
+type Tells<B extends Declaration> = Opt<B["tells"]>;
+type Decisions<B extends Declaration> = Opt<B["decisions"]>;
+type Calculations<B extends Declaration> = Opt<B["calculations"]>;
+type Takes<B extends Declaration, A extends keyof B["actions"]> = Opt<B["actions"][A]["takes"]>;
 
-// 同じ定義の中で検査する: initial と from は states に含まれること、列挙が広がっていないこと
-type Checked<B extends Boundary> = B & {
-  initial: B["states"][number];
-  data?: NoWide<B["data"]>;
-  queries?: NoWide<B["queries"]>;
-  formulas?: NoWide<B["formulas"]>;
-  commands?: NoWideIn<B["commands"]>;
-  actions: {
-    [Action in keyof B["actions"]]: {
-      from?: readonly B["states"][number][];
-      input?: NoWide<B["actions"][Action]["input"]>;
-    };
+type CheckOutcome<B extends Declaration, O> = KnownKeys<O, keyof Outcome> & {
+  goTo: O extends { goTo: infer G } ? OneOf<G, States<B>, "states"> : string;
+  does: string;
+};
+type CheckAction<B extends Declaration, A extends keyof B["actions"]> = KnownKeys<B["actions"][A], keyof ActionDeclaration> & {
+  takes?: NoWide<B["actions"][A]["takes"]>;
+  allowedIn?: readonly States<B>[];
+} & (B["actions"][A] extends { when: infer W }
+    ? { when: { [C in keyof W]: CheckOutcome<B, W[C]> } & { otherwise: unknown }; then?: never }
+    : B["actions"][A] extends { then: infer O }
+      ? { then: CheckOutcome<B, O> }
+      : { then: Problem<"then (条件で分かれない) か when (条件で分かれる) のどちらかが必要です"> });
+type Checked<B extends Declaration> = B &
+  KnownKeys<B, keyof Declaration> & {
+    startsIn: OneOf<B["startsIn"], States<B>, "states">;
+    remembers?: NoWide<B["remembers"]>;
+    asks?: NoWide<B["asks"]>;
+    tells?: NoWideIn<B["tells"]>;
+    actions: { [A in keyof B["actions"]]: CheckAction<B, A> };
   };
-};
 
-type FieldType<F> = F extends "boolean"
-  ? boolean
-  : F extends "number" | "integer" | NumberSchema
-    ? number
-    : F extends "string"
-      ? string
-      : F extends readonly (infer Value)[]
-        ? Value
-        : never;
+declare const componentBrand: unique symbol;
+export type Component<B extends Declaration> = B & { readonly [componentBrand]?: true };
+
+export const COMPONENT = Symbol.for("aac.component");
+export const BINDING = Symbol.for("aac.binding");
+
+export function component<const B extends Declaration>(declaration: Checked<B>): Component<B> {
+  const value = { ...(declaration as B) };
+  Object.defineProperty(value, COMPONENT, { value: true });
+  return value;
+}
+
+// --- 結び付け ---
+// コンポーネントの文と名前に、内容を結び付ける。2種類を書く:
+//   actions      … 構造。アクションの文 (does) が何を意味するかを、宣言で書く:
+//                  何を指示するか (tell)、何を覚えるか (remember)。値は参照 (decided など) で指す。
+//                  IR に出て、実装する LLM に渡る
+//   conditions / calculations / alwaysTrue … 意味。名前が何を指すかを、関数で書く。
+//                  IR には出ない。PBT が期待値を計算するための正解になる
+
+// 型 T の値として使える参照
+type ColumnType<T, C> = T[keyof T] extends infer Row ? (Row extends unknown ? (C extends keyof Row ? Row[C] : never) : never) : never;
+type RefTo<B extends Declaration, A extends keyof B["actions"], T> =
+  | {
+      [D in keyof Decisions<B>]: {
+        [C in Columns<Decisions<B>[D]>]: ColumnType<Decisions<B>[D], C> extends T ? Ref<"decided", readonly [D, C]> : never;
+      }[Columns<Decisions<B>[D]>];
+    }[keyof Decisions<B>]
+  | { [N in keyof Calculations<B>]: Calculations<B>[N] extends { type: infer S } ? (FieldType<S> extends T ? Ref<"calculated", N> : never) : never }[keyof Calculations<B>]
+  | { [N in keyof Takes<B, A>]: FieldType<Takes<B, A>[N]> extends T ? Ref<"given", N> : never }[keyof Takes<B, A>]
+  | { [N in keyof Remembers<B>]: FieldType<Remembers<B>[N]> extends T ? Ref<"remembered", N> : never }[keyof Remembers<B>]
+  | { [N in keyof Asks<B>]: FieldType<Asks<B>[N]> extends T ? Ref<"asked", N> : never }[keyof Asks<B>]
+  | (boolean extends T ? Ref<"was", readonly States<B>[]> : never);
+type Value<B extends Declaration, A extends keyof B["actions"], T> = T | RefTo<B, A, T>;
+
+// 実際に書かれたキーをなぞって検査する（書かれた型そのものとの交差では、余計なキーを検出できないため）
+type CheckPayload<B extends Declaration, A extends keyof B["actions"], Schema, P> = {
+  [F in keyof P]: F extends keyof Schema
+    ? Value<B, A, FieldType<Schema[F]>>
+    : Problem<`"${F & string}" というフィールドは、この指示にありません`>;
+} & { [F in keyof Schema]: unknown };
+type CheckTell<B extends Declaration, A extends keyof B["actions"], E> = {
+  // when: 条件の文か、真偽値の参照（決定表の列、問い合わせ、実行前の状態）
+  [K in keyof E]: K extends "when"
+    ? string | RefTo<B, A, boolean>
+    : K extends keyof Tells<B>
+      ? CheckPayload<B, A, Tells<B>[K], E[K]>
+      : Problem<`"${K & string}" は tells にありません`>;
+};
+// 型引数をそのままなぞる形にしないと、タプルの要素ごとの検査にならない
+type CheckTells<B extends Declaration, A extends keyof B["actions"], T> = { [I in keyof T]: CheckTell<B, A, T[I]> };
+type CheckRemember<B extends Declaration, A extends keyof B["actions"], R> = {
+  [K in keyof R]: K extends keyof Remembers<B>
+    ? Value<B, A, FieldType<Remembers<B>[K]>>
+    : Problem<`"${K & string}" は remembers にありません`>;
+};
+type CheckEffects<B extends Declaration, A extends keyof B["actions"], E> = {
+  [K in keyof E]: K extends "tell"
+    ? CheckTells<B, A, E[K]>
+    : K extends "remember"
+      ? CheckRemember<B, A, E[K]>
+      : Problem<`"${K & string}" はここには書けません。書けるのは tell と remember です (遷移先はコンポーネントの goTo に書きます)`>;
+};
+// アクションごとの構造。when のあるアクションは、その条件ごと (otherwise を含む) に書く
+type CheckStructure<B extends Declaration, S> = {
+  [A in keyof B["actions"]]: B["actions"][A] extends { when: infer W }
+    ? { [C in keyof W]: A extends keyof S ? (C extends keyof S[A] ? CheckEffects<B, A, S[A][C]> : unknown) : unknown } &
+        (A extends keyof S ? KnownKeys<S[A], keyof W> : unknown)
+    : A extends keyof S
+      ? CheckEffects<B, A, S[A]>
+      : unknown;
+} & KnownKeys<S, keyof B["actions"]>;
+
+// 条件の名前は、決定表の行・onlyIf・when のキー（コンポーネント）と、指示の when（結び付けの構造）から集める。
+// 結び付けの漏れも、どこにも使われていない条件（typo）も、コンパイルエラーになる
+type TellConditions<E> = E extends { tell: readonly (infer T)[] } ? (T extends { when: infer W } ? (W extends string ? W : never) : never) : never;
+type StructureConditions<B extends Declaration, S> = {
+  [A in keyof S]: A extends keyof B["actions"]
+    ? B["actions"][A] extends { when: unknown }
+      ? TellConditions<S[A][keyof S[A]]>
+      : TellConditions<S[A]>
+    : never;
+}[keyof S];
+type DeclaredConditions<B extends Declaration> =
+  | Exclude<{ [D in keyof Decisions<B>]: keyof Decisions<B>[D] }[keyof Decisions<B>], "otherwise">
+  | {
+      [A in keyof B["actions"]]:
+        | (B["actions"][A] extends { onlyIf: readonly (infer N)[] } ? N : never)
+        | (B["actions"][A] extends { when: infer W } ? Exclude<keyof W, "otherwise"> : never);
+    }[keyof B["actions"]];
+export type ConditionNames<B extends Declaration, S> = (DeclaredConditions<B> | StructureConditions<B, S>) & string;
 
 type Shape<F> = F extends Fields ? { -readonly [K in keyof F]: FieldType<F[K]> } : {};
 type UnionToIntersection<U> = (U extends unknown ? (value: U) => void : never) extends (value: infer I) => void ? I : never;
-
-export type DataOf<B extends Boundary> = Shape<B["data"]>;
-export type CommandsOf<B extends Boundary> =
-  B["commands"] extends Record<string, Fields>
-    ? { [Name in keyof B["commands"]]: { action: Name; payload: Shape<B["commands"][Name]> } }[keyof B["commands"]]
-    : never;
-type InputOf<B extends Boundary, Action extends keyof B["actions"]> = Shape<B["actions"][Action]["input"]>;
-
 // 部品が覚えている状態: 状態名 (status) と、覚えているデータ（未設定があり得る）
-export type StateOf<B extends Boundary> = { status: B["states"][number] } & Partial<DataOf<B>>;
+export type StateOf<B extends Declaration> = { status: States<B> } & Partial<Shape<B["remembers"]>>;
+// 条件と計算が読めるデータ: 状態、問い合わせの答え、アクションの入力（どのアクションでも使われ得るので省略可能）
+export type ContextOf<B extends Declaration> = StateOf<B> &
+  Shape<B["asks"]> &
+  Partial<UnionToIntersection<{ [A in keyof B["actions"]]: Shape<B["actions"][A]["takes"]> }[keyof B["actions"]]>>;
 
-// case が読めるデータ: 状態、問い合わせの答え、そのアクションの入力
-export type ContextOf<B extends Boundary, Action extends keyof B["actions"]> = StateOf<B> &
-  Shape<B["queries"]> &
-  InputOf<B, Action>;
+type Meanings<B extends Declaration, S> = {
+  conditions: { [N in ConditionNames<B, S>]: (state: ContextOf<B>) => boolean };
+} & (keyof Calculations<B> extends never
+  ? { calculations?: never }
+  : { calculations: { [N in keyof Calculations<B>]: (state: ContextOf<B>) => Calculations<B>[N] extends { type: infer T } ? FieldType<T> : never } }) &
+  (B["alwaysTrue"] extends readonly string[]
+    ? { alwaysTrue: { [N in B["alwaysTrue"][number]]: (state: StateOf<B>) => boolean } }
+    : { alwaysTrue?: never });
 
-// 条件と計算が読めるデータ: どのアクションでも使われ得るので、入力はすべて省略可能
-export type SpecContextOf<B extends Boundary> = StateOf<B> &
-  Shape<B["queries"]> &
-  Partial<UnionToIntersection<{ [Action in keyof B["actions"]]: InputOf<B, Action> }[keyof B["actions"]]>>;
-
-// --- 遷移と case ---
-export type TransitionSpec<B extends Boundary> = {
-  event?: string;
-  effects?: readonly CommandsOf<B>[];
-  // 覚えるデータ。ここに書いたフィールドだけが更新される
-  set?: Partial<DataOf<B>>;
+// 実行時に扱う形（型の検査は bind の引数で済んでいる）
+export type Effects = { tell?: readonly Record<string, unknown>[]; remember?: Record<string, unknown> };
+export type BoundSpecification = {
+  component: Declaration;
+  // アクション名 → 構造。when のあるアクションは、条件 → 構造
+  actions: Record<string, Effects | Record<string, Effects>>;
+  conditions: Record<string, (state: any) => boolean>;
+  calculations?: Record<string, (state: any) => unknown>;
+  alwaysTrue?: Record<string, (state: any) => boolean>;
 };
 
-export type Transition = {
-  readonly nextState: string;
-  readonly event?: string;
-  readonly effects: readonly unknown[];
-  readonly set?: object;
-};
+// コンポーネント → その結び付け。decide / calculate が、意味の関数の中から引けるようにする
+const registry = new WeakMap<object, BoundSpecification>();
+export const bindingOf = (target: object): BoundSpecification | undefined => registry.get(target);
 
-// state は現在のデータを読め、かつ状態名のコンストラクタで次状態を宣言できる。
-export type StateHandle<B extends Boundary, Action extends keyof B["actions"]> = Readonly<ContextOf<B, Action>> & {
-  readonly [Name in B["states"][number]]: (spec?: TransitionSpec<B>) => Transition;
-};
-
-export type Case<B extends Boundary, Action extends keyof B["actions"]> = (state: StateHandle<B, Action>) => Transition;
-
-// アクションごとの case。「条件（自然言語）→ 遷移」の表で、決定表と同じく "default" が必須。
-// 条件で分かれないアクションは、関数1つで書ける（default だけの表と同じ意味）
-export type CasesOf<B extends Boundary> = {
-  [Action in keyof B["actions"]]: Case<B, Action> | (Record<string, Case<B, Action>> & { default: Case<B, Action> });
-};
-
-export const COMPONENT = Symbol.for("aac.component");
-
-export type Component<B extends Boundary, Cases> = B & { readonly behaviors: Cases };
-export type ComponentBuilder<B extends Boundary> = B & {
-  cases<const Cases extends CasesOf<B>>(cases: Cases): Component<B, Cases>;
-};
-
-export function defineComponent<const B extends Boundary>(boundary: Checked<B>): ComponentBuilder<B> {
-  const declared = boundary as B;
-  return {
-    ...declared,
-    cases(cases) {
-      const component = { ...declared, behaviors: cases };
-      Object.defineProperty(component, COMPONENT, { value: true });
-      return component;
-    },
-  };
+export function bind<B extends Declaration, const S>(
+  target: Component<B>,
+  bindings: { actions: S & CheckStructure<B, S> } & Meanings<B, S>,
+): BoundSpecification {
+  const value = { component: target as Declaration, ...(bindings as unknown as Omit<BoundSpecification, "component">) };
+  Object.defineProperty(value, BINDING, { value: true });
+  registry.set(target, value);
+  return value;
 }
 
-// --- 仕様の結び付け (Layer 2) ---
-// Layer 1 に自然言語で書いた名前に、評価関数を結び付ける。同じ文は、どこに書かれても同じ意味になる。
-//   conditions … 決定表の行、事前条件 (where)、case の分かれ方
-//   formulas   … 計算
-//   invariants … 不変条件
-type Condition = (state: any) => boolean;
-type Formula = (state: any) => unknown;
-
-const conditions = new Map<string, Condition>();
-const formulas = new Map<string, Formula>();
-const invariants = new Map<string, Condition>();
-
+// --- 評価 ---
 export class RuleConflictError extends Error {
   hits: string[];
   constructor(hits: string[]) {
-    super(`複数の条件が同時に成立しました (Hit Policy: Unique): ${hits.join(" / ")}`);
+    super(`複数の条件が同時に成立しました (同時に成り立つのは1つまで): ${hits.join(" / ")}`);
     this.name = "RuleConflictError";
     this.hits = hits;
   }
@@ -197,108 +321,47 @@ export class RuleConflictError extends Error {
 
 export class UnboundNameError extends Error {
   constructor(kind: string, name: string) {
-    super(`${kind} "${name}" に bindSpecification による評価関数が登録されていません`);
+    super(`${kind} "${name}" の意味が、結び付け (bind) に書かれていません`);
     this.name = "UnboundNameError";
   }
 }
 
-// 条件の名前は、事前条件 (where)・case のキー・決定表の行のすべてから集める。
-// 結び付けの漏れも、どこにも使われていない条件（typo）も、コンパイルエラーになる
-type WhereNames<B extends Boundary> = {
-  [Action in keyof B["actions"]]: B["actions"][Action] extends { where: readonly (infer Name)[] } ? Name : never;
-}[keyof B["actions"]];
-type CaseNames<Cases> = {
-  [Action in keyof Cases]: Cases[Action] extends (...args: never[]) => unknown ? never : Exclude<keyof Cases[Action], "default">;
-}[keyof Cases];
-type TableNames<Tables> = Exclude<{ [K in keyof Tables]: keyof Tables[K] }[keyof Tables], "default">;
-export type ConditionNames<B extends Boundary, Cases, Tables> = (WhereNames<B> | CaseNames<Cases> | TableNames<Tables>) &
-  string;
-
-type Bindings<B extends Boundary, Cases, Tables> = {
-  // このコンポーネントの case が使う決定表。行の条件が、結び付けるべき名前に加わる
-  tables?: Tables;
-  conditions: { [Name in ConditionNames<B, Cases, Tables>]: (state: SpecContextOf<B>) => boolean };
-} & (B["formulas"] extends Fields
-  ? { formulas: { [Name in keyof B["formulas"]]: (state: SpecContextOf<B>) => FieldType<B["formulas"][Name]> } }
-  : { formulas?: never }) &
-  (B["invariants"] extends readonly string[]
-    ? { invariants: { [Name in B["invariants"][number]]: (state: StateOf<B>) => boolean } }
-    : { invariants?: never });
-
-function register<F>(kind: string, registry: Map<string, F>, entries: Record<string, F> | undefined) {
-  for (const [name, fn] of Object.entries(entries ?? {})) {
-    if (registry.has(name) && registry.get(name) !== fn) {
-      throw new Error(`${kind} "${name}" が複数回、別の関数に結び付けられています（同じ文は1つの意味でなければなりません）`);
-    }
-    registry.set(name, fn);
-  }
-}
-
-export function bindSpecification<B extends Boundary, Cases, const Tables extends Record<string, object> = {}>(
-  _component: Component<B, Cases>,
-  bindings: Bindings<B, Cases, Tables>,
-) {
-  register("条件", conditions, bindings.conditions as Record<string, Condition>);
-  register("計算", formulas, bindings.formulas as Record<string, Formula> | undefined);
-  register("不変条件", invariants, bindings.invariants as Record<string, Condition> | undefined);
-  return bindings;
-}
-
-export const getCondition = (name: string) => conditions.get(name);
-export const getFormula = (name: string) => formulas.get(name);
-export const getInvariant = (name: string) => invariants.get(name);
-
-// 成立した条件の名前を返す。どれも成立しなければ "default"。2つ以上成立したら RuleConflictError
-export function evaluateConditions(names: readonly string[], state: object): string {
+// 成立した条件の名前を返す。どれも成立しなければ "otherwise"。2つ以上成立したら RuleConflictError
+export function matchCondition(binding: BoundSpecification, names: readonly string[], state: object): string {
   const hits = names.filter((name) => {
-    if (name === "default") return false;
-    const condition = conditions.get(name);
+    if (name === "otherwise") return false;
+    const condition = binding.conditions[name];
     if (!condition) throw new UnboundNameError("条件", name);
     return condition(state);
   });
   if (hits.length > 1) throw new RuleConflictError(hits);
-  return hits[0] ?? "default";
+  return hits[0] ?? "otherwise";
 }
 
-// --- DMN ---
-// 文字列キーに加え、必ず "default" キーを要求する
-export type DecisionTable<Outputs> = Record<string, Outputs> & { default: Outputs };
-
-// 抽象実行（IR 抽出）側が state に生やすフック。core は中身を知らない。
-export const ABSTRACT_APPLY = Symbol.for("aac.abstract.applyDecision");
-export const ABSTRACT_FORMULA = Symbol.for("aac.abstract.applyFormula");
-
-export function applyDecision<T extends { default: unknown }>(table: T, state: object): T[keyof T] {
-  const hook = (state as any)[ABSTRACT_APPLY];
-  if (typeof hook === "function") return hook(table);
-  return table[evaluateConditions(Object.keys(table), state) as keyof T];
+function bound(target: object): BoundSpecification {
+  const binding = registry.get(target);
+  if (!binding) throw new Error("このコンポーネントには、まだ結び付け (bind) がありません");
+  return binding;
 }
 
-// --- 計算 ---
-export function applyFormula<B extends Boundary, Name extends keyof NonNullable<B["formulas"]> & string>(
-  _component: B,
-  name: Name,
+// 決定表を引く。意味の関数（計算など）の中で、表の結果を使うためのもの
+export function decide<B extends Declaration, D extends keyof Decisions<B> & string>(
+  target: Component<B>,
+  decision: D,
   state: object,
-): FieldType<NonNullable<B["formulas"]>[Name]> {
-  const hook = (state as any)[ABSTRACT_FORMULA];
-  if (typeof hook === "function") return hook(name);
-  const formula = formulas.get(name);
-  if (!formula) throw new UnboundNameError("計算", name);
-  return formula(state) as FieldType<NonNullable<B["formulas"]>[Name]>;
+): Decisions<B>[D][keyof Decisions<B>[D]] {
+  const table = (target as Declaration).decisions?.[decision];
+  if (!table) throw new UnboundNameError("決定表", decision);
+  return table[matchCondition(bound(target), Object.keys(table), state)] as Decisions<B>[D][keyof Decisions<B>[D]];
 }
 
-// 具体値での実行用（PBT のモデル側）。context に無いプロパティは状態コンストラクタとして振る舞う。
-// 未設定のデータも、値 undefined のキーとして context に含めること。
-export function createState(context: object): any {
-  return new Proxy(context, {
-    get(target, prop) {
-      if (typeof prop === "symbol" || prop in target) return Reflect.get(target, prop);
-      return (spec: { event?: string; effects?: readonly unknown[]; set?: object } = {}): Transition => ({
-        nextState: prop,
-        ...(spec.event === undefined ? {} : { event: spec.event }),
-        effects: spec.effects ?? [],
-        ...(spec.set === undefined ? {} : { set: spec.set }),
-      });
-    },
-  });
+// 計算する。意味の関数の中で、別の計算の結果を使うためのもの
+export function calculate<B extends Declaration, N extends keyof Calculations<B> & string>(
+  target: Component<B>,
+  name: N,
+  state: object,
+): Calculations<B>[N] extends { type: infer T } ? FieldType<T> : never {
+  const calculation = bound(target).calculations?.[name];
+  if (!calculation) throw new UnboundNameError("計算", name);
+  return calculation(state) as Calculations<B>[N] extends { type: infer T } ? FieldType<T> : never;
 }

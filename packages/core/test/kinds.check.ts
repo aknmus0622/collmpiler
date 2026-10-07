@@ -1,76 +1,101 @@
-// 型の検査。さまざまな種類の部品が、同じ形 (境界と構造 + case + 結び付け) で書けることを確かめる。
-// 実行するテストではなく、tsc が通ること自体が確認になる。
-import { applyDecision, bindSpecification, defineComponent } from "../index.ts";
-import type { DecisionTable } from "../index.ts";
+// 型の検査。さまざまな種類の部品が、同じ形 (コンポーネント + 結び付け) で書けることを確かめる。
+// 実行するテストではなく、pnpm typecheck が通ること自体が確認になる。
+import { asked, bind, component, decided, decisionTable, given, remembered, was } from "../index.ts";
 
-// K1: 最小のコンポーネント。data / queries / commands / formulas / invariants をすべて省略し、1つの式で書く
-export const Toggle = defineComponent({
-  initial: "OFF",
+// K1: 最小の部品。語彙も決定表も無い
+export const Toggle = component({
   states: ["OFF", "ON"],
-  actions: { Flip: {} },
-}).cases({
-  Flip: { "It is on": (s) => s.OFF(), default: (s) => s.ON() },
-});
-bindSpecification(Toggle, { conditions: { "It is on": (s) => s.status === "ON" } });
-
-// K2: UI 部品 (カートのボタン)。指示 = ユースケースの呼び出しと表示の更新、問い合わせ = 画面の入力
-export const CheckoutButton = defineComponent({
-  initial: "IDLE",
-  states: ["IDLE", "SUBMITTING", "DONE", "FAILED"],
-  data: { attempts: { type: "integer", min: 0, max: 3 } },
-  queries: { cartIsEmpty: "boolean" },
-  commands: { RequestCheckout: {}, ShowMessage: { kind: ["empty-cart", "thanks", "retry"] } },
+  startsIn: "OFF",
   actions: {
-    Click: { from: ["IDLE", "FAILED"] },
-    CheckoutFinished: { input: { ok: "boolean" }, from: ["SUBMITTING"] },
-  },
-}).cases({
-  Click: {
-    "The cart is empty": (s) => s.IDLE({ effects: [{ action: "ShowMessage", payload: { kind: "empty-cart" } }] }),
-    default: (s) => s.SUBMITTING({ effects: [{ action: "RequestCheckout", payload: {} }] }),
-  },
-  CheckoutFinished: {
-    "The checkout succeeded": (s) => s.DONE({ effects: [{ action: "ShowMessage", payload: { kind: "thanks" } }] }),
-    default: (s) => s.FAILED({ effects: [{ action: "ShowMessage", payload: { kind: "retry" } }] }),
+    Flip: {
+      when: {
+        "It is on": { goTo: "OFF", does: "It turns off." },
+        otherwise: { goTo: "ON", does: "It turns on." },
+      },
+    },
   },
 });
-bindSpecification(CheckoutButton, {
+bind(Toggle, {
+  actions: { Flip: { "It is on": {}, otherwise: {} } },
+  conditions: { "It is on": (s) => s.status === "ON" },
+});
+
+// K2: UI 部品 (カートのボタン)。指示 = ユースケースの呼び出しと表示の更新、問い合わせ = 画面の状態
+export const CheckoutButton = component({
+  states: ["IDLE", "SUBMITTING", "DONE", "FAILED"],
+  startsIn: "IDLE",
+  asks: { cartIsEmpty: "boolean" },
+  tells: { RequestCheckout: {}, ShowMessage: { kind: ["empty-cart", "thanks", "retry"] } },
+  actions: {
+    Click: {
+      allowedIn: ["IDLE", "FAILED"],
+      when: {
+        "The cart is empty": { goTo: "IDLE", does: "A message says the cart is empty." },
+        otherwise: { goTo: "SUBMITTING", does: "The checkout is requested." },
+      },
+    },
+    CheckoutFinished: {
+      takes: { ok: "boolean" },
+      allowedIn: ["SUBMITTING"],
+      when: {
+        "The checkout succeeded": { goTo: "DONE", does: "A thank-you message is shown." },
+        otherwise: { goTo: "FAILED", does: "A message invites the user to retry." },
+      },
+    },
+  },
+});
+bind(CheckoutButton, {
+  actions: {
+    Click: {
+      "The cart is empty": { tell: [{ ShowMessage: { kind: "empty-cart" } }] },
+      otherwise: { tell: [{ RequestCheckout: {} }] },
+    },
+    CheckoutFinished: {
+      "The checkout succeeded": { tell: [{ ShowMessage: { kind: "thanks" } }] },
+      otherwise: { tell: [{ ShowMessage: { kind: "retry" } }] },
+    },
+  },
   conditions: {
     "The cart is empty": (s) => s.cartIsEmpty,
     "The checkout succeeded": (s) => s.ok === true,
   },
 });
 
-// K3: ドメインの部品 (在庫)。状態によって次の状態が変わる (以前の outcome では書けなかった形)
-const StockBoundary = defineComponent({
-  initial: "AVAILABLE",
+// K3: ドメインの部品 (在庫)。問い合わせの値で遷移先が変わり、同じ文が決定表の行と when のキーの両方に現れる
+const Urgency = decisionTable({ "Stock is out": { urgent: true }, otherwise: { urgent: false } });
+export const Stock = component({
   states: ["AVAILABLE", "RESERVED", "BACKORDERED"],
-  queries: { quantityOnHand: { type: "integer", min: 0, max: 100, around: [1] } },
-  commands: { NotifyWarehouse: { urgent: "boolean" } },
-  actions: { Reserve: { from: ["AVAILABLE"] }, Release: { from: ["RESERVED", "BACKORDERED"] } },
-});
-const UrgencyRules = {
-  "Stock is out": { urgent: true },
-  default: { urgent: false },
-} as const satisfies DecisionTable<{ urgent: boolean }>;
-export const Stock = StockBoundary.cases({
-  Reserve: {
-    "Stock is out": (s) => s.BACKORDERED({ effects: [{ action: "NotifyWarehouse", payload: { urgent: applyDecision(UrgencyRules, s).urgent } }] }),
-    default: (s) => s.RESERVED(),
+  startsIn: "AVAILABLE",
+  remembers: { reservedBy: "string" },
+  asks: { quantityOnHand: { type: "integer", min: 0, max: 100, around: [1] }, auditing: "boolean" },
+  tells: { NotifyWarehouse: { urgent: "boolean", customer: "string" }, Audit: {} },
+  decisions: { urgency: Urgency },
+  actions: {
+    Reserve: {
+      takes: { customer: "string" },
+      allowedIn: ["AVAILABLE"],
+      when: {
+        "Stock is out": { goTo: "BACKORDERED", does: "The warehouse is notified urgently." },
+        otherwise: { goTo: "RESERVED", does: "The reservation is remembered." },
+      },
+    },
+    Release: { allowedIn: ["RESERVED", "BACKORDERED"], then: { goTo: "AVAILABLE", does: "A backorder is audited when auditing is on." } },
   },
-  Release: (s) => s.AVAILABLE(),
 });
-// 同じ文 ("Stock is out") が case のキーと決定表の行の両方に現れる。結び付けは1つ
-bindSpecification(Stock, { tables: { UrgencyRules }, conditions: { "Stock is out": (s) => s.quantityOnHand === 0 } });
-
-// K4: 値オブジェクト的な部品 (金額)。状態を持たず、操作が値を返す。現在の枠組みでは「指示」としてしか結果を出せない
-export const Money = defineComponent({
-  initial: "VALID",
-  states: ["VALID"],
-  commands: { Result: { amount: "integer" } },
-  formulas: { "Sum of the two amounts": "integer" },
-  actions: { Add: { input: { a: { type: "integer", min: 0 }, b: { type: "integer", min: 0 } } } },
-}).cases({
-  Add: (s) => s.VALID({ effects: [{ action: "Result", payload: { amount: s.a + s.b } }] }),
+bind(Stock, {
+  actions: {
+    Reserve: {
+      "Stock is out": { tell: [{ NotifyWarehouse: { urgent: decided("urgency", "urgent"), customer: given("customer") } }] },
+      otherwise: { remember: { reservedBy: given("customer") } },
+    },
+    Release: {
+      tell: [
+        { Audit: {}, when: was("BACKORDERED") },
+        { Audit: {}, when: asked("auditing") },
+        { NotifyWarehouse: { urgent: false, customer: remembered("reservedBy") }, when: "Stock is out" },
+      ],
+    },
+  },
+  // 同じ文の結び付けは1つ
+  conditions: { "Stock is out": (s) => s.quantityOnHand === 0 },
 });
-bindSpecification(Money, { conditions: {}, formulas: { "Sum of the two amounts": (s) => (s.a ?? 0) + (s.b ?? 0) } });

@@ -2,23 +2,23 @@ import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
-import { getCondition, getFormula, getInvariant } from "@aac/core";
-import type { SpecInput } from "./extract.ts";
 import { assetsFor, mergeAssets } from "./assets.ts";
 import type { Asset } from "./assets.ts";
+import type { SpecInput } from "./extract.ts";
 import { scrubEnv } from "./gates.ts";
-import { ASSETS_DIR, renderAssets } from "./request.ts";
 import { TEST_DIR, FILES } from "./generate.ts";
 import { DRAFT_SUFFIX, loadSpecs } from "./loader.ts";
+import { ASSETS_DIR, renderAssets } from "./request.ts";
 import type { ImplementationStrategy } from "./strategy.ts";
 
-// 結び付け (Layer 2) の下書きを LLM に書かせる。実装のループとは別の、仕様を書く人のための補助。
+// 結び付けの下書きを LLM に書かせる。実装のループとは別の、仕様を書く人のための補助。
+// 下書きには、アクションの構造 (宣言) と、名前の意味 (関数) の両方が含まれる。
 //
 // 結び付けは採点の正解なので、LLM が書いたものをそのまま正解にはしない:
 //   - 下書きは <名前>.binding.draft.ts に書き出す。ローダーは既定で *.draft.ts を読まないので、
 //     人が中身を確認して <名前>.binding.ts に名前を変えるまで、検証には使われない
-//   - 機械的に確かめられること（型エラー、結び付け漏れ、条件の衝突、不変条件、値の型）は、書き出す前に検査して差し戻す。
-//     意味が合っているかは、人が読んで確かめる
+//   - 機械的に確かめられること（型エラー、参照の誤り、条件の衝突、不変条件、値の型）は、書き出す前に検査して差し戻す。
+//     文と構造・意味が合っているかは、人が読んで確かめる
 
 export type DraftOptions = {
   specs: string;
@@ -31,112 +31,120 @@ export type DraftOptions = {
 
 export type DraftResult =
   | { status: "nothing-to-draft" }
-  | { status: "drafted" | "failed"; draft: string; attempts: number; missing: Names; problems?: string };
-
-type Names = { conditions: string[]; formulas: string[]; invariants: string[] };
+  | { status: "drafted" | "failed"; draft: string; attempts: number; problems?: string };
 
 const SPEC_DIR = "spec";
 const REQUEST = `${TEST_DIR}/${FILES.request}`;
 
 const HEADER = `// DRAFT — written by an LLM, not yet reviewed.
-// This file is the oracle the tests are judged against. Read every function and check that it means what
-// its name says. Then rename this file (drop ".draft") to put it into use. Until then it is ignored.
+// This file is the oracle the tests are judged against. Read every entry and check that it means what the
+// component says. Then rename this file (drop ".draft") to put it into use. Until then it is ignored.
 `;
 
-// 結び付けるべき名前のうち、まだ結び付けの無いもの
-function missingNames(spec: SpecInput): Names {
+const quote = (name: string) => JSON.stringify(name);
+const TODO = `{\n      throw new Error("TODO");\n    }`;
+
+// 出発点: アクションと名前をすべて並べ、中身は空にしておく
+function skeleton(spec: SpecInput, componentFile: string, exportName: string): string {
+  const model = spec.model!;
+  const actions = Object.entries(spec.behaviors).map(([name, behavior]) => {
+    const cases = Object.keys(behavior.cases);
+    if (cases.length === 1) return `    // ${behavior.cases.otherwise.does}\n    ${name}: {},`;
+    const inner = cases.map((condition) => `      // ${behavior.cases[condition].does}\n      ${quote(condition)}: {},`).join("\n");
+    return `    ${name}: {\n${inner}\n    },`;
+  });
   const conditions = new Set<string>();
   for (const behavior of Object.values(spec.behaviors)) {
     for (const name of [...(behavior.where ?? []), ...Object.keys(behavior.cases)]) conditions.add(name);
   }
-  for (const table of Object.values(spec.tables)) for (const name of Object.keys(table)) conditions.add(name);
-  conditions.delete("default");
-  return {
-    conditions: [...conditions].filter((name) => !getCondition(name)).sort(),
-    formulas: Object.keys(spec.model?.formulas ?? {}).filter((name) => !getFormula(name)).sort(),
-    invariants: (spec.model?.invariants ?? []).filter((name) => !getInvariant(name)).sort(),
-  };
-}
+  for (const table of Object.values(spec.decisions)) for (const name of Object.keys(table)) conditions.add(name);
+  conditions.delete("otherwise");
 
-const quote = (name: string) => JSON.stringify(name);
-const todo = `{\n      throw new Error("TODO");\n    }`;
+  const group = (key: string, entries: string[]) => (entries.length === 0 ? "" : `\n  ${key}: {\n${entries.join("\n")}\n  },\n`);
+  return `import { asked, bind, calculate, calculated, decide, decided, given, remembered, was } from "@aac/core";
+import { ${exportName} } from "./${componentFile}";
 
-// 確定版がまだ無いときの出発点。名前をすべて並べ、中身は未実装にしておく
-function skeleton(spec: SpecInput, names: Names, componentFile: string, exportName: string): string {
-  const byFile = new Map<string, string[]>([[componentFile, [exportName]]]);
-  for (const [table, file] of Object.entries(spec.sources?.tables ?? {})) {
-    byFile.set(file, [...(byFile.get(file) ?? []), table]);
-  }
-  const imports = [...byFile].map(([file, exports]) => `import { ${exports.sort().join(", ")} } from "./${file}";`);
-  const group = (key: string, list: string[]) =>
-    list.length === 0 ? "" : `\n  ${key}: {\n${list.map((name) => `    ${quote(name)}: (state) => ${todo},`).join("\n")}\n  },\n`;
-  const tables = Object.keys(spec.sources?.tables ?? {}).sort();
-  return `import { applyDecision, bindSpecification } from "@aac/core";
-${imports.join("\n")}
+export const Binding = bind(${exportName}, {
+  // Structure: what each action's sentence means, as declarations.
+  actions: {
+${actions.join("\n")}
+  },
 
-export const Specification = bindSpecification(${exportName}, {
-  tables: { ${tables.join(", ")} },
-${group("conditions", names.conditions) || "\n  conditions: {},\n"}${group("formulas", names.formulas)}${group("invariants", names.invariants)}});
+  // Meaning: what each name refers to, as functions.
+  conditions: {
+${[...conditions].sort().map((name) => `    ${quote(name)}: (state) => ${TODO},`).join("\n")}
+  },
+${group("calculations", Object.entries(model.formulas ?? {}).map(([name, formula]) => `    // ${formula.is}\n    ${name}: (state) => ${TODO},`))}${group("alwaysTrue", (model.invariants ?? []).map((name) => `    ${quote(name)}: (state) => ${TODO},`))}});
 `;
 }
 
-function request(
-  spec: SpecInput,
-  names: Names,
-  draftFile: string,
-  extending: boolean,
-  attempt: number,
-  assets: Asset[],
-  problems?: string,
-) {
+function request(spec: SpecInput, draftFile: string, attempt: number, assets: Asset[], problems?: string) {
   const model = spec.model!;
-  const list = (items: string[]) => items.map((item) => `  - ${quote(item)}`).join("\n") || "  (none)";
+  const names = (fields: object) => Object.keys(fields).map((k) => `\`${k}\``).join(", ") || "none";
   const inputs = [...new Set(Object.values(model.actions).flatMap((fields) => Object.keys(fields)))];
   return `# Draft the binding of a specification (attempt ${attempt})
 
-The files under \`${SPEC_DIR}/\` are a specification. In it, conditions, formulas, and invariants are written
-only as **natural-language names**. Your task is to write, for each name, the function that says what it
-means. The result is a draft: a person will review every function before it is used.
+The files under \`${SPEC_DIR}/\` are a specification. The component describes what each action does **in prose**
+(\`does\`), and names its conditions, calculations, and invariants in natural language. Your task is to write
+the **binding**: what those sentences and names mean. The result is a draft; a person will review every entry
+before it is used.
 
 ## What to write
 
-Edit \`${SPEC_DIR}/${draftFile}\`, and only that file.${extending ? " It already contains the reviewed bindings: leave those functions exactly as they are, and add the missing names listed below." : " It lists every name with a placeholder body: replace each body."}
+Edit \`${SPEC_DIR}/${draftFile}\`, and only that file. It lists every action and every name with an empty
+placeholder. It has two parts.
 
-Names to bind:
+### 1. Structure (\`actions\`): declarations, no functions
 
-- conditions (return a boolean):
-${list(names.conditions)}
-- formulas (return a value of the type declared in the component's \`formulas\`):
-${list(names.formulas)}
-- invariants (return a boolean that must always be true):
-${list(names.invariants)}
+For each action (and, where the component has \`when\`, for each of its conditions including \`otherwise\`),
+write what the \`does\` sentence means:
 
-## What the functions receive
+- \`tell\`: the commands to issue, in order, each as \`{ CommandName: { field: value, ... } }\`. Add
+  \`when: ...\` to issue a command only sometimes.
+- \`remember\`: the data to store, as \`{ field: value }\`.
+- The resulting state is already given by \`goTo\` in the component; do not repeat it.
 
-- Conditions and formulas receive \`state\` with: \`status\` (the current state name); the remembered data
-  (${Object.keys(model.data).map((k) => `\`${k}\``).join(", ") || "none"}), each possibly \`undefined\` before it is set; the query answers
-  (${Object.keys(model.queries).map((k) => `\`${k}\``).join(", ") || "none"}); and the inputs of the action being executed
-  (${inputs.map((k) => `\`${k}\``).join(", ") || "none"}), \`undefined\` during other actions.
-- Invariants receive only \`status\` and the remembered data.
-- A formula may use a decision table's result: \`applyDecision(Table, state).column\`.
+A value is a constant or a reference:
+
+- \`given("field")\`: the action's input (${inputs.map((k) => `\`${k}\``).join(", ") || "none"})
+- \`remembered("field")\`: remembered data (${names(model.data)})
+- \`asked("field")\`: a query answer (${names(model.queries)})
+- \`decided("table", "column")\`: the value of a decision table's column in the row that applies
+  (tables: ${names(spec.decisions)})
+- \`calculated("name")\`: the result of a calculation (${names(model.formulas ?? {})})
+
+A command's \`when\` is either a boolean reference (\`decided(...)\`, \`asked(...)\`, \`remembered(...)\`, or
+\`was("STATE", ...)\` for "the state before the action was one of these"), or a new condition sentence in
+natural language, which you must then also define under \`conditions\`. Prefer a reference when one fits.
+
+### 2. Meaning (\`conditions\`, \`calculations\`, \`alwaysTrue\`): functions
+
+- Each condition returns a boolean; each calculation returns a value of its declared type; each \`alwaysTrue\`
+  entry returns a boolean that must always be true.
+- Conditions and calculations receive \`state\` with: \`status\` (the current state name); the remembered data,
+  each possibly \`undefined\` before it is set; the query answers; and the inputs of the action being executed,
+  \`undefined\` during other actions. \`alwaysTrue\` functions receive only \`status\` and the remembered data.
+- Inside a function, \`decide(Component, "table", state)\` gives the row of a decision table that applies, and
+  \`calculate(Component, "name", state)\` gives the result of another calculation.
 
 ## Rules
 
-- **Write the most literal reading of each name.** The name is the specification; do not add conditions it
-  does not state. If a name can reasonably be read in more than one way, pick one and put a comment starting
-  with \`// REVIEW:\` on the line above it explaining the doubt. Those comments are the most useful part of
-  the draft.
+- **Write the most literal reading of each sentence.** The component is the specification; do not add anything
+  it does not state. If a sentence or name can reasonably be read in more than one way, pick one and put a
+  comment starting with \`// REVIEW:\` on the line above it explaining the doubt. Those comments are the most
+  useful part of the draft.
 - Conditions that label the rows of the same decision table, or the cases of the same action, must never be
-  true at the same time (\`default\` covers "none of them").
-- Formulas over money use whole numbers; apply the rounding the name states.
+  true at the same time (\`otherwise\` covers "none of them").
+- Calculations over money use whole numbers; apply the rounding the description states.
 - Do not change any other file, and do not read anything outside this directory.
 
 ## How the draft is checked
 
-After you finish, the draft is type-checked, and the specification is run on its own with your functions,
-over many random sequences of actions. The draft is rejected if it has a type error, if a name is left unbound, if two conditions of the same table or action hold
-at once, if an invariant is broken, or if a formula returns a value that does not fit its declared type.
-Passing this check does not mean the functions are right; that is what the review is for.
+After you finish, the draft is type-checked, and the specification is run on its own over many random
+sequences of actions. The draft is rejected if it has a type error, if a reference does not fit the field it
+is used for, if a name is left without a meaning, if two conditions of the same table or action hold at once,
+if an invariant is broken, or if a value does not fit its declared type. Passing this check does not mean the
+draft is right; that is what the review is for.
 ${renderAssets(assets)}${problems ? `\n## Problems found in the previous attempt\n\n\`\`\`\n${problems}\n\`\`\`\n` : ""}`;
 }
 
@@ -147,24 +155,20 @@ export async function draftBinding(options: DraftOptions): Promise<DraftResult> 
   const spec = await loadSpecs(specsDir);
   const component = spec.sources?.component;
   if (!spec.model || !component) throw new Error("仕様にコンポーネントがありません");
-  const missing = missingNames(spec);
-  if (missing.conditions.length + missing.formulas.length + missing.invariants.length === 0) {
-    return { status: "nothing-to-draft" };
-  }
+  // 確定した結び付けがあれば、何もしない
+  if (spec.binding) return { status: "nothing-to-draft" };
 
-  // order.component.ts → 確定版 order.binding.ts、下書き order.binding.draft.ts
+  // order.component.ts → 下書き order.binding.draft.ts
   const stem = join(dirname(component.file), basename(component.file).replace(/(\.component)?\.ts$/, ""));
-  const finalFile = `${stem}.binding.ts`;
   const draftFile = `${stem}.binding${DRAFT_SUFFIX}`;
-  const extending = existsSync(join(specsDir, finalFile));
-  const start = extending
-    ? readFileSync(join(specsDir, finalFile), "utf8")
-    : skeleton(spec, missing, basename(component.file), component.exportName);
+  const start = skeleton(spec, basename(component.file), component.exportName);
 
   const hidden = [...new Set([process.cwd(), specsDir])];
   const specFiles = (readdirSync(specsDir, { recursive: true }) as string[]).filter(
     (file) => file.endsWith(".ts") && !file.endsWith(DRAFT_SUFFIX),
   );
+  // 仕様に宣言された資料と、コマンドで渡された資料のうち、設計の段階に渡るもの
+  const assets = assetsFor(mergeAssets(spec.assets ?? [], options.assets ?? []), "design");
   let problems: string | undefined;
 
   for (let attempt = 1; attempt <= (options.maxAttempts ?? 3); attempt++) {
@@ -180,14 +184,12 @@ export async function draftBinding(options: DraftOptions): Promise<DraftResult> 
       const previous = join(specsDir, draftFile);
       writeFileSync(join(dir, SPEC_DIR, draftFile), existsSync(previous) && attempt > 1 ? readFileSync(previous, "utf8") : start);
       mkdirSync(join(dir, TEST_DIR), { recursive: true });
-      // 仕様に宣言された資料と、コマンドで渡された資料のうち、設計の段階に渡るもの
-      const assets = assetsFor(mergeAssets(spec.assets ?? [], options.assets ?? []), "design");
       for (const asset of assets) {
         if (asset.kind !== "file") continue;
         mkdirSync(dirname(join(dir, ASSETS_DIR, asset.name)), { recursive: true });
         writeFileSync(join(dir, ASSETS_DIR, asset.name), asset.content);
       }
-      writeFileSync(join(dir, REQUEST), request(spec, missing, draftFile, extending, attempt, assets, problems));
+      writeFileSync(join(dir, REQUEST), request(spec, draftFile, attempt, assets, problems));
 
       log(`[binding #${attempt}] ${options.strategy.name} (in ${dir})`);
       await options.strategy.run({ dir, phase: "binding", attempt, env: scrubEnv(process.env, hidden) });
@@ -201,9 +203,9 @@ export async function draftBinding(options: DraftOptions): Promise<DraftResult> 
       } else if (changed.length > 0) {
         problems = `Only ${draftFile} may be edited, but these files were changed: ${changed.join(", ")}`;
       } else {
-        const text = readFileSync(join(dir, SPEC_DIR, draftFile), "utf8");
+        const content = readFileSync(join(dir, SPEC_DIR, draftFile), "utf8");
         cpSync(join(dir, SPEC_DIR, draftFile), previous);
-        writeFileSync(previous, text.startsWith(HEADER) ? text : HEADER + text);
+        writeFileSync(previous, content.startsWith(HEADER) ? content : HEADER + content);
         problems = check(specsDir);
       }
     } finally {
@@ -211,13 +213,12 @@ export async function draftBinding(options: DraftOptions): Promise<DraftResult> 
     }
 
     log(`[binding #${attempt}] ${problems === undefined ? "ok" : "rejected"}`);
-    if (problems === undefined) return { status: "drafted", draft: join(specsDir, draftFile), attempts: attempt, missing };
+    if (problems === undefined) return { status: "drafted", draft: join(specsDir, draftFile), attempts: attempt };
   }
-  return { status: "failed", draft: join(specsDir, draftFile), attempts: options.maxAttempts ?? 3, missing, problems };
+  return { status: "failed", draft: join(specsDir, draftFile), attempts: options.maxAttempts ?? 3, problems };
 }
 
-// 下書きを確定版の代わりに読み込み、仕様の検査にかける。
-// 結び付けはプロセス全体で共有されるので、別プロセスで行う
+// 下書きを読み込み、型チェックと仕様の検査にかける。別プロセスで行う
 function check(specsDir: string): string | undefined {
   const run = spawnSync(process.execPath, [join(import.meta.dirname, "compile.ts"), specsDir, "--drafts"], {
     encoding: "utf8",
@@ -225,7 +226,7 @@ function check(specsDir: string): string | undefined {
   });
   if (run.status === 0) return undefined;
   return [process.cwd(), specsDir]
-    .reduce((text, path) => text.split(path).join("."), `${run.stderr ?? ""}${run.error?.message ?? ""}`)
+    .reduce((output, path) => output.split(path).join("."), `${run.stderr ?? ""}${run.error?.message ?? ""}`)
     .split("\n")
     .filter((line) => !line.includes("ExperimentalWarning") && !line.includes("--trace-warnings"))
     .join("\n")

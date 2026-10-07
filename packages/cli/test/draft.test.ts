@@ -18,11 +18,10 @@ after(() => rmSync(tmpRoot, { recursive: true, force: true }));
 
 const reviewed = readFileSync(join(repoRoot, "specs/order.binding.ts"), "utf8");
 
-// 例のコンポーネントだけを写した仕様ディレクトリ。binding を渡せば確定版の結び付けも置く
-function specDir(binding?: string) {
+// 例の決定表とコンポーネントだけを写した仕様ディレクトリ（結び付けは無い）
+function specDir() {
   const dir = mkdtempSync(join(tmpRoot, "d-"));
-  copyFileSync(join(repoRoot, "specs/order.component.ts"), join(dir, "order.component.ts"));
-  if (binding !== undefined) writeFileSync(join(dir, "order.binding.ts"), binding);
+  for (const name of ["order.decisions.ts", "order.component.ts"]) copyFileSync(join(repoRoot, "specs", name), join(dir, name));
   return dir;
 }
 
@@ -36,7 +35,7 @@ function scripted(drafts: string[], extra?: (assignment: Assignment) => void) {
       seen.push({
         request: readFileSync(join(assignment.dir, "aac/REQUEST.md"), "utf8"),
         start: readFileSync(file, "utf8"),
-        files: ["order.component.ts", "order.binding.ts"].filter((name) => existsSync(join(assignment.dir, "spec", name))),
+        files: ["order.decisions.ts", "order.component.ts", "order.binding.ts"].filter((name) => existsSync(join(assignment.dir, "spec", name))),
       });
       writeFileSync(file, drafts[Math.min(assignment.attempt, drafts.length) - 1]);
       extra?.(assignment);
@@ -48,19 +47,22 @@ function scripted(drafts: string[], extra?: (assignment: Assignment) => void) {
 const compileWithDrafts = (dir: string) =>
   spawnSync(process.execPath, [join(repoRoot, "packages/cli/src/compile.ts"), dir, "--drafts"], { encoding: "utf8" });
 
-test("下書き: 名前をすべて並べた雛形から始め、検査に通ったら .draft.ts として書き出す", async () => {
+test("下書き: アクションと名前をすべて並べた雛形から始め、検査に通ったら .draft.ts として書き出す", async () => {
   const dir = specDir();
   const { strategy, seen } = scripted([reviewed]);
   const result = await draftBinding({ specs: dir, strategy });
 
-  assert.equal(result.status, "drafted");
   assert.ok(result.status === "drafted" && result.attempts === 1);
-  // エージェントには仕様のファイルと、結び付けるべき名前がすべて渡る
-  assert.deepEqual(seen[0].files, ["order.component.ts"]);
-  assert.match(seen[0].request, /"The payment succeeded"/);
-  assert.match(seen[0].request, /"Amount charged: price × \(100 − discount percent\) ÷ 100, rounded down to a whole yen"/);
+  // エージェントには仕様のファイルが渡る
+  assert.deepEqual(seen[0].files, ["order.decisions.ts", "order.component.ts"]);
+  // 雛形: 構造は、アクションの文をコメントに添えた空の宣言。意味は、名前を並べた未実装の関数
+  assert.match(seen[0].start, /\/\/ If the order had been paid, a refund is issued\.\n    Cancel: \{\},/);
+  assert.match(seen[0].start, /Checkout: \{\n      \/\/ A receipt is sent[^\n]*\n      "The payment succeeded": \{\},\n      \/\/ The customer is notified[^\n]*\n      "otherwise": \{\},/);
   assert.match(seen[0].start, /"The customer is a Silver member": \(state\) => \{\n      throw new Error\("TODO"\);/);
-  assert.match(seen[0].start, /import \{ CampaignRules, CancelRules, Order, ShippingRules \} from "\.\/order\.component\.ts";/);
+  assert.match(seen[0].start, /\/\/ price × \(100 − discount percent\) ÷ 100, rounded down to a whole yen\n    amountCharged: \(state\) =>/);
+  // 依頼文は、使える参照を仕様の語彙で案内する
+  assert.match(seen[0].request, /`decided\("table", "column"\)`[\s\S]*tables: `campaign`, `shipping`/);
+  assert.match(seen[0].request, /`given\("field"\)`: the action's input \(`customerRank`, `listPrice`\)/);
 
   // 書き出された下書きには、未確認であることが明記される
   const draft = readFileSync(join(dir, "order.binding.draft.ts"), "utf8");
@@ -73,21 +75,22 @@ test("下書き: 人が名前を変えるまで、検証には使われない", 
   await draftBinding({ specs: dir, strategy: scripted([reviewed]).strategy });
 
   // 既定の読み込みは下書きを無視するので、結び付けは無いまま
-  const { diagnostics } = await extract(await loadSpecs(dir));
-  assert.ok(diagnostics.some((d) => d.code === "unbound-condition"));
-  assert.ok(diagnostics.some((d) => d.code === "unbound-formula"));
+  const { diagnostics } = extract(await loadSpecs(dir));
+  assert.deepEqual(diagnostics.map((d) => d.code), ["unbound-specification"]);
   // 下書きを読むよう明示したときだけ、仕様として通る
   assert.equal(compileWithDrafts(dir).status, 0);
 });
 
-test("下書き: 型エラーのある下書きは、書き直させる", async () => {
-  // フィールド名の typo
-  const mistyped = reviewed.replace("state.paymentModuleActive", "state.paymentModuleActiv");
-  const dir = specDir();
-  const { strategy, seen } = scripted([mistyped, reviewed]);
-  const result = await draftBinding({ specs: dir, strategy });
-  assert.ok(result.status === "drafted" && result.attempts === 2);
+test("下書き: 型エラーのある下書きは、書き直させる (意味の関数の typo、構造の参照の型違い)", async () => {
+  const typo = reviewed.replace("state.paymentModuleActive", "state.paymentModuleActiv");
+  // 真偽値の列を、整数のフィールドに渡している
+  const wrongColumn = reviewed.replace('discountPercent: decided("campaign", "discountPercent")', 'discountPercent: decided("campaign", "grantsCoupon")');
+  assert.ok(typo !== reviewed && wrongColumn !== reviewed);
+  const { strategy, seen } = scripted([typo, wrongColumn, reviewed]);
+  const result = await draftBinding({ specs: specDir(), strategy });
+  assert.ok(result.status === "drafted" && result.attempts === 3);
   assert.match(seen[1].request, /Problems found in the previous attempt[\s\S]*type-error[\s\S]*paymentModuleActiv/);
+  assert.match(seen[2].request, /Problems found in the previous attempt[\s\S]*type-error/);
 });
 
 test("下書き: 添付資料を渡せる", async () => {
@@ -103,7 +106,7 @@ test("下書き: 添付資料を渡せる", async () => {
   assert.match(seen[0].request, /## Project conventions[\s\S]*- Prices never include tax\.[\s\S]*`aac\/assets\/glossary\.md`/);
 });
 
-test("下書き: 機械的に分かる誤り (条件の衝突) は、書き直させる", async () => {
+test("下書き: 型では分からない誤り (条件の衝突) も、書き直させる", async () => {
   // シルバー会員の条件を「常に真」にすると、ゴールド会員かつ月末の条件と同時に成り立つ
   const conflicting = reviewed.replace('(state) => state.rank === "Silver"', "() => true");
   assert.notEqual(conflicting, reviewed);
@@ -134,28 +137,6 @@ test("下書き: 仕様のファイルを書き換えたら差し戻す", async 
   assert.ok(result.status === "drafted" && result.attempts === 2);
   assert.match(seen[1].request, /Only order\.binding\.draft\.ts may be edited, but these files were changed: order\.component\.ts/);
   assert.equal(readFileSync(join(dir, "order.component.ts"), "utf8"), original);
-});
-
-test("下書き: 確定版があれば、足りない名前だけを対象に、確定版の内容から始める", async () => {
-  // 確定版から計算の結び付けを取り除いた状態（型検査はしないので、実行時に漏れとして見つかる）
-  const start = reviewed.indexOf("  // Formulas");
-  const end = reviewed.indexOf("  // Invariants");
-  const partial = reviewed.slice(0, start) + reviewed.slice(end);
-  const dir = specDir(partial);
-  const { strategy, seen } = scripted([reviewed]);
-  const result = await draftBinding({ specs: dir, strategy });
-
-  assert.ok(result.status === "drafted");
-  assert.deepEqual(result.missing, {
-    conditions: [],
-    formulas: ["Amount charged: price × (100 − discount percent) ÷ 100, rounded down to a whole yen"],
-    invariants: [],
-  });
-  assert.equal(seen[0].start, partial);
-  assert.match(seen[0].request, /leave those functions exactly as they are/);
-  // 確定版はそのまま残り、下書きは別のファイルになる
-  assert.equal(readFileSync(join(dir, "order.binding.ts"), "utf8"), partial);
-  assert.equal(compileWithDrafts(dir).status, 0);
 });
 
 test("下書き: 結び付けが揃っていれば、何もしない", () => {
@@ -196,15 +177,16 @@ test("下書き: --drafts を明示すれば、人の確認を待たずに実装
 
 test("添付資料: 仕様に宣言した資料が、実装の各段階に渡る (配線には、明示したものだけ)", async () => {
   // 例のコンポーネントに assets を足した仕様
-  const dir = specDir(reviewed);
+  const dir = specDir();
+  writeFileSync(join(dir, "order.binding.ts"), reviewed);
   const component = join(dir, "order.component.ts");
   writeFileSync(
     component,
     readFileSync(component, "utf8")
-      .replace('import { applyDecision, applyFormula, defineComponent } from "@aac/core";', 'import { applyDecision, applyFormula, defineComponent, dir, file, text } from "@aac/core";')
+      .replace('import { component } from "@aac/core";', 'import { component, dir, file, text } from "@aac/core";')
       .replace(
-        "const OrderBoundary = defineComponent({",
-        `const OrderBoundary = defineComponent({
+        "export const Order = component({",
+        `export const Order = component({
   assets: [
     file("docs/architecture.md"),
     dir("docs/conventions"),

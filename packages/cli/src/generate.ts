@@ -9,8 +9,8 @@ import type { SpecModel } from "./extract.ts";
 
 export type Ir = {
   irVersion: number;
-  behaviors: { name: string; from: string[]; preconditions: string[]; transitions: Record<string, unknown> }[];
-  decisions: Record<string, { bound: boolean; rows: Record<string, unknown> }>;
+  behaviors: { name: string; from: string[]; preconditions: string[]; transitions: Record<string, { description?: string }> }[];
+  decisions: Record<string, { rows: Record<string, Record<string, unknown>> }>;
   model?: SpecModel;
 };
 
@@ -118,6 +118,6 @@ await runPbt({ specs: fileURLToPath(new URL(${JSON.stringify(specs + "/")}, impo
 }
 
 export function requireModel(ir: Ir): SpecModel {
-  if (!ir.model) throw new Error("仕様にコンポーネントがありません（defineComponent(...).cases(...) を export してください）");
+  if (!ir.model) throw new Error("仕様にコンポーネントがありません（component(...) を export してください）");
   return ir.model;
 }

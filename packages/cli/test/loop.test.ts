@@ -91,7 +91,7 @@ test("3段階: 段階ごとに見せるものが違う (配線は IR を見な�
   // 配線の段階には、条件の文も決定表の値も渡らない
   const wiring = Object.values(of(seen, "wiring")[0].files).join("\n");
   assert.ok(!wiring.includes("Gold member and it is month-end"));
-  assert.ok(!wiring.includes("CampaignRules"));
+  assert.ok(!wiring.includes("discountPercent\": 20"));
   // 設計と実装の段階には、テストの口 (代役の形) が渡らない
   for (const phase of ["design", "implementation"] as const) {
     const text = Object.values(of(seen, phase)[0].files).join("\n");
@@ -222,20 +222,16 @@ test("実装 (緑): PBT の反例を差し戻し、次の試行で合格する",
   const first = attempts[2].feedback;
   assert.ok(first?.kind === "pbt" && first.result.status === "fail");
   assert.deepEqual(
-    first.result.steps.map((s) => [s.from, s.action, s.case, s.input, s.data]),
+    first.result.steps.map((s) => [s.from, s.action, s.case, s.input.customerRank, s.data.rank]),
     [
-      ["DRAFT", "PlaceOrder", "default", { customerRank: "Silver", listPrice: 0 }, {}],
-      ["PENDING", "Checkout", "The payment succeeded", {}, { rank: "Silver", price: 0 }],
+      ["DRAFT", "PlaceOrder", "otherwise", "Silver", undefined],
+      ["PENDING", "Checkout", "The payment succeeded", undefined, "Silver"],
     ],
   );
-  assert.deepEqual(first.result.expected, {
-    state: "PAID",
-    commands: [{ action: "SendReceipt", payload: { discountPercent: 5, amount: 0 } }],
-  });
-  assert.deepEqual(first.result.actual, {
-    state: "PAID",
-    commands: [{ action: "SendReceipt", payload: { discountPercent: 50, amount: 0 } }],
-  });
+  // 割引率だけが食い違う（価格は縮小の止まった値で、ここでは問わない）
+  const percentOf = (o: unknown) => (o as { commands: { payload: { discountPercent: number } }[] }).commands[0].payload.discountPercent;
+  assert.equal(percentOf(first.result.expected), 5);
+  assert.equal(percentOf(first.result.actual), 50);
 
   // 差し戻しは次の依頼文に載り、前回の成果も作業場所に引き継がれる
   const retry = of(seen, "implementation")[1];
@@ -259,9 +255,9 @@ test("複数ステップ: 3手でしか現れない不具合を、最小のア�
   assert.deepEqual(
     feedback.result.steps.map((s) => [s.from, s.action, s.case]),
     [
-      ["DRAFT", "PlaceOrder", "default"],
+      ["DRAFT", "PlaceOrder", "otherwise"],
       ["PENDING", "Checkout", "The payment succeeded"],
-      ["PAID", "Cancel", "default"],
+      ["PAID", "Cancel", "otherwise"],
     ],
   );
   assert.deepEqual(feedback.result.expected, { state: "CANCELLED", commands: [{ action: "Refund", payload: {} }] });
@@ -513,7 +509,7 @@ test("出口ゲート: その段階で許可した出力以外は取り出さず
 
 async function workspace() {
   const out = workdir();
-  const ir = JSON.parse(stableStringify((await extract(await loadSpecs(specsDir))).ir)) as Ir;
+  const ir = JSON.parse(stableStringify(extract(await loadSpecs(specsDir)).ir)) as Ir;
   mkdirSync(join(out, "aac"), { recursive: true });
   writeFileSync(join(out, "aac/ir.json"), stableStringify(ir));
   writeFileSync(join(out, "aac/adapter.contract.ts"), generateContract(ir));

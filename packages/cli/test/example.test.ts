@@ -3,62 +3,39 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import { RuleConflictError, bindSpecification, createState, defineComponent, evaluateConditions } from "@aac/core";
+import { RuleConflictError, bind, calculate, component, decide, matchCondition } from "@aac/core";
+import { Binding } from "../../../specs/order.binding.ts";
 import { Order } from "../../../specs/order.component.ts";
-import "../../../specs/order.binding.ts";
 import { extract } from "../src/extract.ts";
 import { loadSpecs } from "../src/loader.ts";
 import { selfCheck } from "../src/runtime.ts";
 
-// SPEC.md の例 (specs/) を、具体値と抽象実行の両方で通す
+// 例の仕様 (specs/) と、仕様の読み込み・検査
 
-const success = Order.behaviors.Checkout["The payment succeeded"];
-const order = (data: object) => createState({ status: "PENDING", rank: undefined, price: undefined, ...data });
+const paid = { status: "PENDING", rank: "Gold", price: 1999, isMonthEnd: true, paymentModuleActive: true, paymentResult: "succeeded" } as const;
 
-test("具体実行: ゴールド会員かつ月末は20%引きで、請求金額は計算で決まる", () => {
-  assert.deepEqual(success(order({ rank: "Gold", isMonthEnd: true, price: 1999 })), {
-    nextState: "PAID",
-    event: "Payment completed",
-    effects: [
-      { action: "SendReceipt", payload: { discountPercent: 20, amount: 1599 } }, // 1599.2 を切り捨て
-      { action: "IssueCoupon", payload: { type: "Premium" } },
-    ],
-  });
+test("意味: 決定表は、成り立つ条件の行を返す。どれも成り立たなければ otherwise", () => {
+  assert.deepEqual(decide(Order, "campaign", paid), { discountPercent: 20, grantsCoupon: true, coupon: "Premium" });
+  assert.deepEqual(decide(Order, "campaign", { ...paid, rank: "Bronze" }), { discountPercent: 0, grantsCoupon: false, coupon: "Standard" });
 });
 
-test("具体実行: どの条件にも当たらなければ default", () => {
-  const state = { status: "PENDING", rank: "Bronze", isMonthEnd: true, price: 500 };
-  assert.equal(evaluateConditions(["The customer is a Gold member and it is month-end", "The customer is a Silver member"], state), "default");
-  assert.deepEqual(success(order(state)).effects, [{ action: "SendReceipt", payload: { discountPercent: 0, amount: 500 } }]);
+test("意味: 計算は決定表の結果を使える (1999円の20%引きは、1599.2 を切り捨てて 1599)", () => {
+  assert.equal(calculate(Order, "amountCharged", paid), 1599);
 });
 
-test("具体実行: set で覚えるデータが遷移に含まれる", () => {
-  assert.deepEqual(Order.behaviors.PlaceOrder(order({ status: "DRAFT", customerRank: "Gold", listPrice: 300 })), {
-    nextState: "PENDING",
-    event: "Order placed",
-    effects: [{ action: "SendOrderConfirmation", payload: {} }],
-    set: { rank: "Gold", price: 300 },
-  });
+test("同時に成り立つ条件は1つまで: 複数成立すると RuleConflictError", () => {
+  const Tiny = component({ states: ["A"], startsIn: "A", actions: { Go: { onlyIf: ["First", "Second"], then: { goTo: "A", does: "Nothing." } } } });
+  const binding = bind(Tiny, { actions: { Go: {} }, conditions: { First: () => true, Second: () => true } });
+  assert.throws(() => matchCondition(binding, ["First", "Second", "otherwise"], {}), RuleConflictError);
+  assert.equal(matchCondition(binding, ["otherwise"], {}), "otherwise");
 });
 
-// 任意の条件を結び付けるための最小のコンポーネント
-const tiny = (first: string, second: string) =>
-  defineComponent({ initial: "A", states: ["A"], actions: { Go: { where: [first, second] } } }).cases({ Go: (state) => state.A() });
-
-test("Hit Policy Unique: default 以外が複数成立すると RuleConflictError", () => {
-  bindSpecification(tiny("常に成り立つ条件その1", "常に成り立つ条件その2"), {
-    conditions: { "常に成り立つ条件その1": () => true, "常に成り立つ条件その2": () => true },
-  });
-  assert.throws(() => evaluateConditions(["常に成り立つ条件その1", "常に成り立つ条件その2", "default"], {}), RuleConflictError);
-});
-
-test("結び付け: 同じ文を別の関数に結び付けるとエラー (同じ文は1つの意味)", () => {
-  const component = tiny("二重に結び付ける条件", "もう1つの条件");
-  bindSpecification(component, { conditions: { "二重に結び付ける条件": () => true, "もう1つの条件": () => true } });
-  assert.throws(
-    () => bindSpecification(component, { conditions: { "二重に結び付ける条件": () => false, "もう1つの条件": () => true } }),
-    /複数回、別の関数に/,
-  );
+test("結び付けの構造には関数が無い (そのまま IR にできる)", () => {
+  const hasFunction = (value: unknown): boolean =>
+    typeof value === "function" || (typeof value === "object" && value !== null && Object.values(value).some(hasFunction));
+  assert.equal(hasFunction(Order), false);
+  assert.equal(hasFunction(Binding.actions), false);
+  assert.equal(hasFunction(Binding.conditions), true);
 });
 
 test("specs/ の IR 出力は実行ごとにバイト一致する", () => {
@@ -67,17 +44,29 @@ test("specs/ の IR 出力は実行ごとにバイト一致する", () => {
   assert.equal(first, compile());
   const ir = JSON.parse(first);
   const find = (name: string) => ir.behaviors.find((b: { name: string }) => b.name === name);
-  // case のキーは条件の文。state の参照は「どの境界の値か」に、計算は名前に解決されて IR に出る
-  const paid = find("Checkout").transitions["The payment succeeded"];
-  assert.equal(paid.nextState, "PAID");
-  assert.deepEqual(paid.emittedCommands[0].payload.amount, {
-    $ref: "formula:Amount charged: price × (100 − discount percent) ÷ 100, rounded down to a whole yen",
-  });
-  assert.deepEqual(find("PlaceOrder").transitions.default.set, {
+
+  // コンポーネントの骨組みと文に、結び付けの構造が重なる。意味の関数は出ない
+  const succeeded = find("Checkout").transitions["The payment succeeded"];
+  assert.equal(succeeded.nextState, "PAID");
+  assert.match(succeeded.description, /A receipt is sent/);
+  assert.deepEqual(succeeded.emittedCommands, [
+    {
+      action: "SendReceipt",
+      payload: { discountPercent: { $ref: "decision:campaign.discountPercent" }, amount: { $ref: "formula:amountCharged" } },
+    },
+    { action: "IssueCoupon", payload: { type: { $ref: "decision:campaign.coupon" } }, when: { $ref: "decision:campaign.grantsCoupon" } },
+  ]);
+  assert.deepEqual(find("PlaceOrder").transitions.otherwise.set, {
     rank: { $ref: "input:customerRank" },
     price: { $ref: "input:listPrice" },
   });
-  assert.deepEqual(ir.model.invariants, ["Every order past the draft state has a member rank and a price"]);
+  assert.deepEqual(find("Cancel").transitions.otherwise.emittedCommands, [{ action: "Refund", payload: {}, when: { $was: ["PAID"] } }]);
+  assert.deepEqual(ir.model.formulas.amountCharged, {
+    is: "price × (100 − discount percent) ÷ 100, rounded down to a whole yen",
+    type: "integer",
+  });
+  assert.deepEqual(ir.decisions.campaign.rows.otherwise, { discountPercent: 0, grantsCoupon: false, coupon: "Standard" });
+  assert.ok(!first.includes("=>"));
 });
 
 test("specs/ は仕様の事前検査に合格する", async () => {
@@ -85,57 +74,105 @@ test("specs/ は仕様の事前検査に合格する", async () => {
 });
 
 // --- 仕様の誤りの検出 (loader / extract / selfCheck) ---
-// 結び付けはプロセス全体で共有されるので、テストごとに条件の文を変えている
+// ここの仕様は型チェックを通さずに読み込む。型をすり抜けた誤りが、分かる文面で報告されることを確かめる
 
 const tmpRoot = join(import.meta.dirname, ".tmp-specs");
 mkdirSync(tmpRoot, { recursive: true });
 after(() => rmSync(tmpRoot, { recursive: true, force: true }));
 
-// 仕様ファイルを一時ディレクトリに書き出す。boundary は defineComponent の中身、cases は .cases() の中身
-function specDir(boundary: string, cases: string, bindings = "conditions: {}") {
+// 仕様ファイルを一時ディレクトリに書き出す。declaration は component の中身、bindings は bind の中身
+function specDir(declaration: string, bindings?: string) {
   const dir = mkdtempSync(join(tmpRoot, "s-"));
   writeFileSync(
     join(dir, "x.component.ts"),
-    `import { applyFormula, bindSpecification, defineComponent, dir, file, text } from "@aac/core";
-const Boundary = defineComponent({ initial: "A", states: ["A", "B"], ${boundary} });
-export const Component = Boundary.cases({ ${cases} });
-bindSpecification(Component, { ${bindings} });
+    `import { asked, bind, calculated, component, decided, decisionTable, dir, file, given, remembered, text, was } from "@aac/core";
+const Size = decisionTable({ "It is big": { count: 10, urgent: true }, otherwise: { count: 1, urgent: false } });
+export const Thing = component({ states: ["A", "B"], startsIn: "A", ${declaration} });
+${bindings === undefined ? "" : `export const Binding = bind(Thing, { ${bindings} });`}
 `,
   );
   return dir;
 }
-const noop = "(state) => state.A()";
+const go = `then: { goTo: "B", does: "It moves on." }`;
+const codes = async (dir: string) => extract(await loadSpecs(dir)).diagnostics.map((d) => d.code).sort();
+const messages = async (dir: string) => extract(await loadSpecs(dir)).diagnostics.map((d) => d.message);
 
-test("コンポーネント: data・queries・入力の名前が重なるとエラー (条件から区別できないため)", async () => {
-  const dir = specDir(`data: { rank: "string" }, actions: { Place: { input: { rank: "string" } } }`, `Place: ${noop}`);
-  await assert.rejects(loadSpecs(dir), /"rank" が重複しています \(data と actions の入力\)/);
+test("読み込み: remembers・asks・入力の名前が重なるとエラー (条件から区別できないため)", async () => {
+  const dir = specDir(`remembers: { rank: "string" }, actions: { Place: { takes: { rank: "string" }, ${go} } }`);
+  await assert.rejects(loadSpecs(dir), /"rank" が重複しています \(remembers と takes\)/);
 });
 
-test("コンポーネント: 入力はアクションが違えば同名でよい", async () => {
-  const dir = specDir(`actions: { Place: { input: { note: "string" } }, Amend: { input: { note: "string" } } }`, `Place: ${noop}, Amend: ${noop}`);
-  assert.deepEqual(Object.keys((await loadSpecs(dir)).behaviors).sort(), ["Amend", "Place"]);
-});
-
-test("コンポーネント: 省略した宣言は空として扱い、関数1つの case は default だけの表になる", async () => {
-  const spec = await loadSpecs(specDir(`actions: { Place: { from: ["A"] }, Back: {} }`, `Place: ${noop}, Back: { default: ${noop} }`));
-  assert.deepEqual(spec.model, { initial: "A", states: ["A", "B"], data: {}, actions: { Place: {}, Back: {} }, queries: {}, commands: {} });
-  assert.deepEqual(Object.keys(spec.behaviors.Place.cases), ["default"]);
-  assert.deepEqual(spec.behaviors.Place.from, ["A"]);
-  assert.equal(spec.behaviors.Back.from, undefined);
-});
-
-test("コンポーネント: case の無いアクション、default の無い表はエラー", async () => {
-  await assert.rejects(loadSpecs(specDir(`actions: { Place: {}, Ship: {} }`, `Place: ${noop}`)), /アクション "Ship" に case がありません/);
+test("読み込み: then と when は、どちらか一方。when には otherwise が要る", async () => {
+  await assert.rejects(loadSpecs(specDir(`actions: { Place: {} }`)), /then か when の、どちらか一方/);
   await assert.rejects(
-    loadSpecs(specDir(`actions: { Place: {} }`, `Place: { "何かの場合": ${noop} }`)),
-    /アクション "Place" に case がありません/,
+    loadSpecs(specDir(`actions: { Place: { when: { "It is big": { goTo: "B", does: "x" } } } }`)),
+    /when に otherwise がありません/,
   );
+});
+
+test("読み込み: 結び付けの構造が、コンポーネントのアクションと条件に対応していなければエラー", async () => {
+  const declaration = `actions: { Place: { when: { "It is big": { goTo: "B", does: "x" }, otherwise: { goTo: "A", does: "y" } } }, Back: { ${go} } }`;
+  await assert.rejects(loadSpecs(specDir(declaration, `actions: { Place: { "It is big": {}, otherwise: {} } }, conditions: {}`)), /アクション "Back" の構造がありません/);
+  await assert.rejects(loadSpecs(specDir(declaration, `actions: { Place: { "It is big": {} }, Back: {} }, conditions: {}`)), /条件 "otherwise" の構造がありません/);
+  await assert.rejects(
+    loadSpecs(specDir(declaration, `actions: { Place: { "It is big": {}, otherwise: {} }, Back: {}, Jump: {} }, conditions: {}`)),
+    /"Jump" に対応するアクションが、コンポーネントにありません/,
+  );
+});
+
+test("読み込み: 省略した宣言は空として扱い、分かれないアクションは otherwise だけの表になる", async () => {
+  const spec = await loadSpecs(specDir(`actions: { Place: { allowedIn: ["A"], ${go} } }`, `actions: { Place: {} }, conditions: {}`));
+  assert.deepEqual(spec.model, { initial: "A", states: ["A", "B"], data: {}, actions: { Place: {} }, queries: {}, commands: {} });
+  assert.deepEqual(spec.behaviors.Place, {
+    from: ["A"],
+    where: undefined,
+    cases: { otherwise: { nextState: "B", does: "It moves on.", tell: [], set: {} } },
+  });
+});
+
+test("検査: 結び付けが無い、名前の意味が書かれていない", async () => {
+  const declaration = `decisions: { size: Size }, calculations: { total: { is: "count times two", type: "integer" } }, alwaysTrue: ["It is fine"], actions: { Place: { onlyIf: ["Flag is on"], ${go} } }`;
+  assert.deepEqual(await codes(specDir(declaration)), ["unbound-specification"]);
+  assert.deepEqual(await codes(specDir(declaration, `actions: { Place: { tell: [] } }, conditions: {}`)), [
+    "unbound-condition", // 決定表の行
+    "unbound-condition", // onlyIf
+    "unbound-formula",
+    "unbound-invariant",
+  ]);
+});
+
+test("検査: 構造の誤りを、場所と理由が分かる文面で報告する", async () => {
+  const declaration = `remembers: { memo: "string", level: ["low", "high"] }, asks: { flag: "boolean", mode: ["x", "y"] },
+    tells: { Notify: { text: "string", count: "integer" }, Grade: { level: ["low", "high"] } },
+    decisions: { size: Size }, calculations: { title: { is: "the memo, upper-cased", type: "string" } },
+    actions: { Place: { takes: { note: "string" }, ${go} } }`;
+  const meanings = `conditions: { "It is big": () => true }, calculations: { title: () => "t" }`;
+  const report = async (structure: string) => (await messages(specDir(declaration, `actions: { Place: { ${structure} } }, ${meanings}`))).join("\n");
+
+  assert.equal(await report(`tell: [{ Notify: { text: given("note"), count: decided("size", "count") } }], remember: { memo: calculated("title") }`), "");
+  assert.match(await report(`tell: [{ Refund: {} }]`), /指示 "Refund" は tells にありません/);
+  assert.match(await report(`tell: [{ Notify: { text: "x" } }]`), /指示 Notify に、フィールド "count" がありません/);
+  assert.match(await report(`tell: [{ Notify: { text: "x", count: 1.5 } }]`), /Notify\.count: 1\.5 は integer に入りません/);
+  assert.match(await report(`tell: [{ Notify: { text: "x", count: decided("size", "urgent") } }]`), /Notify\.count: 決定表の値 true は integer に入りません/);
+  assert.match(await report(`tell: [{ Notify: { text: "x", count: decided("weight", "count") } }]`), /決定表 "weight" は、コンポーネントの decisions にありません/);
+  assert.match(await report(`tell: [{ Notify: { text: "x", count: calculated("title") } }]`), /Notify\.count: string は integer に入りません/);
+  assert.match(await report(`tell: [{ Grade: { level: asked("mode") } }]`), /Grade\.level: "x" \| "y" は "low" \| "high" に入りません/);
+  assert.match(await report(`tell: [{ Grade: { level: "low" }, when: decided("size", "count") }]`), /Grade の when: 決定表の値 10 は boolean に入りません/);
+  assert.match(await report(`tell: [{ Grade: { level: "low" }, when: was("Z") }]`), /was: "Z" は states にありません/);
+  assert.match(await report(`tell: [{ Grade: { level: "low" }, when: "It is odd" }]`), /条件 "It is odd" の意味が、結び付けの conditions に書かれていません/);
+  assert.match(await report(`remember: { nickname: "x" }`), /remember\.nickname: "nickname" は remembers にありません/);
+  assert.match(await report(`remember: { memo: given("nota") }`), /"nota" は、アクション Place の takes にありません/);
+});
+
+test("検査: 存在しない状態への遷移", async () => {
+  const dir = specDir(`actions: { Place: { allowedIn: ["Z"], then: { goTo: "Y", does: "x" } } }`, `actions: { Place: {} }, conditions: {}`);
+  assert.deepEqual((await messages(dir)).sort(), ['allowedIn の "Z" は states にありません', 'goTo の "Y" は states にありません']);
 });
 
 test("添付資料: file / dir / text で宣言でき、パスはコンポーネントのファイルからの相対で読む", async () => {
   const dir = specDir(
-    `assets: [file("docs/architecture.md"), dir("docs/conventions", { phases: ["design"] }), text("Adapters are named *Gateway.", { phases: ["wiring"] })], actions: { Place: {} }`,
-    `Place: ${noop}`,
+    `assets: [file("docs/architecture.md"), dir("docs/conventions", { phases: ["design"] }), text("Adapters are named *Gateway.", { phases: ["wiring"] })], actions: { Place: { ${go} } }`,
+    `actions: { Place: {} }, conditions: {}`,
   );
   mkdirSync(join(dir, "docs/conventions/naming"), { recursive: true });
   writeFileSync(join(dir, "docs/architecture.md"), "- Use the repository pattern.");
@@ -151,16 +188,14 @@ test("添付資料: file / dir / text で宣言でき、パスはコンポーネ
     { kind: "text", text: "Adapters are named *Gateway.", phases: ["wiring"] },
   ]);
   // 添付資料は仕様の意味ではないので、IR には出ない（内容を変えても検証のシードは変わらない）
-  const { ir } = await extract(spec);
-  assert.ok(!JSON.stringify(ir).includes("architecture"));
+  assert.ok(!JSON.stringify(extract(spec).ir).includes("architecture"));
 });
 
 test("添付資料: 無いパス、file と dir の取り違え、名前の重なりはエラー", async () => {
-  const load = async (assets: string, prepare?: (dir: string) => void) => {
-    const dir = specDir(`assets: [${assets}], actions: { Place: {} }`, `Place: ${noop}`);
+  const load = async (assets: string) => {
+    const dir = specDir(`assets: [${assets}], actions: { Place: { ${go} } }`);
     mkdirSync(join(dir, "docs"));
     writeFileSync(join(dir, "docs/a.md"), "a");
-    prepare?.(dir);
     return loadSpecs(dir);
   };
   await assert.rejects(load(`file("docs/missing.md")`), /添付資料がありません: docs\/missing\.md/);
@@ -169,25 +204,10 @@ test("添付資料: 無いパス、file と dir の取り違え、名前の重�
   await assert.rejects(load(`file("docs/a.md"), dir("docs")`), /添付資料の名前が重なっています: docs\/a\.md/);
 });
 
-test("IR 抽出: 結び付けの無い条件・計算・不変条件はエラー", async () => {
-  const dir = specDir(
-    `actions: { Place: { where: ["結び付けの無い事前条件"] } }, formulas: { "結び付けの無い計算": "integer" }, invariants: ["結び付けの無い不変条件"]`,
-    `Place: { "結び付けの無い場合": ${noop}, default: ${noop} }`,
-  );
-  const { diagnostics } = await extract(await loadSpecs(dir));
-  assert.deepEqual(diagnostics.map((d) => d.code).sort(), [
-    "unbound-condition",
-    "unbound-condition",
-    "unbound-formula",
-    "unbound-invariant",
-  ]);
-});
-
 test("事前検査: 2つの条件が同時に成り立つ仕様を、実装なしで見つける", async () => {
   const dir = specDir(
-    `actions: { Place: {} }`,
-    `Place: { "事前検査で衝突する条件その1": (state) => state.B(), "事前検査で衝突する条件その2": (state) => state.B(), default: ${noop} }`,
-    `conditions: { "事前検査で衝突する条件その1": () => true, "事前検査で衝突する条件その2": () => true }`,
+    `actions: { Place: { when: { "First case": { goTo: "B", does: "x" }, "Second case": { goTo: "B", does: "y" }, otherwise: { goTo: "A", does: "z" } } } }`,
+    `actions: { Place: { "First case": {}, "Second case": {}, otherwise: {} } }, conditions: { "First case": () => true, "Second case": () => true }`,
   );
   const result = await selfCheck(await loadSpecs(dir), { seed: 1 });
   assert.ok(!result.ok);
@@ -196,22 +216,21 @@ test("事前検査: 2つの条件が同時に成り立つ仕様を、実装な�
 
 test("事前検査: 不変条件が破れるアクション列を、最短で報告する", async () => {
   const dir = specDir(
-    `data: { note: "string" }, actions: { Place: { from: ["A"] }, Back: { from: ["B"] } }, invariants: ["Bの状態ではメモが設定されている"]`,
+    `remembers: { note: "string" }, alwaysTrue: ["A note is remembered in B"],
+     actions: { Place: { allowedIn: ["A"], ${go} }, Back: { allowedIn: ["B"], then: { goTo: "A", does: "It goes back." } } }`,
     // Place がメモを覚え忘れている
-    `Place: (state) => state.B(), Back: ${noop}`,
-    `conditions: {}, invariants: { "Bの状態ではメモが設定されている": (state) => state.status !== "B" || state.note !== undefined }`,
+    `actions: { Place: {}, Back: {} }, conditions: {}, alwaysTrue: { "A note is remembered in B": (state) => state.status !== "B" || state.note !== undefined }`,
   );
   const result = await selfCheck(await loadSpecs(dir), { seed: 1 });
   assert.ok(!result.ok);
-  assert.match(result.message, /不変条件が破れました: "Bの状態ではメモが設定されている"/);
+  assert.match(result.message, /不変条件が破れました: "A note is remembered in B"/);
   assert.deepEqual(result.steps.map((step) => step.action), ["Place"]);
 });
 
 test("事前検査: 計算の結果が宣言した型に合わなければ報告する", async () => {
   const dir = specDir(
-    `commands: { Bill: { amount: "integer" } }, actions: { Place: {} }, formulas: { "半額（端数処理なし）": "integer" }`,
-    `Place: (state) => state.A({ effects: [{ action: "Bill", payload: { amount: applyFormula(Boundary, "半額（端数処理なし）", state) } }] })`,
-    `conditions: {}, formulas: { "半額（端数処理なし）": () => 1.5 }`,
+    `tells: { Bill: { amount: "integer" } }, calculations: { half: { is: "half of it, no rounding", type: "integer" } }, actions: { Place: { ${go} } }`,
+    `actions: { Place: { tell: [{ Bill: { amount: calculated("half") } }] } }, conditions: {}, calculations: { half: () => 1.5 }`,
   );
   const result = await selfCheck(await loadSpecs(dir), { seed: 1 });
   assert.ok(!result.ok);

@@ -1,27 +1,29 @@
-import { applyDecision, applyFormula, defineComponent } from "@aac/core";
-import type { CommandsOf, DecisionTable } from "@aac/core";
+import { component } from "@aac/core";
+import { Campaign, Shipping } from "./order.decisions.ts";
 
 const Rank = ["Gold", "Silver", "Bronze"] as const;
 // Money is a whole number of yen. `around` lists thresholds the property-based test probes closely.
 const Yen = { type: "integer", min: 0, max: 1_000_000, around: [10_000] } as const;
 
-// --- 1. Boundary and structure: pure data, the single source of truth. Types are derived from it. ---
-const OrderBoundary = defineComponent({
-  initial: "DRAFT",
+// The "order" component: its vocabulary, the skeleton of its state machine, and what each action does, in prose.
+// There are no functions here. What the sentences mean is written in order.binding.ts.
+export const Order = component({
+  // ── Vocabulary ──────────────────────────────────────────────
   states: ["DRAFT", "PENDING", "PAID", "SHIPPED", "CANCELLED"],
-  // What the order remembers between actions (nothing is set in the initial state)
-  data: {
-    rank: Rank,
-    price: Yen,
-  },
-  // Queries to dependencies: values the component asks for (clock, configuration, an external service's response)
-  queries: {
+  startsIn: "DRAFT",
+
+  // What the order remembers between actions (nothing is set at the start)
+  remembers: { rank: Rank, price: Yen },
+
+  // What the order asks its dependencies (a clock, configuration, an external service's response)
+  asks: {
     isMonthEnd: "boolean",
     paymentModuleActive: "boolean",
     paymentResult: ["succeeded", "failed"],
   },
-  // Commands to dependencies: the side effects the spec allows
-  commands: {
+
+  // What the order tells its dependencies to do
+  tells: {
     SendOrderConfirmation: {},
     SendReceipt: { discountPercent: "integer", amount: "integer" },
     IssueCoupon: { type: ["Premium", "Standard"] },
@@ -29,88 +31,62 @@ const OrderBoundary = defineComponent({
     SendShippingNotice: { priority: "boolean" },
     Refund: {},
   },
-  // Formulas: the name states the calculation and the rounding. The function is bound in order.binding.ts.
-  formulas: {
-    "Amount charged: price × (100 − discount percent) ÷ 100, rounded down to a whole yen": "integer",
-  },
-  // Invariants: properties that must hold after every action
-  invariants: [
-    "Every order past the draft state has a member rank and a price",
-  ],
-  // Actions: their input, the states they can run in (from), and their preconditions (where)
-  actions: {
-    PlaceOrder: { input: { customerRank: Rank, listPrice: Yen }, from: ["DRAFT"] },
-    Checkout: { from: ["PENDING"], where: ["The external payment module is active"] },
-    Ship: { from: ["PAID"] },
-    Cancel: { from: ["PENDING", "PAID"] },
-  },
-});
 
-// --- 2. Decision tables: each key is a condition in natural language; `default` is mandatory. ---
-type Command = CommandsOf<typeof OrderBoundary>;
+  // ── Decisions and calculations ──────────────────────────────
+  decisions: { campaign: Campaign, shipping: Shipping },
 
-// The discount is a whole-number percentage (fractions would make the amount calculation inexact).
-export const CampaignRules = {
-  "The customer is a Gold member and it is month-end": {
-    discountPercent: 20,
-    effects: [{ action: "IssueCoupon", payload: { type: "Premium" } }]
-  },
-  "The customer is a Silver member": { discountPercent: 5, effects: [] },
-  "default": { discountPercent: 0, effects: [] }
-} as const satisfies DecisionTable<{ discountPercent: number; effects: Command[] }>;
-
-export const CancelRules = {
-  "The order has been paid": { effects: [{ action: "Refund", payload: {} }] },
-  "default": { effects: [] }
-} as const satisfies DecisionTable<{ effects: Command[] }>;
-
-export const ShippingRules = {
-  "The customer is a Gold member, or the order is 10,000 yen or more": { priority: true },
-  "default": { priority: false }
-} as const satisfies DecisionTable<{ priority: boolean }>;
-
-// --- 3. Cases: what each action does. No logic here: apply tables and formulas, then map their results. ---
-export const Order = OrderBoundary.cases({
-  // An action that does not branch is a single function.
-  PlaceOrder: (state) => state.PENDING({
-    event: "Order placed",
-    // Remember the rank and the price; checkout and shipping depend on them.
-    set: { rank: state.customerRank, price: state.listPrice },
-    effects: [{ action: "SendOrderConfirmation", payload: {} }]
-  }),
-
-  // An action that branches is a table keyed by conditions, with a mandatory `default`.
-  Checkout: {
-    "The payment succeeded": (state) => {
-      const campaign = applyDecision(CampaignRules, state);
-      const amount = applyFormula(OrderBoundary, "Amount charged: price × (100 − discount percent) ÷ 100, rounded down to a whole yen", state);
-
-      return state.PAID({
-        event: "Payment completed",
-        effects: [
-          { action: "SendReceipt", payload: { discountPercent: campaign.discountPercent, amount } },
-          ...campaign.effects
-        ]
-      });
+  calculations: {
+    amountCharged: {
+      is: "price × (100 − discount percent) ÷ 100, rounded down to a whole yen",
+      type: "integer",
     },
-    "default": (state) => state.PENDING({
-      event: "Payment failed",
-      effects: [{ action: "NotifyPaymentFailure", payload: {} }]
-    })
   },
 
-  Ship: (state) => {
-    const shipping = applyDecision(ShippingRules, state);
+  // Properties that must hold after every action
+  alwaysTrue: ["Every order past the draft state has a member rank and a price"],
 
-    return state.SHIPPED({
-      event: "Order shipped",
-      effects: [{ action: "SendShippingNotice", payload: { priority: shipping.priority } }]
-    });
+  // ── Actions ─────────────────────────────────────────────────
+  actions: {
+    PlaceOrder: {
+      takes: { customerRank: Rank, listPrice: Yen },
+      allowedIn: ["DRAFT"],
+      then: {
+        goTo: "PENDING",
+        does: "The order remembers the customer's rank and the list price. An order confirmation is sent.",
+      },
+    },
+
+    Checkout: {
+      allowedIn: ["PENDING"],
+      onlyIf: ["The external payment module is active"],
+      when: {
+        "The payment succeeded": {
+          goTo: "PAID",
+          does:
+            "A receipt is sent with the campaign's discount percent and the amount charged. " +
+            "Then a coupon is issued if the campaign grants one.",
+        },
+        otherwise: {
+          goTo: "PENDING",
+          does: "The customer is notified of the payment failure.",
+        },
+      },
+    },
+
+    Ship: {
+      allowedIn: ["PAID"],
+      then: {
+        goTo: "SHIPPED",
+        does: "A shipping notice is sent, with priority as the shipping decision says.",
+      },
+    },
+
+    Cancel: {
+      allowedIn: ["PENDING", "PAID"],
+      then: {
+        goTo: "CANCELLED",
+        does: "If the order had been paid, a refund is issued.",
+      },
+    },
   },
-
-  Cancel: (state) => {
-    const cancel = applyDecision(CancelRules, state);
-
-    return state.CANCELLED({ event: "Order cancelled", effects: [...cancel.effects] });
-  }
 });

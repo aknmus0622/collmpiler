@@ -1,9 +1,11 @@
 import { isDeepStrictEqual, parseArgs } from "node:util";
 import fc from "fast-check";
-import { createState, evaluateConditions, getCondition, getInvariant } from "@aac/core";
-import type { FieldSchema } from "@aac/core";
-import type { SpecInput, SpecModel } from "./extract.ts";
+import { matchCondition } from "@aac/core";
+import type { BoundSpecification, FieldSchema } from "@aac/core";
+import { isReference } from "./extract.ts";
+import type { Reference, SpecInput, SpecModel, SpecValue } from "./extract.ts";
 import { loadSpecs } from "./loader.ts";
+import { conforms, isEnum, isNumberSchema } from "./schema.ts";
 
 // 生成された verify.ts から呼ばれる PBT ランタイム。
 // 1回の試行は「初期状態から始まるアクション列」。期待値は仕様 (Layer 1/2) を具体値で実行して得る。
@@ -24,7 +26,7 @@ type Values = Record<string, unknown>;
 type RawStep = { pick: number; inputs: Record<string, Values>; queries: Values };
 type Observation = { state: unknown; commands: unknown };
 
-// data は、そのアクションの実行前に部品が覚えているはずのデータ。case は成立した条件（無ければ "default"）
+// data は、そのアクションの実行前に部品が覚えているはずのデータ。case は成立した条件（無ければ "otherwise"）
 export type Step = { from: string; data: Values; action: string; input: Values; queries: Values; case: string };
 
 export type PbtResult =
@@ -56,13 +58,10 @@ class SpecError extends Error {
   }
 }
 
-const isNumberSchema = (schema: FieldSchema): schema is Extract<FieldSchema, { type: string }> =>
-  typeof schema === "object" && !Array.isArray(schema);
-
 function arbitraryOf(schema: FieldSchema): fc.Arbitrary<unknown> {
   if (schema === "boolean") return fc.boolean();
   if (schema === "string") return fc.string();
-  if (!isNumberSchema(schema) && typeof schema !== "string") return fc.constantFrom(...schema);
+  if (isEnum(schema)) return fc.constantFrom(...schema);
 
   const { type, min, max, around = [] } = isNumberSchema(schema) ? schema : { type: schema as "integer" | "number" };
   const base =
@@ -82,19 +81,6 @@ function arbitraryOf(schema: FieldSchema): fc.Arbitrary<unknown> {
   return choices.length === 1 ? base : fc.oneof(...choices);
 }
 
-function conforms(schema: FieldSchema, value: unknown): boolean {
-  if (schema === "boolean" || schema === "string") return typeof value === schema;
-  if (!isNumberSchema(schema) && typeof schema !== "string") return schema.includes(value as string);
-  const { type, min, max } = isNumberSchema(schema) ? schema : { type: schema as "integer" | "number" };
-  return (
-    typeof value === "number" &&
-    Number.isFinite(value) &&
-    (type !== "integer" || Number.isInteger(value)) &&
-    (min === undefined || value >= min) &&
-    (max === undefined || value <= max)
-  );
-}
-
 const recordOf = (fields: Record<string, FieldSchema>) =>
   fc.record(Object.fromEntries(Object.entries(fields).map(([key, schema]) => [key, arbitraryOf(schema)])));
 
@@ -102,7 +88,7 @@ const plain = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 const messageOf = (error: unknown) => (error instanceof Error ? `${error.name}: ${error.message}` : String(error));
 
 // 仕様側のシミュレーション。実装には触れず、仕様だけで「次に何が起きるべきか」を進める
-function simulator(input: SpecInput, model: SpecModel) {
+function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecification) {
   const actions = Object.keys(input.behaviors).sort();
 
   const sequences = fc.array(
@@ -116,17 +102,45 @@ function simulator(input: SpecInput, model: SpecModel) {
 
   const start = () => ({
     status: model.initial,
-    // 未設定のデータも undefined のキーとして持つ（createState が状態コンストラクタと区別できるように）
+    // 未設定のデータも undefined のキーとして持つ
     data: Object.fromEntries(Object.keys(model.data).map((field) => [field, undefined])) as Values,
   });
 
   const checkInvariants = (state: { status: string; data: Values }, steps: Step[]) => {
     for (const name of model.invariants ?? []) {
-      const invariant = getInvariant(name);
-      if (!invariant) throw new SpecError(`不変条件 "${name}" に評価関数がありません`, steps);
+      const invariant = binding.alwaysTrue?.[name];
+      if (!invariant) throw new SpecError(`不変条件 "${name}" の判定が、結び付けにありません`, steps);
       if (!invariant({ status: state.status, ...state.data })) {
         throw new SpecError(`不変条件が破れました: "${name}" (状態 ${state.status}, データ ${JSON.stringify(state.data)})`, steps);
       }
+    }
+  };
+
+  // 参照を、その場の値に解決する
+  const resolve = (value: SpecValue, context: Values & { status: string }, action: string): unknown => {
+    if (!isReference(value)) return value;
+    const ref: Reference = value;
+    const name = String(ref.path);
+    switch (ref.$ref) {
+      case "decided": {
+        const [decision, column] = ref.path as [string, string];
+        const table = input.decisions[decision];
+        if (!table) throw new Error(`決定表 "${decision}" がありません`);
+        return table[matchCondition(binding, Object.keys(table), context)][column];
+      }
+      case "calculated": {
+        const calculation = binding.calculations?.[name];
+        if (!calculation) throw new Error(`計算 "${name}" の中身が、結び付けにありません`);
+        return calculation(context);
+      }
+      case "given":
+        if (!(name in (model.actions[action] ?? {}))) throw new Error(`"${name}" は、アクション ${action} の入力ではありません`);
+        return context[name];
+      case "remembered":
+      case "asked":
+        return context[name];
+      case "was":
+        return (ref.path as string[]).includes(context.status);
     }
   };
 
@@ -139,8 +153,8 @@ function simulator(input: SpecInput, model: SpecModel) {
         return (
           (behavior.from ?? model.states).includes(state.status) &&
           (behavior.where ?? []).every((text) => {
-            const condition = getCondition(text);
-            if (!condition) throw new Error(`事前条件 "${text}" に評価関数がありません`);
+            const condition = binding.conditions[text];
+            if (!condition) throw new Error(`事前条件 "${text}" の意味が、結び付けにありません`);
             return condition(contextOf(name));
           })
         );
@@ -150,29 +164,47 @@ function simulator(input: SpecInput, model: SpecModel) {
       const action = enabled[raw.pick % enabled.length];
       const context = contextOf(action);
       const cases = input.behaviors[action].cases;
-      const matched = evaluateConditions(Object.keys(cases), context);
+      const matched = matchCondition(binding, Object.keys(cases), context);
       const step: Step = { from: state.status, data: plain(state.data), action, input: raw.inputs[action], queries: raw.queries, case: matched };
       steps.push(step);
 
-      const transition = cases[matched](createState(context)) as any;
-      if (!model.states.includes(transition?.nextState)) throw new Error(`case が状態への遷移を返していません`);
-      for (const [field, value] of Object.entries(transition.set ?? {})) {
-        if (!(field in model.data)) throw new Error(`set: モデルの data に "${field}" がありません`);
-        if (!conforms(model.data[field], value)) throw new Error(`set: ${field} = ${JSON.stringify(value)} が宣言した型・範囲に合いません`);
-      }
-      for (const command of transition.effects as { action: string; payload: Values }[]) {
+      const outcome = cases[matched];
+      if (!model.states.includes(outcome.nextState)) throw new Error(`goTo "${outcome.nextState}" は states にありません`);
+
+      // 指示: when が成り立つものだけを、書かれた順に
+      const commands: { action: string; payload: Values }[] = [];
+      for (const command of outcome.tell) {
+        const issued =
+          command.when === undefined
+            ? true
+            : typeof command.when === "string"
+              ? matchCondition(binding, [command.when], context) === command.when
+              : resolve(command.when, context, action) === true;
+        if (!issued) continue;
         const fields = model.commands[command.action];
-        if (!fields) throw new Error(`モデルの commands に "${command.action}" がありません`);
+        if (!fields) throw new Error(`指示 "${command.action}" は tells にありません`);
+        const payload = Object.fromEntries(Object.entries(command.payload).map(([field, value]) => [field, resolve(value, context, action)]));
         for (const [field, schema] of Object.entries(fields)) {
-          if (!conforms(schema, command.payload?.[field])) {
-            throw new Error(`${command.action}.${field} = ${JSON.stringify(command.payload?.[field])} が宣言した型・範囲に合いません`);
+          if (!conforms(schema, payload[field])) {
+            throw new Error(`${command.action}.${field} = ${JSON.stringify(payload[field])} が宣言した型・範囲に合いません`);
           }
+        }
+        commands.push({ action: command.action, payload });
+      }
+
+      // 覚えるデータ
+      const set: Values = {};
+      for (const [field, value] of Object.entries(outcome.set)) {
+        if (!(field in model.data)) throw new Error(`remember: "${field}" は remembers にありません`);
+        set[field] = resolve(value, context, action);
+        if (!conforms(model.data[field], set[field])) {
+          throw new Error(`remember: ${field} = ${JSON.stringify(set[field])} が宣言した型・範囲に合いません`);
         }
       }
 
-      const after = { status: transition.nextState as string, data: { ...state.data, ...transition.set } as Values };
+      const after = { status: outcome.nextState, data: { ...state.data, ...set } as Values };
       checkInvariants(after, steps);
-      return { step, expected: plain({ state: transition.nextState, commands: transition.effects }) as Observation, after };
+      return { step, expected: plain({ state: outcome.nextState, commands }) as Observation, after };
     } catch (error) {
       throw error instanceof SpecError ? error : new SpecError(messageOf(error), steps);
     }
@@ -189,7 +221,8 @@ export async function selfCheck(
 ): Promise<{ ok: true; numRuns: number } | { ok: false; message: string; steps: Step[] }> {
   const model = input.model;
   if (!model) return { ok: false, message: "仕様にコンポーネントがありません", steps: [] };
-  const sim = simulator(input, model);
+  if (!input.binding) return { ok: false, message: "コンポーネントの結び付け (bind) がありません", steps: [] };
+  const sim = simulator(input, model, input.binding);
 
   const walk = (raw: RawStep[]) => {
     const steps: Step[] = [];
@@ -238,7 +271,8 @@ async function check(
   const input = await loadSpecs(specs, { drafts });
   const model = input.model;
   if (!model) return { status: "error", message: "仕様にコンポーネントがありません" };
-  const sim = simulator(input, model);
+  if (!input.binding) return { status: "error", message: "コンポーネントの結び付け (bind) がありません" };
+  const sim = simulator(input, model, input.binding);
   if (sim.actions.length === 0) return { status: "error", message: "検証する behavior がありません" };
 
   // 1試行を実行し、不一致があればその内容を返す。仕様側の問題は SpecError として投げる

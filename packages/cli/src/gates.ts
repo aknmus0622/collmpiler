@@ -156,17 +156,21 @@ function runVerify(ctx: GateContext): { result?: PbtResult; crash?: string } {
   return result ? { result } : { crash: scrub(ctx, crash ?? "") };
 }
 
-// 仕様に自然言語で書かれた文（条件・計算・不変条件）が、骨組みにそのまま書き写されていないか。
+// 仕様に自然言語で書かれた文（条件・アクションの説明・計算の式・不変条件）が、骨組みにそのまま書き写されていないか。
 // 言い換えまでは検出できない
 function specSentencesIn(ctx: GateContext, files: string[]): Violation[] {
   const { ir } = ctx;
   const sentences = new Set<string>([
     ...Object.values(ir.decisions).flatMap((decision) => Object.keys(decision.rows)),
-    ...ir.behaviors.flatMap((behavior) => [...behavior.preconditions, ...Object.keys(behavior.transitions)]),
-    ...Object.keys(ir.model?.formulas ?? {}),
+    ...ir.behaviors.flatMap((behavior) => [
+      ...behavior.preconditions,
+      ...Object.keys(behavior.transitions),
+      ...Object.values(behavior.transitions).flatMap((transition) => (transition.description ? [transition.description] : [])),
+    ]),
+    ...Object.values(ir.model?.formulas ?? {}).map((formula) => formula.is),
     ...(ir.model?.invariants ?? []),
   ]);
-  sentences.delete("default");
+  sentences.delete("otherwise");
   const violations: Violation[] = [];
   for (const rel of files) {
     const text = readFileSync(join(ctx.outDir, rel), "utf8");
