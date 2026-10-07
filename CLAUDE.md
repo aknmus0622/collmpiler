@@ -6,13 +6,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Phase 1 spike. The design documents (written in Japanese) are still the bulk of the repo. The code:
 
-- `packages/core/index.ts` — `defineComponent(...).cases(...)` (a component declared as a value, with types derived from it), `DecisionTable`, `applyDecision`, `applyFormula`, `bindSpecification`, `createState` (concrete execution). Zero dependencies. `packages/core/test/*.check.ts` are type-level checks: they are verified by `tsc` passing (wrong usages carry `@ts-expect-error`), not by the test runner.
+- `packages/core/index.ts` — `defineComponent(...).cases(...)` (a component declared as a value, with types derived from it), `DecisionTable`, `applyDecision`, `applyFormula`, `bindSpecification`, `createState` (concrete execution). Zero dependencies. `packages/core/test/*.check.ts` are type-level checks: they are verified by `pnpm typecheck` passing (wrong usages carry `@ts-expect-error`), not by the test runner.
 - `packages/cli/src/` (no `aac` bin yet; `compile.ts`, `implement.ts` and `draft-binding.ts` are temporary entry points)
   - `loader.ts` — the single `SpecLoader`. It normalizes a component into the internal `SpecModel` + behaviours form the rest of the CLI uses (inputs under `model.actions`; `from` / `where` / cases under behaviours), so the IR shape is independent of how the component is written.
   - `extract.ts` — recording-Proxy abstract execution → IR. `lint.ts` — token whitelist applied to each case body first.
   - `generate.ts` — IR → test-side files. `runtime.ts` — PBT runtime (fast-check) called by the generated `verify.ts`, plus `selfCheck`, the spec-only simulation run before any agent.
   - `strategy.ts` — how an agent session is launched (an external command). `gates.ts` — per-phase entry gate (isolated sandbox with allowlisted inputs) and exit gate (collect allowlisted outputs, checks, PBT). `request.ts` — the three phase-specific request texts. `loop.ts` — the design → wiring → implementation pipeline with feedback and restarts.
   - `check.ts` + `scan.ts` — mechanical checks on what the LLM wrote (imports and generated files only; adapter contents are unrestricted).
+  - `typecheck.ts` — runs `tsc` on specs and on agent output. `assets.ts` — resolves asset declarations (files keep their relative path under `aac/assets/`; text goes inline into the request) from the component's `assets` (relative to the component file) and from `--asset`.
   - `draft.ts` — has an agent draft the Layer 2 binding into `<name>.binding.draft.ts` (entry point `draft-binding.ts`). Separate from the implementation pipeline.
   - `mutation.ts` — the mutation gate: a swappable `MutationStrategy` (built-in literal mutation) plus `judge`, the pass rule owned by the gate. `guide.ts` — default design guidance embedded in the request.
 - `specs/` — the example: `order.component.ts` (Layer 1: boundary, decision tables, cases) and `order.binding.ts` (Layer 2). Only one component can be loaded at present.
@@ -26,10 +27,11 @@ The repo is a colocated Jujutsu (`.jj/`) + git repository, so `git` normally sho
 
 ```bash
 pnpm install
+pnpm typecheck                                        # tsc over the whole repo, incl. packages/core/test/*.check.ts
 pnpm test                                             # all packages/**/*.test.ts
 node --test packages/cli/test/extract.test.ts         # one file
 node --test --test-name-pattern="スプレッド" "packages/**/*.test.ts"   # tests by name
-pnpm -s run ir                                        # specs/ -> IR JSON on stdout, diagnostics on stderr; also runs the spec self-check
+pnpm -s run ir                                        # type-check + self-check the specs, IR JSON on stdout, diagnostics on stderr
 pnpm --filter example-checkout-ts verify              # PBT against examples/checkout-ts (add -- --seed N --path P to replay)
 
 # Have an agent draft the binding (Layer 2) for names that are not bound yet. The result is
@@ -39,12 +41,13 @@ pnpm -s run draft-binding --agent 'claude -p "Read aac/REQUEST.md and carry out 
 # Have an agent (re)write an implementation in three sessions (design, wiring, implementation).
 # Any command works; each session runs in an isolated temp directory. --from <phase> starts later in the pipeline.
 # --fresh discards the existing src/ and adapter; --transcripts <dir> saves the agent's stdout per attempt;
-# --guide <file> replaces the default design guidance; --mutation auto|builtin|off selects the mutation strategy.
+# --asset [<phases>=]<file> attaches a file to the requests (repeatable); --drafts uses unreviewed draft bindings
+# as the oracle; --mutation auto|builtin|off selects the mutation strategy.
 pnpm -s run implement --out examples/checkout-ts --fresh --max-attempts 3 \
   --agent 'claude -p "Read aac/REQUEST.md and carry out the request." --permission-mode acceptEdits'
 ```
 
-`typescript` is deliberately not a dependency, so there is no type-check script; `tsconfig.json` exists for editors and for an externally installed `tsc -p .`. `fast-check` (in `@aac/cli`) is the only third-party dependency.
+`typescript` (in `@aac/cli`, plus `@types/node` at the root) and `fast-check` are the only third-party dependencies; `packages/core` has none. Type checking is part of the framework, not just a dev convenience: `compile.ts` / `implement` type-check the specs, and every exit gate type-checks what the agent wrote.
 
 ## What is being built
 
@@ -71,7 +74,7 @@ The same thing goes by several names across the docs: `co-llm-piler` (repo), `aa
 
 Layers, from `SPEC.md`:
 
-- **Layer 1 – Spec**: one component per unit (a scenario, a domain part, a UI part all take the same shape). `defineComponent({...})` declares the boundary and structure as pure data — `states` / `initial`; `actions` (each with `input`, `from` = states it can run in, `where` = preconditions); `queries` (values it asks its dependencies for, including external services' responses); `commands` (side effects on its dependencies); `data` (what it remembers between actions; unset initially); `formulas` and `invariants` (natural-language names only). Everything except `states`, `initial`, `actions` is optional. Literals written inline are inferred narrowly without `as const`, but an enum array pulled into a variable needs `as const` (a widened `string[]` is rejected by the types). Numeric fields can carry constraints (`{ type, min, max, around }`; `around` lists thresholds the PBT probes closely). Decision tables (DMN) are keyed by natural-language condition strings, declared with `as const satisfies DecisionTable<T>`, return constants only, need a `"default"` key, and must be exported (the IR names them by export name). `.cases({...})` then attaches, for every action, either a single function or a table keyed by conditions with a mandatory `default`; the outputs are transitions (`nextState`, `effects`, `set`). The order boundary → tables → cases is forced by type dependencies.
+- **Layer 1 – Spec**: one component per unit (a scenario, a domain part, a UI part all take the same shape). `defineComponent({...})` declares the boundary and structure as pure data — `states` / `initial`; `actions` (each with `input`, `from` = states it can run in, `where` = preconditions); `queries` (values it asks its dependencies for, including external services' responses); `commands` (side effects on its dependencies); `data` (what it remembers between actions; unset initially); `formulas` and `invariants` (natural-language names only); `assets` (a list of `file(path)`, `dir(path)`, `text(content)`, each with an optional `{ phases }`, attached to the agent's requests — not part of the spec's meaning, so never emitted into the IR). Everything except `states`, `initial`, `actions` is optional. Literals written inline are inferred narrowly without `as const`, but an enum array pulled into a variable needs `as const` (a widened `string[]` is rejected by the types). Numeric fields can carry constraints (`{ type, min, max, around }`; `around` lists thresholds the PBT probes closely). Decision tables (DMN) are keyed by natural-language condition strings, declared with `as const satisfies DecisionTable<T>`, return constants only, need a `"default"` key, and must be exported (the IR names them by export name). `.cases({...})` then attaches, for every action, either a single function or a table keyed by conditions with a mandatory `default`; the outputs are transitions (`nextState`, `effects`, `set`). The order boundary → tables → cases is forced by type dependencies.
 - **Layer 2 – Binding**: one `bindSpecification(Component, { tables, conditions, formulas, invariants })` call binds every natural-language name to a function. The condition names to bind are collected in the type system from `where`, case keys, and the rows of the tables passed in `tables`, so both a missing binding and an unused condition are compile errors. The same sentence means the same thing wherever it appears (rebinding it to a different function throws). Conditions are hit-policy Unique: more than one true is a `RuleConflictError`, none true means `default`. Conditions, cases and formulas see `status`, data, query answers, and action input in one flat namespace, so those field names must not collide (the loader rejects it). Invariants see only `status` and data, and verify the spec, not the implementation.
 - **Universal IR**: flat, language-independent JSON extracted from Layer 1 (older docs call it "Layer 1.5" or "Layer 2.5").
 - **Layer 3 – Verification**: PBT generated on the test side (fast-check for TS today; rapid/proptest planned). A trial is a sequence of actions from the initial state; failures shrink to the shortest sequence.
@@ -85,9 +88,9 @@ The framework generates **test-side code only**; it never places types, signatur
 
 | Phase | Agent sees | Agent writes | Phase check |
 | --- | --- | --- | --- |
-| `design` | IR, guide | `src/` skeleton (signatures; bodies throw `"not implemented"`) | loads; quotes no spec sentence |
-| `wiring` | adapter contract, skeleton — **not the IR** | `aac/adapter.ts` | PBT must fail for the "not implemented" reason (red) |
-| `implementation` | IR, skeleton, guide — **not the adapter or contract** | `src/` bodies | PBT passes (green); mutation gate |
+| `design` | IR, guide, assets | `src/` skeleton (signatures; bodies throw `"not implemented"`) | type-checks; loads; quotes no spec sentence |
+| `wiring` | adapter contract, skeleton — **not the IR** | `aac/adapter.ts` | type-checks; PBT must fail for the "not implemented" reason (red) |
+| `implementation` | IR, skeleton, guide, assets — **not the adapter or contract** | `src/` bodies | type-checks together with the adapter (catches changed signatures); PBT passes (green); mutation gate |
 
 A failed check goes into the same phase's next `REQUEST.md`; when a phase exhausts its attempts the whole pipeline restarts from `design` (the failing phase cannot be attributed mechanically). If `--out` already holds `src/` and an adapter, the run starts at `implementation`.
 
@@ -96,12 +99,12 @@ Invariants to preserve when changing this:
 - What each phase may see is the mechanism, not a detail: the wiring phase never sees the IR (so the adapter cannot encode business decisions) and the design/implementation phases never see the adapter contract (so production code is not shaped by the harness). Do not add an input to a phase, and do not mention `ports` or the harness in the design/implementation requests or the default guide, without re-examining these two properties. The skeleton is the one channel between them; `gates.ts` rejects skeletons that quote spec sentences.
 - Isolation belongs to the gates, not to strategies. Nothing that points at the repo may enter the sandbox: no spec sources, no `verify.ts` (it contains the specs path), no repo paths in file contents or environment variables. A new strategy must not need to re-implement any of this.
 - Production code carries zero constraints: no framework imports or types, no required naming, no required DI, no shared vocabulary with the spec. The adapter always adapts to the production code, so never restrict what the adapter may contain; whether business decisions really live in `src/` is established by mutation, not by inspecting the adapter.
-- Anything you want the implementer to do about design goes into the guide (`guide.ts`, or `--guide <file>`), which is advice and never a pass/fail rule. The guide must not mention business rules.
+- Anything you want the implementer to do about design goes into the default guide (`guide.ts`) or an attached asset (the component's `assets`, or `--asset` for a single run), which is advice and never a pass/fail rule. Neither may mention business rules. Assets go to the design and implementation phases unless phases are named; sending one to the wiring phase can undo that phase's blindness to the spec.
 - The mutation pass rule lives in `judge`, not in a strategy. A strategy only breaks code and reports which mutants survived; record which strategy ran in the result.
 - Anything the framework only has to *judge* (conditions, formulas, invariants) is a natural-language name in Layer 1 plus a function in Layer 2; anything it has to *generate* or match exactly (states, actions, inputs, queries, commands, numeric constraints, `from`) is data. Do not put arithmetic or branching in case bodies or table cells: add a condition or a formula.
 - Spec errors are never the implementer's problem. `selfCheck` (`runtime.ts`) simulates the spec alone before any agent runs, and a `SpecError` during PBT yields `status: "error"`, which stops the loop instead of becoming feedback.
 - Money and other exact quantities are integers, with rounding spelled out in the formula's name; float arithmetic makes the oracle and a correct implementation disagree for no good reason.
-- The binding is the oracle, so an LLM never produces it unreviewed. `draft-binding` writes `*.draft.ts`, which `loadSpecs` ignores unless called with `{ drafts: true }` (used only to check a draft); a person reads it and renames it to put it into use. Never make drafts load by default, and never let the implementation pipeline read one.
+- The binding is the oracle. `draft-binding` writes `*.draft.ts`, which `loadSpecs` ignores unless called with `{ drafts: true }`; a person reads it and renames it to put it into use. Drafts must never load by default. The one opt-in is `implement --drafts` (for unattended CI runs), which uses drafts as the oracle, logs a warning, and records `oracle: "draft"` in the result — keep all three, because in that mode the same misreading by the LLM passes undetected.
 - The agent sees the IR only. Layer 2 predicates are the oracle and must never be emitted into the IR or the request; interpreting the natural-language condition keys is the LLM's job, and PBT judges it.
 - Test cases are never LLM-written. Expected values come from executing the spec concretely (`createState` + `applyDecision`).
 - Generated files are a pure function of the IR (no timestamps, no versions); `check.ts` relies on byte-equality with a regeneration. The PBT seed is derived from the spec hash so verification is deterministic.
