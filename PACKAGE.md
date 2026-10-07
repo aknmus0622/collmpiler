@@ -48,10 +48,10 @@ aac-engine-monorepo/
 ユーザー（PdM・エンジニア）が `specs/` ディレクトリ内でインポートして使う、極めて薄いライブラリです。ランタイムのロジックはほぼ持ちません。
 
 * **責務:**
-* コンポーネントの定義 (`defineComponent(...).cases(...)`)。部品の境界と構造を値として宣言し、型を導出する
+* コンポーネントの定義 (`component()`)。語彙・状態機械の骨組み・アクションの説明の文を値として宣言し、型を導出する
 * 多重度DSLの型定義 (`One<T>`, `Some<T>`, `Many<T>`)
-* DMNの型定義 (`DecisionTable<T>`, `applyDecision()`) と計算 (`applyFormula()`)
-* 自然言語の名前への結び付け (`bindSpecification()`)
+* 決定表の定義 (`decisionTable()`)
+* 結び付け (`bind()`)。アクションの構造（宣言と参照: `given` / `remembered` / `asked` / `decided` / `calculated` / `was`）と、名前の意味（関数）。意味の評価 (`decide()`, `calculate()`)
 
 
 * **依存関係:** 外部依存ゼロ（ピュアTS）。
@@ -62,7 +62,7 @@ aac-engine-monorepo/
 
 * **責務:**
 * TypeScript Compiler API を用いて AST（抽象構文木）を走査。
-* `defineComponent` や `DecisionTable` の構造を静的解析（またはSandbox上での安全な動的評価）し、情報を抽出。
+* `component` や `decisionTable` の構造を静的解析（またはSandbox上での安全な動的評価）し、情報を抽出。
 * 抽出したデータを言語非依存の **Universal IR (`universal-spec.ir.json`)** にシリアライズして出力。
 
 
@@ -142,7 +142,7 @@ export default defineConfig({
 
 
 * **Phase 2 (Universal IR の抽出):**
-* 動的評価で動いている TS のステートマシン情報を JSON化（Universal IR化）するロジックを追加。（LLM への入力として必要になったため、抽象実行による抽出は Phase 1 で先行実装済み）
+* 動的評価で動いている TS のステートマシン情報を JSON化（Universal IR化）するロジックを追加。（LLM への入力として必要になったため、Phase 1 で先行実装済み。仕様に関数が無いので、宣言を並べ直すだけで抽出できる）
 * `packages/compiler` を切り出す。
 
 
