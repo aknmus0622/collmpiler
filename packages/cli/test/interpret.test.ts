@@ -300,6 +300,30 @@ export const Interpretation = interpretation(Gate, {
   assert.ok(["GOLD", "gold"].includes(difference.steps[0].input.rank as string));
 });
 
+test("比較: 1つのコマンドに食い違いが複数あれば、観点ごとに報告する。ほかのコマンドの食い違いに隠れない", async () => {
+  // もう一方は、支払いの成功で: 領収書の割引率を常に 0 にし、クーポンを出さない。出荷では優先扱いを常に付ける
+  const other = reviewed
+    .replace('discountPercent: ref.decision("campaign", "discountPercent"),', "discountPercent: 0,")
+    .replace('{ IssueCoupon: { type: ref.decision("campaign", "coupon") }, when: ref.decision("campaign", "grantsCoupon") },', "")
+    .replace('{ SendShippingNotice: { priority: ref.decision("shipping", "priority") } }', "{ SendShippingNotice: { priority: true } }")
+    .replace('Cancel: { from: ["PENDING", "PAID"], goTo: "CANCELLED", effects: [{ Refund: {}, when: ref.was("PAID") }] }', 'Cancel: { from: ["PENDING"], goTo: "CANCELLED" }');
+  const log: string[] = [];
+  const result = await interpret({ specs: specDir(), strategy: scripted([reviewed, other]).strategy, sessions: 2, log: (line) => log.push(line) });
+  assert.ok(result.status === "interpreted");
+  assert.equal(result.comparisons![0].status, "compared", log.join("\n"));
+  assert.deepEqual(result.comparisons![0].differences.map((d) => `${d.command}:${d.aspect}`), [
+    // 支払い済みの注文をキャンセルできるかどうか
+    "Cancel:runs",
+    // 領収書とクーポンは、別々に報告される
+    "Checkout:effect:IssueCoupon",
+    "Checkout:effect:SendReceipt",
+    // 支払いの食い違いの先にある、出荷の食い違いも見つかる
+    "Ship:effect:SendShippingNotice",
+  ]);
+  const coupon = result.comparisons![0].differences[1];
+  assert.deepEqual(coupon.steps.map((step) => step.command), ["PlaceOrder", "Checkout"]);
+});
+
 // 文だけのコンポーネント。構造は、すべて解釈が決める
 const COUNTER = `import { component, description } from "@clp/core";
 export const Counter = component(description("A counter that can be raised by a step. It reports each new total. It can be closed."));

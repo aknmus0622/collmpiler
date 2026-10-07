@@ -9,6 +9,10 @@ import { commandStrategy } from "./strategy.ts";
 //   node packages/cli/src/interpret-cli.ts --accept [--specs specs] [--component <name>]
 // 解釈 (Layer 2) を LLM に導かせ、<名前>.interpretation.draft.ts に書き出す。
 // 下書きは、人が確定する (--accept) まで使われない。
+// 食い違いの観点の表示
+const label = (aspect: string) =>
+  aspect === "runs" ? "実行できるかどうか" : aspect === "state" ? "遷移先" : aspect === "order" ? "副作用の順序" : `副作用 ${aspect.slice("effect:".length)}`;
+
 const { values } = parseArgs({
   options: {
     specs: { type: "string", default: "specs" },
@@ -56,7 +60,7 @@ if (values.accept) {
       else if (comparison.differences.length === 0) console.error(`\n${comparison.session} つ目の解釈は、試したコマンド列のすべてで、1つ目と一致しました。`);
       for (const difference of comparison.differences) {
         const path = difference.steps.map((step) => `${step.command} ${JSON.stringify({ ...step.input, ...step.queries })}`).join(" → ");
-        console.error(`\n食い違い (${difference.command}): ${path}\n  1つ目: ${JSON.stringify(difference.first)}\n  ${comparison.session} つ目: ${JSON.stringify(difference.other)}`);
+        console.error(`\n食い違い (${difference.command}、${label(difference.aspect)}): ${path}\n  1つ目: ${JSON.stringify(difference.first)}\n  ${comparison.session} つ目: ${JSON.stringify(difference.other)}`);
       }
     }
     for (const question of result.questions) console.error(`疑問点 (${question.line} 行目): ${question.text}`);

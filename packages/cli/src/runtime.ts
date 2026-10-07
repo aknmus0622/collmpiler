@@ -277,14 +277,24 @@ export async function selfCheck(
 
 // 2つの解釈の比較: 同じ境界を持つ2つの仕様を、同じコマンド列で実行し、期待する結果が食い違う所を探す。
 // 独立に導いた2つの解釈が食い違う所は、Layer 1 の記述があいまいな所である。
-// コマンドごとに、食い違いが起きる最短のコマンド列を1つ返す
+// コマンドと観点の組ごとに、食い違いが起きる最短のコマンド列を1つ返す。観点は:
+//   runs            … 実行できるかどうか（片方だけが実行できる、片方だけが仕様の誤りになる）
+//   state           … 遷移先
+//   effect:<名前>   … その副作用を起こすかどうかと、その値
+//   order           … 副作用の順序（起こす副作用と値は同じで、並びだけが違う）
+// 観点を分けるのは、1つのコマンドにあいまいな所が複数あっても、それぞれを報告するためである
+// （分けなければ、いちばん短く示せるものだけが出て、ほかは隠れる）
 export type Difference = {
   command: string;
+  aspect: string;
   // 1つ目の解釈で見た、そこまでのコマンド列。最後の1つで食い違う
   steps: Step[];
   first: Observation | { error: string } | { skipped: true };
   other: Observation | { error: string } | { skipped: true };
 };
+
+type Recorded = { name: string; payload: Values };
+const isObservation = (result: Difference["first"]): result is Observation => "state" in result;
 
 export async function compareSpecs(first: SpecInput, second: SpecInput, params: { seed?: number; numRuns?: number } = {}): Promise<Difference[]> {
   if (!first.model || !first.binding || !second.model || !second.binding) throw new Error("比べる仕様に、解釈がありません");
@@ -301,7 +311,22 @@ export async function compareSpecs(first: SpecInput, second: SpecInput, params: 
       throw error;
     }
   };
-  const walk = (raw: RawStep[], only: string): Difference | undefined => {
+  // 1手の結果が食い違っている観点
+  const aspectsOf = (x: Seen, y: Seen): string[] => {
+    if (x.command !== y.command || !isObservation(x.result) || !isObservation(y.result)) {
+      return x.command !== y.command || !isDeepStrictEqual(x.result, y.result) ? ["runs"] : [];
+    }
+    const found: string[] = [];
+    if (x.result.state !== y.result.state) found.push("state");
+    const [left, right] = [x.result.effects as Recorded[], y.result.effects as Recorded[]];
+    const of = (effects: Recorded[], name: string) => effects.filter((effect) => effect.name === name);
+    for (const name of new Set([...left, ...right].map((effect) => effect.name))) {
+      if (!isDeepStrictEqual(of(left, name), of(right, name))) found.push(`effect:${name}`);
+    }
+    if (!found.some((aspect) => aspect.startsWith("effect:")) && !isDeepStrictEqual(left, right)) found.push("order");
+    return found;
+  };
+  const walk = (raw: RawStep[], only: string, aspect: string): Difference | undefined => {
     const steps: Step[] = [];
     const others: Step[] = [];
     let left = a.start();
@@ -310,24 +335,29 @@ export async function compareSpecs(first: SpecInput, second: SpecInput, params: 
       const x = advance(a, left, rawStep, steps);
       const y = advance(b, right, rawStep, others);
       const command = x.command ?? y.command;
-      if (x.command !== y.command || !isDeepStrictEqual(x.result, y.result)) {
+      const aspects = aspectsOf(x, y);
+      if (command === only && aspects.includes(aspect)) {
         // 1つ目がそのコマンドを実行できないと読んだ場合は、最後の1手を、もう一方のものから取る
         const path = steps.length >= others.length ? steps : [...steps, others[others.length - 1]];
-        return command === only ? { command, steps: plain(path), first: x.result, other: y.result } : undefined;
+        return { command, aspect, steps: plain(path), first: x.result, other: y.result };
       }
-      if (!x.after || !y.after) return undefined;
+      // 副作用だけの食い違いなら、その先も比べられる。実行できるかどうかや状態が分かれたら、そこまで
+      if (!x.after || !y.after || aspects.includes("runs") || aspects.includes("state")) return undefined;
       left = x.after;
       right = y.after;
     }
     return undefined;
   };
 
+  const aspects = ["runs", "state", ...Object.keys(first.model.effects).sort().map((name) => `effect:${name}`), "order"];
   const differences: Difference[] = [];
   for (const command of a.commands) {
-    const details = await fc.check(fc.property(a.sequences, (raw) => walk(raw, command) === undefined), { numRuns: 300, ...params });
-    if (!details.failed || !details.counterexample) continue;
-    const found = walk(details.counterexample[0], command);
-    if (found) differences.push(found);
+    for (const aspect of aspects) {
+      const details = await fc.check(fc.property(a.sequences, (raw) => walk(raw, command, aspect) === undefined), { numRuns: 300, ...params });
+      if (!details.failed || !details.counterexample) continue;
+      const found = walk(details.counterexample[0], command, aspect);
+      if (found) differences.push(found);
+    }
   }
   return differences;
 }
