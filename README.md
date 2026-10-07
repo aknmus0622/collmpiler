@@ -17,6 +17,8 @@ Phase 1 spike. TypeScript targets only.
 - **Have an LLM agent write the production code from the spec**, test-first, in three isolated sessions:
   design a skeleton, wire it to the test harness, then implement it. The framework generates test-side code
   only and places nothing in production code.
+- **Put the files where your project wants them.** Production code and the test side can go in separate
+  directories (`src/` and `test/`), or side by side in one directory with a prefix on the test-side files.
 - **Verify the result.** Property-based tests run sequences of commands and shrink failures to the shortest
   sequence; a mutation gate confirms that the tested behaviour really comes from production code. Failures go
   back to the agent until it passes.
@@ -27,6 +29,8 @@ Phase 1 spike. TypeScript targets only.
 - Alerts from the review notes an LLM leaves in a draft binding (`// REVIEW:`): collecting them, reporting
   them, and holding back a run until the ambiguous names they point at have been looked at
 - Stopping after the design step so a person can review the skeleton before it is wired and implemented
+- Applying a spec to existing production code (legacy code): wiring and verification only, with mismatches
+  reported to a person instead of being sent back to the agent
 - Help with triaging surviving mutations: logic the spec cannot exercise versus code that is not needed
 - Operations that return values (value objects), and multiplicity declared as values
 - Composing components, and describing the UI layer
@@ -267,6 +271,21 @@ used, so changing them left the tests passing, and the mutation gate sent the wo
 made them matter by deriving "grants a coupon" from the coupon type. A run fails when changing a value from a
 decision table leaves the tests passing; other surviving mutations are reported but do not fail the run (here,
 two constants in the agent's own month-end calendar logic, which the spec's month-end flag cannot exercise).
+
+By default the production code goes to `<out>/src` and the test side to `<out>/aac`. To follow another
+layout, name the two places directly:
+
+```bash
+# src/ and test/ kept apart
+pnpm -s run implement --src app/src --tests test/aac --agent '...'
+
+# side by side: src/order/order.ts next to src/order/order.aac.adapter.ts, order.aac.ir.json, ...
+pnpm -s run implement --src src/order --tests src/order/order.aac. --agent '...'
+```
+
+`--tests` is the path put in front of the test-side file names: when it ends with a `.`, its last part is a
+file-name prefix; otherwise it is a directory. The directory given as `--src` is rewritten by the agent, so it
+must not be a project root.
 
 ### 4. What you get
 

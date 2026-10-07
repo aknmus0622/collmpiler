@@ -11,6 +11,7 @@ Phase 1 spike. The design documents (written in Japanese) are still the bulk of 
   - `loader.ts` — the single `SpecLoader`. It finds the component and its binding, and normalizes them into the internal `SpecModel` + behaviours form the rest of the CLI uses (a command without `when` becomes a table with only `otherwise`; omitted declarations become empty).
   - `extract.ts` — builds the IR by rearranging the component, the decision tables and the binding's structure (all function-free data; nothing is executed), and reports what the type check let through (unknown names, references whose type does not fit) with readable Japanese messages. `schema.ts` — runtime checks on field types.
   - `target.ts` — the `Target` interface: everything that depends on the language the production system is written in. `target-typescript.ts` — the only implementation, assembled from the TypeScript-specific modules below (`generate.ts`, `check.ts` + `scan.ts`, `runtime.ts`, `mutation.ts`'s built-in strategy, `static-check.ts`'s `tsc`).
+  - `layout.ts` — where production code and the test-side files go (`--out`, or `--src` / `--tests`), and the one definition of "which files are production code" (`isSource` / `sourceFiles`).
   - `generate.ts` — IR → test-side files. `runtime.ts` — PBT runtime (fast-check) called by the generated `verify.ts`, plus `selfCheck`, the spec-only simulation run before any agent.
   - `strategy.ts` — how an agent session is launched (an external command). `gates.ts` — per-phase entry gate (isolated sandbox with allowlisted inputs) and exit gate (collect allowlisted outputs, checks, PBT). `request.ts` — the three phase-specific request texts. `loop.ts` — the design → wiring → implementation pipeline with feedback and restarts.
   - `check.ts` + `scan.ts` — mechanical checks on what the LLM wrote (imports and generated files only; adapter contents are unrestricted).
@@ -45,6 +46,9 @@ pnpm -s run draft-binding --agent 'claude -p "Read aac/REQUEST.md and carry out 
 # --asset [<phases>=]<file> attaches a file to the requests (repeatable); --drafts uses unreviewed draft bindings
 # as the oracle; --mutation auto|builtin|off and --static-check auto|tsc|off select those strategies (auto = the target's own);
 # --target typescript selects the target language (the only one so far).
+# --out puts production code in <out>/src and the test side in <out>/aac; --src / --tests name the two places
+# directly. --tests is the path put in front of the test-side file names: ending with "." makes its last part a file-name
+# prefix (--tests src/order/order.aac. → src/order/order.aac.adapter.ts; required when both are the same directory).
 pnpm -s run implement --out examples/checkout-ts --fresh --max-attempts 3 \
   --agent 'claude -p "Read aac/REQUEST.md and carry out the request." --permission-mode acceptEdits'
 ```
@@ -103,6 +107,7 @@ A failed check goes into the same phase's next `REQUEST.md`; when a phase exhaus
 Invariants to preserve when changing this:
 
 - What each phase may see is the mechanism, not a detail: the wiring phase never sees the IR (so the adapter cannot encode business decisions) and the design/implementation phases never see the adapter contract (so production code is not shaped by the harness). Do not add an input to a phase, and do not mention `ports` or the harness in the design/implementation requests or the default guide, without re-examining these two properties. The skeleton is the one channel between them; `gates.ts` rejects skeletons that quote spec sentences.
+- The layout is data, not convention. Nothing outside `layout.ts` may assume `src/` or `aac/`: ask the `Workspace` for `paths.*` and use `sourceFiles` / `isSource` for production code. The sandbox mirrors the output's relative layout (so relative imports are identical in both); only `REQUEST.md` and assets always live in the sandbox's `aac/`, because agent commands point there. Production code is removed file by file, never by deleting the directory — test-side files may sit next to it — and `resolveLayout` refuses a `--src` that looks like a project root.
 - Isolation belongs to the gates, not to strategies. Nothing that points at the repo may enter the sandbox: no spec sources, no `verify.ts` (it contains the specs path), no repo paths in file contents or environment variables. A new strategy must not need to re-implement any of this.
 - Production code carries zero constraints: no framework imports or types, no required naming, no required DI, no shared vocabulary with the spec. The adapter always adapts to the production code, so never restrict what the adapter may contain; whether business decisions really live in `src/` is established by mutation, not by inspecting the adapter.
 - Anything you want the implementer to do about design goes into the default guide (`guide.ts`) or an attached asset (the component's `assets`, or `--asset` for a single run), which is advice and never a pass/fail rule. Neither may mention business rules. Assets go to the design and implementation phases unless phases are named; sending one to the wiring phase can undo that phase's blindness to the spec.
