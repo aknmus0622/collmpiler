@@ -417,9 +417,11 @@
     }
   },
   "descriptions": {
-    "component": "Reconciles one component with its specification in up to three phases (design, wiring, implementation). Each phase is an agent session followed by a check. A rejected check repeats the phase; a phase that runs out of attempts restarts the pipeline from design, until the rounds run out."
+    "component": "Reconciles one component with its specification in up to three phases (design, wiring, implementation). Each phase is an agent session followed by a check. A rejected check repeats the phase; a phase that runs out of attempts restarts the pipeline from design, until the rounds run out.",
+    "effects.GradeCurrentCode": "Grade the production code as it is, without an agent.",
+    "queries.boundaryChanged": "Whether the component's boundary differs from the one the previous run worked from."
   },
-  "irVersion": 4,
+  "irVersion": 5,
   "model": {
     "calculations": {
       "nextAttempt": {
@@ -513,9 +515,18 @@
       "The round number never exceeds the limit of rounds"
     ],
     "queries": {
-      "boundaryChanged": "boolean",
-      "hasAdapter": "boolean",
-      "hasProductionCode": "boolean"
+      "boundaryChanged": {
+        "input": {},
+        "output": "boolean"
+      },
+      "hasAdapter": {
+        "input": {},
+        "output": "boolean"
+      },
+      "hasProductionCode": {
+        "input": {},
+        "output": "boolean"
+      }
     },
     "states": [
       "IDLE",

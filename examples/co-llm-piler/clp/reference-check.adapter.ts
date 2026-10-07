@@ -15,8 +15,8 @@ export const adapter: TargetSystemAdapter = {
   async setupIsolation(ports) {
     check = new ReferenceCheck({
       declarations: {
-        isStateDeclared: () => ports.queries.stateDeclared(),
-        isEffectDeclared: () => ports.queries.effectDeclared(),
+        isStateDeclared: (state) => ports.queries.stateDeclared({ name: state }),
+        isEffectDeclared: (name) => ports.queries.effectDeclared({ name }),
       },
       diagnostics: {
         report: (diagnostic) =>

@@ -156,9 +156,12 @@
     }
   },
   "descriptions": {
-    "component": "An order: placed by a customer, paid through an external payment module, then shipped or cancelled."
+    "component": "An order: placed by a customer, paid through an external payment module, then shipped or cancelled.",
+    "effects.Refund": "What the customer paid is returned.",
+    "queries.isMonthEnd": "Whether today is the last day of the month.",
+    "queries.paymentResult": "What the payment module answered for this order."
   },
-  "irVersion": 4,
+  "irVersion": 5,
   "model": {
     "calculations": {
       "amountCharged": {
@@ -224,12 +227,21 @@
       "Every order past the draft state has a member rank and a price"
     ],
     "queries": {
-      "isMonthEnd": "boolean",
-      "paymentModuleActive": "boolean",
-      "paymentResult": [
-        "succeeded",
-        "failed"
-      ]
+      "isMonthEnd": {
+        "input": {},
+        "output": "boolean"
+      },
+      "paymentModuleActive": {
+        "input": {},
+        "output": "boolean"
+      },
+      "paymentResult": {
+        "input": {},
+        "output": [
+          "succeeded",
+          "failed"
+        ]
+      }
     },
     "states": [
       "DRAFT",
