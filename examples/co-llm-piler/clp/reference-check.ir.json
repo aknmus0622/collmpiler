@@ -1,0 +1,271 @@
+{
+  "behaviors": [
+    {
+      "from": [
+        "IN_COMMAND"
+      ],
+      "name": "AllowFrom",
+      "onlyIf": [],
+      "when": {
+        "The named state is not declared": {
+          "does": "An unknown-state diagnostic is reported for the remembered command, with an empty case name and the state as the subject. The error count goes up by one.",
+          "effects": [
+            {
+              "name": "ReportDiagnostic",
+              "payload": {
+                "caseName": "",
+                "code": "unknown-state",
+                "command": {
+                  "$ref": "data:command"
+                },
+                "subject": {
+                  "$ref": "input:state"
+                }
+              }
+            }
+          ],
+          "set": {
+            "errors": {
+              "$ref": "calculation:nextErrors"
+            }
+          }
+        },
+        "otherwise": {
+          "effects": []
+        }
+      }
+    },
+    {
+      "from": [
+        "IDLE"
+      ],
+      "name": "Begin",
+      "onlyIf": [],
+      "when": {
+        "otherwise": {
+          "does": "The error count starts at 0.",
+          "effects": [],
+          "goTo": "BETWEEN_COMMANDS",
+          "set": {
+            "errors": 0
+          }
+        }
+      }
+    },
+    {
+      "from": [
+        "IN_COMMAND",
+        "IN_CASE"
+      ],
+      "name": "EnterCase",
+      "onlyIf": [],
+      "when": {
+        "otherwise": {
+          "does": "The walk remembers the case's name.",
+          "effects": [],
+          "goTo": "IN_CASE",
+          "set": {
+            "caseName": {
+              "$ref": "input:name"
+            }
+          }
+        }
+      }
+    },
+    {
+      "from": [
+        "BETWEEN_COMMANDS"
+      ],
+      "name": "EnterCommand",
+      "onlyIf": [],
+      "when": {
+        "otherwise": {
+          "does": "The walk remembers the command's name, and an empty case name.",
+          "effects": [],
+          "goTo": "IN_COMMAND",
+          "set": {
+            "caseName": "",
+            "command": {
+              "$ref": "input:name"
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "Between commands, the walk can be finished: it is accepted if no error was counted, rejected otherwise.",
+      "from": [
+        "BETWEEN_COMMANDS"
+      ],
+      "name": "Finish",
+      "onlyIf": [],
+      "when": {
+        "No error was counted": {
+          "effects": [],
+          "goTo": "ACCEPTED"
+        },
+        "otherwise": {
+          "effects": [],
+          "goTo": "REJECTED"
+        }
+      }
+    },
+    {
+      "from": [
+        "IN_CASE"
+      ],
+      "name": "GoTo",
+      "onlyIf": [],
+      "when": {
+        "The named state is not declared": {
+          "does": "An unknown-state diagnostic is reported for the remembered command and case, with the state as the subject. The error count goes up by one.",
+          "effects": [
+            {
+              "name": "ReportDiagnostic",
+              "payload": {
+                "caseName": {
+                  "$ref": "data:caseName"
+                },
+                "code": "unknown-state",
+                "command": {
+                  "$ref": "data:command"
+                },
+                "subject": {
+                  "$ref": "input:state"
+                }
+              }
+            }
+          ],
+          "set": {
+            "errors": {
+              "$ref": "calculation:nextErrors"
+            }
+          }
+        },
+        "otherwise": {
+          "effects": []
+        }
+      }
+    },
+    {
+      "from": [
+        "IN_COMMAND",
+        "IN_CASE"
+      ],
+      "name": "LeaveCommand",
+      "onlyIf": [],
+      "when": {
+        "otherwise": {
+          "effects": [],
+          "goTo": "BETWEEN_COMMANDS"
+        }
+      }
+    },
+    {
+      "from": [
+        "IN_CASE"
+      ],
+      "name": "UseEffect",
+      "onlyIf": [],
+      "when": {
+        "The named effect is not declared": {
+          "does": "An unknown-effect diagnostic is reported for the remembered command and case, with the effect as the subject. The error count goes up by one.",
+          "effects": [
+            {
+              "name": "ReportDiagnostic",
+              "payload": {
+                "caseName": {
+                  "$ref": "data:caseName"
+                },
+                "code": "unknown-effect",
+                "command": {
+                  "$ref": "data:command"
+                },
+                "subject": {
+                  "$ref": "input:name"
+                }
+              }
+            }
+          ],
+          "set": {
+            "errors": {
+              "$ref": "calculation:nextErrors"
+            }
+          }
+        },
+        "otherwise": {
+          "effects": []
+        }
+      }
+    }
+  ],
+  "decisions": {},
+  "descriptions": {
+    "component": "Walks the commands of a specification, one element at a time, and reports every reference to a state or an effect that is not declared. At the end the walk is accepted if nothing was reported, rejected otherwise."
+  },
+  "irVersion": 4,
+  "model": {
+    "calculations": {
+      "nextErrors": {
+        "is": "the number of errors so far plus one",
+        "type": "integer"
+      }
+    },
+    "commands": {
+      "AllowFrom": {
+        "state": "string"
+      },
+      "Begin": {},
+      "EnterCase": {
+        "name": "string"
+      },
+      "EnterCommand": {
+        "name": "string"
+      },
+      "Finish": {},
+      "GoTo": {
+        "state": "string"
+      },
+      "LeaveCommand": {},
+      "UseEffect": {
+        "name": "string"
+      }
+    },
+    "data": {
+      "caseName": "string",
+      "command": "string",
+      "errors": {
+        "max": 8,
+        "min": 0,
+        "type": "integer"
+      }
+    },
+    "effects": {
+      "ReportDiagnostic": {
+        "caseName": "string",
+        "code": [
+          "unknown-state",
+          "unknown-effect"
+        ],
+        "command": "string",
+        "subject": "string"
+      }
+    },
+    "init": "IDLE",
+    "invariants": [
+      "A walk that has started has an error count"
+    ],
+    "queries": {
+      "effectDeclared": "boolean",
+      "stateDeclared": "boolean"
+    },
+    "states": [
+      "IDLE",
+      "BETWEEN_COMMANDS",
+      "IN_COMMAND",
+      "IN_CASE",
+      "ACCEPTED",
+      "REJECTED"
+    ]
+  }
+}

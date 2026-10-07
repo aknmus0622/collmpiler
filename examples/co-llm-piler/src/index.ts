@@ -12,3 +12,8 @@ export type { Grader, PipelineDependencies, SessionLauncher, Workspace } from ".
 export type { StartPlan, Step } from "./decisions.ts";
 export { decideAfterCheck, decideAfterGrading, decideStart, nextAttempt, nextRound, planFor } from "./decisions.ts";
 export { Pipeline } from "./pipeline.ts";
+export type { Diagnostic, DiagnosticCode, ReferenceCheckState, WalkMemory } from "./reference-check-types.ts";
+export type { Declarations, DiagnosticReporter, ReferenceCheckDependencies } from "./reference-check-ports.ts";
+export type { ReferenceOutcome } from "./reference-check-decisions.ts";
+export { decideFinish, decideReference, nextErrors } from "./reference-check-decisions.ts";
+export { ReferenceCheck } from "./reference-check.ts";
