@@ -10,11 +10,17 @@ import { selectTarget } from "./target-typescript.ts";
 
 // 暫定エントリ:
 //   node packages/cli/src/implement.ts --out <dir> --agent "<command>"
+//     [--src <dir>] [--tests <dir | path-prefix.>]
 //     [--specs specs] [--max-attempts 3] [--max-rounds 2] [--from design|wiring|implementation]
 //     [--fresh] [--keep-sandbox] [--transcripts <dir>]
 //     [--asset [<phases>=]<file>]... [--drafts] [--mutation auto|builtin|off] [--static-check auto|tsc|off]
 //     [--target typescript]
 //
+// --out: 出力先。本番コードは <out>/src、テスト側は <out>/aac に置く
+// --src / --tests: 本番コードとテスト側の置き場所を、直接指定する（両方を指定すれば --out は要らない）。
+//          --tests が "." で終わるときは、最後の部分がテスト側のファイル名の接頭辞になる:
+//            --tests test/aac              → test/aac/adapter.ts
+//            --tests src/order/order.aac.  → src/order/order.aac.adapter.ts （本番コードと同じ場所に並べる）
 // --asset: 依頼に添付する資料（設計方針、用語集など）。何度でも指定できる。既定では設計と実装の段階に渡す。
 //          "wiring,design=docs/x.md" のように段階を指定できる
 // --drafts: 人が確認していない結び付けの下書き (*.draft.ts) を正解として使う
@@ -22,6 +28,8 @@ const { values } = parseArgs({
   options: {
     specs: { type: "string", default: "specs" },
     out: { type: "string" },
+    src: { type: "string" },
+    tests: { type: "string" },
     agent: { type: "string" },
     "max-attempts": { type: "string", default: "3" },
     "max-rounds": { type: "string", default: "2" },
@@ -42,14 +50,16 @@ if (values.from !== undefined && !PHASES.includes(values.from as Phase)) {
   console.error(`--from は ${PHASES.join(" / ")} のいずれかです`);
   process.exit(2);
 }
-if (!values.out || !values.agent) {
-  console.error('usage: implement --out <dir> --agent "<command>" [--specs specs] [--max-attempts 3] [--max-rounds 2] [--from design|wiring|implementation] [--fresh] [--keep-sandbox] [--transcripts <dir>] [--asset [<phases>=]<file>]... [--drafts] [--mutation auto|builtin|off] [--static-check auto|tsc|off] [--target typescript]');
+if ((!values.out && !(values.src && values.tests)) || !values.agent) {
+  console.error('usage: implement (--out <dir> | --src <dir> --tests <dir | path-prefix.>) --agent "<command>" [--specs specs] [--max-attempts 3] [--max-rounds 2] [--from design|wiring|implementation] [--fresh] [--keep-sandbox] [--transcripts <dir>] [--asset [<phases>=]<file>]... [--drafts] [--mutation auto|builtin|off] [--static-check auto|tsc|off] [--target typescript]');
   process.exit(2);
 }
 
 const result = await implement({
   specs: values.specs,
   out: values.out,
+  src: values.src,
+  tests: values.tests,
   strategy: commandStrategy(values.agent, { transcriptDir: values.transcripts }),
   maxAttempts: Number(values["max-attempts"]),
   maxRounds: Number(values["max-rounds"]),

@@ -1,6 +1,8 @@
 import type { Asset } from "./assets.ts";
 import type { Feedback } from "./gates.ts";
-import { FILES, SOURCE_DIR, TEST_DIR } from "./generate.ts";
+import { FILES, TEST_DIR } from "./generate.ts";
+import { label } from "./layout.ts";
+import type { Workspace } from "./layout.ts";
 import type { Target } from "./target.ts";
 
 // エージェントに渡す依頼文。実装は TDD の流れに沿って3つの段階に分かれ、段階ごとに別の依頼になる。
@@ -70,8 +72,12 @@ The IR describes one component by its boundary.
   - \`{"$ref": "decision:<table>.<column>"}\`: the value of that column in the row whose condition holds.
   - \`{"$was": [<states>]}\`: true if the state before the command was one of those listed.`;
 
-const design = (target: Target, guide: string) => `Design the production code for the component specified in \`${TEST_DIR}/${FILES.ir}\`, and write it as a
-**skeleton** under \`${SOURCE_DIR}/\`: every type, every interface, and every exported class and function with its
+// 本番コードと同じ場所にテスト側のファイルが並ぶとき、その名前を本番コードに使わせない
+const reserved = (ws: Workspace) =>
+  ws.prefix === "" ? "" : `\n- File names starting with \`${ws.prefix}\` are reserved for the test harness. Do not create, edit, or import such files.`;
+
+const design = (target: Target, ws: Workspace, guide: string) => `Design the production code for the component specified in \`${ws.paths.ir}\`, and write it as a
+**skeleton** under \`${label(ws.src)}\`: every type, every interface, and every exported class and function with its
 full signature, but no behaviour yet.
 
 This is the first of three steps, each done by a different engineer who sees different things:
@@ -85,7 +91,7 @@ This is the first of three steps, each done by a different engineer who sees dif
 - The complete public shape of the production code: file layout, types, interfaces for dependencies, classes
   and functions with parameter and return types.
 - The body of every function and method that would contain behaviour must be exactly
-  \`${target.request.skeletonBody}\`. Constructors may store what they receive. Write no decisions, no
+  \`${target.request(ws).skeletonBody}\`. Constructors may store what they receive. Write no decisions, no
   calculations, and no values taken from the specification.
 - **Doc comments that let step 2 succeed without the specification.** For every exported member say what it is
   for: which command it performs and what its arguments are, how the current state is read and what each state
@@ -98,9 +104,9 @@ This is the first of three steps, each done by a different engineer who sees dif
 
 ## Rules (checked mechanically)
 
-${target.request.sourceRules}
+${target.request(ws).sourceRules}
 - Work only from the files in this directory. Do not read anything outside it.
-- Write only under \`${SOURCE_DIR}/\`. Do not edit \`${TEST_DIR}/${FILES.ir}\`.
+- Write only under \`${label(ws.src)}\`. Do not edit \`${ws.paths.ir}\`.${reserved(ws)}
 - Every file must load without error (it is loaded once to check).
 
 ## Design guidance
@@ -112,9 +118,9 @@ ${guide.trim()}
 ${IR_GUIDE}
 `;
 
-const wiring = (target: Target) => `Connect the production code under \`${SOURCE_DIR}/\` to the test harness by filling in
-\`${TEST_DIR}/${target.files.adapter}\`. The interface to implement, and the stand-ins the harness provides for
-everything the system depends on, are defined in \`${TEST_DIR}/${target.files.contract}\`.
+const wiring = (target: Target, ws: Workspace) => `Connect the production code under \`${label(ws.src)}\` to the test harness by filling in
+\`${ws.paths.adapter}\`. The interface to implement, and the stand-ins the harness provides for
+everything the system depends on, are defined in \`${ws.paths.contract}\`.
 
 The production code is a skeleton: its signatures and doc comments are final, but its bodies fail with
 \`"${target.notImplemented}"\`. Someone else will fill them in later. You do not have the specification and do not need
@@ -122,20 +128,20 @@ it: your job is only to connect the two sides.
 
 ## What to write
 
-${target.request.adapterGuide}
+${target.request(ws).adapterGuide}
 
 ## Rules (checked mechanically)
 
-- Write only \`${TEST_DIR}/${target.files.adapter}\`. Do not change anything under \`${SOURCE_DIR}/\` or any other file.
-- ${target.request.adapterImports}
+- Write only \`${ws.paths.adapter}\`. Do not change the production code or any other file.
+- ${target.request(ws).adapterImports}
 - Do not implement any behaviour in the adapter and do not work around the unimplemented bodies. After you
   finish, the harness runs its tests and they **must fail** because the production code is not implemented. If
   they pass, or if they fail because of an error in the adapter itself, your work is rejected.
 - Work only from the files in this directory. Do not read anything outside it.
 `;
 
-const implementation = (target: Target, guide: string) => `Implement the production code under \`${SOURCE_DIR}/\` so that it satisfies the specification in
-\`${TEST_DIR}/${FILES.ir}\`. The code is currently a skeleton: its design, signatures, and doc comments are in
+const implementation = (target: Target, ws: Workspace, guide: string) => `Implement the production code under \`${label(ws.src)}\` so that it satisfies the specification in
+\`${ws.paths.ir}\`. The code is currently a skeleton: its design, signatures, and doc comments are in
 place, and its bodies fail with \`"${target.notImplemented}"\`. Fill in the bodies.
 
 A test harness is already connected to the skeleton's exported signatures. You cannot see it. Your work is
@@ -143,16 +149,16 @@ accepted when the harness's property-based test and mutation check both pass.
 
 ## What to write
 
-- The bodies of the functions and methods under \`${SOURCE_DIR}/\`. You may add private helpers and new files.
+- The bodies of the functions and methods under \`${label(ws.src)}\`. You may add private helpers and new files.
 - **Keep every exported name and signature exactly as it is**, and keep the documented meaning of each member.
-  The harness calls them as documented; an error such as ${target.request.signatureErrorExample} in the feedback
+  The harness calls them as documented; an error such as ${target.request(ws).signatureErrorExample} in the feedback
   means a signature was changed.
 
 ## Rules (checked mechanically)
 
-${target.request.sourceRules}
+${target.request(ws).sourceRules}
 - Work only from the files in this directory. Do not read anything outside it.
-- Write only under \`${SOURCE_DIR}/\`. Do not edit \`${TEST_DIR}/${FILES.ir}\`.
+- Write only under \`${label(ws.src)}\`. Do not edit \`${ws.paths.ir}\`.${reserved(ws)}
 - All business decisions must be made by this code. This is verified by mutation: after the tests pass, the
   harness changes the decision values in your code one at a time (a discount rate, a coupon type, ...) and
   expects the tests to fail each time. A value that can be changed without failing a test is dead code.
@@ -199,13 +205,14 @@ export function renderAssets(assets: Asset[]): string {
 
 export function renderRequest(
   target: Target,
+  ws: Workspace,
   phase: Phase,
   attempt: number,
   feedback: Feedback | undefined,
   guide: string,
   assets: Asset[] = [],
 ): string {
-  const body = phase === "design" ? design(target, guide) : phase === "wiring" ? wiring(target) : implementation(target, guide);
+  const body = phase === "design" ? design(target, ws, guide) : phase === "wiring" ? wiring(target, ws) : implementation(target, ws, guide);
   const previous = feedback ? `\n## Feedback from the previous attempt\n\n${renderFeedback(feedback)}\n` : "";
   return `# ${TITLES[phase]} (attempt ${attempt})\n\n${body}${renderAssets(assets)}${previous}`;
 }

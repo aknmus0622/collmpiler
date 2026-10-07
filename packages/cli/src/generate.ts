@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
-import { relative, sep } from "node:path";
+import { posix, relative, sep } from "node:path";
 import type { FieldSchema } from "@aac/core";
 import { stableStringify } from "./extract.ts";
 import type { SpecModel } from "./extract.ts";
+import { CONTROL_DIR, DEFAULT_SOURCE_DIR, dirFrom, importPath, testsDirOf } from "./layout.ts";
+import type { Workspace } from "./layout.ts";
 
 // テスト側ファイルの生成 (TypeScript を対象とするとき)。フレームワークが生成するのはテスト側だけで、本番コードには何も置かない。
 // 出力は IR だけから決まる（日時・CLI バージョンは埋めない）。
@@ -14,8 +16,10 @@ export type Ir = {
   model?: SpecModel;
 };
 
-export const TEST_DIR = "aac";
-export const SOURCE_DIR = "src";
+// 作業場所の中で、依頼文と添付資料を置くディレクトリ
+export const TEST_DIR = CONTROL_DIR;
+// 本番コードの既定のディレクトリ名
+export const SOURCE_DIR = DEFAULT_SOURCE_DIR;
 
 // 対象言語によらないファイル
 export const FILES = {
@@ -95,23 +99,23 @@ export interface TargetSystemAdapter {
 `;
 }
 
-export function generateAdapterSkeleton(): string {
+export function generateAdapterSkeleton(ws: Workspace): string {
   const methods = ["setupIsolation(ports)", "teardownIsolation()", "executeCommand(command)", "getCurrentState()"];
-  return `import type { TargetSystemAdapter } from "./${TS_FILES.contract}";
+  return `import type { TargetSystemAdapter } from "${importPath(ws.paths.adapter, ws.paths.contract)}";
 
-// Import the production code from ../${SOURCE_DIR}/ and forward each call to it. No business logic here.
+// Import the production code from ${dirFrom(ws.paths.adapter, ws.src)} and forward each call to it. No business logic here.
 export const adapter: TargetSystemAdapter = {
 ${methods.map((method) => `  async ${method} {\n    throw new Error("not implemented");\n  },`).join("\n")}
 };
 `;
 }
 
-export function generateVerify(ir: Ir, testDir: string, specsDir: string): string {
-  const specs = relative(testDir, specsDir).split(sep).join("/");
+export function generateVerify(ir: Ir, ws: Workspace, specsDir: string): string {
+  const specs = relative(testsDirOf(ws), specsDir).split(sep).join("/");
   return `${header(ir)}
 import { fileURLToPath } from "node:url";
 import { runPbt } from "@aac/cli/runtime";
-import { adapter } from "./${TS_FILES.adapter}";
+import { adapter } from "./${posix.basename(ws.paths.adapter)}";
 
 await runPbt({ specs: fileURLToPath(new URL(${JSON.stringify(specs + "/")}, import.meta.url)), adapter });
 `;

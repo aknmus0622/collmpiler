@@ -1,8 +1,10 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, join, posix, relative, resolve, sep } from "node:path";
 import { stableStringify } from "./extract.ts";
-import { FILES, SOURCE_DIR, TEST_DIR, TS_FILES, generateContract, generateVerify } from "./generate.ts";
+import { generateContract, generateVerify } from "./generate.ts";
 import type { Ir } from "./generate.ts";
+import { dirFrom, importPath, isSource, label, sourceFiles, testsDirOf } from "./layout.ts";
+import type { Workspace } from "./layout.ts";
 import { importsOf, scan } from "./scan.ts";
 
 // LLM が書いたものに「余計なもの」が無いかの検査 (TypeScript を対象とするとき)。PBT の前に走り、違反は LLM に差し戻す。
@@ -15,90 +17,74 @@ import { importsOf, scan } from "./scan.ts";
 
 export type Violation = { file: string; rule: string; message: string };
 
-const ALLOWED_TOP_LEVEL = new Set([TEST_DIR, SOURCE_DIR, "package.json", "node_modules"]);
-
-const isInside = (dir: string, path: string) => path === dir || path.startsWith(dir + sep);
-
 // scope: "source" は本番コードだけを調べる（アダプターがまだ無い、設計の段階用）
-export function checkWorkspace(out: string, ir: Ir, specs: string, scope: "all" | "source" = "all"): Violation[] {
-  const outDir = resolve(process.cwd(), out);
+export function checkWorkspace(ws: Workspace, ir: Ir, specs: string, scope: "all" | "source" = "all"): Violation[] {
   const specsDir = resolve(process.cwd(), specs);
-  const testDir = join(outDir, TEST_DIR);
-  const sourceDir = join(outDir, SOURCE_DIR);
   const violations: Violation[] = [];
-  const report = (path: string, rule: string, message: string) =>
-    violations.push({ file: relative(outDir, path).split(sep).join("/"), rule, message });
+  const report = (rel: string, rule: string, message: string) => violations.push({ file: rel, rule, message });
+  const sources = label(ws.src);
 
-  for (const entry of readdirSync(outDir)) {
-    if (!ALLOWED_TOP_LEVEL.has(entry)) {
-      report(join(outDir, entry), "unexpected-file", `Only ${SOURCE_DIR}/ and ${TEST_DIR}/ may be written.`);
-    }
-  }
-  // 依頼文は作業場所にしか置かれない
-  const testFiles = new Set<string>([FILES.ir, TS_FILES.contract, TS_FILES.adapter, TS_FILES.verify]);
-  for (const entry of readdirSync(testDir)) {
-    if (!testFiles.has(entry)) {
-      report(join(testDir, entry), "unexpected-file", `Do not add files to ${TEST_DIR}/. Put code in ${SOURCE_DIR}/.`);
+  // テスト側のファイルは決まった4つだけ。テスト側だけの専用のディレクトリなら、ほかのファイルを置かせない。
+  // 本番コードと同じ場所や、ほかのテストと共用のディレクトリ (接頭辞つき) では、接頭辞の付いた名前だけを見る
+  const testsDir = testsDirOf(ws);
+  const known = new Set(Object.values(ws.paths));
+  const dedicated = ws.prefix === "" && ws.tests !== ws.src;
+  for (const entry of existsSync(testsDir) ? readdirSync(testsDir) : []) {
+    const rel = relative(ws.root, join(testsDir, entry)).split(sep).join("/");
+    if (known.has(rel)) continue;
+    if (dedicated || (ws.prefix !== "" && entry.startsWith(ws.prefix))) {
+      report(rel, "unexpected-file", `Do not add test-side files. Put code in ${sources}.`);
     }
   }
 
   const generated = {
-    [FILES.ir]: stableStringify(ir),
-    [TS_FILES.contract]: generateContract(ir),
-    [TS_FILES.verify]: generateVerify(ir, testDir, specsDir),
+    [ws.paths.ir]: stableStringify(ir),
+    [ws.paths.contract]: generateContract(ir),
+    [ws.paths.verify]: generateVerify(ir, ws, specsDir),
   };
-  for (const [name, expected] of Object.entries(generated)) {
-    const path = join(testDir, name);
+  for (const [rel, expected] of Object.entries(generated)) {
+    const path = join(ws.root, rel);
     if (!existsSync(path) || readFileSync(path, "utf8") !== expected) {
-      report(path, "generated-file-modified", "This file is generated and must not be edited or removed.");
+      report(rel, "generated-file-modified", "This file is generated and must not be edited or removed.");
     }
   }
 
-  const checkImports = (path: string, tokens: ReturnType<typeof scan>, allowContract: boolean) => {
+  const checkImports = (rel: string, tokens: ReturnType<typeof scan>, isAdapter: boolean) => {
     const { specifiers, dynamic } = importsOf(tokens);
-    if (dynamic) report(path, "dynamic-import", "import() and require() are not allowed.");
+    if (dynamic) report(rel, "dynamic-import", "import() and require() are not allowed.");
     for (const specifier of specifiers) {
-      const target = specifier.startsWith(".") ? resolve(dirname(path), specifier) : undefined;
-      const ok =
-        target !== undefined &&
-        (isInside(sourceDir, target) || (allowContract && target === join(testDir, TS_FILES.contract)));
+      const target = specifier.startsWith(".") ? posix.normalize(posix.join(posix.dirname(rel), specifier)) : undefined;
+      const ok = target !== undefined && !target.startsWith("..") && (isSource(ws, target) || (isAdapter && target === ws.paths.contract));
       if (ok) continue;
       report(
-        path,
+        rel,
         "forbidden-import",
-        allowContract
-          ? `"${specifier}": the adapter may only import ./${TS_FILES.contract} and files under ../${SOURCE_DIR}/.`
-          : `"${specifier}": production code may only import other files under ${SOURCE_DIR}/ by relative path.`,
+        isAdapter
+          ? `"${specifier}": the adapter may only import ${importPath(ws.paths.adapter, ws.paths.contract)} and production files under ${dirFrom(ws.paths.adapter, ws.src)}.`
+          : `"${specifier}": production code may only import other production files under ${sources} by relative path.`,
       );
     }
   };
 
   // --- アダプター ---
-  const adapterPath = join(testDir, TS_FILES.adapter);
+  const adapterPath = join(ws.root, ws.paths.adapter);
   if (scope === "source") {
     // アダプターは対象外
   } else if (!existsSync(adapterPath)) {
-    report(adapterPath, "missing-file", "The adapter is missing.");
+    report(ws.paths.adapter, "missing-file", "The adapter is missing.");
   } else {
-    const tokens = scan(readFileSync(adapterPath, "utf8"));
-    checkImports(adapterPath, tokens, true);
+    checkImports(ws.paths.adapter, scan(readFileSync(adapterPath, "utf8")), true);
   }
 
   // --- 本番コード ---
-  const sourceFiles = existsSync(sourceDir)
-    ? (readdirSync(sourceDir, { recursive: true, withFileTypes: true }) as import("node:fs").Dirent[])
-        .filter((entry) => entry.isFile())
-        .map((entry) => join(entry.parentPath, entry.name))
-    : [];
-  if (sourceFiles.length === 0) {
-    report(sourceDir, "missing-file", `No production code found under ${SOURCE_DIR}/.`);
-  }
-  for (const path of sourceFiles.sort()) {
-    if (!path.endsWith(".ts")) {
-      report(path, "unexpected-file", `Only .ts files are allowed under ${SOURCE_DIR}/.`);
+  const files = sourceFiles(ws);
+  if (files.length === 0) report(ws.src || ".", "missing-file", `No production code found under ${sources}.`);
+  for (const rel of files) {
+    if (!rel.endsWith(".ts")) {
+      report(rel, "unexpected-file", `Only .ts files are allowed under ${sources}.`);
       continue;
     }
-    checkImports(path, scan(readFileSync(path, "utf8")), false);
+    checkImports(rel, scan(readFileSync(join(ws.root, rel), "utf8")), false);
   }
 
   return violations;

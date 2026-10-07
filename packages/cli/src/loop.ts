@@ -1,11 +1,12 @@
 import { existsSync, readdirSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { resolveLayout, sourceFiles, workspaceOf } from "./layout.ts";
 import { extract, stableStringify } from "./extract.ts";
 import { mergeAssets } from "./assets.ts";
 import type { Asset } from "./assets.ts";
 import { entryGate, exitGate } from "./gates.ts";
 import type { Feedback, GateContext, MutationSummary } from "./gates.ts";
-import { SOURCE_DIR, TEST_DIR, requireModel, specHash } from "./generate.ts";
+import { requireModel, specHash } from "./generate.ts";
 import type { Ir } from "./generate.ts";
 import { DEFAULT_GUIDE } from "./guide.ts";
 import { DRAFT_SUFFIX, loadSpecs } from "./loader.ts";
@@ -31,7 +32,12 @@ const DEFAULT_RUNS = 1000;
 
 export type ImplementOptions = {
   specs: string;
-  out: string;
+  // 出力先の配置。out だけなら <out>/src と <out>/aac。src / tests で、それぞれの場所を直接指定できる。
+  // tests が "." で終わるときは、最後の部分がテスト側のファイル名の接頭辞（"src/order/order.aac." など。
+  // 本番コードと同じ場所に並べるときに要る）
+  out?: string;
+  src?: string;
+  tests?: string;
   strategy: ImplementationStrategy;
   // 1つの段階の中で差し戻す回数の上限
   maxAttempts?: number;
@@ -77,7 +83,6 @@ export type Attempt = {
 
 export async function implement(options: ImplementOptions) {
   const specsDir = resolve(process.cwd(), options.specs);
-  const outDir = resolve(process.cwd(), options.out);
   const log = options.log ?? (() => {});
 
   const drafts = options.drafts ?? false;
@@ -102,11 +107,12 @@ export async function implement(options: ImplementOptions) {
   // 検証を決定的にするため、シードは仕様のハッシュから決める
   const seed = Number.parseInt(specHash(ir).slice("sha256:".length, "sha256:".length + 7), 16);
   const target = options.target ?? typescriptTarget;
+  const ws = workspaceOf(resolveLayout(options), target.files);
   const ctx: GateContext = {
     target,
     ir,
     specsDir,
-    outDir,
+    ws,
     seed,
     runs: options.runs ?? DEFAULT_RUNS,
     guide: DEFAULT_GUIDE,
@@ -117,11 +123,10 @@ export async function implement(options: ImplementOptions) {
   };
 
   const clear = () => {
-    rmSync(join(outDir, SOURCE_DIR), { recursive: true, force: true });
-    rmSync(join(outDir, TEST_DIR, target.files.adapter), { force: true });
+    for (const rel of [...sourceFiles(ws), ws.paths.adapter]) rmSync(join(ws.root, rel), { force: true });
   };
   if (options.fresh) clear();
-  const built = existsSync(join(outDir, SOURCE_DIR)) && existsSync(join(outDir, TEST_DIR, target.files.adapter));
+  const built = sourceFiles(ws).length > 0 && existsSync(join(ws.root, ws.paths.adapter));
   const first: Phase = options.fresh ? "design" : (options.from ?? (built ? "implementation" : "design"));
 
   // 正解 (結び付け) が人の確認を経たものか、下書きのままか

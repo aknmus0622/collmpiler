@@ -1,5 +1,6 @@
 import type { Violation } from "./check.ts";
 import type { Ir } from "./generate.ts";
+import type { Workspace } from "./layout.ts";
 import type { MutationStrategy } from "./mutation.ts";
 import type { PbtResult } from "./runtime.ts";
 import type { StaticCheckStrategy } from "./static-check.ts";
@@ -25,7 +26,7 @@ export interface Target {
   name: string;
 
   // --- テスト側の生成 ---
-  // テスト側のファイル名（出力先の aac/ の中）
+  // テスト側のファイル名（置き場所と接頭辞は配置 (layout.ts) が決める）
   files: {
     // アダプターが満たすべき契約（生成。書き換え不可）
     contract: string;
@@ -36,27 +37,27 @@ export interface Target {
   };
   generate: {
     contract(ir: Ir): string;
-    adapterSkeleton(): string;
-    verify(ir: Ir, testDir: string, specsDir: string): string;
+    adapterSkeleton(ws: Workspace): string;
+    verify(ir: Ir, ws: Workspace, specsDir: string): string;
   };
 
   // --- 出口ゲートの検査 ---
   // 余計なもの検査: 本番コードとアダプターの依存、生成ファイルの改ざん。scope が "source" なら本番コードだけ
-  check(outDir: string, ir: Ir, specsDir: string, scope: "all" | "source"): Violation[];
+  check(ws: Workspace, ir: Ir, specsDir: string, scope: "all" | "source"): Violation[];
   // 実装の静的検査。言語によっては無い
   staticCheck: StaticCheckStrategy | undefined;
   // 本番コードを実行せずに読み込めることを確かめる。失敗したら、その出力を返す
-  load(outDir: string): string | undefined;
+  load(ws: Workspace): string | undefined;
   // PBT を実行する。期待値の計算と本番システムの操作をどうつなぐかは、実装が決める
-  runTests(input: { outDir: string; seed: number; runs: number; drafts: boolean }): TestRun;
+  runTests(input: { ws: Workspace; seed: number; runs: number; drafts: boolean }): TestRun;
   // ミューテーションの壊し方。言語によっては無い
   mutation: MutationStrategy | undefined;
 
   // --- エージェントとの取り決め ---
   // 骨組みの未実装部分が出すエラーの文言。配線の段階で「未実装による失敗」を見分けるのに使う
   notImplemented: string;
-  // 依頼文のうち、言語に依存する部分（英語）
-  request: {
+  // 依頼文のうち、言語に依存する部分（英語）。パスの書き方は配置による
+  request(ws: Workspace): {
     // 本番コードが守る、言語と依存に関する規則（箇条書き）
     sourceRules: string;
     // 骨組みの、振る舞いを持つはずの本体に書く文

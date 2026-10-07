@@ -8,6 +8,7 @@ import { scrubEnv } from "../src/gates.ts";
 import { generateAdapterSkeleton, generateContract, generateVerify } from "../src/generate.ts";
 import type { Ir } from "../src/generate.ts";
 import { DEFAULT_GUIDE } from "../src/guide.ts";
+import { resolveLayout, workspaceOf } from "../src/layout.ts";
 import { loadSpecs } from "../src/loader.ts";
 import { implement } from "../src/loop.ts";
 import type { ImplementOptions } from "../src/loop.ts";
@@ -19,7 +20,7 @@ import { typescriptTarget } from "../src/target-typescript.ts";
 import type { Target } from "../src/target.ts";
 import type { Assignment, ImplementationStrategy } from "../src/strategy.ts";
 import { write } from "./fixtures/scripted-agent.ts";
-import type { Phase, Step } from "./fixtures/scripted-agent.ts";
+import type { Phase, Place, Step } from "./fixtures/scripted-agent.ts";
 
 // 出力先は packages/cli 配下に置く（verify.ts が @aac/cli/runtime を解決できる場所）
 const repoRoot = join(import.meta.dirname, "../../..");
@@ -35,7 +36,7 @@ type Seen = { phase: Phase; dir: string; files: Record<string, string> };
 
 // LLM の代役の Strategy。段階ごとに、呼ばれた回数に応じた成果物を書き出し、作業場所で見えたものを記録する。
 // 指定の無い段階は常に正しいものを書く
-function scripted(script: Script, extra?: (assignment: Assignment) => void) {
+function scripted(script: Script, extra?: (assignment: Assignment) => void, place?: Place) {
   const seen: Seen[] = [];
   const calls: Record<Phase, number> = { design: 0, wiring: 0, implementation: 0 };
   const strategy: ImplementationStrategy = {
@@ -48,7 +49,7 @@ function scripted(script: Script, extra?: (assignment: Assignment) => void) {
       const phase = assignment.phase as Phase;
       seen.push({ phase, dir: assignment.dir, files });
       const steps = script[phase] ?? ["correct"];
-      write(phase, steps[Math.min(calls[phase]++, steps.length - 1)], assignment.dir);
+      write(phase, steps[Math.min(calls[phase]++, steps.length - 1)], assignment.dir, place);
       extra?.(assignment);
     },
   };
@@ -64,6 +65,8 @@ async function run(script: Script, options: Partial<ImplementOptions> = {}, extr
 }
 
 const of = (seen: Seen[], phase: Phase) => seen.filter((s) => s.phase === phase);
+// 既定の配置 (<out>/src と <out>/aac)
+const defaultWorkspace = (out: string) => workspaceOf(resolveLayout({ out }), typescriptTarget.files);
 
 // --- TDD の3段階 ---
 
@@ -293,11 +296,11 @@ test("対象言語: 流れとゲートは Target だけを通して、生成・�
     name: "recording",
     generate: {
       contract: (ir) => (calls.push("generate.contract"), typescriptTarget.generate.contract(ir)),
-      adapterSkeleton: () => (calls.push("generate.adapterSkeleton"), typescriptTarget.generate.adapterSkeleton()),
-      verify: (ir, testDir, specs) => (calls.push("generate.verify"), typescriptTarget.generate.verify(ir, testDir, specs)),
+      adapterSkeleton: (ws) => (calls.push("generate.adapterSkeleton"), typescriptTarget.generate.adapterSkeleton(ws)),
+      verify: (ir, ws, specs) => (calls.push("generate.verify"), typescriptTarget.generate.verify(ir, ws, specs)),
     },
     check: (...args) => (calls.push("check"), typescriptTarget.check(...args)),
-    load: (outDir) => (calls.push("load"), typescriptTarget.load(outDir)),
+    load: (ws) => (calls.push("load"), typescriptTarget.load(ws)),
     // 常に合格と答える
     runTests: () => (calls.push("runTests"), { result: { status: "pass", seed: 0, numRuns: 0 } }),
     staticCheck: undefined,
@@ -359,7 +362,7 @@ test("ループ: 成果物がすでにあれば実装の段階から始める。
   await implement({ specs: specsDir, out: first.out, strategy: fresh.strategy, mutation: null, fresh: true });
   assert.deepEqual(fresh.seen.map((s) => s.phase), ["design", "wiring", "implementation"]);
   assert.ok(!("src/order-service.ts" in fresh.seen[0].files));
-  assert.equal(fresh.seen[1].files["aac/adapter.ts"], generateAdapterSkeleton());
+  assert.equal(fresh.seen[1].files["aac/adapter.ts"], generateAdapterSkeleton(defaultWorkspace(first.out)));
 });
 
 test("コマンド Strategy: 外部コマンドを作業場所で、段階ごとに起動する", async () => {
@@ -505,6 +508,79 @@ test("出口ゲート: その段階で許可した出力以外は取り出さず
   assert.notEqual(readFileSync(join(out, "aac/ir.json"), "utf8"), "{}");
 });
 
+// --- 配置 ---
+
+test("配置: 本番コードとテスト側を、別々の場所に置ける (src/ と test/ を分ける流儀)", async () => {
+  const base = workdir();
+  const place = { source: "app/src/order-service.ts", adapter: "test/aac/adapter.ts" };
+  const { strategy, seen } = scripted({}, undefined, place);
+  const result = await implement({ specs: specsDir, src: join(base, "app/src"), tests: join(base, "test/aac"), strategy, maxAttempts: 1, maxRounds: 1 });
+  assert.equal(result.status, "pass");
+
+  // 作業場所は、出力先の相対位置をそのまま写す（依頼文だけは常に aac/）
+  const keys = (phase: Phase) => Object.keys(of(seen, phase)[0].files).sort();
+  assert.deepEqual(keys("design"), ["aac/REQUEST.md", "test/aac/ir.json"]);
+  assert.deepEqual(keys("wiring"), ["aac/REQUEST.md", "app/src/order-service.ts", "test/aac/adapter.contract.ts", "test/aac/adapter.ts"]);
+  // 依頼文と雛形は、その配置でのパスを案内する
+  assert.match(of(seen, "design")[0].files["aac/REQUEST.md"], /specified in `test\/aac\/ir\.json`[\s\S]*skeleton\*\* under `app\/src\/`/);
+  assert.match(of(seen, "wiring")[0].files["test/aac/adapter.ts"], /Import the production code from \.\.\/\.\.\/app\/src\/ /);
+  assert.match(of(seen, "wiring")[0].files["aac/REQUEST.md"], /may import only `\.\/adapter\.contract\.ts` and production files under `\.\.\/\.\.\/app\/src\/`/);
+
+  for (const file of ["app/src/order-service.ts", "test/aac/adapter.ts", "test/aac/ir.json", "test/aac/adapter.contract.ts", "test/aac/verify.ts"]) {
+    assert.ok(existsSync(join(base, file)), file);
+  }
+  assert.ok(!existsSync(join(base, "aac")));
+  assert.deepEqual(result.attempts.at(-1)?.mutation?.survivors.map((s) => s.file), ["app/src/order-service.ts"]);
+});
+
+test("配置: 本番コードと同じ場所に並べられる (テスト側は接頭辞で見分ける)", async () => {
+  const base = workdir();
+  const dir = join(base, "order");
+  const place = { source: "order-service.ts", adapter: "order.aac.adapter.ts" };
+  const options = { specs: specsDir, src: dir, tests: join(dir, "order.aac."), maxAttempts: 1, maxRounds: 1 };
+  const first = scripted({}, undefined, place);
+  assert.equal((await implement({ ...options, strategy: first.strategy })).status, "pass");
+  assert.deepEqual(readdirSync(dir).sort(), [
+    "order-service.ts",
+    "order.aac.adapter.contract.ts",
+    "order.aac.adapter.ts",
+    "order.aac.ir.json",
+    "order.aac.verify.ts",
+  ]);
+  assert.match(of(first.seen, "design")[0].files["aac/REQUEST.md"], /File names starting with `order\.aac\.` are reserved for the test harness/);
+
+  // 本番コードが、テスト側のための名前を使ったら差し戻す
+  const squatter = scripted({}, ({ dir: sandbox, phase }) => {
+    if (phase === "implementation") writeFileSync(join(sandbox, "order.aac.helper.ts"), "export {};");
+  }, place);
+  const rejected = await implement({ ...options, strategy: squatter.strategy });
+  const feedback = rejected.attempts.at(-1)?.feedback;
+  assert.ok(feedback?.kind === "check");
+  assert.deepEqual(feedback.violations.map((v) => `${v.file}:${v.rule}`), ["order.aac.helper.ts:unexpected-file"]);
+
+  // fresh でやり直しても、消えるのは本番コードとアダプターだけ
+  const again = scripted({}, undefined, place);
+  assert.equal((await implement({ ...options, strategy: again.strategy, fresh: true })).status, "pass");
+  assert.deepEqual(again.seen.map((s) => s.phase), ["design", "wiring", "implementation"]);
+  assert.deepEqual(Object.keys(again.seen[0].files).sort(), ["aac/REQUEST.md", "order.aac.ir.json"]);
+});
+
+test("配置: 危ない指定は、始める前に断る", () => {
+  const base = workdir();
+  // 同じ場所に置くのに、見分ける接頭辞が無い
+  assert.throws(() => resolveLayout({ src: join(base, "order"), tests: join(base, "order") }), /--tests にファイル名の接頭辞まで書いてください/);
+  // 本番コードのディレクトリは、エージェントが中身を書き直す。プロジェクトのルートを指させない
+  writeFileSync(join(base, "package.json"), "{}");
+  assert.throws(() => resolveLayout({ src: base, tests: join(base, "aac") }), /package\.json があります/);
+  assert.throws(() => resolveLayout({ src: join(base, "src") }), /--out か、--src と --tests の両方を指定してください/);
+  // --tests が "." で終われば、最後の部分が接頭辞。それ以外はディレクトリ
+  assert.deepEqual(resolveLayout({ src: join(base, "order"), tests: join(base, "order/order.aac.") }), { root: join(base, "order"), src: "", tests: "", prefix: "order.aac." });
+  assert.deepEqual(resolveLayout({ src: join(base, "app/src"), tests: join(base, "test/aac") }), { root: base, src: "app/src", tests: "test/aac", prefix: "" });
+  assert.deepEqual(resolveLayout({ src: join(base, "app/src"), tests: join(base, "test/order.") }).prefix, "order.");
+  // --out だけなら、従来どおり
+  assert.deepEqual(resolveLayout({ out: join(base, "x") }), { root: join(base, "x"), src: "src", tests: "aac", prefix: "" });
+});
+
 // --- 余計なもの検査 ---
 
 async function workspace() {
@@ -513,10 +589,11 @@ async function workspace() {
   mkdirSync(join(out, "aac"), { recursive: true });
   writeFileSync(join(out, "aac/ir.json"), stableStringify(ir));
   writeFileSync(join(out, "aac/adapter.contract.ts"), generateContract(ir));
-  writeFileSync(join(out, "aac/verify.ts"), generateVerify(ir, join(out, "aac"), specsDir));
+  const ws = defaultWorkspace(out);
+  writeFileSync(join(out, "aac/verify.ts"), generateVerify(ir, ws, specsDir));
   write("wiring", "correct", out);
   write("implementation", "correct", out);
-  const rules = () => checkWorkspace(out, ir, specsDir).map((v) => `${v.file}:${v.rule}`);
+  const rules = () => checkWorkspace(ws, ir, specsDir).map((v) => `${v.file}:${v.rule}`);
   const edit = (file: string, fn: (text: string) => string) =>
     writeFileSync(join(out, file), fn(readFileSync(join(out, file), "utf8")));
   return { out, rules, edit };
@@ -529,7 +606,7 @@ test("検査: 正しい実装は違反なし", async () => {
 test("検査: 未実装のスケルトンだけでは本番コードが無いので違反", async () => {
   const { out, rules } = await workspace();
   rmSync(join(out, "src"), { recursive: true });
-  writeFileSync(join(out, "aac/adapter.ts"), generateAdapterSkeleton());
+  writeFileSync(join(out, "aac/adapter.ts"), generateAdapterSkeleton(defaultWorkspace(out)));
   assert.deepEqual(rules(), ["src:missing-file"]);
 });
 
@@ -560,13 +637,14 @@ test("検査: 生成ファイルの書き換え・削除、余計なファイル
   edit("aac/verify.ts", (text) => text.replace("await runPbt", "// await runPbt"));
   rmSync(join(out, "aac/ir.json"));
   writeFileSync(join(out, "aac/helper.ts"), "");
+  // 出力先のほかの場所は見ない（プロジェクトの他のファイルがあり得る。エージェントが作業場所に余計なものを
+  // 作った場合は、出口ゲートの監査が弾く）
   writeFileSync(join(out, "notes.md"), "");
   writeFileSync(join(out, "src/data.json"), "{}");
   assert.deepEqual(rules().sort(), [
     "aac/helper.ts:unexpected-file",
     "aac/ir.json:generated-file-modified",
     "aac/verify.ts:generated-file-modified",
-    "notes.md:unexpected-file",
     "src/data.json:unexpected-file",
   ]);
 });

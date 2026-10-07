@@ -1,9 +1,7 @@
 import { spawnSync } from "node:child_process";
-import { readdirSync } from "node:fs";
-import type { Dirent } from "node:fs";
-import { join, relative, sep } from "node:path";
 import { checkWorkspace } from "./check.ts";
-import { SOURCE_DIR, TEST_DIR, TS_FILES, generateAdapterSkeleton, generateContract, generateVerify } from "./generate.ts";
+import { TS_FILES, generateAdapterSkeleton, generateContract, generateVerify } from "./generate.ts";
+import { dirFrom, importPath, label, sourceFiles } from "./layout.ts";
 import { builtinMutation } from "./mutation.ts";
 import { RESULT_PREFIX } from "./runtime.ts";
 import type { PbtResult } from "./runtime.ts";
@@ -30,37 +28,35 @@ export const typescriptTarget: Target = {
   mutation: builtinMutation,
 
   // 本番コードの全ファイルを1回 import する
-  load(outDir) {
-    const sourceDir = join(outDir, SOURCE_DIR);
-    const files = (readdirSync(sourceDir, { recursive: true, withFileTypes: true }) as Dirent[])
-      .filter((entry) => entry.isFile() && entry.name.endsWith(".ts"))
-      .map((entry) => `./${SOURCE_DIR}/${relative(sourceDir, join(entry.parentPath, entry.name)).split(sep).join("/")}`)
-      .sort();
+  load(ws) {
+    const files = sourceFiles(ws)
+      .filter((rel) => rel.endsWith(".ts"))
+      .map((rel) => `./${rel}`);
     const run = spawnSync(
       process.execPath,
       ["--input-type=module", "-e", "for (const file of JSON.parse(process.argv[1])) await import(file);", JSON.stringify(files)],
-      { cwd: outDir, encoding: "utf8", timeout: 60_000 },
+      { cwd: ws.root, encoding: "utf8", timeout: 60_000 },
     );
     return run.status === 0 ? undefined : outputOf(run);
   },
 
   // 生成した verify.ts を別プロセスで実行し、最後に出力される結果の行を読む
-  runTests({ outDir, seed, runs, drafts }) {
+  runTests({ ws, seed, runs, drafts }) {
     const run = spawnSync(
       process.execPath,
-      [join(TEST_DIR, TS_FILES.verify), "--seed", String(seed), "--runs", String(runs), ...(drafts ? ["--drafts"] : [])],
-      { cwd: outDir, encoding: "utf8", timeout: 120_000 },
+      [ws.paths.verify, "--seed", String(seed), "--runs", String(runs), ...(drafts ? ["--drafts"] : [])],
+      { cwd: ws.root, encoding: "utf8", timeout: 120_000 },
     );
     const line = run.stdout?.split("\n").find((text) => text.startsWith(RESULT_PREFIX));
     return line ? { result: JSON.parse(line.slice(RESULT_PREFIX.length)) as PbtResult } : { crash: outputOf(run) };
   },
 
   notImplemented: NOT_IMPLEMENTED,
-  request: {
+  request: (ws) => ({
     sourceRules: `- Production code is plain TypeScript that Node can run directly (erasable syntax only: no \`enum\`, no
   \`namespace\`, no parameter properties; relative imports need the \`.ts\` extension).
-- Production code may import only other files under \`${SOURCE_DIR}/\`, by relative path. No packages, no
-  \`node:\` built-ins, no \`import()\` / \`require()\`.`,
+- Production code may import only other production files under \`${label(ws.src)}\`, by relative path. No
+  packages, no \`node:\` built-ins, no \`import()\` / \`require()\`.`,
     skeletonBody: `throw new Error("${NOT_IMPLEMENTED}");`,
     adapterGuide: `- \`setupIsolation(ports)\`: build a fresh production system in its initial state, giving it dependencies that
   forward to \`ports\`. Where the production code expects a value in a different form than \`ports\` provides (a
@@ -69,9 +65,9 @@ export const typescriptTarget: Target = {
 - \`getCurrentState()\`: return the current state as one of the \`StateName\` values, translating if the
   production code names its states differently.
 - \`teardownIsolation()\`: discard the system.`,
-    adapterImports: `The adapter may import only \`./${TS_FILES.contract}\` and files under \`../${SOURCE_DIR}/\`.`,
+    adapterImports: `The adapter may import only \`${importPath(ws.paths.adapter, ws.paths.contract)}\` and production files under \`${dirFrom(ws.paths.adapter, ws.src)}\`.`,
     signatureErrorExample: `"x is not a function"`,
-  },
+  }),
 };
 
 export function selectTarget(name: string): Target {

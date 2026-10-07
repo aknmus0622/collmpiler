@@ -2,11 +2,13 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, 
 import type { Dirent } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, relative, sep } from "node:path";
+import { isSource, label, sourceFiles } from "./layout.ts";
+import type { Workspace } from "./layout.ts";
 import { assetsFor } from "./assets.ts";
 import type { Asset } from "./assets.ts";
 import type { Violation } from "./check.ts";
 import { stableStringify } from "./extract.ts";
-import { FILES, SOURCE_DIR, TEST_DIR } from "./generate.ts";
+import { FILES, TEST_DIR } from "./generate.ts";
 import type { Ir } from "./generate.ts";
 import { decisionValues, judge } from "./mutation.ts";
 import type { MutationStrategy } from "./mutation.ts";
@@ -20,10 +22,12 @@ import type { Target } from "./target.ts";
 //   入口ゲート: リポジトリの外に作業場所を作り、その段階に許可した入力だけを置く
 //   出口ゲート: その段階に許可した出力だけを取り出し、その段階の検査にかける
 //
+// 作業場所は、出力先の配置 (layout.ts) をそのまま写す。依頼文と添付資料だけは、常に aac/ に置く。
+//
 // 段階ごとに、見せるものと書かせるものが違う (TDD の流れ):
-//   design         … 見せる: IR                    書かせる: src/ (骨組み)   検査: 読み込めること
+//   design         … 見せる: IR                    書かせる: 本番コード (骨組み)  検査: 読み込めること
 //   wiring         … 見せる: 契約、骨組み            書かせる: アダプター       検査: PBT が未実装で失敗すること (赤)
-//   implementation … 見せる: IR、骨組み              書かせる: src/ (中身)     検査: PBT 合格 (緑)、ミューテーション
+//   implementation … 見せる: IR、骨組み              書かせる: 本番コード (中身)    検査: PBT 合格 (緑)、ミューテーション
 // 配線の段階は IR を見ないので、アダプターに業務上の判断を書きようがない。
 // 設計と実装の段階はテストの口を見ないので、本番コードがその形に引きずられない。
 // 仕様のソース・PBT のグルー (verify.ts)・リポジトリのパスは、どの段階にも渡さない。
@@ -33,7 +37,8 @@ export type GateContext = {
   target: Target;
   ir: Ir;
   specsDir: string;
-  outDir: string;
+  // 出力先の配置: 本番コードとテスト側のファイルの場所
+  ws: Workspace;
   seed: number;
   runs: number;
   // 依頼文に載せる既定の設計方針
@@ -74,15 +79,11 @@ export type Sandbox = {
 };
 
 const REQUEST = `${TEST_DIR}/${FILES.request}`;
-const IR = `${TEST_DIR}/${FILES.ir}`;
-const adapterOf = (target: Target) => `${TEST_DIR}/${target.files.adapter}`;
-const contractOf = (target: Target) => `${TEST_DIR}/${target.files.contract}`;
 const posix = (path: string) => path.split(sep).join("/");
 const isInside = (dir: string, path: string) => path === dir || path.startsWith(dir + sep);
 
 // その段階でエージェントが書いてよい場所
-const writable = (target: Target, phase: Phase, rel: string) =>
-  phase === "wiring" ? rel === adapterOf(target) : rel.startsWith(`${SOURCE_DIR}/`);
+const writable = (ws: Workspace, phase: Phase, rel: string) => (phase === "wiring" ? rel === ws.paths.adapter : isSource(ws, rel));
 
 function filesUnder(root: string): { rel: string; entry: Dirent }[] {
   if (!existsSync(root)) return [];
@@ -93,9 +94,8 @@ function filesUnder(root: string): { rel: string; entry: Dirent }[] {
 }
 
 export function entryGate(ctx: GateContext, phase: Phase, attempt: number, feedback: Feedback | undefined): Sandbox {
-  const ADAPTER = adapterOf(ctx.target);
-  const CONTRACT = contractOf(ctx.target);
-  const hidden = [...new Set([process.cwd(), ctx.specsDir, ctx.outDir])];
+  const { ws } = ctx;
+  const hidden = [...new Set([process.cwd(), ctx.specsDir, ws.root])];
   const dir = mkdtempSync(join(realpathSync(tmpdir()), "aac-"));
   if (hidden.some((path) => isInside(path, dir))) {
     rmSync(dir, { recursive: true, force: true });
@@ -105,21 +105,19 @@ export function entryGate(ctx: GateContext, phase: Phase, attempt: number, feedb
   // 許可リスト。段階ごとに違う
   const assets = assetsFor(ctx.assets, phase);
   const inputs: Record<string, string> = {
-    [REQUEST]: renderRequest(ctx.target, phase, attempt, feedback, ctx.guide, assets),
+    [REQUEST]: renderRequest(ctx.target, ws, phase, attempt, feedback, ctx.guide, assets),
   };
   for (const asset of assets) if (asset.kind === "file") inputs[`${ASSETS_DIR}/${asset.name}`] = asset.content;
   if (phase === "wiring") {
-    inputs[CONTRACT] = ctx.target.generate.contract(ctx.ir);
-    inputs[ADAPTER] = existsSync(join(ctx.outDir, ADAPTER))
-      ? readFileSync(join(ctx.outDir, ADAPTER), "utf8")
-      : ctx.target.generate.adapterSkeleton();
+    inputs[ws.paths.contract] = ctx.target.generate.contract(ctx.ir);
+    inputs[ws.paths.adapter] = existsSync(join(ws.root, ws.paths.adapter))
+      ? readFileSync(join(ws.root, ws.paths.adapter), "utf8")
+      : ctx.target.generate.adapterSkeleton(ws);
   } else {
-    inputs[IR] = stableStringify(ctx.ir);
+    inputs[ws.paths.ir] = stableStringify(ctx.ir);
   }
   // 本番コード: 設計の段階ではやり直しのときの前回の成果、以降の段階では骨組み
-  for (const { rel, entry } of filesUnder(join(ctx.outDir, SOURCE_DIR))) {
-    if (entry.isFile()) inputs[`${SOURCE_DIR}/${rel}`] = readFileSync(join(ctx.outDir, SOURCE_DIR, rel), "utf8");
-  }
+  for (const rel of sourceFiles(ws)) inputs[rel] = readFileSync(join(ws.root, rel), "utf8");
 
   for (const [rel, content] of Object.entries(inputs)) {
     const leaked = hidden.find((path) => content.includes(path));
@@ -130,7 +128,7 @@ export function entryGate(ctx: GateContext, phase: Phase, attempt: number, feedb
     mkdirSync(dirname(join(dir, rel)), { recursive: true });
     writeFileSync(join(dir, rel), content);
   }
-  mkdirSync(join(dir, SOURCE_DIR), { recursive: true });
+  mkdirSync(join(dir, ws.src), { recursive: true });
 
   return { dir, phase, inputs, env: scrubEnv(process.env, hidden) };
 }
@@ -147,11 +145,11 @@ export function scrubEnv(env: NodeJS.ProcessEnv, hidden: string[]): NodeJS.Proce
 }
 
 const scrub = (ctx: GateContext, text: string) =>
-  [ctx.outDir, ctx.specsDir, process.cwd()].reduce((result, path) => result.split(path).join("."), text);
+  [ctx.ws.root, ctx.specsDir, process.cwd()].reduce((result, path) => result.split(path).join("."), text);
 
 // PBT を実行する。どう実行するかは対象言語が決める
 function runVerify(ctx: GateContext): { result?: PbtResult; crash?: string } {
-  const { result, crash } = ctx.target.runTests({ outDir: ctx.outDir, seed: ctx.seed, runs: ctx.runs, drafts: ctx.drafts });
+  const { result, crash } = ctx.target.runTests({ ws: ctx.ws, seed: ctx.seed, runs: ctx.runs, drafts: ctx.drafts });
   // 出力に含まれるリポジトリのパスを、差し戻しに載せない
   return result ? { result } : { crash: scrub(ctx, crash ?? "") };
 }
@@ -173,7 +171,7 @@ function specSentencesIn(ctx: GateContext, files: string[]): Violation[] {
   sentences.delete("otherwise");
   const violations: Violation[] = [];
   for (const rel of files) {
-    const text = readFileSync(join(ctx.outDir, rel), "utf8");
+    const text = readFileSync(join(ctx.ws.root, rel), "utf8");
     for (const sentence of sentences) {
       if (text.includes(sentence)) {
         violations.push({
@@ -196,10 +194,8 @@ export type GateResult = {
 
 export async function exitGate(ctx: GateContext, sandbox: Sandbox): Promise<GateResult> {
   const { phase } = sandbox;
-  const { target } = ctx;
-  const ADAPTER = adapterOf(target);
-  const CONTRACT = contractOf(target);
-  const testDir = join(ctx.outDir, TEST_DIR);
+  const { target, ws } = ctx;
+  const ADAPTER = ws.paths.adapter;
   const violations: Violation[] = [];
   const outputs: string[] = [];
 
@@ -210,7 +206,7 @@ export async function exitGate(ctx: GateContext, sandbox: Sandbox): Promise<Gate
     if (rel.startsWith(".") || rel === REQUEST) continue;
     if (!entry.isFile()) {
       violations.push({ file: rel, rule: "unexpected-file", message: "Only regular files are allowed (no symlinks)." });
-    } else if (writable(target, phase, rel)) {
+    } else if (writable(ws, phase, rel)) {
       outputs.push(rel);
     } else if (!(rel in sandbox.inputs)) {
       violations.push({ file: rel, rule: "unexpected-file", message: "This step may not create files here." });
@@ -219,30 +215,27 @@ export async function exitGate(ctx: GateContext, sandbox: Sandbox): Promise<Gate
     }
   }
   for (const rel of Object.keys(sandbox.inputs)) {
-    if (rel !== REQUEST && !writable(target, phase, rel) && !found.has(rel)) {
+    if (rel !== REQUEST && !writable(ws, phase, rel) && !found.has(rel)) {
       violations.push({ file: rel, rule: "read-only-file-modified", message: "This step may not remove this file." });
     }
   }
 
   // 2. 取り出し: その段階の出力で、出力先を置き換える
-  if (phase === "wiring") {
-    rmSync(join(ctx.outDir, ADAPTER), { force: true });
-  } else {
-    rmSync(join(ctx.outDir, SOURCE_DIR), { recursive: true, force: true });
-  }
+  // (本番コードは1ファイルずつ消す。同じ場所にテスト側のファイルが並んでいることがあるため)
+  for (const rel of phase === "wiring" ? [ADAPTER] : sourceFiles(ws)) rmSync(join(ws.root, rel), { force: true });
   for (const rel of outputs) {
-    mkdirSync(dirname(join(ctx.outDir, rel)), { recursive: true });
-    cpSync(join(sandbox.dir, rel), join(ctx.outDir, rel));
+    mkdirSync(dirname(join(ws.root, rel)), { recursive: true });
+    cpSync(join(sandbox.dir, rel), join(ws.root, rel));
   }
 
   // 3. 採点基準 (生成ファイル) は出力先にだけ置く。verify.ts は仕様の場所を知っているので作業場所には渡さない
-  mkdirSync(testDir, { recursive: true });
-  writeFileSync(join(testDir, FILES.ir), stableStringify(ctx.ir));
-  writeFileSync(join(testDir, target.files.contract), target.generate.contract(ctx.ir));
-  writeFileSync(join(testDir, target.files.verify), target.generate.verify(ctx.ir, testDir, ctx.specsDir));
+  mkdirSync(dirname(join(ws.root, ws.paths.ir)), { recursive: true });
+  writeFileSync(join(ws.root, ws.paths.ir), stableStringify(ctx.ir));
+  writeFileSync(join(ws.root, ws.paths.contract), target.generate.contract(ctx.ir));
+  writeFileSync(join(ws.root, ws.paths.verify), target.generate.verify(ctx.ir, ws, ctx.specsDir));
 
   // 4. 余計なもの検査 (設計の段階ではアダプターがまだ無いので、本番コードだけを見る)
-  violations.push(...target.check(ctx.outDir, ctx.ir, ctx.specsDir, phase === "design" ? "source" : "all"));
+  violations.push(...target.check(ws, ctx.ir, ctx.specsDir, phase === "design" ? "source" : "all"));
   if (violations.length > 0) return { feedback: { kind: "check", violations } };
 
   // 5. 静的検査 (Strategy)。設計の段階は本番コードだけ、以降はアダプターと契約も含める。
@@ -250,15 +243,15 @@ export async function exitGate(ctx: GateContext, sandbox: Sandbox): Promise<Gate
   // これ以降の結果には、実行した静的検査の名前を載せる
   const ran = ctx.staticCheck ? { staticCheck: ctx.staticCheck.name } : {};
   if (ctx.staticCheck) {
-    const sources = filesUnder(join(ctx.outDir, SOURCE_DIR)).map(({ rel }) => `${SOURCE_DIR}/${rel}`);
-    const files = phase === "design" ? sources : [...sources, ADAPTER, CONTRACT];
-    const found = (await ctx.staticCheck.check({ dir: ctx.outDir, files })).map((violation) =>
+    const sources = sourceFiles(ws);
+    const files = phase === "design" ? sources : [...sources, ADAPTER, ws.paths.contract];
+    const found = (await ctx.staticCheck.check({ dir: ws.root, files })).map((violation) =>
       // 実装の段階はアダプターを見られない。アダプター側の誤りは、
       // 「公開している名前かシグネチャを変えた」ことの現れなので、そう伝える
       phase === "implementation" && violation.file === ADAPTER
         ? {
             ...violation,
-            file: SOURCE_DIR,
+            file: ws.src || ".",
             message: `The test harness no longer fits your code, which means an exported name or signature was changed. Restore it. (${violation.message})`,
           }
         : violation,
@@ -271,7 +264,7 @@ export async function exitGate(ctx: GateContext, sandbox: Sandbox): Promise<Gate
     // 骨組みは配線の段階に渡る。仕様の文がそのまま書かれていると、IR を見せない意味が薄れる
     const leaked = specSentencesIn(ctx, outputs);
     if (leaked.length > 0) return { ...ran, feedback: { kind: "check", violations: leaked } };
-    const failure = target.load(ctx.outDir);
+    const failure = target.load(ws);
     return failure === undefined ? { ...ran } : { ...ran, feedback: { kind: "crash", output: scrub(ctx, failure) } };
   }
 
@@ -311,7 +304,8 @@ export async function exitGate(ctx: GateContext, sandbox: Sandbox): Promise<Gate
   if (!ctx.mutation) return { ...ran };
   const values = decisionValues(ctx.ir);
   const report = await ctx.mutation.run({
-    sourceDir: join(ctx.outDir, SOURCE_DIR),
+    root: ws.root,
+    files: sourceFiles(ws),
     values,
     test: () => runVerify(ctx).result?.status === "pass",
   });
@@ -323,7 +317,7 @@ export async function exitGate(ctx: GateContext, sandbox: Sandbox): Promise<Gate
       .filter((mutant) => !mutant.killed)
       .map(({ file, line, original }) => ({ file, line, original })),
   };
-  const survived = judge(report, values, readFileSync(join(ctx.outDir, ADAPTER), "utf8"), ADAPTER);
+  const survived = judge(report, values, readFileSync(join(ws.root, ADAPTER), "utf8"), ADAPTER, label(ws.src));
   return survived.length > 0
     ? { ...ran, feedback: { kind: "mutation", violations: survived }, mutation }
     : { ...ran, mutation };

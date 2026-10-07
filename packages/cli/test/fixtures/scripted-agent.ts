@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, posix } from "node:path";
 
 // LLM の代役。決まった成果物を書き出す。ループ (失敗 → 差し戻し → 修正) を LLM なしで再現するためのもの。
 // 段階ごとに書くものが違う:
@@ -143,8 +143,16 @@ const INTERCEPT = `    if (
     }
 `;
 
-const adapter = (step: Step) => `import type { Ports, StateName, TargetSystemAdapter } from "./adapter.contract.ts";
-${step === "fake" ? source("correct").replaceAll("export ", "") : `import { OrderService } from "../src/order-service.ts";`}
+// 成果物を書く場所（作業場所からの相対パス）。配置によって変わる
+export type Place = { source: string; adapter: string };
+const DEFAULT_PLACE: Place = { source: "src/order-service.ts", adapter: "aac/adapter.ts" };
+const relativeImport = (from: string, to: string) => {
+  const rel = posix.relative(posix.dirname(from), to);
+  return rel.startsWith(".") ? rel : `./${rel}`;
+};
+
+const adapter = (step: Step, place: Place) => `import type { Ports, StateName, TargetSystemAdapter } from "${relativeImport(place.adapter, place.adapter.replace(/adapter\.ts$/, "adapter.contract.ts"))}";
+${step === "fake" ? source("correct").replaceAll("export ", "") : `import { OrderService } from "${relativeImport(place.adapter, place.source)}";`}
 
 let service: OrderService | undefined;
 let saved: Ports | undefined;
@@ -174,9 +182,9 @@ ${intercepts(step) ? INTERCEPT : ""}    if (action.name === "PlaceOrder") ${step
 };
 `;
 
-export function write(phase: Phase, step: Step, dir: string) {
-  mkdirSync(join(dir, "src"), { recursive: true });
-  mkdirSync(join(dir, "aac"), { recursive: true });
+export function write(phase: Phase, step: Step, dir: string, place: Place = DEFAULT_PLACE) {
+  mkdirSync(dirname(join(dir, place.source)), { recursive: true });
+  mkdirSync(dirname(join(dir, place.adapter)), { recursive: true });
   if (phase === "design") {
     const text =
       step === "broken"
@@ -186,13 +194,13 @@ export function write(phase: Phase, step: Step, dir: string) {
           : step === "crashing"
             ? `${skeleton}\nthrow new Error("boom at load");\n`
             : skeleton;
-    writeFileSync(join(dir, "src/order-service.ts"), text);
+    writeFileSync(join(dir, place.source), text);
   }
   if (phase === "wiring") {
-    writeFileSync(join(dir, "aac/adapter.ts"), adapter(step));
-    if (step === "touch") writeFileSync(join(dir, "src/order-service.ts"), source("correct"));
+    writeFileSync(join(dir, place.adapter), adapter(step, place));
+    if (step === "touch") writeFileSync(join(dir, place.source), source("correct"));
   }
-  if (phase === "implementation") writeFileSync(join(dir, "src/order-service.ts"), source(step));
+  if (phase === "implementation") writeFileSync(join(dir, place.source), source(step));
 }
 
 // ループから起動されたとき (AAC_PHASE がある) だけ書き出す。

@@ -1,9 +1,7 @@
-import { readFileSync, readdirSync, writeFileSync } from "node:fs";
-import type { Dirent } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { stripTypeScriptTypes } from "node:module";
-import { join, relative, sep } from "node:path";
+import { join } from "node:path";
 import type { Violation } from "./check.ts";
-import { SOURCE_DIR } from "./generate.ts";
 import type { Ir } from "./generate.ts";
 import { literalsOf, scan } from "./scan.ts";
 
@@ -29,8 +27,9 @@ export type Mutant = {
 export type MutationReport = { strategy: string; mutants: Mutant[] };
 
 export type MutationInput = {
-  // 壊す対象 (本番コード) のディレクトリ
-  sourceDir: string;
+  // 出力先のルートと、壊す対象 (本番コード) のファイル (ルートからの相対パス)
+  root: string;
+  files: string[];
   values: DecisionValue[];
   // 現在のファイルの状態で PBT を実行し、合格したら true
   test: () => boolean;
@@ -63,15 +62,12 @@ const valueOf = (token: { kind: string; text: string }): DecisionValue | boolean
 // 自前の Strategy: 本番コードのリテラルを1つずつ変える（数値は +1、文字列は末尾に文字を足す、真偽値は反転）
 export const builtinMutation: MutationStrategy = {
   name: "builtin",
-  run({ sourceDir, values, test }) {
+  run({ root, files, values, test }) {
     const targets = new Set(values);
     const mutants: Mutant[] = [];
-    const files = (readdirSync(sourceDir, { recursive: true, withFileTypes: true }) as Dirent[])
-      .filter((entry) => entry.isFile() && entry.name.endsWith(".ts"))
-      .map((entry) => join(entry.parentPath, entry.name))
-      .sort();
 
-    for (const path of files) {
+    for (const file of files.filter((name) => name.endsWith(".ts")).sort()) {
+      const path = join(root, file);
       const source = readFileSync(path, "utf8");
       for (const token of runtimeLiterals(source)) {
         const value = valueOf(token);
@@ -89,7 +85,7 @@ export const builtinMutation: MutationStrategy = {
           writeFileSync(path, source);
         }
         mutants.push({
-          file: relative(join(sourceDir, ".."), path).split(sep).join("/"),
+          file,
           line: source.slice(0, token.start).split("\n").length,
           original,
           mutated,
@@ -116,6 +112,8 @@ export function judge(
   values: DecisionValue[],
   adapterSource: string,
   adapterFile = "adapter",
+  // 本番コードの置き場所の呼び方（メッセージ用）
+  sources = "src/",
 ): Violation[] {
   const violations: Violation[] = [];
   const adapterNumbers = new Set(
@@ -135,14 +133,14 @@ export function judge(
         violations.push({
           file: sites[0].file,
           rule: "mutation-survived",
-          message: `Changing ${sites[0].original} (${where}) does not make the tests fail, so this value is not actually decided by production code. Business decisions must be made in ${SOURCE_DIR}/, not in the adapter, and production code must not contain dead logic.`,
+          message: `Changing ${sites[0].original} (${where}) does not make the tests fail, so this value is not actually decided by production code. Business decisions must be made in ${sources}, not in the adapter, and production code must not contain dead logic.`,
         });
       }
     } else if (typeof value === "number" && adapterNumbers.has(value)) {
       violations.push({
         file: adapterFile,
         rule: "decision-in-adapter",
-        message: `The decision value ${value} appears in the adapter but not in production code. Business decisions must be made in ${SOURCE_DIR}/.`,
+        message: `The decision value ${value} appears in the adapter but not in production code. Business decisions must be made in ${sources}.`,
       });
     }
   }
@@ -151,9 +149,9 @@ export function judge(
   // 一般的な変異が1つでも検出されることだけを求める
   if (!located && !report.mutants.some((mutant) => mutant.killed)) {
     violations.push({
-      file: SOURCE_DIR,
+      file: sources,
       rule: "mutation-ineffective",
-      message: `No change to production code makes the tests fail, so the tested behaviour does not come from ${SOURCE_DIR}/.`,
+      message: `No change to production code makes the tests fail, so the tested behaviour does not come from ${sources}.`,
     });
   }
   return violations;
