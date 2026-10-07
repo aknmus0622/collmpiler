@@ -57,7 +57,7 @@
           }
         },
         "The check was rejected and attempts remain in this phase": {
-          "does": "The attempt number goes up by one. A design session is started with the new attempt number.",
+          "does": "The attempt number goes up by one. A session of the same phase is started with the new attempt number.",
           "effects": [
             {
               "name": "StartSession",
@@ -72,7 +72,6 @@
               }
             }
           ],
-          "goTo": "DESIGN",
           "set": {
             "attempt": {
               "$ref": "calculation:nextAttempt"
@@ -107,7 +106,6 @@
           }
         },
         "otherwise": {
-          "does": "Nothing.",
           "effects": [],
           "goTo": "FAILED"
         }
@@ -121,12 +119,11 @@
       "onlyIf": [],
       "when": {
         "The check passed": {
-          "does": "Nothing.",
           "effects": [],
           "goTo": "DONE"
         },
         "The check was rejected and attempts remain in this phase": {
-          "does": "The attempt number goes up by one. An implementation session is started with the new attempt number.",
+          "does": "The attempt number goes up by one. A session of the same phase is started with the new attempt number.",
           "effects": [
             {
               "name": "StartSession",
@@ -141,7 +138,6 @@
               }
             }
           ],
-          "goTo": "IMPLEMENTATION",
           "set": {
             "attempt": {
               "$ref": "calculation:nextAttempt"
@@ -176,13 +172,13 @@
           }
         },
         "otherwise": {
-          "does": "Nothing.",
           "effects": [],
           "goTo": "FAILED"
         }
       }
     },
     {
+      "description": "The pipeline remembers the two limits and whether the plan is incremental, and that this is round 1, attempt 1. Then a session of the plan's phase is started; where the plan has no phase, the current code is graded instead.",
       "from": [
         "IDLE"
       ],
@@ -190,7 +186,6 @@
       "onlyIf": [],
       "when": {
         "There is no production code yet": {
-          "does": "The pipeline remembers the two limits and whether the plan is incremental, and that this is round 1, attempt 1. A session of the plan's phase is started.",
           "effects": [
             {
               "name": "StartSession",
@@ -219,7 +214,6 @@
           }
         },
         "There is production code, and the boundary differs from the previous run": {
-          "does": "The pipeline remembers the two limits and whether the plan is incremental, and that this is round 1, attempt 1. A session of the plan's phase is started.",
           "effects": [
             {
               "name": "StartSession",
@@ -248,7 +242,6 @@
           }
         },
         "There is production code, the boundary is unchanged, and there is no adapter": {
-          "does": "The pipeline remembers the two limits and whether the plan is incremental, and that this is round 1, attempt 1. A session of the plan's phase is started.",
           "effects": [
             {
               "name": "StartSession",
@@ -277,7 +270,6 @@
           }
         },
         "otherwise": {
-          "does": "The pipeline remembers the two limits and whether the plan is incremental, and that this is round 1, attempt 1. The current code is graded.",
           "effects": [
             {
               "name": "GradeCurrentCode",
@@ -347,7 +339,7 @@
           }
         },
         "The check was rejected and attempts remain in this phase": {
-          "does": "The attempt number goes up by one. A wiring session is started with the new attempt number.",
+          "does": "The attempt number goes up by one. A session of the same phase is started with the new attempt number.",
           "effects": [
             {
               "name": "StartSession",
@@ -362,7 +354,6 @@
               }
             }
           ],
-          "goTo": "WIRING",
           "set": {
             "attempt": {
               "$ref": "calculation:nextAttempt"
@@ -397,7 +388,6 @@
           }
         },
         "otherwise": {
-          "does": "Nothing.",
           "effects": [],
           "goTo": "FAILED"
         }
@@ -426,7 +416,10 @@
       }
     }
   },
-  "irVersion": 3,
+  "descriptions": {
+    "component": "Reconciles one component with its specification in up to three phases (design, wiring, implementation). Each phase is an agent session followed by a check. A rejected check repeats the phase; a phase that runs out of attempts restarts the pipeline from design, until the rounds run out."
+  },
+  "irVersion": 4,
   "model": {
     "calculations": {
       "nextAttempt": {

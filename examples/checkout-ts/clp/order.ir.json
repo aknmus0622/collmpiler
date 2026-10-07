@@ -1,6 +1,7 @@
 {
   "behaviors": [
     {
+      "description": "A pending or paid order can be cancelled. If the order had been paid, a refund is issued.",
       "from": [
         "PENDING",
         "PAID"
@@ -9,7 +10,6 @@
       "onlyIf": [],
       "when": {
         "otherwise": {
-          "does": "If the order had been paid, a refund is issued.",
           "effects": [
             {
               "name": "Refund",
@@ -69,8 +69,7 @@
               "name": "NotifyPaymentFailure",
               "payload": {}
             }
-          ],
-          "goTo": "PENDING"
+          ]
         }
       }
     },
@@ -109,7 +108,7 @@
       "onlyIf": [],
       "when": {
         "otherwise": {
-          "does": "A shipping notice is sent, with priority as the shipping decision says.",
+          "does": "The order becomes shipped. A shipping notice is sent, with priority as the shipping decision says.",
           "effects": [
             {
               "name": "SendShippingNotice",
@@ -156,7 +155,10 @@
       }
     }
   },
-  "irVersion": 3,
+  "descriptions": {
+    "component": "An order: placed by a customer, paid through an external payment module, then shipped or cancelled."
+  },
+  "irVersion": 4,
   "model": {
     "calculations": {
       "amountCharged": {
