@@ -403,7 +403,7 @@ actual:   state CANCELLED, effects []
   commands, queries and effects)
 - Shorthand for entries that are only a type (`isMonthEnd: "boolean"` instead of `output("boolean")`)
 - Using the answer of one query as the input of the next
-- Describing the framework itself in the framework (`examples/co-llm-piler`): so far its pipeline and one of
+- Describing the framework itself in the framework (`examples/co-llm-piler`): so far its pipeline and two of
   its checks
 - Stopping after the design step so a person can review the skeleton before it is wired and implemented
 - Applying a spec to existing production code (legacy code): wiring and verification only, with mismatches
