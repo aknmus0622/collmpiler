@@ -53,8 +53,8 @@ export const Campaign = decisionTable({
 export const Order = component(description("An order: placed by a customer, paid, then shipped or cancelled. ..."));
 ```
 
-From there, write as structure only what you want to pin down. Every part is either prose (`description`) or
-structure, and a command is composed from parts:
+From there, write as structure only what you want to pin down. Every entry — a data field, a query, an
+effect, a calculation, a command — is prose (`description`), parts, or both merged by `compose`:
 
 ```ts
 const Rank = ["Gold", "Silver", "Bronze"] as const;
@@ -64,20 +64,21 @@ export const Order = component({
   description: "An order: placed by a customer, paid through an external payment module, then shipped or cancelled.",
   states: ["DRAFT", "PENDING", "PAID", "SHIPPED", "CANCELLED"],
   init: "DRAFT",
-  data: { rank: Rank, price: Yen },                       // what the order remembers
+  data: { rank: typed(Rank), price: typed(Yen) },         // what the order remembers
   queries: {                                              // what it asks its dependencies
-    isMonthEnd: "boolean",
-    paymentModuleActive: "boolean",
-    paymentResult: ["succeeded", "failed"],
+    isMonthEnd: compose(description("Whether today is the last day of the month."), output("boolean")),
+    paymentModuleActive: output("boolean"),
+    paymentResult: output(["succeeded", "failed"]),
   },
   effects: {                                              // what it does to its dependencies
-    SendReceipt: { discountPercent: "integer", amount: "integer" },
-    IssueCoupon: { type: ["Premium", "Standard"] },
+    SendReceipt: input({ discountPercent: "integer", amount: "integer" }),
+    IssueCoupon: input({ type: ["Premium", "Standard"] }),
+    Refund: description("What the customer paid is returned."),   // prose only
     // ...
   },
   decisions: { campaign: Campaign, shipping: Shipping },
   calculations: {
-    amountCharged: { is: "price × (100 − discount percent) ÷ 100, rounded down to a whole yen", type: "integer" },
+    amountCharged: compose(description("price × (100 − discount percent) ÷ 100, rounded down to a whole yen"), output("integer")),
   },
   invariants: ["Every order past the draft state has a member rank and a price"],
 
@@ -108,6 +109,23 @@ export const Order = component({
 ```
 
 Parts are values, so a fragment shared by several commands is written once (`const rejected = compose(when(...), otherwise(...))`).
+
+A query can take an input, when it is a question *about something*. The command then says what it asks about,
+and names the answer; the implementation is tested against that, and fails if it asks about anything else:
+
+```ts
+queries: {
+  stateDeclared: compose(input({ name: "string" }), output("boolean")),
+},
+commands: {
+  GoTo: compose(
+    input({ state: "string" }),
+    asks({ declared: { stateDeclared: { name: ref.input("state") } } }),   // read as `state.declared`
+    when("The named state is not declared", does("An unknown-state diagnostic is reported.")),
+    otherwise(),
+  ),
+},
+```
 
 ### 2. Have an LLM interpret it
 
@@ -383,7 +401,8 @@ actual:   state CANCELLED, effects []
   disagreements between two interpretations have been looked at (today they are only reported)
 - Comparing the vocabulary of two interpretations (today the second session is given the first one's states,
   commands, queries and effects)
-- Queries that take arguments, so that what a component asked about is verified too
+- Shorthand for entries that are only a type (`isMonthEnd: "boolean"` instead of `output("boolean")`)
+- Using the answer of one query as the input of the next
 - Describing the framework itself in the framework (`examples/co-llm-piler`): so far its pipeline and one of
   its checks
 - Stopping after the design step so a person can review the skeleton before it is wired and implemented
