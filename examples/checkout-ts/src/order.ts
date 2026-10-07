@@ -1,128 +1,137 @@
-import type { OrderDependencies } from "./dependencies.ts";
-import {
-  amountCharged,
-  cancellationRequiresRefund,
-  isPriorityShipment,
-  selectCampaignOffer,
-} from "./rules.ts";
+import { OrderActionNotAllowedError } from "./errors.ts";
+import type { OrderAction } from "./errors.ts";
+import { amountCharged, campaignTermsFor, isMonthEnd, shipsWithPriority } from "./policies.ts";
+import type { OrderDependencies } from "./ports.ts";
 import type { CustomerRank, OrderStatus } from "./types.ts";
 
 /**
- * One customer order, from draft to shipment or cancellation. This is the component described by the
- * specification: its four actions are the methods {@link Order.placeOrder}, {@link Order.checkout},
- * {@link Order.ship} and {@link Order.cancel}; its state is read through {@link Order.status}.
+ * One customer order, from draft to shipment or cancellation. This is the component the
+ * specification describes: each of its actions is one method here, its state is read with
+ * {@link Order.status}, and its queries and commands go through the dependencies given to the
+ * constructor (see `ports.ts`).
  *
- * A newly constructed order is in the specification's initial state and remembers no price or rank.
+ * | Specification action | Method                           |
+ * | -------------------- | -------------------------------- |
+ * | `PlaceOrder`         | `place(customerRank, listPrice)` |
+ * | `Checkout`           | `checkout()`                     |
+ * | `Ship`               | `ship()`                         |
+ * | `Cancel`             | `cancel()`                       |
  *
- * All actions are synchronous: when a method returns, the status has been updated and every call to a
- * dependency belonging to that action has been made, in the order the specification lists its commands.
- * An action invoked in a status where the specification does not allow it, or while one of its
- * preconditions does not hold, throws an `Error` and leaves the order untouched.
+ * All methods are synchronous. Within one action the dependencies are called in the order in
+ * which the specification lists that transition's commands. An action that the specification
+ * does not allow right now throws {@link OrderActionNotAllowedError} and changes nothing.
+ *
+ * A new order starts in the specification's initial state.
  */
 export class Order {
-  private readonly dependencies: OrderDependencies;
+  private readonly deps: OrderDependencies;
+  /** Specification state. */
   private currentStatus: OrderStatus = "DRAFT";
-  private placedPrice: number | undefined;
-  private placedRank: CustomerRank | undefined;
+  /** Specification data `rank`; absent until the order is placed. */
+  private rank: CustomerRank | undefined;
+  /** Specification data `price`, in whole yen; absent until the order is placed. */
+  private price: number | undefined;
 
   /**
-   * @param dependencies the calendar, payment module, customer notifier and coupon issuer this order
-   *   works with. They are consulted afresh on every action.
+   * @param deps the calendar, payment gateway, notifier and coupon issuer this order uses for
+   *   its whole life. They are only stored here; nothing is called until an action runs.
    */
-  constructor(dependencies: OrderDependencies) {
-    this.dependencies = dependencies;
+  constructor(deps: OrderDependencies) {
+    this.deps = deps;
   }
 
-  /** The current state of the order; see {@link OrderStatus} for the meaning of each value. */
-  get status(): OrderStatus {
+  /**
+   * The current state of the order, as one of the specification's state names.
+   * Calls no dependency.
+   */
+  status(): OrderStatus {
     return this.currentStatus;
   }
 
   /**
-   * The list price the order was placed with, in whole yen, or `undefined` while nothing has been
-   * placed yet. Corresponds to the remembered `price` field.
-   */
-  get price(): number | undefined {
-    return this.placedPrice;
-  }
-
-  /**
-   * The membership rank the order was placed with, or `undefined` while nothing has been placed yet.
-   * Corresponds to the remembered `rank` field.
-   */
-  get rank(): CustomerRank | undefined {
-    return this.placedRank;
-  }
-
-  /**
-   * Performs the specification's `PlaceOrder` action: records what is being ordered and by whom.
+   * Specification action `PlaceOrder`.
    *
-   * @param listPrice the price of the order in whole yen (the action's `listPrice` input).
-   * @param customerRank the customer's membership rank (the action's `customerRank` input).
+   * Tells {@link CustomerNotifier.sendOrderConfirmation}.
+   *
+   * @param customerRank the action's `customerRank` input.
+   * @param listPrice the action's `listPrice` input, in whole yen.
    */
-  placeOrder(listPrice: number, customerRank: CustomerRank): void {
-    this.requireStatus("place", "DRAFT");
-    this.placedPrice = listPrice;
-    this.placedRank = customerRank;
+  place(customerRank: CustomerRank, listPrice: number): void {
+    if (this.currentStatus !== "DRAFT") {
+      throw this.notAllowed("place");
+    }
+    this.rank = customerRank;
+    this.price = listPrice;
     this.currentStatus = "PENDING";
-    this.dependencies.notifier.sendOrderConfirmation();
+    this.deps.notifier.sendOrderConfirmation();
   }
 
   /**
-   * Performs the specification's `Checkout` action (no input): tries to collect the payment through
-   * the payment module and informs the customer of the result. Consults the calendar and the payment
-   * module while it runs.
+   * Specification action `Checkout` (no input).
+   *
+   * Asks {@link PaymentGateway.isActive} first, then {@link BusinessCalendar.today}, then
+   * {@link PaymentGateway.charge} for the outcome of the payment. Depending on that outcome it
+   * tells {@link CustomerNotifier.sendReceipt} and possibly {@link CouponIssuer.issue}, or
+   * {@link CustomerNotifier.notifyPaymentFailure}.
    */
   checkout(): void {
-    this.requireStatus("check out", "PENDING");
-    const { calendar, payments, notifier, coupons } = this.dependencies;
-    if (!payments.isActive()) {
-      throw new Error("Cannot check out the order: the payment module is not active");
+    const active = this.deps.payments.isActive();
+    if (this.currentStatus !== "PENDING" || !active) {
+      throw this.notAllowed("checkout");
     }
-    const { price, rank } = this.placedDetails();
-    const offer = selectCampaignOffer(rank, calendar.today());
-    const amount = amountCharged(price, offer.discountPercent);
-    if (payments.charge(amount) !== "succeeded") {
-      notifier.notifyPaymentFailure();
+    const { rank, price } = this.placed("checkout");
+    const terms = campaignTermsFor(rank, isMonthEnd(this.deps.calendar.today()));
+    const amount = amountCharged(price, terms.discountPercent);
+    if (this.deps.payments.charge(amount) !== "succeeded") {
+      this.deps.notifier.notifyPaymentFailure();
       return;
     }
     this.currentStatus = "PAID";
-    notifier.sendReceipt({ amount, discountPercent: offer.discountPercent });
-    for (const coupon of offer.coupons) {
-      coupons.issueCoupon(coupon);
+    this.deps.notifier.sendReceipt({ amount, discountPercent: terms.discountPercent });
+    if (terms.grantsCoupon) {
+      this.deps.coupons.issue(terms.coupon);
     }
   }
 
-  /** Performs the specification's `Ship` action (no input): sends the order to the customer. */
+  /**
+   * Specification action `Ship` (no input).
+   *
+   * Tells {@link CustomerNotifier.sendShippingNotice}.
+   */
   ship(): void {
-    this.requireStatus("ship", "PAID");
-    const { price, rank } = this.placedDetails();
+    if (this.currentStatus !== "PAID") {
+      throw this.notAllowed("ship");
+    }
+    const { rank, price } = this.placed("ship");
     this.currentStatus = "SHIPPED";
-    this.dependencies.notifier.sendShippingNotice({ priority: isPriorityShipment(rank, price) });
+    this.deps.notifier.sendShippingNotice(shipsWithPriority(rank, price));
   }
 
-  /** Performs the specification's `Cancel` action (no input): calls the order off. */
+  /**
+   * Specification action `Cancel` (no input).
+   *
+   * May tell {@link PaymentGateway.refund}.
+   */
   cancel(): void {
-    this.requireStatus("cancel", "PENDING", "PAID");
-    const refund = cancellationRequiresRefund(this.currentStatus);
+    if (this.currentStatus !== "PENDING" && this.currentStatus !== "PAID") {
+      throw this.notAllowed("cancel");
+    }
+    const wasPaid = this.currentStatus === "PAID";
     this.currentStatus = "CANCELLED";
-    if (refund) {
-      this.dependencies.payments.refund();
+    if (wasPaid) {
+      this.deps.payments.refund();
     }
   }
 
-  /** Throws unless the order is in one of the statuses in which the action is allowed. */
-  private requireStatus(action: string, ...allowed: OrderStatus[]): void {
-    if (!allowed.includes(this.currentStatus)) {
-      throw new Error(`Cannot ${action} the order while it is ${this.currentStatus}`);
-    }
+  private notAllowed(action: OrderAction): OrderActionNotAllowedError {
+    return new OrderActionNotAllowedError(action, this.currentStatus);
   }
 
-  /** The price and rank recorded when the order was placed; every order past the draft has both. */
-  private placedDetails(): { price: number; rank: CustomerRank } {
-    if (this.placedPrice === undefined || this.placedRank === undefined) {
-      throw new Error("The order has not been placed");
+  /** The rank and price remembered since the order was placed. */
+  private placed(action: OrderAction): { rank: CustomerRank; price: number } {
+    if (this.rank === undefined || this.price === undefined) {
+      throw this.notAllowed(action);
     }
-    return { price: this.placedPrice, rank: this.placedRank };
+    return { rank: this.rank, price: this.price };
   }
 }

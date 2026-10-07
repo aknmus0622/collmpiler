@@ -8,13 +8,19 @@
       "name": "Cancel",
       "preconditions": [],
       "transitions": {
-        "default": {
+        "otherwise": {
+          "description": "If the order had been paid, a refund is issued.",
           "emittedCommands": [
             {
-              "$spread": "decision:CancelRules.effects"
+              "action": "Refund",
+              "payload": {},
+              "when": {
+                "$was": [
+                  "PAID"
+                ]
+              }
             }
           ],
-          "event": "Order cancelled",
           "nextState": "CANCELLED"
         }
       }
@@ -29,38 +35,41 @@
       ],
       "transitions": {
         "The payment succeeded": {
+          "description": "A receipt is sent with the campaign's discount percent and the amount charged. Then a coupon is issued if the campaign grants one.",
           "emittedCommands": [
             {
               "action": "SendReceipt",
               "payload": {
                 "amount": {
-                  "$ref": "formula:Amount charged: price × (100 − discount percent) ÷ 100, rounded down to a whole yen"
+                  "$ref": "formula:amountCharged"
                 },
                 "discountPercent": {
-                  "$ref": "decision:CampaignRules.discountPercent"
+                  "$ref": "decision:campaign.discountPercent"
                 }
-              },
-              "payloadSchema": {
-                "amount": "integer",
-                "discountPercent": "number"
               }
             },
             {
-              "$spread": "decision:CampaignRules.effects"
+              "action": "IssueCoupon",
+              "payload": {
+                "type": {
+                  "$ref": "decision:campaign.coupon"
+                }
+              },
+              "when": {
+                "$ref": "decision:campaign.grantsCoupon"
+              }
             }
           ],
-          "event": "Payment completed",
           "nextState": "PAID"
         },
-        "default": {
+        "otherwise": {
+          "description": "The customer is notified of the payment failure.",
           "emittedCommands": [
             {
               "action": "NotifyPaymentFailure",
-              "payload": {},
-              "payloadSchema": {}
+              "payload": {}
             }
           ],
-          "event": "Payment failed",
           "nextState": "PENDING"
         }
       }
@@ -72,15 +81,14 @@
       "name": "PlaceOrder",
       "preconditions": [],
       "transitions": {
-        "default": {
+        "otherwise": {
+          "description": "The order remembers the customer's rank and the list price. An order confirmation is sent.",
           "emittedCommands": [
             {
               "action": "SendOrderConfirmation",
-              "payload": {},
-              "payloadSchema": {}
+              "payload": {}
             }
           ],
-          "event": "Order placed",
           "nextState": "PENDING",
           "set": {
             "price": {
@@ -100,80 +108,55 @@
       "name": "Ship",
       "preconditions": [],
       "transitions": {
-        "default": {
+        "otherwise": {
+          "description": "A shipping notice is sent, with priority as the shipping decision says.",
           "emittedCommands": [
             {
               "action": "SendShippingNotice",
               "payload": {
                 "priority": {
-                  "$ref": "decision:ShippingRules.priority"
+                  "$ref": "decision:shipping.priority"
                 }
-              },
-              "payloadSchema": {
-                "priority": "boolean"
               }
             }
           ],
-          "event": "Order shipped",
           "nextState": "SHIPPED"
         }
       }
     }
   ],
   "decisions": {
-    "CampaignRules": {
-      "bound": true,
+    "campaign": {
       "rows": {
         "The customer is a Gold member and it is month-end": {
+          "coupon": "Premium",
           "discountPercent": 20,
-          "effects": [
-            {
-              "action": "IssueCoupon",
-              "payload": {
-                "type": "Premium"
-              }
-            }
-          ]
+          "grantsCoupon": true
         },
         "The customer is a Silver member": {
+          "coupon": "Standard",
           "discountPercent": 5,
-          "effects": []
+          "grantsCoupon": false
         },
-        "default": {
+        "otherwise": {
+          "coupon": "Standard",
           "discountPercent": 0,
-          "effects": []
+          "grantsCoupon": false
         }
       }
     },
-    "CancelRules": {
-      "bound": true,
-      "rows": {
-        "The order has been paid": {
-          "effects": [
-            {
-              "action": "Refund",
-              "payload": {}
-            }
-          ]
-        },
-        "default": {
-          "effects": []
-        }
-      }
-    },
-    "ShippingRules": {
-      "bound": true,
+    "shipping": {
       "rows": {
         "The customer is a Gold member, or the order is 10,000 yen or more": {
           "priority": true
         },
-        "default": {
+        "otherwise": {
           "priority": false
         }
       }
     }
   },
-  "irVersion": 1,
+  "irVersion": 2,
   "model": {
     "actions": {
       "Cancel": {},
@@ -229,7 +212,10 @@
       ]
     },
     "formulas": {
-      "Amount charged: price × (100 − discount percent) ÷ 100, rounded down to a whole yen": "integer"
+      "amountCharged": {
+        "is": "price × (100 − discount percent) ÷ 100, rounded down to a whole yen",
+        "type": "integer"
+      }
     },
     "initial": "DRAFT",
     "invariants": [
