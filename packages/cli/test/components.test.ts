@@ -45,10 +45,10 @@ export const LampInterpretation = interpretation(Lamp, {
 `;
 
 // 例の仕様 (注文) に、ランプを足した仕様。edit で注文の側を書き換えられる
-function specs(edit: (name: string, text: string) => string = (_name, text) => text) {
+function specs(edit: (name: string, text: string) => string = (_name, text) => text, lamp = LAMP) {
   const dir = mkdtempSync(join(tmpRoot, "s-"));
   for (const name of readdirSync(specsDir)) writeFileSync(join(dir, name), unstamped(edit(name, readFileSync(join(specsDir, name), "utf8"))));
-  writeFileSync(join(dir, "lamp.component.ts"), LAMP);
+  writeFileSync(join(dir, "lamp.component.ts"), lamp);
   return dir;
 }
 
@@ -90,10 +90,12 @@ export const adapter: TargetSystemAdapter = {
 type Seen = { component: string; phase: Phase; files: Record<string, string> };
 
 // LLM の代役。どのコンポーネントの依頼かを、依頼文と渡された契約から見分けて書き分ける。
-// order: 注文の実装の段階で、試行ごとに書くもの。breakLamp: 注文の実装のついでに、ランプを壊す試行の番号
-function scripted(options: { order?: Step[]; breakLamp?: number[] } = {}) {
+// order: 注文の実装の段階で、試行ごとに書くもの。breakLamp: 注文の実装のついでに、ランプを壊す試行の番号。
+// silentLamp: ランプが通知しない実装を書く。touchOrder: ランプの実装のついでに、注文のコードを書き換える試行の番号
+function scripted(options: { order?: Step[]; breakLamp?: number[]; silentLamp?: boolean; touchOrder?: number[] } = {}) {
   const seen: Seen[] = [];
   let orderImplementations = 0;
+  let lampImplementations = 0;
   const strategy: ImplementationStrategy = {
     name: "scripted",
     run({ dir, phase: rawPhase }: Assignment) {
@@ -111,7 +113,11 @@ function scripted(options: { order?: Step[]; breakLamp?: number[] } = {}) {
       if (component === "lamp") {
         mkdirSync(join(dir, "src"), { recursive: true });
         if (phase === "wiring") writeFileSync(join(dir, "clp/lamp.adapter.ts"), LAMP_ADAPTER);
-        else writeFileSync(join(dir, "src/lamp.ts"), lampSource(phase === "implementation"));
+        else writeFileSync(join(dir, "src/lamp.ts"), lampSource(phase === "implementation", !options.silentLamp));
+        if (phase === "implementation" && options.touchOrder?.includes(++lampImplementations)) {
+          const file = join(dir, "src/order-service.ts");
+          writeFileSync(file, readFileSync(file, "utf8").replace("export class", "// tidied up while working on the lamp\nexport class"));
+        }
         return;
       }
       if (phase !== "implementation") return write(phase, "correct", dir);
@@ -180,6 +186,43 @@ test("複数: あるコンポーネントのための変更が、ほかのコン
   assert.ok(feedback?.kind === "regression" && feedback.component === "lamp");
   assert.deepEqual(feedback.result?.status === "fail" && feedback.result.expected, { state: "ON", effects: [{ name: "Notify", payload: { on: true } }] });
   assert.match(seen[1].files["clp/REQUEST.md"], /it broke another component of the same system: `lamp`/);
+});
+
+test("範囲: ほかのコンポーネントだけが使っているコードを書き換えたら、元に戻して差し戻す。ミューテーションは、実行した範囲だけ", async () => {
+  const out = workdir();
+  // ランプが通知しない仕様だった版から始める
+  const silent = LAMP.replace("{ effects: [{ Notify: { on: false } }] }", "{}").replace("{ effects: [{ Notify: { on: true } }] }", "{}");
+  assert.notEqual(silent, LAMP);
+  const first = await implement({ specs: specs(undefined, silent), out, strategy: scripted({ silentLamp: true }).strategy, maxAttempts: 1 });
+  assert.equal(first.status, "pass");
+  const order = readFileSync(join(out, "src/order-service.ts"), "utf8");
+
+  // ランプが通知する仕様に変える。ランプの実装を直すついでに、1回目は注文のコードにも手を入れてしまう
+  const { strategy, seen } = scripted({ touchOrder: [1] });
+  const result = await implement({ specs: specs(), out, strategy, maxAttempts: 2 });
+  assert.equal(result.status, "pass");
+  assert.deepEqual(result.attempts.map((a) => `${a.component}:${a.phase}:${a.attempt}:${a.feedback?.kind ?? "ok"}`), [
+    "lamp:implementation:0:pbt",
+    "lamp:implementation:1:check",
+    "lamp:implementation:2:ok",
+    "order:implementation:0:ok",
+  ]);
+  const feedback = result.attempts[1].feedback;
+  assert.ok(feedback?.kind === "check");
+  assert.deepEqual(feedback.violations.map((v) => [v.file, v.rule]), [["src/order-service.ts", "out-of-scope"]]);
+  // 次の試行には、元に戻した注文のコードが渡り、理由が伝わる
+  assert.equal(seen[1].files["src/order-service.ts"], order);
+  assert.match(seen[1].files["clp/REQUEST.md"], /the tests of this component never execute it, and another component uses it/);
+  assert.equal(readFileSync(join(out, "src/order-service.ts"), "utf8"), order);
+
+  // ミューテーション: ランプの検証では、ランプが実行したコードだけを壊す（注文のコードは対象にならない）。
+  // 範囲を絞れているので、「1つも検出されなければ不合格」の基準も使える
+  const lamp = result.attempts[2].mutation!;
+  assert.ok(lamp.mutants > 0 && lamp.mutants < 5, `lamp mutants: ${lamp.mutants}`);
+  assert.equal(lamp.killed, lamp.mutants);
+  const orderRun = result.attempts[3].mutation!;
+  assert.ok(orderRun.mutants > lamp.mutants);
+  assert.ok(orderRun.survivors.every((survivor) => survivor.file === "src/order-service.ts"));
 });
 
 test("複数: 1つだけを選んで一致させられる。読み込みは名前で選ぶ", async () => {

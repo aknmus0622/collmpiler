@@ -283,6 +283,6 @@ export function renderRequest(
   const system =
     phase === "wiring" || others.length === 0
       ? ""
-      : `\n## Other components of the same system\n\nThe production code is shared with other components. Their specifications are here, in the same format:\n\n${others.map((path) => `- \`${path}\``).join("\n")}\n\nYour task is the specification named at the top. The code must keep satisfying the others too: their tests are run again after yours pass. Do not change exported names or signatures that already exist unless your specification requires it. Reuse what fits; do not edit those files.\n`;
+      : `\n## Other components of the same system\n\nThe production code is shared with other components. Their specifications are here, in the same format:\n\n${others.map((path) => `- \`${path}\``).join("\n")}\n\nYour task is the specification named at the top. The code must keep satisfying the others too: their tests are run again after yours pass. Do not change exported names or signatures that already exist unless your specification requires it. Reuse what fits; do not edit those files.\n\nYou may change code that your component uses, including code it shares with the others. Code that only other components use is not yours to change: such a change is undone and the attempt is rejected. New files are always fine.\n`;
   return `# ${TITLES[phase]} (attempt ${attempt})\n\n${body}${system}${renderAssets(assets)}${previous}`;
 }

@@ -16,6 +16,7 @@ import { ASSETS_DIR, renderRequest } from "./request.ts";
 import type { Phase } from "./request.ts";
 import type { PbtResult } from "./runtime.ts";
 import type { StaticCheckStrategy } from "./static-check.ts";
+import type { Usage } from "./target.ts";
 import type { Target } from "./target.ts";
 
 // Strategy の前後に置くゲート。エージェントの隔離はここで成立させる。
@@ -56,6 +57,9 @@ export type GateContext = {
   incremental: boolean;
   // 設計の段階を始める前の本番コードの文面。そこにすでにあった仕様の文は、設計の段階が持ち込んだものではない
   baseline: string;
+  // このコンポーネントの作業を始める前の本番コード（ファイル → 内容）。
+  // ほかのコンポーネントだけが使っているコードを書き換えていないかを確かめるのに使う
+  before: Record<string, string>;
   // 同じ本番コードを共有する、ほかのコンポーネント。
   // 設計と実装の段階には、その IR も渡す（本番コードは、すべての仕様を満たし続けなければならない）。
   // 実装の段階の採点では、配線済みのものの検証も回す（回帰）
@@ -172,10 +176,11 @@ function settledOthers(ctx: GateContext) {
 }
 
 // PBT を実行する。どう実行するかは対象言語が決める
-function runVerify(ctx: GateContext, unit: { ws: Workspace; seed: number } = ctx): { result?: PbtResult; crash?: string } {
-  const { result, crash } = ctx.target.runTests({ ws: unit.ws, seed: unit.seed, runs: ctx.runs, drafts: ctx.drafts });
+// usage: true なら、実行した範囲も調べる（対象言語が調べられるとき）
+function runVerify(ctx: GateContext, unit: { ws: Workspace; seed: number } = ctx, usage = false): { result?: PbtResult; crash?: string; usage?: Usage } {
+  const run = ctx.target.runTests({ ws: unit.ws, seed: unit.seed, runs: ctx.runs, drafts: ctx.drafts, usage });
   // 出力に含まれるリポジトリのパスを、差し戻しに載せない
-  return result ? { result } : { crash: scrub(ctx, crash ?? "") };
+  return run.result ? { result: run.result, ...(run.usage ? { usage: run.usage } : {}) } : { crash: scrub(ctx, run.crash ?? "") };
 }
 
 // 仕様に自然言語で書かれた文（条件・コマンドの説明・計算の式・不変条件）が、骨組みにそのまま書き写されていないか。
@@ -320,7 +325,8 @@ async function judgeOutput(
   }
 
   // PBT (別プロセス)
-  const { result, crash } = runVerify(ctx);
+  // 実装の段階では、実行した範囲も調べる（書いてよい範囲と、ミューテーションの範囲に使う）
+  const { result, crash, usage } = runVerify(ctx, ctx, phase === "implementation");
   if (!result) return { ...ran, feedback: { kind: "crash", output: crash ?? "" } };
   // 仕様やハーネス側の問題は実装の誤りではないので、エージェントに差し戻さずに止める
   if (result.status === "error") throw new Error(`PBT を実行できませんでした: ${result.message}`);
@@ -356,14 +362,43 @@ async function judgeOutput(
   if (result.status !== "pass") return { ...ran, feedback: { kind: "pbt", result } };
 
   // 回帰: 同じ本番コードを使う、ほかのコンポーネントの検証が通り続けていること
+  const usedByOthers: Usage[] = [];
   for (const other of settledOthers(ctx)) {
     // 採点基準は生成し直す（出力先にあるテストの入口が、別の場所の仕様を指していることがあるため）
     writeFileSync(join(other.ws.root, other.ws.paths.contract), target.generate.contract(other.ir));
     writeFileSync(join(other.ws.root, other.ws.paths.verify), target.generate.verify(other.ir, other.ws, ctx.specsDir));
-    const regression = runVerify(ctx, other);
+    const { usage: used, ...regression } = runVerify(ctx, other, true);
     if (regression.result?.status === "error") throw new Error(`PBT を実行できませんでした (${other.name}): ${regression.result.message}`);
     if (regression.result?.status !== "pass") {
       return { ...ran, feedback: { kind: "regression", component: other.name, ...regression } };
+    }
+    if (used) usedByOthers.push(used);
+  }
+
+  // 書いてよい範囲: ほかのコンポーネントだけが使っているコードは、書き換えられない。
+  // ファイルとコンポーネントは多対多で、だれのコードかは「検証が実行するか」で決まる。
+  //   このコンポーネントも使っている … 共同の持ち主なので、変えてよい（ほかは、上の回帰の確認が守る）
+  //   だれも使っていない、振る舞いを持たない … 変えてよい
+  //   ほかのコンポーネントだけが使っている … このコンポーネントのために変える理由が無い。元に戻して差し戻す
+  if (usage) {
+    const read = (rel: string) => (existsSync(join(ws.root, rel)) ? readFileSync(join(ws.root, rel), "utf8") : undefined);
+    const foreign = Object.keys(ctx.before).filter(
+      (rel) => read(rel) !== ctx.before[rel] && !usage.uses(rel) && !target.inert?.(ws, rel) && usedByOthers.some((other) => other.uses(rel)),
+    );
+    if (foreign.length > 0) {
+      for (const rel of foreign) writeFileSync(join(ws.root, rel), ctx.before[rel]);
+      return {
+        ...ran,
+        feedback: {
+          kind: "check",
+          violations: foreign.map((rel) => ({
+            file: rel,
+            rule: "out-of-scope",
+            message:
+              "This file was changed, but the tests of this component never execute it, and another component uses it. A change there cannot be needed for this component. It has been restored to what it was; leave it as it is.",
+          })),
+        },
+      };
     }
   }
 
@@ -374,6 +409,18 @@ async function judgeOutput(
     root: ws.root,
     files: sourceFiles(ws),
     values,
+    // 壊す範囲（調べられない言語では、全体）:
+    //   このコンポーネントの検証が実行した所 … 対象
+    //   ほかのコンポーネントが実行した所 … 対象外（そちらのコード。壊しても、ここでは検出できなくて当然）
+    //   だれも実行していない所 … このコンポーネントが使うファイルか、だれも使わないファイルの中なら対象。
+    //     アダプターが判断を肩代わりすると、本番コードの判断は実行されなくなる。それを見逃さないため
+    ...(usage
+      ? {
+          executed: (file: string, offset: number) =>
+            usage.executed(file, offset) ||
+            (!usedByOthers.some((other) => other.executed(file, offset)) && (usage.uses(file) || !usedByOthers.some((other) => other.uses(file)))),
+        }
+      : {}),
     test: () => runVerify(ctx).result?.status === "pass",
   });
   const mutation = {
@@ -384,7 +431,7 @@ async function judgeOutput(
       .filter((mutant) => !mutant.killed)
       .map(({ file, line, original }) => ({ file, line, original })),
   };
-  const survived = judge(report, values, readFileSync(join(ws.root, ADAPTER), "utf8"), ADAPTER, label(ws.src), ctx.others.length > 0);
+  const survived = judge(report, values, readFileSync(join(ws.root, ADAPTER), "utf8"), ADAPTER, label(ws.src), ctx.others.length > 0 && !usage);
   return survived.length > 0
     ? { ...ran, feedback: { kind: "mutation", violations: survived }, mutation }
     : { ...ran, mutation };

@@ -31,6 +31,8 @@ export type MutationInput = {
   root: string;
   files: string[];
   values: DecisionValue[];
+  // 壊す範囲: その位置を対象にするか（ほかのコンポーネントのコードを除くのに使う）。省略時は、すべて
+  executed?: (file: string, offset: number) => boolean;
   // 現在のファイルの状態で PBT を実行し、合格したら true
   test: () => boolean;
 };
@@ -62,7 +64,7 @@ const valueOf = (token: { kind: string; text: string }): DecisionValue | boolean
 // 自前の Strategy: 本番コードのリテラルを1つずつ変える（数値は +1、文字列は末尾に文字を足す、真偽値は反転）
 export const builtinMutation: MutationStrategy = {
   name: "builtin",
-  run({ root, files, values, test }) {
+  run({ root, files, values, executed, test }) {
     const targets = new Set(values);
     const mutants: Mutant[] = [];
 
@@ -74,6 +76,8 @@ export const builtinMutation: MutationStrategy = {
         const isTarget = typeof value !== "boolean" && targets.has(value);
         // 文字列は決定表の値だけを壊す（それ以外の文字列は型や識別のためのものが多く、判定に使えない）
         if (token.kind === "string" && !isTarget) continue;
+        // ほかのコンポーネントのコードは、壊しても検出できなくて当然なので、対象にしない
+        if (executed && !executed(file, token.start)) continue;
         const original = source.slice(token.start, token.end);
         const mutated =
           token.kind === "number" ? `(${original}+1)` : token.kind === "word" ? String(!value) : JSON.stringify(`${value}~`);
@@ -114,7 +118,7 @@ export function judge(
   adapterFile = "adapter",
   // 本番コードの置き場所の呼び方（メッセージ用）
   sources = "src/",
-  // true なら、本番コードをほかのコンポーネントと共有している
+  // true なら、本番コードをほかのコンポーネントと共有していて、しかも実行した範囲に絞れていない
   shared = false,
 ): Violation[] {
   const violations: Violation[] = [];
@@ -149,8 +153,8 @@ export function judge(
 
   // 決定表の値が本番コードに1つも見つからない場合（別の表現で書かれている等）は、
   // 一般的な変異が1つでも検出されることだけを求める。
-  // 本番コードをほかのコンポーネントと共有しているときは、この基準は使わない: 壊した箇所の多くは
-  // ほかのコンポーネントのコードで、このコンポーネントのテストでは検出できなくて当然だからである
+  // 本番コードをほかのコンポーネントと共有していて、壊す範囲を絞れていないときは、この基準は使わない:
+  // 壊した箇所の多くはほかのコンポーネントのコードで、このコンポーネントのテストでは検出できなくて当然だからである
   if (!located && !shared && !report.mutants.some((mutant) => mutant.killed)) {
     violations.push({
       file: sources,

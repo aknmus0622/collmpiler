@@ -15,9 +15,20 @@ import type { StaticCheckStrategy } from "./static-check.ts";
 //
 // 現在の実装は TypeScript 用 (target-typescript.ts) だけ。
 
+// そのコンポーネントの検証が、本番コードのどこを実行したか。
+// ファイルとコンポーネントは多対多で、「だれのコードか」は書いた経緯ではなく、使っている事実で決める
+export type Usage = {
+  // そのファイルの振る舞い（関数の中身。関数を持たないファイルは、読み込まれたこと）を実行したか
+  uses(file: string): boolean;
+  // そのファイルの、その位置（文字のオフセット）を実行したか
+  executed(file: string, offset: number): boolean;
+};
+
 export type TestRun = {
   // テストを最後まで実行できたときの結果
   result?: PbtResult;
+  // 実行した範囲（usage: true で実行し、対象言語が調べられるとき）
+  usage?: Usage;
   // 実行できなかったとき（構文エラーなど）の出力
   crash?: string;
 };
@@ -49,7 +60,11 @@ export interface Target {
   // 本番コードを実行せずに読み込めることを確かめる。失敗したら、その出力を返す
   load(ws: Workspace): string | undefined;
   // PBT を実行する。期待値の計算と本番システムの操作をどうつなぐかは、実装が決める
-  runTests(input: { ws: Workspace; seed: number; runs: number; drafts: boolean }): TestRun;
+  // usage: true なら、実行した範囲も調べる（調べられない言語では、TestRun.usage は無い。
+  // そのときゲートは、範囲を本番コードの全体として扱う）
+  runTests(input: { ws: Workspace; seed: number; runs: number; drafts: boolean; usage?: boolean }): TestRun;
+  // 振る舞いを持たないファイル（型だけ、など）か。実行されないので、だれが使っているかを調べられない
+  inert?(ws: Workspace, rel: string): boolean;
   // ミューテーションの壊し方。言語によっては無い
   mutation: MutationStrategy | undefined;
 

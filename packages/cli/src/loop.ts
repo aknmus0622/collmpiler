@@ -156,6 +156,7 @@ export async function implement(options: ImplementOptions) {
       staticCheck: options.staticCheck === null ? undefined : (options.staticCheck ?? target.staticCheck),
       incremental: false,
       baseline: "",
+      before: {},
       others: units.filter((other) => other !== unit).map(({ name, ir, ws, seed }) => ({ name, ir, ws, seed })),
     };
     const tag = units.length > 1 ? `${unit.name} ` : "";
@@ -180,6 +181,8 @@ async function reconcile(ctx: GateContext, options: ImplementOptions, attempts: 
   };
 
   // 何が変わったかを見て、動かす段階を決める。新規は「本番コードが無い」場合にすぎない
+  // 始める前の本番コードを覚えておく（ほかのコンポーネントだけが使うコードを書き換えていないかを、あとで確かめる）
+  ctx.before = Object.fromEntries(sourceFiles(ws).map((rel) => [rel, readFileSync(join(ws.root, rel), "utf8")]));
   const plan = planOf(ctx, options.from);
   ctx.incremental = plan.incremental;
   log(`plan: ${plan.phases.join(" → ")} (${plan.reason})`);
