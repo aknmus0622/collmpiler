@@ -1,4 +1,4 @@
-import { component } from "@aac/core";
+import { component } from "@clp/core";
 import { Campaign, Shipping } from "./order.decisions.ts";
 
 const Rank = ["Gold", "Silver", "Bronze"] as const;

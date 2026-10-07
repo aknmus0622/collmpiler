@@ -13,8 +13,8 @@ import { dirname, join, posix, relative, resolve, sep } from "node:path";
 //
 // 引数は2つ: 本番コードの場所 (--src) と、テスト側の場所 (--tests)。
 // --tests は「テスト側のファイル名の前に付けるパス」で、"." で終われば最後の部分がファイル名の接頭辞になる:
-//   --tests test/aac          → test/aac/order.adapter.ts
-//   --tests src/order/aac.    → src/order/aac.order.adapter.ts
+//   --tests test/clp          → test/clp/order.adapter.ts
+//   --tests src/order/clp.    → src/order/clp.order.adapter.ts
 
 export type Layout = {
   // 絶対パス
@@ -22,12 +22,12 @@ export type Layout = {
   // root からの相対パス (区切りは "/")。root 自身なら ""
   src: string;
   tests: string;
-  // "" か、"order.aac." のように "." で終わる文字列
+  // "" か、"order.clp." のように "." で終わる文字列
   prefix: string;
 };
 
 // 1つのコンポーネントの、テスト側のファイル (root からの相対パス)。
-// ファイル名にはコンポーネントの名前が付く (aac/order.adapter.ts など)
+// ファイル名にはコンポーネントの名前が付く (clp/order.adapter.ts など)
 export type TestPaths = { ir: string; contract: string; adapter: string; verify: string };
 export type Workspace = Layout & {
   // このコンポーネントの名前と、そのテスト側のファイル
@@ -38,9 +38,9 @@ export type Workspace = Layout & {
 };
 
 // 作業場所の中で、依頼文と添付資料を置く場所。配置によらず固定（エージェントの起動コマンドがここを指すため）
-export const CONTROL_DIR = "aac";
+export const CONTROL_DIR = "clp";
 export const DEFAULT_SOURCE_DIR = "src";
-export const DEFAULT_TESTS_DIR = "aac";
+export const DEFAULT_TESTS_DIR = "clp";
 const IR_FILE = "ir.json";
 
 const toPosix = (path: string) => path.split(sep).join("/");
@@ -52,7 +52,7 @@ const inside = (dir: string, rel: string) => dir === "" || rel.startsWith(`${dir
 export type LayoutOptions = { out?: string; src?: string; tests?: string };
 
 // 引数から配置を決める。パスは process.cwd() 基準。
-//   --out だけ          … <out>/src と <out>/aac
+//   --out だけ          … <out>/src と <out>/clp
 //   --src / --tests     … それぞれの場所。省略した側は --out の下の既定の場所。
 //                         --tests が "." で終わるときは、最後の部分がテスト側のファイル名の接頭辞
 export function resolveLayout(options: LayoutOptions): Layout {
@@ -62,7 +62,7 @@ export function resolveLayout(options: LayoutOptions): Layout {
     return resolve(process.cwd(), options.out, fallback);
   };
   const src = place(options.src, DEFAULT_SOURCE_DIR);
-  // "src/order/order.aac." → ディレクトリ src/order と、接頭辞 "order.aac."
+  // "src/order/order.clp." → ディレクトリ src/order と、接頭辞 "order.clp."
   const named = options.tests?.endsWith(".") && !/(^|[\\/])\.{1,2}$/.test(options.tests) ? options.tests : undefined;
   const prefix = named === undefined ? "" : named.split(/[\\/]/).at(-1)!;
   const tests = named === undefined ? place(options.tests, DEFAULT_TESTS_DIR) : resolve(process.cwd(), named.slice(0, -prefix.length) || ".");
@@ -79,7 +79,7 @@ export function resolveLayout(options: LayoutOptions): Layout {
 
   // 本番コードとテスト側を同じ場所に置くなら、名前で見分けられなければならない
   if (layout.tests === layout.src && layout.prefix === "") {
-    throw new Error('本番コードとテスト側を同じディレクトリに置くときは、--tests にファイル名の接頭辞まで書いてください (例: --tests src/order/aac. 末尾の "." が接頭辞の印です)');
+    throw new Error('本番コードとテスト側を同じディレクトリに置くときは、--tests にファイル名の接頭辞まで書いてください (例: --tests src/order/clp. 末尾の "." が接頭辞の印です)');
   }
   // src の中身はエージェントが書き直す。プロジェクトのルートを指していたら、消してはいけないものまで消してしまう
   for (const name of ["package.json", "node_modules", ".git"]) {

@@ -1,4 +1,4 @@
-import type { FieldSchema } from "@aac/core";
+import type { FieldSchema } from "@clp/core";
 
 // フィールドの型 (FieldSchema) に関する実行時の判定
 

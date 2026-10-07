@@ -1,4 +1,4 @@
-import { decisionTable } from "@aac/core";
+import { decisionTable } from "@clp/core";
 
 // Decision tables: a condition in natural language selects a row of values.
 // `otherwise` is mandatory and every row has the same columns. Cells hold values only;

@@ -34,8 +34,8 @@ const DEFAULT_RUNS = 1000;
 
 export type ImplementOptions = {
   specs: string;
-  // 出力先の配置。out だけなら <out>/src と <out>/aac。src / tests で、それぞれの場所を直接指定できる。
-  // tests が "." で終わるときは、最後の部分がテスト側のファイル名の接頭辞（"src/order/order.aac." など。
+  // 出力先の配置。out だけなら <out>/src と <out>/clp。src / tests で、それぞれの場所を直接指定できる。
+  // tests が "." で終わるときは、最後の部分がテスト側のファイル名の接頭辞（"src/order/order.clp." など。
   // 本番コードと同じ場所に並べるときに要る）
   out?: string;
   src?: string;

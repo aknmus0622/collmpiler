@@ -8,10 +8,10 @@ importers:
 
   .:
     devDependencies:
-      '@aac/cli':
+      '@clp/cli':
         specifier: workspace:*
         version: link:packages/cli
-      '@aac/core':
+      '@clp/core':
         specifier: workspace:*
         version: link:packages/core
       '@types/node':
@@ -23,13 +23,13 @@ importers:
 
   examples/checkout-ts:
     devDependencies:
-      '@aac/cli':
+      '@clp/cli':
         specifier: workspace:*
         version: link:../../packages/cli
 
   packages/cli:
     dependencies:
-      '@aac/core':
+      '@clp/core':
         specifier: workspace:*
         version: link:../core
       fast-check:

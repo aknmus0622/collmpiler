@@ -11,7 +11,7 @@ import type { Phase, Place, Step } from "./fixtures/scripted-agent.ts";
 
 // ループのテストで共有する道具。テストのファイルは並列に実行されるので、作業ディレクトリはファイルごとに分ける
 
-// 出力先は packages/cli 配下に置く（verify.ts が @aac/cli/runtime を解決できる場所）
+// 出力先は packages/cli 配下に置く（verify.ts が @clp/cli/runtime を解決できる場所）
 export const repoRoot = join(import.meta.dirname, "../../..");
 export const specsDir = join(repoRoot, "specs");
 
@@ -59,5 +59,5 @@ export function harness(name: string) {
 }
 
 export const of = (seen: Seen[], phase: Phase) => seen.filter((s) => s.phase === phase);
-// 既定の配置 (<out>/src と <out>/aac)
+// 既定の配置 (<out>/src と <out>/clp)
 export const defaultWorkspace = (out: string) => workspaceOf(resolveLayout({ out }), typescriptTarget.files, "order");

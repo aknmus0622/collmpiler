@@ -3,9 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "verify": "node aac/order.verify.ts"
+    "verify": "node clp/order.verify.ts"
   },
   "devDependencies": {
-    "@aac/cli": "workspace:*"
+    "@clp/cli": "workspace:*"
   }
 }

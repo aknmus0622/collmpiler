@@ -15,7 +15,7 @@ import { harness, repoRoot, specsDir } from "./support.ts";
 const { tmpRoot, workdir } = harness("components");
 
 // 2つ目のコンポーネント（ランプ）。結び付けも同じファイルに書いてある
-const LAMP = `import { bind, component } from "@aac/core";
+const LAMP = `import { bind, component } from "@clp/core";
 
 export const Lamp = component({
   states: ["OFF", "ON"],
@@ -102,13 +102,13 @@ function scripted(options: { order?: Step[]; breakLamp?: number[] } = {}) {
       }
       const component =
         phase === "wiring"
-          ? "aac/lamp.adapter.contract.ts" in files ? "lamp" : "order"
-          : /`aac\/lamp\.ir\.json`/.test(files["aac/REQUEST.md"].split("## Other components")[0]) ? "lamp" : "order";
+          ? "clp/lamp.adapter.contract.ts" in files ? "lamp" : "order"
+          : /`clp\/lamp\.ir\.json`/.test(files["clp/REQUEST.md"].split("## Other components")[0]) ? "lamp" : "order";
       seen.push({ component, phase, files });
 
       if (component === "lamp") {
         mkdirSync(join(dir, "src"), { recursive: true });
-        if (phase === "wiring") writeFileSync(join(dir, "aac/lamp.adapter.ts"), LAMP_ADAPTER);
+        if (phase === "wiring") writeFileSync(join(dir, "clp/lamp.adapter.ts"), LAMP_ADAPTER);
         else writeFileSync(join(dir, "src/lamp.ts"), lampSource(phase === "implementation"));
         return;
       }
@@ -133,7 +133,7 @@ test("複数: 仕様にあるコンポーネントを名前順に一致させる
     "order:design", "order:wiring", "order:implementation",
   ]);
   assert.deepEqual(readdirSync(join(out, "src")).sort(), ["lamp.ts", "order-service.ts"]);
-  assert.deepEqual(readdirSync(join(out, "aac")).sort(), [
+  assert.deepEqual(readdirSync(join(out, "clp")).sort(), [
     "lamp.adapter.contract.ts", "lamp.adapter.ts", "lamp.ir.json", "lamp.verify.ts",
     "order.adapter.contract.ts", "order.adapter.ts", "order.ir.json", "order.verify.ts",
   ]);
@@ -142,17 +142,17 @@ test("複数: 仕様にあるコンポーネントを名前順に一致させる
   const at = (component: string, phase: Phase) => seen.find((s) => s.component === component && s.phase === phase)!.files;
   // 設計と実装の段階には、ほかのコンポーネントの仕様と、すでにある本番コードが渡る
   const design = at("order", "design");
-  assert.deepEqual(Object.keys(design).sort(), ["aac/REQUEST.md", "aac/lamp.ir.json", "aac/order.ir.json", "src/lamp.ts"]);
-  assert.match(design["aac/REQUEST.md"], /## Other components of the same system[\s\S]*- `aac\/lamp\.ir\.json`/);
-  assert.match(design["aac/REQUEST.md"], /Production code already exists under `src\/`/);
+  assert.deepEqual(Object.keys(design).sort(), ["clp/REQUEST.md", "clp/lamp.ir.json", "clp/order.ir.json", "src/lamp.ts"]);
+  assert.match(design["clp/REQUEST.md"], /## Other components of the same system[\s\S]*- `clp\/lamp\.ir\.json`/);
+  assert.match(design["clp/REQUEST.md"], /Production code already exists under `src\/`/);
   // 配線の段階には、どの仕様も、ほかのコンポーネントのテスト側も渡らない
   assert.deepEqual(Object.keys(at("order", "wiring")).sort(), [
-    "aac/REQUEST.md", "aac/order.adapter.contract.ts", "aac/order.adapter.ts", "src/lamp.ts", "src/order-service.ts",
+    "clp/REQUEST.md", "clp/order.adapter.contract.ts", "clp/order.adapter.ts", "src/lamp.ts", "src/order-service.ts",
   ]);
-  assert.ok(!at("order", "wiring")["aac/REQUEST.md"].includes("Other components"));
+  assert.ok(!at("order", "wiring")["clp/REQUEST.md"].includes("Other components"));
   // 最初のコンポーネントは、何も無いところから作る
-  assert.match(at("lamp", "design")["aac/REQUEST.md"], /^# Step 1 of 3[\s\S]*Design the production code for the component specified in `aac\/lamp\.ir\.json`/);
-  assert.deepEqual(Object.keys(at("lamp", "design")).sort(), ["aac/REQUEST.md", "aac/lamp.ir.json", "aac/order.ir.json"]);
+  assert.match(at("lamp", "design")["clp/REQUEST.md"], /^# Step 1 of 3[\s\S]*Design the production code for the component specified in `clp\/lamp\.ir\.json`/);
+  assert.deepEqual(Object.keys(at("lamp", "design")).sort(), ["clp/REQUEST.md", "clp/lamp.ir.json", "clp/order.ir.json"]);
 });
 
 test("複数: あるコンポーネントのための変更が、ほかのコンポーネントを壊したら差し戻す (回帰)", async () => {
@@ -177,7 +177,7 @@ test("複数: あるコンポーネントのための変更が、ほかのコン
   const feedback = result.attempts[2].feedback;
   assert.ok(feedback?.kind === "regression" && feedback.component === "lamp");
   assert.deepEqual(feedback.result?.status === "fail" && feedback.result.expected, { state: "ON", effects: [{ name: "Notify", payload: { on: true } }] });
-  assert.match(seen[1].files["aac/REQUEST.md"], /it broke another component of the same system: `lamp`/);
+  assert.match(seen[1].files["clp/REQUEST.md"], /it broke another component of the same system: `lamp`/);
 });
 
 test("複数: 1つだけを選んで一致させられる。読み込みは名前で選ぶ", async () => {
@@ -192,7 +192,7 @@ test("複数: 1つだけを選んで一致させられる。読み込みは名�
   const result = await implement({ specs: dir, out, strategy, component: "lamp", maxAttempts: 1 });
   assert.equal(result.status, "pass");
   assert.deepEqual([...new Set(seen.map((s) => s.component))], ["lamp"]);
-  assert.deepEqual(readdirSync(join(out, "aac")).filter((name) => name.startsWith("order.")), []);
+  assert.deepEqual(readdirSync(join(out, "clp")).filter((name) => name.startsWith("order.")), []);
   await assert.rejects(implement({ specs: dir, out, strategy, component: "stock" }), /コンポーネント "stock" がありません/);
 
   // IR の出力: 複数あれば名前ごと、--component で1つ

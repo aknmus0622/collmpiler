@@ -1,8 +1,8 @@
 import { readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { BINDING, COMPONENT } from "@aac/core";
-import type { BoundSpecification, Declaration, Outcome, Structure } from "@aac/core";
+import { BINDING, COMPONENT } from "@clp/core";
+import type { BoundSpecification, Declaration, Outcome, Structure } from "@clp/core";
 import { resolveAssets } from "./assets.ts";
 import type { SpecEffect, SpecInput, SpecModel, SpecOutcome, SpecValue } from "./extract.ts";
 

@@ -1,10 +1,10 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import type { Dirent } from "node:fs";
 import { join, normalize, relative, resolve, sep } from "node:path";
-import type { AssetDeclaration, AssetPhase } from "@aac/core";
+import type { AssetDeclaration, AssetPhase } from "@clp/core";
 
 // 依頼に添付する資料（設計の決まり、用語集、コーディング規約など）。
-//   ファイル … 作業場所の aac/assets/ に、相対パスの構造を保って置く
+//   ファイル … 作業場所の clp/assets/ に、相対パスの構造を保って置く
 //   文言     … 依頼文の中に直接載せる
 // 既定では設計と実装の段階に渡す。配線の段階に渡すと、その段階に仕様を見せない意味が薄れ得るので、
 // 渡したいときは phases で明示する。業務ルール（仕様の中身）を書いてはいけない

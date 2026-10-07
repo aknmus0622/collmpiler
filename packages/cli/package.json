@@ -1,5 +1,5 @@
 {
-  "name": "@aac/cli",
+  "name": "@clp/cli",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -10,7 +10,7 @@
     "node": ">=22.18"
   },
   "dependencies": {
-    "@aac/core": "workspace:*",
+    "@clp/core": "workspace:*",
     "fast-check": "^4.10.2",
     "typescript": "^7.0.2"
   }

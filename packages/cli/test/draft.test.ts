@@ -9,7 +9,7 @@ import { loadSpecs } from "../src/loader.ts";
 import type { Assignment, ImplementationStrategy } from "../src/strategy.ts";
 
 // 結び付けの下書き。LLM の代役として、決まった内容を書く Strategy を使う。
-// 仕様のコピーは packages/cli 配下に置く（@aac/core を解決できる場所）
+// 仕様のコピーは packages/cli 配下に置く（@clp/core を解決できる場所）
 
 const repoRoot = join(import.meta.dirname, "../../..");
 const tmpRoot = join(import.meta.dirname, ".tmp-drafts");
@@ -33,7 +33,7 @@ function scripted(drafts: string[], extra?: (assignment: Assignment) => void) {
     run(assignment) {
       const file = join(assignment.dir, "spec/order.binding.draft.ts");
       seen.push({
-        request: readFileSync(join(assignment.dir, "aac/REQUEST.md"), "utf8"),
+        request: readFileSync(join(assignment.dir, "clp/REQUEST.md"), "utf8"),
         start: readFileSync(file, "utf8"),
         files: ["order.decisions.ts", "order.component.ts", "order.binding.ts"].filter((name) => existsSync(join(assignment.dir, "spec", name))),
       });
@@ -103,7 +103,7 @@ test("下書き: 添付資料を渡せる", async () => {
       { kind: "text", text: "Prices never include tax." },
     ],
   });
-  assert.match(seen[0].request, /## Project conventions[\s\S]*- Prices never include tax\.[\s\S]*`aac\/assets\/glossary\.md`/);
+  assert.match(seen[0].request, /## Project conventions[\s\S]*- Prices never include tax\.[\s\S]*`clp\/assets\/glossary\.md`/);
 });
 
 test("下書き: 型では分からない誤り (条件の衝突) も、書き直させる", async () => {
@@ -215,7 +215,7 @@ test("添付資料: 仕様に宣言した資料が、実装の各段階に渡る
   writeFileSync(
     component,
     readFileSync(component, "utf8")
-      .replace('import { component } from "@aac/core";', 'import { component, dir, file, text } from "@aac/core";')
+      .replace('import { component } from "@clp/core";', 'import { component, dir, file, text } from "@clp/core";')
       .replace(
         "export const Order = component({",
         `export const Order = component({
@@ -241,15 +241,15 @@ test("添付資料: 仕様に宣言した資料が、実装の各段階に渡る
   const attempts = JSON.parse(run.stdout).attempts as { phase: string; inputs: string[]; sandbox: string }[];
   try {
     const of = (phase: string) => attempts.find((a) => a.phase === phase)!;
-    const assetsOf = (phase: string) => of(phase).inputs.filter((name) => name.startsWith("aac/assets/"));
-    const documents = ["aac/assets/docs/architecture.md", "aac/assets/docs/conventions/errors.md"];
+    const assetsOf = (phase: string) => of(phase).inputs.filter((name) => name.startsWith("clp/assets/"));
+    const documents = ["clp/assets/docs/architecture.md", "clp/assets/docs/conventions/errors.md"];
     assert.deepEqual(assetsOf("design"), documents);
     assert.deepEqual(assetsOf("implementation"), documents);
     assert.deepEqual(assetsOf("wiring"), []);
 
-    assert.equal(readFileSync(join(of("design").sandbox, "aac/assets/docs/architecture.md"), "utf8"), "- Use the repository pattern.");
-    assert.ok(!readFileSync(join(of("design").sandbox, "aac/REQUEST.md"), "utf8").includes("Gateway"));
-    assert.match(readFileSync(join(of("wiring").sandbox, "aac/REQUEST.md"), "utf8"), /- Adapters are named \*Gateway\./);
+    assert.equal(readFileSync(join(of("design").sandbox, "clp/assets/docs/architecture.md"), "utf8"), "- Use the repository pattern.");
+    assert.ok(!readFileSync(join(of("design").sandbox, "clp/REQUEST.md"), "utf8").includes("Gateway"));
+    assert.match(readFileSync(join(of("wiring").sandbox, "clp/REQUEST.md"), "utf8"), /- Adapters are named \*Gateway\./);
   } finally {
     for (const { sandbox } of attempts) rmSync(sandbox, { recursive: true, force: true });
   }

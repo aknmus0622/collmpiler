@@ -1,4 +1,4 @@
-import type { BoundSpecification, Constant, Declaration, FieldSchema, Fields, Table } from "@aac/core";
+import type { BoundSpecification, Constant, Declaration, FieldSchema, Fields, Table } from "@clp/core";
 import type { Asset } from "./assets.ts";
 import { compatible, conforms, describe } from "./schema.ts";
 

@@ -13,8 +13,8 @@
     "typecheck": "tsc -p ."
   },
   "devDependencies": {
-    "@aac/cli": "workspace:*",
-    "@aac/core": "workspace:*",
+    "@clp/cli": "workspace:*",
+    "@clp/core": "workspace:*",
     "@types/node": "^26.6.4",
     "typescript": "^7.0.2"
   }

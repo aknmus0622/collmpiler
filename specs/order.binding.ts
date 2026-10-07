@@ -1,4 +1,4 @@
-import { bind, decide, ref } from "@aac/core";
+import { bind, decide, ref } from "@clp/core";
 import { Order } from "./order.component.ts";
 
 export const Binding = bind(Order, {

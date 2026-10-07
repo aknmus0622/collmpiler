@@ -16,11 +16,11 @@ import { selectTarget } from "./target-typescript.ts";
 //     [--asset [<phases>=]<file>]... [--drafts] [--mutation auto|builtin|off] [--static-check auto|tsc|off]
 //     [--target typescript]
 //
-// --out: 出力先。本番コードは <out>/src、テスト側は <out>/aac に置く
+// --out: 出力先。本番コードは <out>/src、テスト側は <out>/clp に置く
 // --src / --tests: 本番コードとテスト側の置き場所を、直接指定する（両方を指定すれば --out は要らない）。
 //          --tests が "." で終わるときは、最後の部分がテスト側のファイル名の接頭辞になる:
-//            --tests test/aac         → test/aac/order.adapter.ts
-//            --tests src/order/aac.   → src/order/aac.order.adapter.ts （本番コードと同じ場所に並べる）
+//            --tests test/clp         → test/clp/order.adapter.ts
+//            --tests src/order/clp.   → src/order/clp.order.adapter.ts （本番コードと同じ場所に並べる）
 // --component: 一致させるコンポーネントの名前。省略すると、仕様にあるすべてを名前順に一致させる
 // --asset: 依頼に添付する資料（設計方針、用語集など）。何度でも指定できる。既定では設計と実装の段階に渡す。
 //          "wiring,design=docs/x.md" のように段階を指定できる

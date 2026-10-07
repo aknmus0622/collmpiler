@@ -1,7 +1,7 @@
 import { isDeepStrictEqual, parseArgs } from "node:util";
 import fc from "fast-check";
-import { matchCondition } from "@aac/core";
-import type { BoundSpecification, FieldSchema } from "@aac/core";
+import { matchCondition } from "@clp/core";
+import type { BoundSpecification, FieldSchema } from "@clp/core";
 import { isReference } from "./extract.ts";
 import type { Reference, SpecInput, SpecModel, SpecValue } from "./extract.ts";
 import { loadSpecs } from "./loader.ts";
@@ -45,7 +45,7 @@ export type PbtResult =
   // 仕様またはハーネス側の問題。実装の誤りではないので、エージェントには差し戻さない
   | { status: "error"; message: string; steps?: Step[] };
 
-export const RESULT_PREFIX = "AAC_RESULT ";
+export const RESULT_PREFIX = "CLP_RESULT ";
 const MAX_STEPS = 8;
 // 既定の試行回数（verify.ts を直接実行したとき。ループから呼ぶときは loop.ts が回数を渡す）
 const DEFAULT_RUNS = 1000;

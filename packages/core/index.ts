@@ -184,8 +184,8 @@ type Checked<B extends Declaration> = B &
 declare const componentBrand: unique symbol;
 export type Component<B extends Declaration> = B & { readonly [componentBrand]?: true };
 
-export const COMPONENT = Symbol.for("aac.component");
-export const BINDING = Symbol.for("aac.binding");
+export const COMPONENT = Symbol.for("clp.component");
+export const BINDING = Symbol.for("clp.binding");
 
 export function component<const B extends Declaration>(declaration: Checked<B>): Component<B> {
   const value = { ...(declaration as B) };

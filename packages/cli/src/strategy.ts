@@ -8,7 +8,7 @@ import type { Phase } from "./request.ts";
 // 何を渡し何を受け取るか（隔離と採点）は前後のゲート (gates.ts) の責任で、Strategy は関知しない。
 
 export type Assignment = {
-  // 入口ゲートが用意した作業場所。依頼は <dir>/aac/REQUEST.md
+  // 入口ゲートが用意した作業場所。依頼は <dir>/clp/REQUEST.md
   dir: string;
   // 実装のどの段階か（設計 / 配線 / 実装）。依頼文はすでにその段階のものになっている。
   // "binding" は実装の流れとは別の、結び付けの下書き (draft.ts)
@@ -24,7 +24,7 @@ export interface ImplementationStrategy {
 }
 
 // 外部コマンド (claude / codex / 自作スクリプト等) をエージェントとして起動する。
-// cwd = 作業場所。環境変数 AAC_REQUEST (依頼ファイル)、AAC_PHASE (段階)、AAC_ATTEMPT (試行回数) を渡す。
+// cwd = 作業場所。環境変数 CLP_REQUEST (依頼ファイル)、CLP_PHASE (段階)、CLP_ATTEMPT (試行回数) を渡す。
 // 段階ごとに別のプロセスとして起動するので、段階をまたいで記憶は引き継がれない。
 export function commandStrategy(
   command: string,
@@ -36,7 +36,7 @@ export function commandStrategy(
       const result = spawnSync(command, {
         shell: true,
         cwd: dir,
-        env: { ...env, PWD: dir, AAC_REQUEST: join(TEST_DIR, FILES.request), AAC_PHASE: phase, AAC_ATTEMPT: String(attempt) },
+        env: { ...env, PWD: dir, CLP_REQUEST: join(TEST_DIR, FILES.request), CLP_PHASE: phase, CLP_ATTEMPT: String(attempt) },
         stdio: ["ignore", "pipe", "inherit"],
         encoding: "utf8",
         maxBuffer: 256 * 1024 * 1024,

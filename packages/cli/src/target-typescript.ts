@@ -10,7 +10,7 @@ import type { Target } from "./target.ts";
 
 // TypeScript を対象言語とするときの実装。
 // 本番コードは Node がそのまま実行できる TypeScript で、PBT は期待値の計算と同じプロセスで本番システムを動かす
-// (生成した verify.ts が、アダプターを import して @aac/cli/runtime に渡す)。
+// (生成した verify.ts が、アダプターを import して @clp/cli/runtime に渡す)。
 
 const NOT_IMPLEMENTED = "not implemented";
 

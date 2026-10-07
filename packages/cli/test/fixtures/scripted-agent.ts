@@ -147,7 +147,7 @@ const INTERCEPT = `    if (
 
 // 成果物を書く場所（作業場所からの相対パス）。配置によって変わる
 export type Place = { source: string; adapter: string };
-const DEFAULT_PLACE: Place = { source: "src/order-service.ts", adapter: "aac/order.adapter.ts" };
+const DEFAULT_PLACE: Place = { source: "src/order-service.ts", adapter: "clp/order.adapter.ts" };
 const relativeImport = (from: string, to: string) => {
   const rel = posix.relative(posix.dirname(from), to);
   return rel.startsWith(".") ? rel : `./${rel}`;
@@ -207,12 +207,12 @@ export function write(phase: Phase, step: Step, dir: string, place: Place = DEFA
   if (phase === "implementation") writeFileSync(join(dir, place.source), source(step));
 }
 
-// ループから起動されたとき (AAC_PHASE がある) だけ書き出す。
+// ループから起動されたとき (CLP_PHASE がある) だけ書き出す。
 // `node --test` は test/ 配下の全ファイルを実行するため、素の実行では何もしない。
-// AAC_SCRIPT は実装の段階の試行ごとの成果物 (例: "buggy,correct")。他の段階は常に correct
-if (import.meta.main && process.env.AAC_PHASE) {
-  const phase = process.env.AAC_PHASE as Phase;
-  const steps = (process.env.AAC_SCRIPT ?? "correct").split(",") as Step[];
-  const attempt = Number(process.env.AAC_ATTEMPT ?? "1");
+// CLP_SCRIPT は実装の段階の試行ごとの成果物 (例: "buggy,correct")。他の段階は常に correct
+if (import.meta.main && process.env.CLP_PHASE) {
+  const phase = process.env.CLP_PHASE as Phase;
+  const steps = (process.env.CLP_SCRIPT ?? "correct").split(",") as Step[];
+  const attempt = Number(process.env.CLP_ATTEMPT ?? "1");
   write(phase, phase === "implementation" ? steps[Math.min(attempt, steps.length) - 1] : "correct", process.cwd());
 }

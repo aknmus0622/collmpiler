@@ -66,7 +66,7 @@ function skeleton(spec: SpecInput, componentFile: string, exportName: string): s
   conditions.delete("otherwise");
 
   const group = (key: string, entries: string[]) => (entries.length === 0 ? "" : `\n  ${key}: {\n${entries.join("\n")}\n  },\n`);
-  return `import { bind, calculate, decide, ref } from "@aac/core";
+  return `import { bind, calculate, decide, ref } from "@clp/core";
 import { ${exportName} } from "./${componentFile}";
 
 export const Binding = bind(${exportName}, {
@@ -210,7 +210,7 @@ export async function draftBinding(options: DraftOptions): Promise<DraftResult> 
   const assets = assetsFor(mergeAssets(spec.assets ?? [], options.assets ?? []), "design");
   for (let attempt = 1; attempt <= (options.maxAttempts ?? 3); attempt++) {
     // 作業場所: 仕様のファイルと依頼文だけを置く。下書きは、前回の試行の成果か出発点
-    const dir = mkdtempSync(join(realpathSync(tmpdir()), "aac-"));
+    const dir = mkdtempSync(join(realpathSync(tmpdir()), "clp-"));
     try {
       const originals: Record<string, string> = {};
       for (const file of specFiles) {

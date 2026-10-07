@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import { RuleConflictError, bind, calculate, component, decide, matchCondition } from "@aac/core";
+import { RuleConflictError, bind, calculate, component, decide, matchCondition } from "@clp/core";
 import { Binding } from "../../../specs/order.binding.ts";
 import { Order } from "../../../specs/order.component.ts";
 import { extract } from "../src/extract.ts";
@@ -86,7 +86,7 @@ function specDir(declaration: string, bindings?: string) {
   const dir = mkdtempSync(join(tmpRoot, "s-"));
   writeFileSync(
     join(dir, "x.component.ts"),
-    `import { bind, component, decisionTable, dir, file, ref, text } from "@aac/core";
+    `import { bind, component, decisionTable, dir, file, ref, text } from "@clp/core";
 const Size = decisionTable({ "It is big": { count: 10, urgent: true }, otherwise: { count: 1, urgent: false } });
 export const Thing = component({ states: ["A", "B"], init: "A", ${declaration} });
 ${bindings === undefined ? "" : `export const Binding = bind(Thing, { ${bindings} });`}

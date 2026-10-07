@@ -38,7 +38,7 @@ test("繰り返し: 何も変わっていなければ、採点だけして終わ
   await implement({ specs: specsDir, out: first.out, strategy: fresh.strategy, mutation: null, fresh: true });
   assert.deepEqual(fresh.seen.map((s) => s.phase), ["design", "wiring", "implementation"]);
   assert.ok(!("src/order-service.ts" in fresh.seen[0].files));
-  assert.equal(fresh.seen[1].files["aac/order.adapter.ts"], generateAdapterSkeleton(defaultWorkspace(first.out)));
+  assert.equal(fresh.seen[1].files["clp/order.adapter.ts"], generateAdapterSkeleton(defaultWorkspace(first.out)));
 });
 
 // 例の仕様を写して、一部を書き換えた仕様（仕様が変わる前の版として使う）
@@ -70,11 +70,11 @@ test("繰り返し: 仕様の値だけが変わったら、実装の段階だけ
     ["implementation", 1, "ok"],
   ]);
   assert.deepEqual(seen.map((s) => s.phase), ["implementation"]);
-  const request = seen[0].files["aac/REQUEST.md"];
+  const request = seen[0].files["clp/REQUEST.md"];
   assert.match(request, /The code was written before the specification took its current form/);
   assert.match(request, /## Where the current code falls short[\s\S]*The current code failed the property-based test[\s\S]*"discountPercent": 50/);
   // 実装の段階が見るものは変わらない（アダプターとテストの口は見えない）
-  assert.deepEqual(Object.keys(seen[0].files).sort(), ["aac/REQUEST.md", "aac/order.ir.json", "src/order-service.ts"]);
+  assert.deepEqual(Object.keys(seen[0].files).sort(), ["clp/REQUEST.md", "clp/order.ir.json", "src/order-service.ts"]);
   assert.match(seen[0].files["src/order-service.ts"], /percent = 50/);
 });
 
@@ -88,13 +88,13 @@ test("繰り返し: 契約が変わったら、設計から動く。すでにあ
   assert.deepEqual(seen.map((s) => s.phase), ["design", "wiring", "implementation"]);
 
   const design = of(seen, "design")[0].files;
-  assert.match(design["aac/REQUEST.md"], /Production code already exists under `src\/`, but it does not yet fit the specification in\s+`aac\/order\.ir\.json`[\s\S]*\*\*Keep what exists\.\*\*/);
+  assert.match(design["clp/REQUEST.md"], /Production code already exists under `src\/`, but it does not yet fit the specification in\s+`clp\/order\.ir\.json`[\s\S]*\*\*Keep what exists\.\*\*/);
   assert.match(design["src/order-service.ts"], /percent = 5/);
   const wiring = of(seen, "wiring")[0].files;
-  assert.match(wiring["aac/REQUEST.md"], /already existed before the interface took its current form/);
-  assert.ok(!wiring["aac/order.adapter.contract.ts"].includes("Audit"));
+  assert.match(wiring["clp/REQUEST.md"], /already existed before the interface took its current form/);
+  assert.ok(!wiring["clp/order.adapter.contract.ts"].includes("Audit"));
   // 配線の段階は、前回のアダプターから始める
-  assert.match(wiring["aac/order.adapter.ts"], /new OrderService\(/);
+  assert.match(wiring["clp/order.adapter.ts"], /new OrderService\(/);
 });
 
 test("繰り返し: 形を直す必要が無く、いまのコードで満たされていれば、配線のあとは何もしない", async () => {

@@ -31,12 +31,12 @@ test("3段階: 設計 → 配線 (赤) → 実装 (緑) の順に、別々の依
   const { out, seen, status, trail, attempts } = await run({});
   assert.equal(status, "pass");
   assert.deepEqual(trail, ["design:ok", "wiring:ok", "implementation:ok"]);
-  assert.match(of(seen, "design")[0].files["aac/REQUEST.md"], /^# Step 1 of 3/);
-  assert.match(of(seen, "wiring")[0].files["aac/REQUEST.md"], /^# Step 2 of 3/);
-  assert.match(of(seen, "implementation")[0].files["aac/REQUEST.md"], /^# Step 3 of 3/);
+  assert.match(of(seen, "design")[0].files["clp/REQUEST.md"], /^# Step 1 of 3/);
+  assert.match(of(seen, "wiring")[0].files["clp/REQUEST.md"], /^# Step 2 of 3/);
+  assert.match(of(seen, "implementation")[0].files["clp/REQUEST.md"], /^# Step 3 of 3/);
 
   // 合格した実装と採点基準は出力先に揃う。ミューテーションは実装の段階でだけ走る
-  assert.deepEqual(readdirSync(join(out, "aac")).sort(), ["order.adapter.contract.ts", "order.adapter.ts", "order.ir.json", "order.verify.ts"]);
+  assert.deepEqual(readdirSync(join(out, "clp")).sort(), ["order.adapter.contract.ts", "order.adapter.ts", "order.ir.json", "order.verify.ts"]);
   assert.deepEqual(readdirSync(join(out, "src")), ["order-service.ts"]);
   assert.deepEqual(attempts.map((a) => a.mutation?.strategy), [undefined, undefined, "builtin"]);
 });
@@ -44,9 +44,9 @@ test("3段階: 設計 → 配線 (赤) → 実装 (緑) の順に、別々の依
 test("3段階: 段階ごとに見せるものが違う (配線は IR を見ない。設計と実装はテストの口を見ない)", async () => {
   const { seen } = await run({}, { mutation: null });
   const keys = (phase: Phase) => Object.keys(of(seen, phase)[0].files).sort();
-  assert.deepEqual(keys("design"), ["aac/REQUEST.md", "aac/order.ir.json"]);
-  assert.deepEqual(keys("wiring"), ["aac/REQUEST.md", "aac/order.adapter.contract.ts", "aac/order.adapter.ts", "src/order-service.ts"]);
-  assert.deepEqual(keys("implementation"), ["aac/REQUEST.md", "aac/order.ir.json", "src/order-service.ts"]);
+  assert.deepEqual(keys("design"), ["clp/REQUEST.md", "clp/order.ir.json"]);
+  assert.deepEqual(keys("wiring"), ["clp/REQUEST.md", "clp/order.adapter.contract.ts", "clp/order.adapter.ts", "src/order-service.ts"]);
+  assert.deepEqual(keys("implementation"), ["clp/REQUEST.md", "clp/order.ir.json", "src/order-service.ts"]);
 
   // 配線の段階には、条件の文も決定表の値も渡らない
   const wiring = Object.values(of(seen, "wiring")[0].files).join("\n");
@@ -72,7 +72,7 @@ test("設計: 型エラーや構文エラーのある骨組みは差し戻す", 
 test("設計: 読み込むと失敗する骨組みは差し戻す", async () => {
   const { trail, seen } = await run({ design: ["crashing", "correct"] }, { mutation: null });
   assert.deepEqual(trail, ["design:crash", "design:ok", "wiring:ok", "implementation:ok"]);
-  assert.match(of(seen, "design")[1].files["aac/REQUEST.md"], /crashed before producing a test result[\s\S]*boom at load/);
+  assert.match(of(seen, "design")[1].files["clp/REQUEST.md"], /crashed before producing a test result[\s\S]*boom at load/);
 });
 
 test("設計: 仕様の文をそのまま書き写した骨組みは差し戻す (配線の段階に仕様が漏れるため)", async () => {
@@ -115,7 +115,7 @@ test("配線: 骨組みに無いメンバーを呼ぶアダプターは、型エ
   assert.deepEqual(trail, ["design:ok", "wiring:check", "wiring:ok", "implementation:ok"]);
   const feedback = attempts[1].feedback;
   assert.ok(feedback?.kind === "check");
-  assert.deepEqual(feedback.violations.map((v) => `${v.file}:${v.rule}`), ["aac/order.adapter.ts:type-error"]);
+  assert.deepEqual(feedback.violations.map((v) => `${v.file}:${v.rule}`), ["clp/order.adapter.ts:type-error"]);
   assert.match(feedback.violations[0].message, /placeOrder/);
 });
 
@@ -139,7 +139,7 @@ test("静的検査: Strategy として差し替えられ、使ったものが結
   // アダプターに誤りがある、と報告するだけの Strategy
   const stub: StaticCheckStrategy = {
     name: "stub",
-    check: ({ files }) => (files.includes("aac/order.adapter.ts") ? [{ file: "aac/order.adapter.ts", rule: "type-error", message: "line 1: boom" }] : []),
+    check: ({ files }) => (files.includes("clp/order.adapter.ts") ? [{ file: "clp/order.adapter.ts", rule: "type-error", message: "line 1: boom" }] : []),
   };
   const { trail, attempts } = await run({}, { maxAttempts: 1, mutation: null, staticCheck: stub });
   // 設計の段階はアダプターを対象にしないので通り、配線の段階で止まる
@@ -147,7 +147,7 @@ test("静的検査: Strategy として差し替えられ、使ったものが結
   assert.deepEqual(attempts.map((a) => a.staticCheck), ["stub", "stub"]);
   const feedback = attempts[1].feedback;
   assert.ok(feedback?.kind === "check");
-  assert.deepEqual(feedback.violations, [{ file: "aac/order.adapter.ts", rule: "type-error", message: "line 1: boom" }]);
+  assert.deepEqual(feedback.violations, [{ file: "clp/order.adapter.ts", rule: "type-error", message: "line 1: boom" }]);
 
   // 既定は TypeScript の型チェック
   const standard = await run({}, { mutation: null });
@@ -203,7 +203,7 @@ test("実装 (緑): PBT の反例を差し戻し、次の試行で合格する",
 
   // 差し戻しは次の依頼文に載り、前回の成果も作業場所に引き継がれる
   const retry = of(seen, "implementation")[1];
-  assert.match(retry.files["aac/REQUEST.md"], /attempt 2[\s\S]*"discountPercent": 50/);
+  assert.match(retry.files["clp/REQUEST.md"], /attempt 2[\s\S]*"discountPercent": 50/);
   assert.match(retry.files["src/order-service.ts"], /percent = 50/);
 
   // 合格。使った Strategy と件数、生き残りは結果に残る。

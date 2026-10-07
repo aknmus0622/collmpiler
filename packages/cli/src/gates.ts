@@ -22,7 +22,7 @@ import type { Target } from "./target.ts";
 //   入口ゲート: リポジトリの外に作業場所を作り、その段階に許可した入力だけを置く
 //   出口ゲート: その段階に許可した出力だけを取り出し、その段階の検査にかける
 //
-// 作業場所は、出力先の配置 (layout.ts) をそのまま写す。依頼文と添付資料だけは、常に aac/ に置く。
+// 作業場所は、出力先の配置 (layout.ts) をそのまま写す。依頼文と添付資料だけは、常に clp/ に置く。
 //
 // 段階ごとに、見せるものと書かせるものが違う (TDD の流れ):
 //   design         … 見せる: IR                    書かせる: 本番コード (骨組み)  検査: 読み込めること
@@ -107,7 +107,7 @@ function filesUnder(root: string): { rel: string; entry: Dirent }[] {
 export function entryGate(ctx: GateContext, phase: Phase, attempt: number, feedback: Feedback | undefined): Sandbox {
   const { ws } = ctx;
   const hidden = [...new Set([process.cwd(), ctx.specsDir, ws.root])];
-  const dir = mkdtempSync(join(realpathSync(tmpdir()), "aac-"));
+  const dir = mkdtempSync(join(realpathSync(tmpdir()), "clp-"));
   if (hidden.some((path) => isInside(path, dir))) {
     rmSync(dir, { recursive: true, force: true });
     throw new Error(`入口ゲート: 一時ディレクトリ ${dir} がリポジトリの内側にあるため隔離できません`);

@@ -75,7 +75,7 @@ test("ループ: 1つの段階が上限回数まで直らなければ、設計�
   ]);
   assert.deepEqual(attempts.map((a) => a.round), [1, 1, 1, 1, 2, 2, 2]);
   // やり直しの周は、前の周の成果を引き継がない
-  assert.deepEqual(Object.keys(of(seen, "design")[1].files).sort(), ["aac/REQUEST.md", "aac/order.ir.json"]);
+  assert.deepEqual(Object.keys(of(seen, "design")[1].files).sort(), ["clp/REQUEST.md", "clp/order.ir.json"]);
 });
 
 test("ループ: やり直しの上限まで直らなければ失敗で止まる", async () => {
@@ -91,7 +91,7 @@ test("ループ: 検証は決定的 (同じ実装なら同じシード・同じ�
 });
 
 test("コマンド Strategy: 外部コマンドを作業場所で、段階ごとに起動する", async () => {
-  process.env.AAC_SCRIPT = "buggy,correct";
+  process.env.CLP_SCRIPT = "buggy,correct";
   const strategy = commandStrategy(`"${process.execPath}" "${join(import.meta.dirname, "fixtures/scripted-agent.ts")}"`);
   const { status, attempts } = await implement({ specs: specsDir, out: workdir(), strategy, maxAttempts: 2, mutation: null });
   assert.equal(status, "pass");
@@ -150,9 +150,9 @@ test("ミューテーション: 判定の基準", () => {
 
 test("設計方針: 既定の方針は設計と実装の依頼文に載り、配線の依頼文には載らない", async () => {
   const { seen } = await run({}, { mutation: null });
-  assert.ok(of(seen, "design")[0].files["aac/REQUEST.md"].includes(DEFAULT_GUIDE.trim()));
-  assert.ok(of(seen, "implementation")[0].files["aac/REQUEST.md"].includes(DEFAULT_GUIDE.trim()));
-  assert.ok(!of(seen, "wiring")[0].files["aac/REQUEST.md"].includes("Design guidance"));
+  assert.ok(of(seen, "design")[0].files["clp/REQUEST.md"].includes(DEFAULT_GUIDE.trim()));
+  assert.ok(of(seen, "implementation")[0].files["clp/REQUEST.md"].includes(DEFAULT_GUIDE.trim()));
+  assert.ok(!of(seen, "wiring")[0].files["clp/REQUEST.md"].includes("Design guidance"));
 });
 
 test("添付資料: ファイルは作業場所に置かれ、文言は依頼文に載る。既定では設計と実装の段階にだけ渡る", async () => {
@@ -163,18 +163,18 @@ test("添付資料: ファイルは作業場所に置かれ、文言は依頼文
   ] as const;
   const { seen, status } = await run({}, { mutation: null, assets: [...assets] });
   assert.equal(status, "pass");
-  const files = (phase: Phase) => Object.keys(of(seen, phase)[0].files).filter((name) => name.startsWith("aac/assets/"));
-  assert.deepEqual(files("design"), ["aac/assets/docs/architecture.md"]);
-  assert.deepEqual(files("implementation"), ["aac/assets/docs/architecture.md"]);
+  const files = (phase: Phase) => Object.keys(of(seen, phase)[0].files).filter((name) => name.startsWith("clp/assets/"));
+  assert.deepEqual(files("design"), ["clp/assets/docs/architecture.md"]);
+  assert.deepEqual(files("implementation"), ["clp/assets/docs/architecture.md"]);
   assert.deepEqual(files("wiring"), []);
 
   // ファイルは置き場所が案内され、文言はそのまま載る
   const design = of(seen, "design")[0].files;
-  assert.match(design["aac/REQUEST.md"], /## Project conventions[\s\S]*- Money is always handled as whole yen\.[\s\S]*`aac\/assets\/docs\/architecture\.md`/);
-  assert.equal(design["aac/assets/docs/architecture.md"], "- Use the repository pattern.");
-  assert.ok(!design["aac/REQUEST.md"].includes("Gateway"));
+  assert.match(design["clp/REQUEST.md"], /## Project conventions[\s\S]*- Money is always handled as whole yen\.[\s\S]*`clp\/assets\/docs\/architecture\.md`/);
+  assert.equal(design["clp/assets/docs/architecture.md"], "- Use the repository pattern.");
+  assert.ok(!design["clp/REQUEST.md"].includes("Gateway"));
   // 配線の段階には、明示したものだけが渡る
-  const wiring = of(seen, "wiring")[0].files["aac/REQUEST.md"];
+  const wiring = of(seen, "wiring")[0].files["clp/REQUEST.md"];
   assert.match(wiring, /## Project conventions[\s\S]*- Adapters are named \*Gateway\./);
   assert.ok(!wiring.includes("whole yen"));
 });
@@ -182,11 +182,11 @@ test("添付資料: ファイルは作業場所に置かれ、文言は依頼文
 test("添付資料: エージェントが書き換えたら差し戻す", async () => {
   const assets = [{ kind: "file" as const, name: "architecture.md", content: "- Use the repository pattern." }];
   const { attempts } = await run({}, { maxAttempts: 1, mutation: null, assets }, ({ dir, phase }) => {
-    if (phase === "design") writeFileSync(join(dir, "aac/assets/architecture.md"), "- Anything goes.");
+    if (phase === "design") writeFileSync(join(dir, "clp/assets/architecture.md"), "- Anything goes.");
   });
   const feedback = attempts[0].feedback;
   assert.ok(feedback?.kind === "check");
-  assert.deepEqual(feedback.violations.map((v) => `${v.file}:${v.rule}`), ["aac/assets/architecture.md:read-only-file-modified"]);
+  assert.deepEqual(feedback.violations.map((v) => `${v.file}:${v.rule}`), ["clp/assets/architecture.md:read-only-file-modified"]);
 });
 
 // --- 隔離 ---
@@ -216,21 +216,21 @@ test("出口ゲート: その段階で許可した出力以外は取り出さず
   const { out, attempts } = await run({}, { maxAttempts: 1, mutation: null }, ({ dir, phase }) => {
     if (phase !== "implementation") return;
     writeFileSync(join(dir, "notes.md"), "memo");
-    writeFileSync(join(dir, "aac/helper.ts"), "export {};");
-    writeFileSync(join(dir, "aac/order.ir.json"), "{}");
+    writeFileSync(join(dir, "clp/helper.ts"), "export {};");
+    writeFileSync(join(dir, "clp/order.ir.json"), "{}");
     symlinkSync(join(specsDir, "order.binding.ts"), join(dir, "src/oracle.ts"));
   });
   const feedback = attempts.at(-1)?.feedback;
   assert.ok(feedback?.kind === "check");
   assert.deepEqual(feedback.violations.map((v) => `${v.file}:${v.rule}`).sort(), [
-    "aac/helper.ts:unexpected-file",
-    "aac/order.ir.json:read-only-file-modified",
+    "clp/helper.ts:unexpected-file",
+    "clp/order.ir.json:read-only-file-modified",
     "notes.md:unexpected-file",
     "src/oracle.ts:unexpected-file",
   ]);
   assert.ok(!existsSync(join(out, "notes.md")));
-  assert.ok(!existsSync(join(out, "aac/helper.ts")));
+  assert.ok(!existsSync(join(out, "clp/helper.ts")));
   assert.ok(!existsSync(join(out, "src/oracle.ts")));
   // 採点基準は作業場所での改ざんの影響を受けない
-  assert.notEqual(readFileSync(join(out, "aac/order.ir.json"), "utf8"), "{}");
+  assert.notEqual(readFileSync(join(out, "clp/order.ir.json"), "utf8"), "{}");
 });
