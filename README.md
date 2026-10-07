@@ -23,6 +23,8 @@ Phase 1 spike. TypeScript targets only.
 ## Future Scope
 
 - Drafting the component itself from requirements written in natural language
+- Alerts from the review notes an LLM leaves in a draft binding (`// REVIEW:`): collecting them, reporting
+  them, and holding back a run until the ambiguous names they point at have been looked at
 - Stopping after the design step so a person can review the skeleton before it is wired and implemented
 - Help with triaging surviving mutations: logic the spec cannot exercise versus code that is not needed
 - Operations that return values (value objects), and multiplicity declared as values
