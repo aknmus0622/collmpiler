@@ -1,174 +1,128 @@
-/**
- * The order itself: a small state machine that remembers what was ordered, consults the business
- * rules in `rules.ts`, and talks to its dependencies.
- */
-import type { OrderDependencies } from "./ports.ts";
-import { amountCharged, campaignFor, isMonthEnd, isPriorityShipment, refundDueOnCancel } from "./rules.ts";
-import type { OrderPlacement, OrderStatus } from "./types.ts";
+import type { OrderDependencies } from "./dependencies.ts";
+import {
+  amountCharged,
+  cancellationRequiresRefund,
+  isPriorityShipment,
+  selectCampaignOffer,
+} from "./rules.ts";
+import type { CustomerRank, OrderStatus } from "./types.ts";
 
 /**
- * Thrown by an `Order` action that is not permitted right now: the order is in a state from
- * which the action cannot be executed, or (for `checkout`) the external payment module is not
- * active. When this is thrown the order's state is unchanged and no notification, coupon,
- * charge or refund has been issued.
+ * One customer order, from draft to shipment or cancellation. This is the component described by the
+ * specification: its four actions are the methods {@link Order.placeOrder}, {@link Order.checkout},
+ * {@link Order.ship} and {@link Order.cancel}; its state is read through {@link Order.status}.
  *
- * The specification leaves these situations undefined ("not tested"); rejecting them is this
- * component's own choice.
- */
-export class OrderActionError extends Error {
-  /**
-   * @param message a human-readable explanation of why the action was rejected.
-   */
-  constructor(message: string) {
-    super(message);
-    this.name = "OrderActionError";
-  }
-}
-
-/**
- * A single customer order, from draft to shipment or cancellation.
+ * A newly constructed order is in the specification's initial state and remembers no price or rank.
  *
- * One instance is one run of the specification's component. A freshly constructed order is in
- * the specification's initial state (`"DRAFT"`) and remembers nothing yet. The specification's
- * four actions are the four methods below:
- *
- * | Specification action | Method                                   |
- * | -------------------- | ---------------------------------------- |
- * | `PlaceOrder`         | `place({ listPrice, customerRank })`     |
- * | `Checkout`           | `checkout()`                             |
- * | `Ship`               | `ship()`                                 |
- * | `Cancel`             | `cancel()`                               |
- *
- * All methods are synchronous and return nothing; their effects are the new `status` and the
- * calls made on the dependencies. The current state is read through the `status` property.
+ * All actions are synchronous: when a method returns, the status has been updated and every call to a
+ * dependency belonging to that action has been made, in the order the specification lists its commands.
+ * An action invoked in a status where the specification does not allow it, or while one of its
+ * preconditions does not hold, throws an `Error` and leaves the order untouched.
  */
 export class Order {
-  private readonly deps: OrderDependencies;
+  private readonly dependencies: OrderDependencies;
   private currentStatus: OrderStatus = "DRAFT";
-  private placement: OrderPlacement | null = null;
+  private placedPrice: number | undefined;
+  private placedRank: CustomerRank | undefined;
 
   /**
-   * Creates a new draft order.
-   *
-   * @param deps the collaborators this order uses: the business calendar, the payment module,
-   *             the customer notifier and the coupon service (see `OrderDependencies`). Nothing
-   *             is asked of them or told to them during construction.
+   * @param dependencies the calendar, payment module, customer notifier and coupon issuer this order
+   *   works with. They are consulted afresh on every action.
    */
-  constructor(deps: OrderDependencies) {
-    this.deps = deps;
+  constructor(dependencies: OrderDependencies) {
+    this.dependencies = dependencies;
   }
 
-  /**
-   * The order's current lifecycle state (a read-only property, not a method: `order.status`).
-   * The values are exactly the specification's state names (`"DRAFT"`, `"PENDING"`, `"PAID"`,
-   * `"SHIPPED"`, `"CANCELLED"`; see `OrderStatus`). Reading it has no side effects and consults
-   * no dependency.
-   */
+  /** The current state of the order; see {@link OrderStatus} for the meaning of each value. */
   get status(): OrderStatus {
     return this.currentStatus;
   }
 
   /**
-   * Places the order (specification action `PlaceOrder`). Permitted only while the order is
-   * `"DRAFT"`.
-   *
-   * Remembers the list price as the order's price and the customer's rank, tells
-   * `notifier.sendOrderConfirmation()`, and moves the order to `"PENDING"`. No dependency is
-   * queried.
-   *
-   * @param placement the list price in whole yen (specification input `listPrice`) and the
-   *                  customer's membership rank (specification input `customerRank`).
-   * @throws OrderActionError when the order is not in the `"DRAFT"` state.
+   * The list price the order was placed with, in whole yen, or `undefined` while nothing has been
+   * placed yet. Corresponds to the remembered `price` field.
    */
-  place(placement: OrderPlacement): void {
-    if (this.currentStatus !== "DRAFT") {
-      throw new OrderActionError(`Cannot place an order that is ${this.currentStatus}.`);
-    }
-    this.placement = placement;
-    this.deps.notifier.sendOrderConfirmation();
-    this.currentStatus = "PENDING";
+  get price(): number | undefined {
+    return this.placedPrice;
   }
 
   /**
-   * Takes payment for the order (specification action `Checkout`). Permitted only while the
-   * order is `"PENDING"` and `payments.isActive()` returns `true` (specification precondition
-   * "The external payment module is active").
+   * The membership rank the order was placed with, or `undefined` while nothing has been placed yet.
+   * Corresponds to the remembered `rank` field.
+   */
+  get rank(): CustomerRank | undefined {
+    return this.placedRank;
+  }
+
+  /**
+   * Performs the specification's `PlaceOrder` action: records what is being ordered and by whom.
    *
-   * Asks `payments.isActive()`, then `clock.today()` to determine the campaign that applies
-   * (specification query `isMonthEnd`), then `payments.charge(amount)` with the discounted
-   * amount (its answer is the specification query `paymentResult`).
-   *
-   * - Payment succeeded: tells `notifier.sendReceipt({ amount, discountPercent })`, then — only
-   *   if the campaign grants a coupon — `coupons.issueCoupon(type)`, in that order, and moves
-   *   the order to `"PAID"`.
-   * - Payment failed: tells `notifier.notifyPaymentFailure()` and leaves the order `"PENDING"`,
-   *   so checkout can be attempted again.
-   *
-   * @throws OrderActionError when the order is not `"PENDING"` or the payment module is not
-   *                          active.
+   * @param listPrice the price of the order in whole yen (the action's `listPrice` input).
+   * @param customerRank the customer's membership rank (the action's `customerRank` input).
+   */
+  placeOrder(listPrice: number, customerRank: CustomerRank): void {
+    this.requireStatus("place", "DRAFT");
+    this.placedPrice = listPrice;
+    this.placedRank = customerRank;
+    this.currentStatus = "PENDING";
+    this.dependencies.notifier.sendOrderConfirmation();
+  }
+
+  /**
+   * Performs the specification's `Checkout` action (no input): tries to collect the payment through
+   * the payment module and informs the customer of the result. Consults the calendar and the payment
+   * module while it runs.
    */
   checkout(): void {
-    if (this.currentStatus !== "PENDING") {
-      throw new OrderActionError(`Cannot check out an order that is ${this.currentStatus}.`);
+    this.requireStatus("check out", "PENDING");
+    const { calendar, payments, notifier, coupons } = this.dependencies;
+    if (!payments.isActive()) {
+      throw new Error("Cannot check out the order: the payment module is not active");
     }
-    if (!this.deps.payments.isActive()) {
-      throw new OrderActionError("Cannot check out while the payment module is not active.");
-    }
-    const { listPrice, customerRank } = this.placed();
-    const campaign = campaignFor(customerRank, isMonthEnd(this.deps.clock.today()));
-    const amount = amountCharged(listPrice, campaign.discountPercent);
-    if (this.deps.payments.charge(amount) !== "succeeded") {
-      this.deps.notifier.notifyPaymentFailure();
+    const { price, rank } = this.placedDetails();
+    const offer = selectCampaignOffer(rank, calendar.today());
+    const amount = amountCharged(price, offer.discountPercent);
+    if (payments.charge(amount) !== "succeeded") {
+      notifier.notifyPaymentFailure();
       return;
     }
-    this.deps.notifier.sendReceipt({ amount, discountPercent: campaign.discountPercent });
-    if (campaign.coupon !== null) {
-      this.deps.coupons.issueCoupon(campaign.coupon);
-    }
     this.currentStatus = "PAID";
+    notifier.sendReceipt({ amount, discountPercent: offer.discountPercent });
+    for (const coupon of offer.coupons) {
+      coupons.issueCoupon(coupon);
+    }
   }
 
-  /**
-   * Ships the order (specification action `Ship`). Permitted only while the order is `"PAID"`.
-   *
-   * Tells `notifier.sendShippingNotice(priority)`, where `priority` is decided from the
-   * remembered rank and price, and moves the order to `"SHIPPED"`. No dependency is queried.
-   *
-   * @throws OrderActionError when the order is not in the `"PAID"` state.
-   */
+  /** Performs the specification's `Ship` action (no input): sends the order to the customer. */
   ship(): void {
-    if (this.currentStatus !== "PAID") {
-      throw new OrderActionError(`Cannot ship an order that is ${this.currentStatus}.`);
-    }
-    const { listPrice, customerRank } = this.placed();
-    this.deps.notifier.sendShippingNotice(isPriorityShipment(customerRank, listPrice));
+    this.requireStatus("ship", "PAID");
+    const { price, rank } = this.placedDetails();
     this.currentStatus = "SHIPPED";
+    this.dependencies.notifier.sendShippingNotice({ priority: isPriorityShipment(rank, price) });
   }
 
-  /**
-   * Cancels the order (specification action `Cancel`). Permitted only while the order is
-   * `"PENDING"` or `"PAID"`.
-   *
-   * If the order had already been paid, tells `payments.refund()`; otherwise nothing is told to
-   * any dependency. Either way the order moves to `"CANCELLED"`. No dependency is queried.
-   *
-   * @throws OrderActionError when the order is neither `"PENDING"` nor `"PAID"`.
-   */
+  /** Performs the specification's `Cancel` action (no input): calls the order off. */
   cancel(): void {
-    if (this.currentStatus !== "PENDING" && this.currentStatus !== "PAID") {
-      throw new OrderActionError(`Cannot cancel an order that is ${this.currentStatus}.`);
-    }
-    if (refundDueOnCancel(this.currentStatus)) {
-      this.deps.payments.refund();
-    }
+    this.requireStatus("cancel", "PENDING", "PAID");
+    const refund = cancellationRequiresRefund(this.currentStatus);
     this.currentStatus = "CANCELLED";
+    if (refund) {
+      this.dependencies.payments.refund();
+    }
   }
 
-  /** What was ordered; every order past the draft state has it. */
-  private placed(): OrderPlacement {
-    if (this.placement === null) {
-      throw new OrderActionError("The order has not been placed yet.");
+  /** Throws unless the order is in one of the statuses in which the action is allowed. */
+  private requireStatus(action: string, ...allowed: OrderStatus[]): void {
+    if (!allowed.includes(this.currentStatus)) {
+      throw new Error(`Cannot ${action} the order while it is ${this.currentStatus}`);
     }
-    return this.placement;
+  }
+
+  /** The price and rank recorded when the order was placed; every order past the draft has both. */
+  private placedDetails(): { price: number; rank: CustomerRank } {
+    if (this.placedPrice === undefined || this.placedRank === undefined) {
+      throw new Error("The order has not been placed");
+    }
+    return { price: this.placedPrice, rank: this.placedRank };
   }
 }

@@ -1,89 +1,78 @@
-/**
- * Business decisions of the order component, as pure functions: no dependencies, no state, the
- * same answer for the same arguments. `Order` consults these and does the talking to the
- * outside world itself.
+import type { CalendarDate, CampaignOffer, CustomerRank, OrderStatus } from "./types.ts";
+
+/*
+ * Business decisions of the order component, as pure functions: they read only their arguments and
+ * touch no dependency. The rules themselves are defined by the specification.
  */
-import type { CalendarDate, CampaignOutcome, CustomerRank, OrderStatus } from "./types.ts";
 
-/** Orders priced at or above this many yen ship with priority, whatever the customer's rank. */
-const PRIORITY_SHIPMENT_MIN_PRICE = 10000;
-
-/** Days in each month of a non-leap year, January first. */
-const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-
+/** Whether `year` has a 29 February in the Gregorian calendar. */
 function isLeapYear(year: number): boolean {
   return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
 }
 
+/** Number of days in the given month (1 to 12) of the given year. */
 function daysInMonth(year: number, month: number): number {
-  if (month === 2 && isLeapYear(year)) {
-    return 29;
+  if (month === 2) {
+    return isLeapYear(year) ? 29 : 28;
   }
-  return DAYS_IN_MONTH[month - 1];
+  if (month === 4 || month === 6 || month === 9 || month === 11) {
+    return 30;
+  }
+  return 31;
 }
 
 /**
- * Tells whether `date` is month-end, i.e. the last calendar day of its month, taking leap years
- * into account (specification: the meaning of the `isMonthEnd` query).
+ * Answers the specification's `isMonthEnd` question for a calendar day.
  *
- * @param date a calendar date with a 1-based `month` and a 1-based `day`.
- * @returns `true` when `date.day` is the last day of `date.month` in `date.year`.
+ * @param date the day to examine.
  */
 export function isMonthEnd(date: CalendarDate): boolean {
   return date.day === daysInMonth(date.year, date.month);
 }
 
 /**
- * Decides which checkout campaign applies to an order (specification: the `CampaignRules`
- * decision table).
+ * Selects the campaign offer for a checkout. Implements the specification's `CampaignRules` table.
  *
- * @param rank the customer's membership rank remembered by the order (`rank`).
- * @param monthEnd whether today is month-end (specification: `isMonthEnd`).
- * @returns the discount percentage to apply and the coupon to issue, if any.
+ * @param rank the customer's membership rank (the remembered `rank`).
+ * @param today the current business day, as given by the calendar.
  */
-export function campaignFor(rank: CustomerRank, monthEnd: boolean): CampaignOutcome {
-  if (rank === "Gold" && monthEnd) {
-    return { discountPercent: 20, coupon: "Premium" };
+export function selectCampaignOffer(rank: CustomerRank, today: CalendarDate): CampaignOffer {
+  if (rank === "Gold" && isMonthEnd(today)) {
+    return { discountPercent: 20, coupons: ["Premium"] };
   }
   if (rank === "Silver") {
-    return { discountPercent: 5, coupon: null };
+    return { discountPercent: 5, coupons: [] };
   }
-  return { discountPercent: 0, coupon: null };
+  return { discountPercent: 0, coupons: [] };
 }
 
 /**
- * Computes the amount to charge for an order (specification: the formula "Amount charged:
- * price × (100 − discount percent) ÷ 100, rounded down to a whole yen").
+ * Computes the amount to charge, in whole yen. Implements the specification's "Amount charged" formula.
  *
- * @param price the order's price in whole yen (`price`).
- * @param discountPercent the campaign discount as a percentage, e.g. `5` for 5 %.
- * @returns the amount charged, in whole yen.
+ * @param price the order's price in whole yen (the remembered `price`).
+ * @param discountPercent the discount to apply, in percent.
  */
 export function amountCharged(price: number, discountPercent: number): number {
   return Math.floor((price * (100 - discountPercent)) / 100);
 }
 
 /**
- * Decides whether cancelling an order in the given state requires a refund (specification: the
- * `CancelRules` decision table; `true` corresponds to the row "The order has been paid", whose
- * effect is the `Refund` command, and `false` to the default row with no effect).
+ * Decides whether cancelling an order requires a refund. Implements the specification's `CancelRules`
+ * table: `true` means its `effects` contain one `Refund`, `false` means they are empty.
  *
- * @param status the order's state at the moment it is cancelled, before the cancellation.
- * @returns `true` when the customer must be refunded.
+ * @param status the order's status at the moment it is cancelled.
  */
-export function refundDueOnCancel(status: OrderStatus): boolean {
+export function cancellationRequiresRefund(status: OrderStatus): boolean {
   return status === "PAID";
 }
 
 /**
- * Decides whether an order is shipped with priority (specification: the `ShippingRules` decision
- * table, column `priority`).
+ * Decides whether an order is shipped with priority. Implements the specification's `ShippingRules`
+ * table; the result is its `priority` column.
  *
- * @param rank the customer's membership rank remembered by the order (`rank`).
- * @param price the order's price in whole yen remembered by the order (`price`) — the list
- *              price, not the discounted amount charged.
- * @returns `true` for priority shipping, `false` for standard shipping.
+ * @param rank the customer's membership rank (the remembered `rank`).
+ * @param price the order's price in whole yen (the remembered `price`).
  */
 export function isPriorityShipment(rank: CustomerRank, price: number): boolean {
-  return rank === "Gold" || price >= PRIORITY_SHIPMENT_MIN_PRICE;
+  return rank === "Gold" || price >= 10000;
 }

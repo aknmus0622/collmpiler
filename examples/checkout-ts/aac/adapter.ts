@@ -1,19 +1,21 @@
-import type { Ports, TargetSystemAdapter } from "./adapter.contract.ts";
+import type { Action, Ports, StateName, TargetSystemAdapter } from "./adapter.contract.ts";
 import { Order } from "../src/index.ts";
 import type { CalendarDate, OrderDependencies } from "../src/index.ts";
 
-// The production clock reports a date rather than a month-end flag (see `Clock.today`).
-const MONTH_END: CalendarDate = { year: 2026, month: 1, day: 31 };
-const NOT_MONTH_END: CalendarDate = { year: 2026, month: 1, day: 15 };
+// Import the production code from ../src/ and forward each call to it. No business logic here.
+
+// The calendar days the production code documents as standing for the `isMonthEnd` answers.
+const MONTH_END_DAY: CalendarDate = { year: 2026, month: 1, day: 31 };
+const ORDINARY_DAY: CalendarDate = { year: 2026, month: 1, day: 15 };
 
 function dependenciesFor(ports: Ports): OrderDependencies {
   return {
-    clock: {
-      today: () => (ports.queries.isMonthEnd() ? MONTH_END : NOT_MONTH_END),
+    calendar: {
+      today: () => (ports.queries.isMonthEnd() ? MONTH_END_DAY : ORDINARY_DAY),
     },
     payments: {
       isActive: () => ports.queries.paymentModuleActive(),
-      charge: () => ports.queries.paymentResult(),
+      charge: (_amount) => ports.queries.paymentResult(),
       refund: () => ports.commands.Refund({}),
     },
     notifier: {
@@ -21,7 +23,7 @@ function dependenciesFor(ports: Ports): OrderDependencies {
       sendReceipt: (receipt) =>
         ports.commands.SendReceipt({ amount: receipt.amount, discountPercent: receipt.discountPercent }),
       notifyPaymentFailure: () => ports.commands.NotifyPaymentFailure({}),
-      sendShippingNotice: (priority) => ports.commands.SendShippingNotice({ priority }),
+      sendShippingNotice: (notice) => ports.commands.SendShippingNotice({ priority: notice.priority }),
     },
     coupons: {
       issueCoupon: (type) => ports.commands.IssueCoupon({ type }),
@@ -29,28 +31,27 @@ function dependenciesFor(ports: Ports): OrderDependencies {
   };
 }
 
-let order: Order | null = null;
+let order: Order | undefined;
 
 function currentOrder(): Order {
-  if (order === null) {
+  if (order === undefined) {
     throw new Error("adapter: setupIsolation has not been called");
   }
   return order;
 }
 
-// Import the production code from ../src/ and forward each call to it. No business logic here.
 export const adapter: TargetSystemAdapter = {
   async setupIsolation(ports) {
     order = new Order(dependenciesFor(ports));
   },
   async teardownIsolation() {
-    order = null;
+    order = undefined;
   },
-  async executeAction(action) {
+  async executeAction(action: Action) {
     const target = currentOrder();
     switch (action.name) {
       case "PlaceOrder":
-        target.place({ listPrice: action.input.listPrice, customerRank: action.input.customerRank });
+        target.placeOrder(action.input.listPrice, action.input.customerRank);
         return;
       case "Checkout":
         target.checkout();
@@ -67,8 +68,8 @@ export const adapter: TargetSystemAdapter = {
       }
     }
   },
-  async getCurrentState() {
-    // `OrderStatus` uses the specification's state names verbatim.
+  async getCurrentState(): Promise<StateName> {
+    // OrderStatus uses the specification's state names unchanged.
     return currentOrder().status;
   },
 };
