@@ -51,6 +51,11 @@ export type GateContext = {
   mutation: MutationStrategy | undefined;
   // 実装の静的検査。undefined なら省く（動的型の言語など）
   staticCheck: StaticCheckStrategy | undefined;
+  // true なら、すでにある本番コードを仕様の変更に合わせて直す（追加要件）。false なら、何も無いところから作る。
+  // 段階の進み方は同じで、依頼の文面と、赤の確認の基準が変わる
+  incremental: boolean;
+  // 設計の段階を始める前の本番コードの文面。そこにすでにあった仕様の文は、設計の段階が持ち込んだものではない
+  baseline: string;
 };
 
 // どの Strategy で何個壊し、何個検出したか（毎回結果に記録する）
@@ -105,7 +110,7 @@ export function entryGate(ctx: GateContext, phase: Phase, attempt: number, feedb
   // 許可リスト。段階ごとに違う
   const assets = assetsFor(ctx.assets, phase);
   const inputs: Record<string, string> = {
-    [REQUEST]: renderRequest(ctx.target, ws, phase, attempt, feedback, ctx.guide, assets),
+    [REQUEST]: renderRequest(ctx.target, ws, phase, attempt, feedback, ctx.guide, assets, { incremental: ctx.incremental }),
   };
   for (const asset of assets) if (asset.kind === "file") inputs[`${ASSETS_DIR}/${asset.name}`] = asset.content;
   if (phase === "wiring") {
@@ -156,7 +161,9 @@ function runVerify(ctx: GateContext): { result?: PbtResult; crash?: string } {
 
 // 仕様に自然言語で書かれた文（条件・コマンドの説明・計算の式・不変条件）が、骨組みにそのまま書き写されていないか。
 // 言い換えまでは検出できない
+// 設計の段階を始める前からあった文は対象外（この段階が持ち込んだものだけを見る）
 function specSentencesIn(ctx: GateContext, files: string[]): Violation[] {
+  const existing = ctx.baseline;
   const { ir } = ctx;
   const sentences = new Set<string>([
     ...Object.values(ir.decisions).flatMap((decision) => Object.keys(decision.rows)),
@@ -173,7 +180,7 @@ function specSentencesIn(ctx: GateContext, files: string[]): Violation[] {
   for (const rel of files) {
     const text = readFileSync(join(ctx.ws.root, rel), "utf8");
     for (const sentence of sentences) {
-      if (text.includes(sentence)) {
+      if (text.includes(sentence) && !existing.includes(sentence)) {
         violations.push({
           file: rel,
           rule: "spec-text-in-skeleton",
@@ -194,7 +201,7 @@ export type GateResult = {
 
 export async function exitGate(ctx: GateContext, sandbox: Sandbox): Promise<GateResult> {
   const { phase } = sandbox;
-  const { target, ws } = ctx;
+  const { ws } = ctx;
   const ADAPTER = ws.paths.adapter;
   const violations: Violation[] = [];
   const outputs: string[] = [];
@@ -227,6 +234,25 @@ export async function exitGate(ctx: GateContext, sandbox: Sandbox): Promise<Gate
     mkdirSync(dirname(join(ws.root, rel)), { recursive: true });
     cpSync(join(sandbox.dir, rel), join(ws.root, rel));
   }
+
+  return judgeOutput(ctx, phase, violations, outputs);
+}
+
+// 仕様が変わったあと、エージェントを呼ぶ前に、いまの本番コードとアダプターをそのまま採点する。
+// 合格なら何もすることが無い。不合格なら、その内容が実装の段階の最初の依頼に載る（実装の前に落ちることの確認 = 赤）
+export async function verifyGate(ctx: GateContext): Promise<GateResult> {
+  return judgeOutput(ctx, "implementation", [], sourceFiles(ctx.ws));
+}
+
+// 出力先にあるものを、その段階の基準で採点する
+async function judgeOutput(
+  ctx: GateContext,
+  phase: Phase,
+  violations: Violation[],
+  outputs: string[],
+): Promise<GateResult> {
+  const { target, ws } = ctx;
+  const ADAPTER = ws.paths.adapter;
 
   // 3. 採点基準 (生成ファイル) は出力先にだけ置く。verify.ts は仕様の場所を知っているので作業場所には渡さない
   mkdirSync(dirname(join(ws.root, ws.paths.ir)), { recursive: true });
@@ -275,8 +301,12 @@ export async function exitGate(ctx: GateContext, sandbox: Sandbox): Promise<Gate
   if (result.status === "error") throw new Error(`PBT を実行できませんでした: ${result.message}`);
 
   if (phase === "wiring") {
-    // 赤: 本番コードは骨組みのままなので、PBT は「未実装」で失敗しなければならない
+    // 赤: 本番コードに未実装の部分が残っているなら、PBT は合格してはならない
+    // （アダプターが振る舞いを肩代わりしているか、未実装の部分を呼んでいない）。
+    // 未実装の部分が無いとき（仕様の変更が、すでにあるコードで満たされている）は、合格してよい
+    const unimplemented = sourceFiles(ws).some((rel) => readFileSync(join(ws.root, rel), "utf8").includes(target.notImplemented));
     if (result.status === "pass") {
+      if (!unimplemented) return { ...ran };
       return {
         feedback: {
           kind: "red",

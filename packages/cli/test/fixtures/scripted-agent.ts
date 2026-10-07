@@ -8,6 +8,7 @@ import { dirname, join, posix } from "node:path";
 //     broken   … 構文エラー
 //     crashing … 型は通るが、読み込むと例外を投げる
 //     leaky    … 仕様の条件の文を、コメントにそのまま書き写している
+//     kept     … 骨組みではなく、実装済みのコードをそのまま残す（仕様が変わっても、形を直す必要が無かった場合）
 //   wiring … アダプター
 //     correct  … 正しい配線
 //     mistyped … 存在しないメソッドを呼ぶ（型エラーになる）
@@ -24,7 +25,7 @@ import { dirname, join, posix } from "node:path";
 
 export type Phase = "design" | "wiring" | "implementation";
 export type Step =
-  | "correct" | "broken" | "crashing" | "leaky"
+  | "correct" | "broken" | "crashing" | "leaky" | "kept"
   | "mistyped" | "miswired" | "fake" | "touch" | "cheat"
   | "buggy" | "norefund" | "boundary" | "rounding";
 
@@ -193,7 +194,9 @@ export function write(phase: Phase, step: Step, dir: string, place: Place = DEFA
           ? `// Discount applies when: The customer is a Silver member\n${skeleton}`
           : step === "crashing"
             ? `${skeleton}\nthrow new Error("boom at load");\n`
-            : skeleton;
+            : step === "kept"
+              ? source("correct")
+              : skeleton;
     writeFileSync(join(dir, place.source), text);
   }
   if (phase === "wiring") {

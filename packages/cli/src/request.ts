@@ -15,7 +15,9 @@ import type { Target } from "./target.ts";
 export type Phase = "design" | "wiring" | "implementation";
 export const PHASES: readonly Phase[] = ["design", "wiring", "implementation"];
 
-function renderFeedback(feedback: Feedback): string {
+// current: 前回の試行ではなく、いまのコードをそのまま採点した結果として述べる
+function renderFeedback(feedback: Feedback, current = false): string {
+  if (current) return renderFeedback(feedback).replaceAll("The previous attempt", "The current code");
   if (feedback.kind === "check") {
     const lines = feedback.violations.map((v) => `- \`${v.file}\` [${v.rule}] ${v.message}`);
     return `The previous attempt was rejected before testing because it broke the rules:\n\n${lines.join("\n")}`;
@@ -76,21 +78,41 @@ The IR describes one component by its boundary.
 const reserved = (ws: Workspace) =>
   ws.prefix === "" ? "" : `\n- File names starting with \`${ws.prefix}\` are reserved for the test harness. Do not create, edit, or import such files.`;
 
-const design = (target: Target, ws: Workspace, guide: string) => `Design the production code for the component specified in \`${ws.paths.ir}\`, and write it as a
+const design = (target: Target, ws: Workspace, guide: string, incremental: boolean) => `${
+  incremental
+    ? `The specification in \`${ws.paths.ir}\` has changed. The production code under \`${label(ws.src)}\` was written for an
+earlier version of it. Update the **public shape** of that code to fit the specification as it is now: types,
+interfaces, and the signatures of exported classes and functions. Do not implement new behaviour yet.`
+    : `Design the production code for the component specified in \`${ws.paths.ir}\`, and write it as a
 **skeleton** under \`${label(ws.src)}\`: every type, every interface, and every exported class and function with its
-full signature, but no behaviour yet.
+full signature, but no behaviour yet.`
+}
 
 This is the first of three steps, each done by a different engineer who sees different things:
 
 1. You design the code and write the skeleton. You see the specification.
 2. Someone connects your skeleton to a test harness. They see your skeleton but **not** the specification.
 3. Someone fills in the bodies. They see the specification and your skeleton, but not the test harness.
+${
+  incremental
+    ? `
+## What is already there
+
+- **Keep what exists.** Change only what the specification now requires. Leave every existing body exactly as
+  it is, even where its behaviour no longer matches the specification: step 3 corrects behaviour, with tests.
+  Do not rename, move, or restructure code that does not need it.
+- A member that is new, or whose signature changed so that its old body no longer fits, gets the body
+  described below. Remove a member only if the specification no longer has what it was for.
+- If the public shape already fits the specification, change nothing.
+`
+    : ""
+}
 
 ## What to write
 
 - The complete public shape of the production code: file layout, types, interfaces for dependencies, classes
   and functions with parameter and return types.
-- The body of every function and method that would contain behaviour must be exactly
+- The body of every ${incremental ? "new " : ""}function and method that would contain behaviour must be exactly
   \`${target.request(ws).skeletonBody}\`. Constructors may store what they receive. Write no decisions, no
   calculations, and no values taken from the specification.
 - **Doc comments that let step 2 succeed without the specification.** For every exported member say what it is
@@ -118,12 +140,19 @@ ${guide.trim()}
 ${IR_GUIDE}
 `;
 
-const wiring = (target: Target, ws: Workspace) => `Connect the production code under \`${label(ws.src)}\` to the test harness by filling in
+const wiring = (target: Target, ws: Workspace, incremental: boolean) => `Connect the production code under \`${label(ws.src)}\` to the test harness by filling in
 \`${ws.paths.adapter}\`. The interface to implement, and the stand-ins the harness provides for
 everything the system depends on, are defined in \`${ws.paths.contract}\`.
 
-The production code is a skeleton: its signatures and doc comments are final, but its bodies fail with
-\`"${target.notImplemented}"\`. Someone else will fill them in later. You do not have the specification and do not need
+${
+  incremental
+    ? `The production code and the adapter were written for an earlier version of the interface. The signatures and
+doc comments of the production code are now final for the current version; members that are not implemented
+yet fail with \`"${target.notImplemented}"\`, and someone else will fill them in later. Update the adapter so
+that it fits the current interface and the current production code; keep what still fits.`
+    : `The production code is a skeleton: its signatures and doc comments are final, but its bodies fail with
+\`"${target.notImplemented}"\`. Someone else will fill them in later.`
+} You do not have the specification and do not need
 it: your job is only to connect the two sides.
 
 ## What to write
@@ -135,14 +164,22 @@ ${target.request(ws).adapterGuide}
 - Write only \`${ws.paths.adapter}\`. Do not change the production code or any other file.
 - ${target.request(ws).adapterImports}
 - Do not implement any behaviour in the adapter and do not work around the unimplemented bodies. After you
-  finish, the harness runs its tests and they **must fail** because the production code is not implemented. If
-  they pass, or if they fail because of an error in the adapter itself, your work is rejected.
+  finish, the harness runs its tests. While any production code is unimplemented they **must fail** for that
+  reason. If they pass in spite of it, or if they fail because of an error in the adapter itself, your work is
+  rejected.
 - Work only from the files in this directory. Do not read anything outside it.
 `;
 
-const implementation = (target: Target, ws: Workspace, guide: string) => `Implement the production code under \`${label(ws.src)}\` so that it satisfies the specification in
+const implementation = (target: Target, ws: Workspace, guide: string, incremental: boolean) => `${
+  incremental
+    ? `Change the production code under \`${label(ws.src)}\` so that it satisfies the specification in
+\`${ws.paths.ir}\`. The code was written for an earlier version of the specification. Its design and signatures
+already fit the current version; members that are not implemented yet fail with
+\`"${target.notImplemented}"\`. Change what the specification now requires and leave the rest as it is.`
+    : `Implement the production code under \`${label(ws.src)}\` so that it satisfies the specification in
 \`${ws.paths.ir}\`. The code is currently a skeleton: its design, signatures, and doc comments are in
-place, and its bodies fail with \`"${target.notImplemented}"\`. Fill in the bodies.
+place, and its bodies fail with \`"${target.notImplemented}"\`. Fill in the bodies.`
+}
 
 A test harness is already connected to the skeleton's exported signatures. You cannot see it. Your work is
 accepted when the harness's property-based test and mutation check both pass.
@@ -211,8 +248,21 @@ export function renderRequest(
   feedback: Feedback | undefined,
   guide: string,
   assets: Asset[] = [],
+  // incremental: すでにある本番コードを、仕様の変更に合わせて直す
+  options: { incremental?: boolean } = {},
 ): string {
-  const body = phase === "design" ? design(target, ws, guide) : phase === "wiring" ? wiring(target, ws) : implementation(target, ws, guide);
-  const previous = feedback ? `\n## Feedback from the previous attempt\n\n${renderFeedback(feedback)}\n` : "";
+  const incremental = options.incremental ?? false;
+  const body =
+    phase === "design"
+      ? design(target, ws, guide, incremental)
+      : phase === "wiring"
+        ? wiring(target, ws, incremental)
+        : implementation(target, ws, guide, incremental);
+  // 1回目の依頼に載るのは、エージェントを呼ぶ前に、いまのコードを採点した結果
+  const previous = !feedback
+    ? ""
+    : attempt === 1
+      ? `\n## Where the current code falls short\n\nThe harness checked the code as it is now, before any change:\n\n${renderFeedback(feedback, true)}\n`
+      : `\n## Feedback from the previous attempt\n\n${renderFeedback(feedback)}\n`;
   return `# ${TITLES[phase]} (attempt ${attempt})\n\n${body}${renderAssets(assets)}${previous}`;
 }

@@ -1,10 +1,10 @@
-import { existsSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { resolveLayout, sourceFiles, workspaceOf } from "./layout.ts";
 import { extract, stableStringify } from "./extract.ts";
 import { mergeAssets } from "./assets.ts";
 import type { Asset } from "./assets.ts";
-import { entryGate, exitGate } from "./gates.ts";
+import { entryGate, exitGate, verifyGate } from "./gates.ts";
 import type { Feedback, GateContext, MutationSummary } from "./gates.ts";
 import { requireModel, specHash } from "./generate.ts";
 import type { Ir } from "./generate.ts";
@@ -24,6 +24,7 @@ import { formatTypeErrors, typecheckSpecs } from "./typecheck.ts";
 // 言語に依存する処理は、すべて Target (target.ts) を通す。
 // 各段階は [入口ゲート → Strategy (エージェント) → 出口ゲート] で、段階ごとに別のセッションとして起動する。
 // 出口ゲートで落ちたら、その内容を同じ段階の次の依頼文に載せて差し戻す。
+// どの段階から動かすかは、出力先の状態で決まる (planOf)。何も無ければ3段階すべて、仕様の値だけが変わったのなら実装だけ。
 // ある段階が上限回数まで直らなければ、最初の段階からやり直す（原因がどの段階にあるかは機械的に分からないため）。
 
 // 既定の試行回数。しきい値にちょうど当たる値で特定の状態まで進む、といった狭い場合を、
@@ -57,8 +58,7 @@ export type ImplementOptions = {
   // 実装の静的検査の Strategy。省略時は対象言語のもの、null で無効。
   // 仕様の型チェックはこれとは別で、常に行う
   staticCheck?: StaticCheckStrategy | null;
-  // どの段階から始めるか。省略時は、出力先に本番コードとアダプターが無ければ設計から、あれば実装から。
-  // 仕様を少し変えただけなら、骨組みと配線はそのままで実装だけやり直せる
+  // どの段階から始めるか。省略時は、出力先の状態から決める (planOf)
   from?: Phase;
   // true なら出力先の既存の本番コードとアダプターを捨てて、設計から始める
   fresh?: boolean;
@@ -72,7 +72,7 @@ export type Attempt = {
   phase: Phase;
   attempt: number;
   ok: boolean;
-  // エージェントに渡したファイルの一覧 (隔離の証跡)
+  // エージェントに渡したファイルの一覧 (隔離の証跡)。attempt が 0 のものは、エージェントを呼ぶ前の採点
   inputs: string[];
   sandbox?: string;
   // 実行した静的検査の Strategy の名前
@@ -120,14 +120,19 @@ export async function implement(options: ImplementOptions) {
     drafts,
     mutation: options.mutation === null ? undefined : (options.mutation ?? target.mutation),
     staticCheck: options.staticCheck === null ? undefined : (options.staticCheck ?? target.staticCheck),
+    incremental: false,
+    baseline: "",
   };
 
   const clear = () => {
     for (const rel of [...sourceFiles(ws), ws.paths.adapter]) rmSync(join(ws.root, rel), { force: true });
   };
   if (options.fresh) clear();
-  const built = sourceFiles(ws).length > 0 && existsSync(join(ws.root, ws.paths.adapter));
-  const first: Phase = options.fresh ? "design" : (options.from ?? (built ? "implementation" : "design"));
+
+  // 何が変わったかを見て、動かす段階を決める。新規は「本番コードが無い」場合にすぎない
+  const plan = planOf(ctx, options.from);
+  ctx.incremental = plan.incremental;
+  log(`plan: ${plan.phases.join(" → ")} (${plan.reason})`);
 
   // 正解 (結び付け) が人の確認を経たものか、下書きのままか
   const usesDraft = drafts && (readdirSync(specsDir, { recursive: true }) as string[]).some((file) => file.endsWith(DRAFT_SUFFIX));
@@ -138,13 +143,37 @@ export async function implement(options: ImplementOptions) {
   const maxAttempts = options.maxAttempts ?? 3;
 
   rounds: for (let round = 1; round <= (options.maxRounds ?? 2); round++) {
-    // やり直しの周は、前の周の成果を捨てて設計から始める
-    if (round > 1) clear();
-    const phases = PHASES.slice(round === 1 ? PHASES.indexOf(first) : 0);
+    // やり直しの周は設計から始める。何も無いところから作ったものは、前の周の成果を捨てる。
+    // すでにあった本番コードを直しているときは捨てない（仕様の変更のたびに、全部を書き直すことになるため）
+    if (round > 1 && !ctx.incremental) clear();
+    const phases = round === 1 ? plan.phases : PHASES;
 
     for (const phase of phases) {
       let feedback: Feedback | undefined;
       let passed = false;
+      if (phase === "design") {
+        ctx.baseline = ctx.incremental ? sourceFiles(ws).map((rel) => readFileSync(join(ws.root, rel), "utf8")).join("\n") : "";
+      }
+
+      // すでにある本番コードを直すときは、エージェントを呼ぶ前に、いまのコードをそのまま採点する。
+      // 合格なら実装の段階は要らない。不合格なら、その内容を最初の依頼に載せる
+      if (phase === "implementation" && ctx.incremental) {
+        const before = await verifyGate(ctx);
+        feedback = before.feedback;
+        passed = feedback === undefined;
+        log(`[${round}] verify: ${passed ? "pass (nothing to implement)" : describe(phase, feedback)}`);
+        attempts.push({
+          round,
+          phase,
+          attempt: 0,
+          ok: passed,
+          inputs: [],
+          ...(before.staticCheck ? { staticCheck: before.staticCheck } : {}),
+          ...(before.mutation ? { mutation: before.mutation } : {}),
+          ...(feedback ? { feedback } : {}),
+        });
+      }
+
       for (let attempt = 1; attempt <= maxAttempts && !passed; attempt++) {
         const sandbox = entryGate(ctx, phase, attempt, feedback);
         let mutation: MutationSummary | undefined;
@@ -178,6 +207,33 @@ export async function implement(options: ImplementOptions) {
     return { status: "pass" as const, oracle, attempts, seed };
   }
   return { status: "fail" as const, oracle, attempts, seed };
+}
+
+// 動かす段階を、出力先の状態から決める。
+//   本番コードが無い                     … 何も無いところから: 設計 → 配線 → 実装
+//   契約 (コマンド・入力・問い合わせ・副作用・状態) が変わった … 公開している形から直す: 設計 → 配線 → 実装
+//   アダプターだけが無い                 … 配線 → 実装
+//   それ以外                             … 実装だけ（その前にいまのコードを採点し、合格なら何もしない）
+// 前回の境界は、出力先に生成してある IR から読む
+const boundaryOf = (ir: Ir) => {
+  const { init, states, commands, queries, effects } = ir.model ?? ({} as Partial<NonNullable<Ir["model"]>>);
+  return stableStringify({ init, states, commands, queries, effects });
+};
+
+function planOf(ctx: GateContext, from: Phase | undefined): { phases: readonly Phase[]; incremental: boolean; reason: string } {
+  const { ws } = ctx;
+  const read = (rel: string) => (existsSync(join(ws.root, rel)) ? readFileSync(join(ws.root, rel), "utf8") : undefined);
+  const incremental = sourceFiles(ws).length > 0;
+  if (from !== undefined) return { phases: PHASES.slice(PHASES.indexOf(from)), incremental, reason: `--from ${from}` };
+  if (!incremental) return { phases: PHASES, incremental, reason: "no production code yet" };
+  // 契約は境界 (状態・コマンドと入力・問い合わせ・副作用) から決まる。前回の IR の境界と比べる
+  // （生成した契約のファイルは、ヘッダーに仕様全体のハッシュを含むので、そのままは比べられない）
+  const previous = read(ws.paths.ir);
+  if (previous === undefined || boundaryOf(JSON.parse(previous) as Ir) !== boundaryOf(ctx.ir)) {
+    return { phases: PHASES, incremental, reason: "the contract changed" };
+  }
+  if (read(ws.paths.adapter) === undefined) return { phases: ["wiring", "implementation"], incremental, reason: "no adapter yet" };
+  return { phases: ["implementation"], incremental, reason: "the contract is unchanged" };
 }
 
 function describe(phase: Phase, feedback: Feedback | undefined): string {
