@@ -1,11 +1,11 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { stableStringify } from "./extract.ts";
-import { FILES, SOURCE_DIR, TEST_DIR, generateContract, generateVerify } from "./generate.ts";
+import { FILES, SOURCE_DIR, TEST_DIR, TS_FILES, generateContract, generateVerify } from "./generate.ts";
 import type { Ir } from "./generate.ts";
 import { importsOf, scan } from "./scan.ts";
 
-// LLM が書いたものに「余計なもの」が無いかの検査。PBT の前に走り、違反は LLM に差し戻す。
+// LLM が書いたものに「余計なもの」が無いかの検査 (TypeScript を対象とするとき)。PBT の前に走り、違反は LLM に差し戻す。
 //  1. 本番コードがフレームワーク・仕様・テスト側に依存していないこと
 //  2. 生成したテスト側ファイル（採点基準）が書き換えられていないこと
 //  3. アダプターが仕様や採点基準を import していないこと
@@ -35,7 +35,7 @@ export function checkWorkspace(out: string, ir: Ir, specs: string, scope: "all" 
     }
   }
   // 依頼文は作業場所にしか置かれない
-  const testFiles = new Set<string>([FILES.ir, FILES.contract, FILES.adapter, FILES.verify]);
+  const testFiles = new Set<string>([FILES.ir, TS_FILES.contract, TS_FILES.adapter, TS_FILES.verify]);
   for (const entry of readdirSync(testDir)) {
     if (!testFiles.has(entry)) {
       report(join(testDir, entry), "unexpected-file", `Do not add files to ${TEST_DIR}/. Put code in ${SOURCE_DIR}/.`);
@@ -44,8 +44,8 @@ export function checkWorkspace(out: string, ir: Ir, specs: string, scope: "all" 
 
   const generated = {
     [FILES.ir]: stableStringify(ir),
-    [FILES.contract]: generateContract(ir),
-    [FILES.verify]: generateVerify(ir, testDir, specsDir),
+    [TS_FILES.contract]: generateContract(ir),
+    [TS_FILES.verify]: generateVerify(ir, testDir, specsDir),
   };
   for (const [name, expected] of Object.entries(generated)) {
     const path = join(testDir, name);
@@ -61,20 +61,20 @@ export function checkWorkspace(out: string, ir: Ir, specs: string, scope: "all" 
       const target = specifier.startsWith(".") ? resolve(dirname(path), specifier) : undefined;
       const ok =
         target !== undefined &&
-        (isInside(sourceDir, target) || (allowContract && target === join(testDir, FILES.contract)));
+        (isInside(sourceDir, target) || (allowContract && target === join(testDir, TS_FILES.contract)));
       if (ok) continue;
       report(
         path,
         "forbidden-import",
         allowContract
-          ? `"${specifier}": the adapter may only import ./${FILES.contract} and files under ../${SOURCE_DIR}/.`
+          ? `"${specifier}": the adapter may only import ./${TS_FILES.contract} and files under ../${SOURCE_DIR}/.`
           : `"${specifier}": production code may only import other files under ${SOURCE_DIR}/ by relative path.`,
       );
     }
   };
 
   // --- アダプター ---
-  const adapterPath = join(testDir, FILES.adapter);
+  const adapterPath = join(testDir, TS_FILES.adapter);
   if (scope === "source") {
     // アダプターは対象外
   } else if (!existsSync(adapterPath)) {

@@ -15,6 +15,8 @@ import { judge } from "../src/mutation.ts";
 import type { MutationStrategy } from "../src/mutation.ts";
 import type { StaticCheckStrategy } from "../src/static-check.ts";
 import { commandStrategy } from "../src/strategy.ts";
+import { typescriptTarget } from "../src/target-typescript.ts";
+import type { Target } from "../src/target.ts";
 import type { Assignment, ImplementationStrategy } from "../src/strategy.ts";
 import { write } from "./fixtures/scripted-agent.ts";
 import type { Phase, Step } from "./fixtures/scripted-agent.ts";
@@ -283,6 +285,41 @@ test("計算: 丸め方の違い (切り捨てと四捨五入) を見つける",
   assert.ok(feedback?.kind === "pbt" && feedback.result.status === "fail");
   const amountOf = (o: unknown) => (o as { commands: { payload: { amount: number } }[] }).commands[0].payload.amount;
   assert.equal(amountOf(feedback.result.actual), amountOf(feedback.result.expected) + 1);
+});
+
+// --- 対象言語 ---
+
+test("対象言語: 流れとゲートは Target だけを通して、生成・検査・テストの実行を行う", async () => {
+  // TypeScript 用の実装を包み、呼ばれたものを記録する。テストの実行だけ差し替える
+  const calls: string[] = [];
+  const recording: Target = {
+    ...typescriptTarget,
+    name: "recording",
+    generate: {
+      contract: (ir) => (calls.push("generate.contract"), typescriptTarget.generate.contract(ir)),
+      adapterSkeleton: () => (calls.push("generate.adapterSkeleton"), typescriptTarget.generate.adapterSkeleton()),
+      verify: (ir, testDir, specs) => (calls.push("generate.verify"), typescriptTarget.generate.verify(ir, testDir, specs)),
+    },
+    check: (...args) => (calls.push("check"), typescriptTarget.check(...args)),
+    load: (outDir) => (calls.push("load"), typescriptTarget.load(outDir)),
+    // 常に合格と答える
+    runTests: () => (calls.push("runTests"), { result: { status: "pass", seed: 0, numRuns: 0 } }),
+    staticCheck: undefined,
+    mutation: undefined,
+  };
+  const { trail, attempts } = await run({}, { target: recording, maxAttempts: 1 });
+
+  // テストが「合格」と答えるので、配線の段階の赤の検査で止まる（骨組みのまま通るのはおかしい）
+  assert.deepEqual(trail, ["design:ok", "wiring:red"]);
+  assert.deepEqual([...new Set(calls)].sort(), ["check", "generate.adapterSkeleton", "generate.contract", "generate.verify", "load", "runTests"]);
+  // 静的検査とミューテーションは、対象言語が持たなければ行わない
+  assert.deepEqual(attempts.map((a) => a.staticCheck), [undefined, undefined]);
+});
+
+test("対象言語: 「未実装」の印は Target が決める", async () => {
+  // 印が違えば、骨組みの "not implemented" は「アダプター自身の誤り」に見える
+  const { trail } = await run({}, { target: { ...typescriptTarget, notImplemented: "TODO" }, maxAttempts: 1, mutation: null });
+  assert.deepEqual(trail, ["design:ok", "wiring:red"]);
 });
 
 // --- やり直し ---

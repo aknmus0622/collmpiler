@@ -1,6 +1,7 @@
 import type { Asset } from "./assets.ts";
 import type { Feedback } from "./gates.ts";
 import { FILES, SOURCE_DIR, TEST_DIR } from "./generate.ts";
+import type { Target } from "./target.ts";
 
 // エージェントに渡す依頼文。実装は TDD の流れに沿って3つの段階に分かれ、段階ごとに別の依頼になる。
 // 段階ごとに見せる情報が違うので、依頼文もその段階で見えるものだけに触れる。
@@ -11,9 +12,6 @@ import { FILES, SOURCE_DIR, TEST_DIR } from "./generate.ts";
 //   implementation … 本番コードの中身を書く。IR と骨組みを見る。アダプターとテストの口は見ない
 export type Phase = "design" | "wiring" | "implementation";
 export const PHASES: readonly Phase[] = ["design", "wiring", "implementation"];
-
-// 骨組みの未実装部分が投げるエラーの文言。配線の段階で「未実装による失敗」を見分けるのに使う
-export const NOT_IMPLEMENTED = "not implemented";
 
 function renderFeedback(feedback: Feedback): string {
   if (feedback.kind === "check") {
@@ -66,13 +64,7 @@ The IR describes one component by its boundary.
   array, inserted at that position. \`payloadSchema\` and \`event\` are informational and are not part of the
   command.`;
 
-const SOURCE_RULES = `- Production code is plain TypeScript that Node can run directly (erasable syntax only: no \`enum\`, no
-  \`namespace\`, no parameter properties; relative imports need the \`.ts\` extension).
-- Production code may import only other files under \`${SOURCE_DIR}/\`, by relative path. No packages, no
-  \`node:\` built-ins, no \`import()\` / \`require()\`.
-- Work only from the files in this directory. Do not read anything outside it.`;
-
-const design = (guide: string) => `Design the production code for the component specified in \`${TEST_DIR}/${FILES.ir}\`, and write it as a
+const design = (target: Target, guide: string) => `Design the production code for the component specified in \`${TEST_DIR}/${FILES.ir}\`, and write it as a
 **skeleton** under \`${SOURCE_DIR}/\`: every type, every interface, and every exported class and function with its
 full signature, but no behaviour yet.
 
@@ -87,7 +79,7 @@ This is the first of three steps, each done by a different engineer who sees dif
 - The complete public shape of the production code: file layout, types, interfaces for dependencies, classes
   and functions with parameter and return types.
 - The body of every function and method that would contain behaviour must be exactly
-  \`throw new Error("${NOT_IMPLEMENTED}");\`. Constructors may store what they receive. Write no decisions, no
+  \`${target.request.skeletonBody}\`. Constructors may store what they receive. Write no decisions, no
   calculations, and no values taken from the specification.
 - **Doc comments that let step 2 succeed without the specification.** For every exported member say what it is
   for: which action it performs and what its arguments are, how the current state is read and what each state
@@ -100,9 +92,10 @@ This is the first of three steps, each done by a different engineer who sees dif
 
 ## Rules (checked mechanically)
 
-${SOURCE_RULES}
+${target.request.sourceRules}
+- Work only from the files in this directory. Do not read anything outside it.
 - Write only under \`${SOURCE_DIR}/\`. Do not edit \`${TEST_DIR}/${FILES.ir}\`.
-- Every file must load without error (it is imported once to check).
+- Every file must load without error (it is loaded once to check).
 
 ## Design guidance
 
@@ -113,37 +106,31 @@ ${guide.trim()}
 ${IR_GUIDE}
 `;
 
-const wiring = () => `Connect the production code under \`${SOURCE_DIR}/\` to the test harness by filling in
-\`${TEST_DIR}/${FILES.adapter}\`. The interface to implement, and the stand-ins the harness provides for
-everything the system depends on, are defined in \`${TEST_DIR}/${FILES.contract}\`.
+const wiring = (target: Target) => `Connect the production code under \`${SOURCE_DIR}/\` to the test harness by filling in
+\`${TEST_DIR}/${target.files.adapter}\`. The interface to implement, and the stand-ins the harness provides for
+everything the system depends on, are defined in \`${TEST_DIR}/${target.files.contract}\`.
 
-The production code is a skeleton: its signatures and doc comments are final, but its bodies throw
-\`"${NOT_IMPLEMENTED}"\`. Someone else will fill them in later. You do not have the specification and do not need
+The production code is a skeleton: its signatures and doc comments are final, but its bodies fail with
+\`"${target.notImplemented}"\`. Someone else will fill them in later. You do not have the specification and do not need
 it: your job is only to connect the two sides.
 
 ## What to write
 
-- \`setupIsolation(ports)\`: build a fresh production system in its initial state, giving it dependencies that
-  forward to \`ports\`. Where the production code expects a value in a different form than \`ports\` provides (a
-  date instead of a flag, a differently named result), translate here.
-- \`executeAction(action)\`: call the production code for that action with its input.
-- \`getCurrentState()\`: return the current state as one of the \`StateName\` values, translating if the
-  production code names its states differently.
-- \`teardownIsolation()\`: discard the system.
+${target.request.adapterGuide}
 
 ## Rules (checked mechanically)
 
-- Write only \`${TEST_DIR}/${FILES.adapter}\`. Do not change anything under \`${SOURCE_DIR}/\` or any other file.
-- The adapter may import only \`./${FILES.contract}\` and files under \`../${SOURCE_DIR}/\`.
+- Write only \`${TEST_DIR}/${target.files.adapter}\`. Do not change anything under \`${SOURCE_DIR}/\` or any other file.
+- ${target.request.adapterImports}
 - Do not implement any behaviour in the adapter and do not work around the unimplemented bodies. After you
   finish, the harness runs its tests and they **must fail** because the production code is not implemented. If
   they pass, or if they fail because of an error in the adapter itself, your work is rejected.
 - Work only from the files in this directory. Do not read anything outside it.
 `;
 
-const implementation = (guide: string) => `Implement the production code under \`${SOURCE_DIR}/\` so that it satisfies the specification in
+const implementation = (target: Target, guide: string) => `Implement the production code under \`${SOURCE_DIR}/\` so that it satisfies the specification in
 \`${TEST_DIR}/${FILES.ir}\`. The code is currently a skeleton: its design, signatures, and doc comments are in
-place, and its bodies throw \`"${NOT_IMPLEMENTED}"\`. Fill in the bodies.
+place, and its bodies fail with \`"${target.notImplemented}"\`. Fill in the bodies.
 
 A test harness is already connected to the skeleton's exported signatures. You cannot see it. Your work is
 accepted when the harness's property-based test and mutation check both pass.
@@ -152,12 +139,13 @@ accepted when the harness's property-based test and mutation check both pass.
 
 - The bodies of the functions and methods under \`${SOURCE_DIR}/\`. You may add private helpers and new files.
 - **Keep every exported name and signature exactly as it is**, and keep the documented meaning of each member.
-  The harness calls them as documented; an error such as "x is not a function" in the feedback means a
-  signature was changed.
+  The harness calls them as documented; an error such as ${target.request.signatureErrorExample} in the feedback
+  means a signature was changed.
 
 ## Rules (checked mechanically)
 
-${SOURCE_RULES}
+${target.request.sourceRules}
+- Work only from the files in this directory. Do not read anything outside it.
 - Write only under \`${SOURCE_DIR}/\`. Do not edit \`${TEST_DIR}/${FILES.ir}\`.
 - All business decisions must be made by this code. This is verified by mutation: after the tests pass, the
   harness changes the decision values in your code one at a time (a discount rate, a coupon type, ...) and
@@ -204,13 +192,14 @@ export function renderAssets(assets: Asset[]): string {
 }
 
 export function renderRequest(
+  target: Target,
   phase: Phase,
   attempt: number,
   feedback: Feedback | undefined,
   guide: string,
   assets: Asset[] = [],
 ): string {
-  const body = phase === "design" ? design(guide) : phase === "wiring" ? wiring() : implementation(guide);
+  const body = phase === "design" ? design(target, guide) : phase === "wiring" ? wiring(target) : implementation(target, guide);
   const previous = feedback ? `\n## Feedback from the previous attempt\n\n${renderFeedback(feedback)}\n` : "";
   return `# ${TITLES[phase]} (attempt ${attempt})\n\n${body}${renderAssets(assets)}${previous}`;
 }

@@ -3,7 +3,7 @@ import type { Dirent } from "node:fs";
 import { stripTypeScriptTypes } from "node:module";
 import { join, relative, sep } from "node:path";
 import type { Violation } from "./check.ts";
-import { FILES, SOURCE_DIR, TEST_DIR } from "./generate.ts";
+import { SOURCE_DIR } from "./generate.ts";
 import type { Ir } from "./generate.ts";
 import { literalsOf, scan } from "./scan.ts";
 
@@ -111,7 +111,12 @@ export function selectMutation(name: string): MutationStrategy | undefined {
 }
 
 // 合否の基準。どの Strategy でも共通で、ゲートが持つ。メッセージはエージェントに渡すため英語。
-export function judge(report: MutationReport, values: DecisionValue[], adapterSource: string): Violation[] {
+export function judge(
+  report: MutationReport,
+  values: DecisionValue[],
+  adapterSource: string,
+  adapterFile = "adapter",
+): Violation[] {
   const violations: Violation[] = [];
   const adapterNumbers = new Set(
     runtimeLiterals(adapterSource)
@@ -135,7 +140,7 @@ export function judge(report: MutationReport, values: DecisionValue[], adapterSo
       }
     } else if (typeof value === "number" && adapterNumbers.has(value)) {
       violations.push({
-        file: `${TEST_DIR}/${FILES.adapter}`,
+        file: adapterFile,
         rule: "decision-in-adapter",
         message: `The decision value ${value} appears in the adapter but not in production code. Business decisions must be made in ${SOURCE_DIR}/.`,
       });

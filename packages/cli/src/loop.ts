@@ -5,21 +5,22 @@ import { mergeAssets } from "./assets.ts";
 import type { Asset } from "./assets.ts";
 import { entryGate, exitGate } from "./gates.ts";
 import type { Feedback, GateContext, MutationSummary } from "./gates.ts";
-import { FILES, SOURCE_DIR, TEST_DIR, requireModel, specHash } from "./generate.ts";
+import { SOURCE_DIR, TEST_DIR, requireModel, specHash } from "./generate.ts";
 import type { Ir } from "./generate.ts";
 import { DEFAULT_GUIDE } from "./guide.ts";
 import { DRAFT_SUFFIX, loadSpecs } from "./loader.ts";
-import { builtinMutation } from "./mutation.ts";
 import type { MutationStrategy } from "./mutation.ts";
 import { PHASES } from "./request.ts";
 import type { Phase } from "./request.ts";
 import { selfCheck } from "./runtime.ts";
-import { tscStaticCheck } from "./static-check.ts";
 import type { StaticCheckStrategy } from "./static-check.ts";
 import type { ImplementationStrategy } from "./strategy.ts";
+import { typescriptTarget } from "./target-typescript.ts";
+import type { Target } from "./target.ts";
 import { formatTypeErrors, typecheckSpecs } from "./typecheck.ts";
 
-// 仕様 → IR → TDD の3段階 (設計 → 配線 → 実装)。
+// 仕様 → IR → TDD の3段階 (設計 → 配線 → 実装)。対象言語を知らない、型どおりの流れ。
+// 言語に依存する処理は、すべて Target (target.ts) を通す。
 // 各段階は [入口ゲート → Strategy (エージェント) → 出口ゲート] で、段階ごとに別のセッションとして起動する。
 // 出口ゲートで落ちたら、その内容を同じ段階の次の依頼文に載せて差し戻す。
 // ある段階が上限回数まで直らなければ、最初の段階からやり直す（原因がどの段階にあるかは機械的に分からないため）。
@@ -39,9 +40,11 @@ export type ImplementOptions = {
   // true なら、人がまだ確認していない結び付けの下書き (*.draft.ts) を正解として使う。
   // 下書きから実装までを人手を挟まずに流すためのもの。結果には oracle: "draft" と記録される
   drafts?: boolean;
-  // ミューテーションのゲートの Strategy。省略時は自前、null で無効
+  // 対象言語。省略時は TypeScript
+  target?: Target;
+  // ミューテーションのゲートの Strategy。省略時は対象言語のもの、null で無効
   mutation?: MutationStrategy | null;
-  // 実装の静的検査の Strategy。省略時は TypeScript の型チェック、null で無効。
+  // 実装の静的検査の Strategy。省略時は対象言語のもの、null で無効。
   // 仕様の型チェックはこれとは別で、常に行う
   staticCheck?: StaticCheckStrategy | null;
   // どの段階から始めるか。省略時は、出力先に本番コードとアダプターが無ければ設計から、あれば実装から。
@@ -94,7 +97,9 @@ export async function implement(options: ImplementOptions) {
 
   // 検証を決定的にするため、シードは仕様のハッシュから決める
   const seed = Number.parseInt(specHash(ir).slice("sha256:".length, "sha256:".length + 7), 16);
+  const target = options.target ?? typescriptTarget;
   const ctx: GateContext = {
+    target,
     ir,
     specsDir,
     outDir,
@@ -103,16 +108,16 @@ export async function implement(options: ImplementOptions) {
     guide: DEFAULT_GUIDE,
     assets: mergeAssets(spec.assets ?? [], options.assets ?? []),
     drafts,
-    mutation: options.mutation === null ? undefined : (options.mutation ?? builtinMutation),
-    staticCheck: options.staticCheck === null ? undefined : (options.staticCheck ?? tscStaticCheck),
+    mutation: options.mutation === null ? undefined : (options.mutation ?? target.mutation),
+    staticCheck: options.staticCheck === null ? undefined : (options.staticCheck ?? target.staticCheck),
   };
 
   const clear = () => {
     rmSync(join(outDir, SOURCE_DIR), { recursive: true, force: true });
-    rmSync(join(outDir, TEST_DIR, FILES.adapter), { force: true });
+    rmSync(join(outDir, TEST_DIR, target.files.adapter), { force: true });
   };
   if (options.fresh) clear();
-  const built = existsSync(join(outDir, SOURCE_DIR)) && existsSync(join(outDir, TEST_DIR, FILES.adapter));
+  const built = existsSync(join(outDir, SOURCE_DIR)) && existsSync(join(outDir, TEST_DIR, target.files.adapter));
   const first: Phase = options.fresh ? "design" : (options.from ?? (built ? "implementation" : "design"));
 
   // 正解 (結び付け) が人の確認を経たものか、下書きのままか

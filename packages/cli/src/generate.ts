@@ -4,7 +4,7 @@ import type { FieldSchema } from "@aac/core";
 import { stableStringify } from "./extract.ts";
 import type { SpecModel } from "./extract.ts";
 
-// テスト側ファイルの生成。フレームワークが生成するのはテスト側だけで、本番コードには何も置かない。
+// テスト側ファイルの生成 (TypeScript を対象とするとき)。フレームワークが生成するのはテスト側だけで、本番コードには何も置かない。
 // 出力は IR だけから決まる（日時・CLI バージョンは埋めない）。
 
 export type Ir = {
@@ -17,12 +17,17 @@ export type Ir = {
 export const TEST_DIR = "aac";
 export const SOURCE_DIR = "src";
 
+// 対象言語によらないファイル
 export const FILES = {
   ir: "ir.json",
+  request: "REQUEST.md",
+} as const;
+
+// TypeScript を対象とするときの、テスト側のファイル名
+export const TS_FILES = {
   contract: "adapter.contract.ts",
   adapter: "adapter.ts",
   verify: "verify.ts",
-  request: "REQUEST.md",
 } as const;
 
 export function specHash(ir: Ir): string {
@@ -92,7 +97,7 @@ export interface TargetSystemAdapter {
 
 export function generateAdapterSkeleton(): string {
   const methods = ["setupIsolation(ports)", "teardownIsolation()", "executeAction(action)", "getCurrentState()"];
-  return `import type { TargetSystemAdapter } from "./${FILES.contract}";
+  return `import type { TargetSystemAdapter } from "./${TS_FILES.contract}";
 
 // Import the production code from ../${SOURCE_DIR}/ and forward each call to it. No business logic here.
 export const adapter: TargetSystemAdapter = {
@@ -106,7 +111,7 @@ export function generateVerify(ir: Ir, testDir: string, specsDir: string): strin
   return `${header(ir)}
 import { fileURLToPath } from "node:url";
 import { runPbt } from "@aac/cli/runtime";
-import { adapter } from "./${FILES.adapter}";
+import { adapter } from "./${TS_FILES.adapter}";
 
 await runPbt({ specs: fileURLToPath(new URL(${JSON.stringify(specs + "/")}, import.meta.url)), adapter });
 `;
