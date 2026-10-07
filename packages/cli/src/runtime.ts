@@ -47,6 +47,8 @@ export type PbtResult =
 
 export const RESULT_PREFIX = "AAC_RESULT ";
 const MAX_STEPS = 8;
+// 既定の試行回数（verify.ts を直接実行したとき。ループから呼ぶときは loop.ts が回数を渡す）
+const DEFAULT_RUNS = 1000;
 
 // 仕様の評価中に起きた問題（条件の衝突、結び付け漏れ、不変条件の破れ、型に合わない値）
 class SpecError extends Error {
@@ -255,7 +257,7 @@ export async function runPbt(options: { specs: string; adapter: Adapter; args?: 
   const result = await check(options.specs, options.adapter, values.drafts, {
     seed: values.seed === undefined ? undefined : Number(values.seed),
     path: values.path,
-    numRuns: values.runs === undefined ? 200 : Number(values.runs),
+    numRuns: values.runs === undefined ? DEFAULT_RUNS : Number(values.runs),
   });
   console.log(RESULT_PREFIX + JSON.stringify(result));
   if (result.status !== "pass") process.exitCode = 1;

@@ -25,6 +25,10 @@ import { formatTypeErrors, typecheckSpecs } from "./typecheck.ts";
 // 出口ゲートで落ちたら、その内容を同じ段階の次の依頼文に載せて差し戻す。
 // ある段階が上限回数まで直らなければ、最初の段階からやり直す（原因がどの段階にあるかは機械的に分からないため）。
 
+// 既定の試行回数。しきい値にちょうど当たる値で特定の状態まで進む、といった狭い場合を、
+// シードによらず踏めるだけの回数にしている（200回では、例の仕様のしきい値を踏まないシードが2割ほどあった）
+const DEFAULT_RUNS = 1000;
+
 export type ImplementOptions = {
   specs: string;
   out: string;
@@ -104,7 +108,7 @@ export async function implement(options: ImplementOptions) {
     specsDir,
     outDir,
     seed,
-    runs: options.runs ?? 200,
+    runs: options.runs ?? DEFAULT_RUNS,
     guide: DEFAULT_GUIDE,
     assets: mergeAssets(spec.assets ?? [], options.assets ?? []),
     drafts,
