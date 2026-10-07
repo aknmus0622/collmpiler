@@ -1,0 +1,537 @@
+{
+  "behaviors": [
+    {
+      "from": [
+        "GRADING"
+      ],
+      "name": "CurrentCodeGraded",
+      "onlyIf": [],
+      "when": {
+        "The check passed": {
+          "does": "Nothing: there is nothing to implement.",
+          "effects": [],
+          "goTo": "DONE"
+        },
+        "otherwise": {
+          "does": "An implementation session is started (attempt 1).",
+          "effects": [
+            {
+              "name": "StartSession",
+              "payload": {
+                "attempt": 1,
+                "phase": "implementation",
+                "round": {
+                  "$ref": "data:round"
+                }
+              }
+            }
+          ],
+          "goTo": "IMPLEMENTATION"
+        }
+      }
+    },
+    {
+      "from": [
+        "DESIGN"
+      ],
+      "name": "DesignChecked",
+      "onlyIf": [],
+      "when": {
+        "The check passed": {
+          "does": "The attempt number goes back to 1. A wiring session is started.",
+          "effects": [
+            {
+              "name": "StartSession",
+              "payload": {
+                "attempt": 1,
+                "phase": "wiring",
+                "round": {
+                  "$ref": "data:round"
+                }
+              }
+            }
+          ],
+          "goTo": "WIRING",
+          "set": {
+            "attempt": 1
+          }
+        },
+        "The check was rejected and attempts remain in this phase": {
+          "does": "The attempt number goes up by one. A design session is started with the new attempt number.",
+          "effects": [
+            {
+              "name": "StartSession",
+              "payload": {
+                "attempt": {
+                  "$ref": "calculation:nextAttempt"
+                },
+                "phase": "design",
+                "round": {
+                  "$ref": "data:round"
+                }
+              }
+            }
+          ],
+          "goTo": "DESIGN",
+          "set": {
+            "attempt": {
+              "$ref": "calculation:nextAttempt"
+            }
+          }
+        },
+        "The check was rejected, no attempts remain in this phase, and rounds remain": {
+          "does": "The round number goes up by one and the attempt number goes back to 1. The code is discarded if it was being written from nothing. Then a design session is started in the new round.",
+          "effects": [
+            {
+              "name": "DiscardCode",
+              "payload": {},
+              "when": "The code is being written from nothing"
+            },
+            {
+              "name": "StartSession",
+              "payload": {
+                "attempt": 1,
+                "phase": "design",
+                "round": {
+                  "$ref": "calculation:nextRound"
+                }
+              }
+            }
+          ],
+          "goTo": "DESIGN",
+          "set": {
+            "attempt": 1,
+            "round": {
+              "$ref": "calculation:nextRound"
+            }
+          }
+        },
+        "otherwise": {
+          "does": "Nothing.",
+          "effects": [],
+          "goTo": "FAILED"
+        }
+      }
+    },
+    {
+      "from": [
+        "IMPLEMENTATION"
+      ],
+      "name": "ImplementationChecked",
+      "onlyIf": [],
+      "when": {
+        "The check passed": {
+          "does": "Nothing.",
+          "effects": [],
+          "goTo": "DONE"
+        },
+        "The check was rejected and attempts remain in this phase": {
+          "does": "The attempt number goes up by one. An implementation session is started with the new attempt number.",
+          "effects": [
+            {
+              "name": "StartSession",
+              "payload": {
+                "attempt": {
+                  "$ref": "calculation:nextAttempt"
+                },
+                "phase": "implementation",
+                "round": {
+                  "$ref": "data:round"
+                }
+              }
+            }
+          ],
+          "goTo": "IMPLEMENTATION",
+          "set": {
+            "attempt": {
+              "$ref": "calculation:nextAttempt"
+            }
+          }
+        },
+        "The check was rejected, no attempts remain in this phase, and rounds remain": {
+          "does": "The round number goes up by one and the attempt number goes back to 1. The code is discarded if it was being written from nothing. Then a design session is started in the new round.",
+          "effects": [
+            {
+              "name": "DiscardCode",
+              "payload": {},
+              "when": "The code is being written from nothing"
+            },
+            {
+              "name": "StartSession",
+              "payload": {
+                "attempt": 1,
+                "phase": "design",
+                "round": {
+                  "$ref": "calculation:nextRound"
+                }
+              }
+            }
+          ],
+          "goTo": "DESIGN",
+          "set": {
+            "attempt": 1,
+            "round": {
+              "$ref": "calculation:nextRound"
+            }
+          }
+        },
+        "otherwise": {
+          "does": "Nothing.",
+          "effects": [],
+          "goTo": "FAILED"
+        }
+      }
+    },
+    {
+      "from": [
+        "IDLE"
+      ],
+      "name": "Start",
+      "onlyIf": [],
+      "when": {
+        "There is no production code yet": {
+          "does": "The pipeline remembers the two limits and whether the plan is incremental, and that this is round 1, attempt 1. A session of the plan's phase is started.",
+          "effects": [
+            {
+              "name": "StartSession",
+              "payload": {
+                "attempt": 1,
+                "phase": {
+                  "$ref": "decision:plan.phase"
+                },
+                "round": 1
+              }
+            }
+          ],
+          "goTo": "DESIGN",
+          "set": {
+            "attempt": 1,
+            "incremental": {
+              "$ref": "decision:plan.incremental"
+            },
+            "maxAttempts": {
+              "$ref": "input:attemptsPerPhase"
+            },
+            "maxRounds": {
+              "$ref": "input:rounds"
+            },
+            "round": 1
+          }
+        },
+        "There is production code, and the boundary differs from the previous run": {
+          "does": "The pipeline remembers the two limits and whether the plan is incremental, and that this is round 1, attempt 1. A session of the plan's phase is started.",
+          "effects": [
+            {
+              "name": "StartSession",
+              "payload": {
+                "attempt": 1,
+                "phase": {
+                  "$ref": "decision:plan.phase"
+                },
+                "round": 1
+              }
+            }
+          ],
+          "goTo": "DESIGN",
+          "set": {
+            "attempt": 1,
+            "incremental": {
+              "$ref": "decision:plan.incremental"
+            },
+            "maxAttempts": {
+              "$ref": "input:attemptsPerPhase"
+            },
+            "maxRounds": {
+              "$ref": "input:rounds"
+            },
+            "round": 1
+          }
+        },
+        "There is production code, the boundary is unchanged, and there is no adapter": {
+          "does": "The pipeline remembers the two limits and whether the plan is incremental, and that this is round 1, attempt 1. A session of the plan's phase is started.",
+          "effects": [
+            {
+              "name": "StartSession",
+              "payload": {
+                "attempt": 1,
+                "phase": {
+                  "$ref": "decision:plan.phase"
+                },
+                "round": 1
+              }
+            }
+          ],
+          "goTo": "WIRING",
+          "set": {
+            "attempt": 1,
+            "incremental": {
+              "$ref": "decision:plan.incremental"
+            },
+            "maxAttempts": {
+              "$ref": "input:attemptsPerPhase"
+            },
+            "maxRounds": {
+              "$ref": "input:rounds"
+            },
+            "round": 1
+          }
+        },
+        "otherwise": {
+          "does": "The pipeline remembers the two limits and whether the plan is incremental, and that this is round 1, attempt 1. The current code is graded.",
+          "effects": [
+            {
+              "name": "GradeCurrentCode",
+              "payload": {
+                "round": 1
+              }
+            }
+          ],
+          "goTo": "GRADING",
+          "set": {
+            "attempt": 1,
+            "incremental": {
+              "$ref": "decision:plan.incremental"
+            },
+            "maxAttempts": {
+              "$ref": "input:attemptsPerPhase"
+            },
+            "maxRounds": {
+              "$ref": "input:rounds"
+            },
+            "round": 1
+          }
+        }
+      }
+    },
+    {
+      "from": [
+        "WIRING"
+      ],
+      "name": "WiringChecked",
+      "onlyIf": [],
+      "when": {
+        "The check passed and existing code is being changed": {
+          "does": "The attempt number goes back to 1. The current code is graded.",
+          "effects": [
+            {
+              "name": "GradeCurrentCode",
+              "payload": {
+                "round": {
+                  "$ref": "data:round"
+                }
+              }
+            }
+          ],
+          "goTo": "GRADING",
+          "set": {
+            "attempt": 1
+          }
+        },
+        "The check passed and the code is being written from nothing": {
+          "does": "The attempt number goes back to 1. An implementation session is started.",
+          "effects": [
+            {
+              "name": "StartSession",
+              "payload": {
+                "attempt": 1,
+                "phase": "implementation",
+                "round": {
+                  "$ref": "data:round"
+                }
+              }
+            }
+          ],
+          "goTo": "IMPLEMENTATION",
+          "set": {
+            "attempt": 1
+          }
+        },
+        "The check was rejected and attempts remain in this phase": {
+          "does": "The attempt number goes up by one. A wiring session is started with the new attempt number.",
+          "effects": [
+            {
+              "name": "StartSession",
+              "payload": {
+                "attempt": {
+                  "$ref": "calculation:nextAttempt"
+                },
+                "phase": "wiring",
+                "round": {
+                  "$ref": "data:round"
+                }
+              }
+            }
+          ],
+          "goTo": "WIRING",
+          "set": {
+            "attempt": {
+              "$ref": "calculation:nextAttempt"
+            }
+          }
+        },
+        "The check was rejected, no attempts remain in this phase, and rounds remain": {
+          "does": "The round number goes up by one and the attempt number goes back to 1. The code is discarded if it was being written from nothing. Then a design session is started in the new round.",
+          "effects": [
+            {
+              "name": "DiscardCode",
+              "payload": {},
+              "when": "The code is being written from nothing"
+            },
+            {
+              "name": "StartSession",
+              "payload": {
+                "attempt": 1,
+                "phase": "design",
+                "round": {
+                  "$ref": "calculation:nextRound"
+                }
+              }
+            }
+          ],
+          "goTo": "DESIGN",
+          "set": {
+            "attempt": 1,
+            "round": {
+              "$ref": "calculation:nextRound"
+            }
+          }
+        },
+        "otherwise": {
+          "does": "Nothing.",
+          "effects": [],
+          "goTo": "FAILED"
+        }
+      }
+    }
+  ],
+  "decisions": {
+    "plan": {
+      "rows": {
+        "There is no production code yet": {
+          "incremental": false,
+          "phase": "design"
+        },
+        "There is production code, and the boundary differs from the previous run": {
+          "incremental": true,
+          "phase": "design"
+        },
+        "There is production code, the boundary is unchanged, and there is no adapter": {
+          "incremental": true,
+          "phase": "wiring"
+        },
+        "otherwise": {
+          "incremental": true,
+          "phase": null
+        }
+      }
+    }
+  },
+  "irVersion": 3,
+  "model": {
+    "calculations": {
+      "nextAttempt": {
+        "is": "the current attempt number plus one",
+        "type": "integer"
+      },
+      "nextRound": {
+        "is": "the current round number plus one",
+        "type": "integer"
+      }
+    },
+    "commands": {
+      "CurrentCodeGraded": {
+        "passed": "boolean"
+      },
+      "DesignChecked": {
+        "passed": "boolean"
+      },
+      "ImplementationChecked": {
+        "passed": "boolean"
+      },
+      "Start": {
+        "attemptsPerPhase": {
+          "max": 3,
+          "min": 1,
+          "type": "integer"
+        },
+        "rounds": {
+          "max": 3,
+          "min": 1,
+          "type": "integer"
+        }
+      },
+      "WiringChecked": {
+        "passed": "boolean"
+      }
+    },
+    "data": {
+      "attempt": {
+        "max": 4,
+        "min": 1,
+        "type": "integer"
+      },
+      "incremental": "boolean",
+      "maxAttempts": {
+        "max": 3,
+        "min": 1,
+        "type": "integer"
+      },
+      "maxRounds": {
+        "max": 3,
+        "min": 1,
+        "type": "integer"
+      },
+      "round": {
+        "max": 4,
+        "min": 1,
+        "type": "integer"
+      }
+    },
+    "effects": {
+      "DiscardCode": {},
+      "GradeCurrentCode": {
+        "round": {
+          "max": 4,
+          "min": 1,
+          "type": "integer"
+        }
+      },
+      "StartSession": {
+        "attempt": {
+          "max": 4,
+          "min": 1,
+          "type": "integer"
+        },
+        "phase": [
+          "design",
+          "wiring",
+          "implementation"
+        ],
+        "round": {
+          "max": 4,
+          "min": 1,
+          "type": "integer"
+        }
+      }
+    },
+    "init": "IDLE",
+    "invariants": [
+      "The attempt number never exceeds the limit of attempts per phase",
+      "The round number never exceeds the limit of rounds"
+    ],
+    "queries": {
+      "boundaryChanged": "boolean",
+      "hasAdapter": "boolean",
+      "hasProductionCode": "boolean"
+    },
+    "states": [
+      "IDLE",
+      "DESIGN",
+      "WIRING",
+      "GRADING",
+      "IMPLEMENTATION",
+      "DONE",
+      "FAILED"
+    ]
+  }
+}
