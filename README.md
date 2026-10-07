@@ -4,10 +4,10 @@
 
 Phase 1 spike. TypeScript targets only.
 
-- **Write a spec as TypeScript data. (Spec Driven Development)** Decision tables, plus a component: its vocabulary (states, remembered
-  data, queries to and effects on dependencies), the skeleton of its state machine, and what each command does
-  in prose. No functions. A separate binding says what the prose means: the structure of each command as
-  declarations, and the meaning of each condition, calculation, and invariant as functions.
+- **Write a spec as TypeScript data. (Spec Driven Development)** Decision tables, plus a component described as
+  roughly or as precisely as you like: prose alone, or prose with structure wherever you want to pin something
+  down (states, inputs, transitions). No functions. An LLM derives the rest — the missing structure, and the
+  meaning of every sentence — into an *interpretation* that you review; it can never override the structure you wrote.
 - **Have an LLM agent write the production code from the spec (Harness/Loop Engineering)**, test-first, in three isolated sessions:
   design a skeleton, wire it to the test harness, then implement it. The framework generates test-side code
   only and places nothing in production code.
@@ -29,11 +29,12 @@ There is no build step. Node runs the `.ts` files directly.
 
 The repository contains one example, end to end: the spec of an order that is placed, paid, shipped, or
 cancelled (`specs/`), and the implementation an LLM agent wrote from it (`examples/checkout-ts/`).
+`examples/co-llm-piler/` describes parts of the framework itself in the same way.
 
 ### 1. Write the spec
 
-A spec is **decision tables**, one **component**, and its **binding**. A scenario, a domain part, and a UI
-part are all written as components of the same shape.
+You write **decision tables** and a **component**. A scenario, a domain part, and a UI part are all written
+as components of the same shape. Neither contains a function.
 
 **Decision tables** (`specs/order.decisions.ts`). Each row is a condition in natural language; cells are
 values, or `null` where a row gives no value for a column. `otherwise` is mandatory.
@@ -46,14 +47,21 @@ export const Campaign = decisionTable({
 });
 ```
 
-**The component** (`specs/order.component.ts`). Vocabulary, the skeleton of the state machine, and prose. It
-contains no functions; types are derived from it.
+**The component** (`specs/order.component.ts`). The roughest form is prose alone:
+
+```ts
+export const Order = component(description("An order: placed by a customer, paid, then shipped or cancelled. ..."));
+```
+
+From there, write as structure only what you want to pin down. Every part is either prose (`description`) or
+structure, and a command is composed from parts:
 
 ```ts
 const Rank = ["Gold", "Silver", "Bronze"] as const;
 const Yen = { type: "integer", min: 0, max: 1_000_000, around: [10_000] } as const;
 
 export const Order = component({
+  description: "An order: placed by a customer, paid through an external payment module, then shipped or cancelled.",
   states: ["DRAFT", "PENDING", "PAID", "SHIPPED", "CANCELLED"],
   init: "DRAFT",
   data: { rank: Rank, price: Yen },                       // what the order remembers
@@ -74,108 +82,137 @@ export const Order = component({
   invariants: ["Every order past the draft state has a member rank and a price"],
 
   commands: {                                             // what drives it from outside
-    PlaceOrder: {
-      input: { customerRank: Rank, listPrice: Yen },
-      from: ["DRAFT"],
-      then: {
-        goTo: "PENDING",
-        does: "The order remembers the customer's rank and the list price. An order confirmation is sent.",
-      },
-    },
-    Checkout: {
-      from: ["PENDING"],
-      onlyIf: ["The external payment module is active"],
-      when: {
-        "The payment succeeded": {
-          goTo: "PAID",
-          does:
-            "A receipt is sent with the campaign's discount percent and the amount charged. " +
-            "Then a coupon is issued if the campaign grants one.",
-        },
-        otherwise: { goTo: "PENDING", does: "The customer is notified of the payment failure." },
-      },
-    },
-    Cancel: {
-      from: ["PENDING", "PAID"],
-      then: { goTo: "CANCELLED", does: "If the order had been paid, a refund is issued." },
-    },
-    // ...
+    // fully structured: input, where it applies, where it leads
+    PlaceOrder: compose(
+      input({ customerRank: Rank, listPrice: Yen }),
+      from("DRAFT"),
+      goTo("PENDING"),
+      does("The order remembers the customer's rank and the list price. An order confirmation is sent."),
+    ),
+    Checkout: compose(
+      from("PENDING"),
+      onlyIf("The external payment module is active"),
+      when(
+        "The payment succeeded",
+        goTo("PAID"),
+        does("A receipt is sent with the campaign's discount percent and the amount charged. Then a coupon is issued if the campaign grants one."),
+      ),
+      otherwise(does("The customer is notified of the payment failure.")),   // no goTo: the state stays
+    ),
+    // partly structured: the resulting state is left to the prose
+    Ship: compose(from("PAID"), does("The order becomes shipped. A shipping notice is sent, with priority as the shipping decision says.")),
+    // prose only
+    Cancel: description("A pending or paid order can be cancelled. If the order had been paid, a refund is issued."),
   },
 });
 ```
 
-**The binding** (`specs/order.binding.ts`). It has two parts. `commands` is the *structure*: what each `does`
-sentence means, written as declarations and references (`ref.*`). It goes into the IR. The rest is the *meaning*: what
-each name refers to, written as functions. That is the oracle for the tests and is never shown to the agent.
-A missing entry, an unknown name, or a reference of the wrong type is a compile error.
+Parts are values, so a fragment shared by several commands is written once (`const rejected = compose(when(...), otherwise(...))`).
 
-```ts
-export const Binding = bind(Order, {
-  commands: {
-    PlaceOrder: {
-      set: { rank: ref.input("customerRank"), price: ref.input("listPrice") },
-      effects: [{ SendOrderConfirmation: {} }],
-    },
-    Checkout: {
-      "The payment succeeded": {
-        effects: [
-          { SendReceipt: { discountPercent: ref.decision("campaign", "discountPercent"), amount: ref.calculation("amountCharged") } },
-          { IssueCoupon: { type: ref.decision("campaign", "coupon") }, when: ref.decision("campaign", "grantsCoupon") },
-        ],
-      },
-      otherwise: { effects: [{ NotifyPaymentFailure: {} }] },
-    },
-    Cancel: { effects: [{ Refund: {}, when: ref.was("PAID") }] },
-    // ...
-  },
-
-  conditions: {
-    "The customer is a Gold member and it is month-end": (state) => state.rank === "Gold" && state.isMonthEnd,
-    "The customer is a Silver member": (state) => state.rank === "Silver",
-    "The payment succeeded": (state) => state.paymentResult === "succeeded",
-    // ...
-  },
-  calculations: {
-    amountCharged: (state) =>
-      Math.floor(((state.price ?? 0) * (100 - decide(Order, "campaign", state).discountPercent)) / 100),
-  },
-  invariants: {
-    "Every order past the draft state has a member rank and a price": (state) =>
-      state.status === "DRAFT" || (state.rank !== undefined && state.price !== undefined),
-  },
-});
-```
-
-The binding does not have to be written from scratch. An agent can draft it, structure and meaning both:
+### 2. Have an LLM interpret it
 
 ```bash
-pnpm -s run draft-binding \
+pnpm -s run interpret \
   --agent 'claude -p "Read clp/REQUEST.md and carry out the request." --permission-mode acceptEdits'
 ```
 
-The draft goes to `specs/order.binding.draft.ts` and is ignored until you have read it and dropped `.draft`
-from its name, because the binding is what the implementation is judged against. (For unattended runs,
-`implement --drafts` uses the draft as it is; the result then records that the oracle was not reviewed.) The
-agent marks what it found ambiguous:
+The agent writes the **interpretation**: the structure Layer 1 left as prose, and the meaning of every
+sentence as a function. You do not write this file.
 
 ```ts
-// REVIEW: "the order is 10,000 yen or more" is read as the remembered list price. It could also mean the
-// amount charged after the campaign discount; the two differ for e.g. a Silver order of 10,000 yen
-// (charged 9,500).
-"The customer is a Gold member, or the order is 10,000 yen or more": (state) => {
-  return state.rank === "Gold" || (state.price !== undefined && state.price >= 10_000);
-},
+// specs/order.interpretation.ts — generated
+export const Interpretation = interpretation(Order, {
+  // structure: declarations and references, no functions. It goes into the IR.
+  structure: {
+    commands: {
+      PlaceOrder: {
+        set: { rank: ref.input("customerRank"), price: ref.input("listPrice") },
+        effects: [{ SendOrderConfirmation: {} }],
+      },
+      Checkout: {
+        when: {
+          "The payment succeeded": {
+            effects: [
+              { SendReceipt: { discountPercent: ref.decision("campaign", "discountPercent"), amount: ref.calculation("amountCharged") } },
+              { IssueCoupon: { type: ref.decision("campaign", "coupon") }, when: ref.decision("campaign", "grantsCoupon") },
+            ],
+          },
+          otherwise: { effects: [{ NotifyPaymentFailure: {} }] },
+        },
+      },
+      Ship: { goTo: "SHIPPED", effects: [{ SendShippingNotice: { priority: ref.decision("shipping", "priority") } }] },
+      Cancel: { from: ["PENDING", "PAID"], goTo: "CANCELLED", effects: [{ Refund: {}, when: ref.was("PAID") }] },
+    },
+  },
+
+  // meanings: functions. The oracle for the tests; never shown to the implementing agent.
+  meanings: {
+    conditions: {
+      "The customer is a Gold member and it is month-end": (state) => state.rank === "Gold" && state.isMonthEnd,
+      "The payment succeeded": (state) => state.paymentResult === "succeeded",
+      // ...
+    },
+    calculations: {
+      amountCharged: (state) =>
+        Math.floor(((state.price ?? 0) * (100 - decide(Order, "campaign", state).discountPercent)) / 100),
+    },
+    // ...
+  },
+});
 ```
 
-### 2. Check the spec
+The interpretation **cannot override structure written in Layer 1**: where you gave states, an input, `from`,
+a `goTo`, or the cases of a `when`, it may only add what is missing. It is type-checked against Layer 1, and
+run on its own over random command sequences, before it is written out.
+
+Because the interpretation is what the implementation is judged against, it is not used until you accept it.
+It goes to `specs/order.interpretation.draft.ts`, and you are told where the prose was ambiguous, in two ways:
+
+- **Questions the agent left** (`// REVIEW:`). From a deliberately rough version of this component (vocabulary
+  and most commands as prose):
+
+  ```text
+  the member ranks are not listed anywhere, so the rank is kept as free text
+  Layer 1 mentions a "discounted amount" but states no discount rule
+  "a coupon may be issued" gives no condition. Month-end is assumed, only because that query is declared
+  "good customers" is not defined
+  ```
+
+- **Where another reading behaves differently.** A second session interprets the same prose without seeing
+  the first (only the vocabulary is shared), and is asked to take, wherever the prose leaves room, a reading
+  that is defensible but not the most obvious one. Both are run on the same command sequences, and each
+  disagreement is reported as the shortest sequence that shows it:
+
+  ```text
+  Ship: PlaceOrder {"memberRank":"SILVER", ...} → Checkout {...} → Ship {...}
+    first:  state SHIPPED, effects [ShippingNotice {priority: false}]
+    second: state SHIPPED, effects [ShippingNotice {priority: true}]
+  ```
+
+  `--sessions <n>` sets the number of sessions (default 2; `1` skips the comparison). In our trials the
+  second session found every command with a disagreement, and a third and fourth added none.
+
+To resolve them, **make Layer 1 more precise** (add a decision table, a state, a `goTo`) and run `interpret`
+again; only what the change affects is redone. When nothing is left to resolve, read the draft and accept it:
+
+```bash
+pnpm -s run interpret --accept
+```
+
+The interpretation records the Layer 1 it was derived from. If Layer 1 changes afterwards, the interpretation
+is stale and nothing runs until it is derived again (or accepted again, when you only reworded a sentence).
+Changing a value in a decision table does not make it stale. For unattended runs, `implement --drafts` uses
+the draft as it is; the result then records that the oracle was not reviewed.
+
+### 3. Check the spec
 
 ```bash
 pnpm -s run ir
 ```
 
 This type-checks the spec, checks it on its own, and prints the IR: the spec as language-independent JSON. The
-prose and the structure are both there, under the same keys as in the spec; the bound functions are left out, so the IR says *what* must hold but
-not *how* to decide it.
+prose and the structure are both there, under the same keys as in the spec, wherever they were written; the
+functions of the interpretation are left out, so the IR says *what* must hold but not *how* to decide it.
 
 ```json
 "The payment succeeded": {
@@ -193,7 +230,7 @@ not *how* to decide it.
 }
 ```
 
-### 3. Have an agent implement it
+### 4. Have an agent implement it
 
 ```bash
 pnpm -s run implement --out examples/checkout-ts --fresh \
@@ -260,7 +297,7 @@ pnpm -s run implement --src src/order --tests src/order/clp. --agent '...'
 file-name prefix; otherwise it is a directory. The directory given as `--src` is rewritten by the agent, so it
 must not be a project root.
 
-### 4. What you get
+### 5. What you get
 
 ```text
 examples/checkout-ts/
@@ -323,7 +360,7 @@ function connect(ports: Ports): OrderDependencies {
 }
 ```
 
-### 5. Verify again at any time
+### 6. Verify again at any time
 
 ```bash
 pnpm --filter example-checkout-ts verify     # property-based test against the example
@@ -342,9 +379,13 @@ actual:   state CANCELLED, effects []
 
 ## Future Scope
 
-- Drafting the component itself from requirements written in natural language
-- Alerts from the review notes an LLM leaves in a draft binding (`// REVIEW:`): collecting them, reporting
-  them, and holding back a run until the ambiguous names they point at have been looked at
+- Holding back a run until the questions an LLM left in an interpretation (`// REVIEW:`) and the
+  disagreements between two interpretations have been looked at (today they are only reported)
+- Comparing the vocabulary of two interpretations (today the second session is given the first one's states,
+  commands, queries and effects)
+- Queries that take arguments, so that what a component asked about is verified too
+- Describing the framework itself in the framework (`examples/co-llm-piler`): so far its pipeline and one of
+  its checks
 - Stopping after the design step so a person can review the skeleton before it is wired and implemented
 - Applying a spec to existing production code (legacy code): wiring and verification only, with mismatches
   reported to a person instead of being sent back to the agent (design notes in `INCREMENTAL.md`)

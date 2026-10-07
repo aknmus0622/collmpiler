@@ -48,10 +48,10 @@ aac-engine-monorepo/
 ユーザー（PdM・エンジニア）が `specs/` ディレクトリ内でインポートして使う、極めて薄いライブラリです。ランタイムのロジックはほぼ持ちません。
 
 * **責務:**
-* コンポーネントの定義 (`component()`)。語彙・状態機械の骨組み・コマンドの説明の文を値として宣言し、型を導出する
+* コンポーネントの定義 (`component()`)。Layer 1。文 (`description()`) と、書きたい分だけの構造（`compose()` と、`input()` / `from()` / `onlyIf()` / `when()` / `otherwise()` / `goTo()` / `does()`）を値として宣言し、型を導出する
 * 多重度DSLの型定義 (`One<T>`, `Some<T>`, `Many<T>`)
 * 決定表の定義 (`decisionTable()`)
-* 結び付け (`bind()`)。コマンドの構造（宣言と参照: `ref.input` / `ref.data` / `ref.query` / `ref.decision` / `ref.calculation` / `ref.was`）と、名前の意味（関数）。意味の評価 (`decide()`, `calculate()`)
+* 解釈 (`interpretation()`)。Layer 2。LLM が導く。Layer 1 が書かなかった構造（宣言と参照: `ref.input` / `ref.data` / `ref.query` / `ref.decision` / `ref.calculation` / `ref.was`）と、名前の意味（関数）。Layer 1 への重ね合わせ (`resolveComponent()`)、意味の評価 (`decide()`, `calculate()`)
 
 
 * **依存関係:** 外部依存ゼロ（ピュアTS）。
