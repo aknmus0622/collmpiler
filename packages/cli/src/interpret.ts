@@ -99,6 +99,8 @@ function sentences(layer1: Layer1): string[] {
 }
 
 const structured = (value: unknown) => value !== undefined && !isDescription(value);
+// 項目に書かれた部品（文だけなら description だけを持つ）
+const partsOf = (entry: unknown): CommandShape => (isDescription(entry) ? { description: entry.$description } : isFragment(entry) ? entry.$fragment : {});
 
 // ほかの解釈に渡す語彙からは、しきい値 (around) を除く。1つ目が文から読み取った数値が、そこから伝わってしまうため
 const withoutThresholds = <T>(value: T): T =>
@@ -109,25 +111,50 @@ const withoutThresholds = <T>(value: T): T =>
 function skeleton(layer1: Layer1, componentFile: string, exportName: string, pinned?: SpecModel): string {
   const groups: string[] = [];
   const todo = (key: string, what: string) => groups.push(`    // TODO: ${key} — ${what}`);
-  const pin = (key: "states" | "init" | "queries" | "effects") => groups.push(`    ${key}: ${literal(pinned![key], "    ")},`);
-  for (const [key, what] of [
-    ["states", "the state names"],
-    ["init", "the initial state"],
-    ["data", "what the component remembers between commands (omit if nothing)"],
-    ["queries", "what it asks its dependencies (omit if nothing)"],
-    ["effects", "the effects it has on its dependencies (omit if none)"],
-  ] as const) {
-    if (structured(layer1[key])) continue;
-    if (pinned && key !== "data") pin(key);
-    else todo(key, what);
+  if (!structured(layer1.states)) pinned ? groups.push(`    states: ${literal(pinned.states, "    ")},`) : todo("states", "the state names");
+  if (layer1.init === undefined) pinned ? groups.push(`    init: ${quote(pinned.init)},`) : todo("init", "the initial state");
+
+  // 語彙のまとまり: Layer 1 が項目を並べていれば、足りない部品だけを、項目ごとに。並べていなければ、まとまりごと
+  const WHAT = {
+    data: "what the component remembers between commands, each as { type } (omit if nothing)",
+    queries: "what it asks its dependencies, each as { input?, output } (omit if nothing)",
+    effects: "the effects it has on its dependencies, each as { input? } (omit if none)",
+  };
+  const fromPinned = (key: "queries" | "effects", name: string, lacks: (part: string) => boolean): Record<string, unknown> => {
+    const entry: Record<string, unknown> = {};
+    const fields = key === "queries" ? pinned!.queries[name]?.input : pinned!.effects[name];
+    if (lacks("input") && Object.keys(fields ?? {}).length > 0) entry.input = fields;
+    if (key === "queries" && lacks("output")) entry.output = pinned!.queries[name]?.output;
+    return entry;
+  };
+  for (const key of ["data", "queries", "effects", "calculations"] as const) {
+    const given = layer1[key];
+    if (given === undefined || isDescription(given)) {
+      if (key === "calculations") continue;
+      if (pinned && key !== "data") {
+        const all = Object.fromEntries(Object.keys(pinned[key]).map((name) => [name, fromPinned(key, name, () => true)]));
+        groups.push(`    ${key}: ${literal(all, "    ")},`);
+      } else todo(key, WHAT[key]);
+      continue;
+    }
+    const lines: string[] = [];
+    for (const [name, written] of Object.entries(given)) {
+      const shape = partsOf(written);
+      const note = shape.description ? `      // ${shape.description}\n` : "";
+      if (key === "data" && shape.type === undefined) lines.push(`${note}      ${name}: { type: "TODO" },`);
+      if (key === "calculations" && shape.output === undefined) lines.push(`${note}      ${name}: { output: "TODO" },`);
+      if (key === "queries" || key === "effects") {
+        const lacks = (part: string) => (shape as Record<string, unknown>)[part] === undefined;
+        if (pinned) {
+          const entry = fromPinned(key, name, lacks);
+          if (Object.keys(entry).length > 0) lines.push(`      ${name}: ${literal(entry, "      ")},`);
+        } else if (key === "queries" && lacks("output")) lines.push(`${note}      ${name}: { output: "TODO" },`);
+        else if (lacks("input") && shape.description !== undefined) lines.push(`${note}      ${name}: {},`);
+      }
+    }
+    if (lines.length > 0) groups.push(`    ${key}: {\n${lines.join("\n")}\n    },`);
   }
   const calculations = layer1.calculations;
-  if (calculations !== undefined && !isDescription(calculations)) {
-    const untyped = Object.entries(calculations).filter(([, entry]) => isDescription(entry));
-    if (untyped.length > 0) {
-      groups.push(`    calculations: {\n${untyped.map(([name, entry]) => `      // ${(entry as { $description: string }).$description}\n      ${name}: { type: "TODO" },`).join("\n")}\n    },`);
-    }
-  }
 
   const known = sketched(layer1);
   const names = known ? Object.keys(known) : Object.keys(pinned?.commands ?? {});
@@ -161,7 +188,7 @@ ${groups.join("\n")}
     conditions: {
 ${sentences(layer1).map((name) => `      ${quote(name)}: (state) => ${TODO},`).join("\n")}
     },
-${meaning("calculations", Object.entries(declared).map(([name, entry]) => `      // ${isDescription(entry) ? entry.$description : entry.is}\n      ${name}: (state) => ${TODO},`))}${meaning("invariants", (layer1.invariants ?? []).map((name) => `      ${quote(name)}: (state) => ${TODO},`))}  },
+${meaning("calculations", Object.entries(declared).map(([name, entry]) => `      // ${partsOf(entry).description ?? ""}\n      ${name}: (state) => ${TODO},`))}${meaning("invariants", (layer1.invariants ?? []).map((name) => `      ${quote(name)}: (state) => ${TODO},`))}  },
 });
 `;
 }
@@ -194,8 +221,9 @@ end of this request.`
     pinned
       ? `
 
-**The vocabulary is fixed.** \`states\`, \`init\`, \`queries\`, \`effects\`, the command names, and each command's
-\`input\` are already filled in where Layer 1 does not give them. Do not change them. Everything else is yours to
+**The vocabulary is fixed.** \`states\`, \`init\`, \`queries\` (with their \`input\` and \`output\`), \`effects\`
+(with their \`input\`), the command names, and each command's \`input\` are already filled in where Layer 1
+does not give them. Do not change them. Everything else is yours to
 decide from the prose.
 
 **Take the other reading.** Another interpreter has already written the most obvious reading of this
@@ -212,18 +240,25 @@ clear, follow it exactly: a difference that the prose does not allow is noise.`
 **You cannot override what Layer 1 wrote as structure.** Where Layer 1 gives states, an input, \`from\`, \`onlyIf\`,
 a \`goTo\`, or the cases of a \`when\`, do not repeat or change it; write only what is missing.
 
-- Vocabulary, each only if Layer 1 does not give it as structure: \`states\` (an array of names), \`init\`,
-  \`data\` (what the component remembers between commands; everything is unset at the start), \`queries\` (values
-  it asks its dependencies for: a clock, a setting, an external service's response), \`effects\` (what it does to
-  its dependencies, each with payload fields). You may add \`calculations\` (\`{ name: { is: "<how it is computed>",
-  type } }\`; for one Layer 1 describes in prose, give only \`{ type }\`) and \`invariants\` (sentences that must
-  hold after every command).
+- Vocabulary. Layer 1 gives each group (\`states\`, \`data\`, \`queries\`, \`effects\`, \`calculations\`) either
+  as prose, or as a list of entries, each of which may itself be prose or parts.
+  - A group given as prose or not at all: write it. \`states\` is an array of names and \`init\` one of them.
+    The other groups are \`{ name: { ...parts } }\`.
+  - A group given as a list of entries: do not add entries (except to \`calculations\`); for each entry, write
+    only the parts Layer 1 does not give.
+  - The parts: \`data\` (what the component remembers between commands; everything is unset at the start):
+    \`{ type }\`. \`queries\` (what it asks its dependencies: a clock, a setting, an external service's
+    response): \`{ output }\` for the type of the answer, plus \`{ input: { field: type } }\` if it is a question
+    about something. \`effects\` (what it does to its dependencies): \`{ input: { field: type } }\` for what it
+    carries, or \`{}\`. \`calculations\`: \`{ is: "<how it is computed>", output }\`; for one Layer 1 describes in
+    prose, only \`{ output }\`. You may also add \`invariants\` (sentences that must hold after every command).
 - Field types: \`"boolean"\`, \`"integer"\`, \`"number"\`, \`"string"\`, an array of allowed strings, or
-  \`{ type: "integer", min, max, around: [thresholds] }\`. Use whole numbers for money. Field names of \`data\`,
-  \`queries\` and command inputs share one namespace and must not collide (inputs of different commands may).
+  \`{ type: "integer", min, max, around: [thresholds] }\`. Use whole numbers for money. The names of \`data\`
+  fields, queries without input, command inputs, and the names given in \`asks\` share one namespace and must
+  not collide (inputs, and \`asks\` names, of different commands may).
 - \`commands\`: one entry for **every** command, even if you add nothing (\`{}\`). An entry may hold, where
   Layer 1 does not: \`input\`, \`from\` (the states in which the command can be executed), \`onlyIf\` (condition
-  sentences that must hold), and the outcome:
+  sentences that must hold), \`asks\` (below), and the outcome:
   - \`goTo\`: the resulting state. **Omit it when the state does not change.**
   - \`effects\`: the effects to perform, in order, each as \`{ EffectName: { field: value, ... } }\`. Add
     \`when: ...\` to perform an effect only sometimes.
@@ -233,11 +268,17 @@ a \`goTo\`, or the cases of a \`when\`, do not repeat or change it; write only w
     \`otherwise\`). \`otherwise\` is mandatory.
   - For a command Layer 1 only describes in prose, you may add \`does: "<what happens>"\` to an outcome.
 
+A query that takes an \`input\` cannot be read by its name: the command must say what it asks about.
+\`asks: { answerName: { queryName: { field: value } } }\` asks that query with that input and names the answer.
+The input values are constants, \`ref.input(...)\` or \`ref.data(...)\`. Functions read the answer as
+\`state.answerName\`, and the structure refers to it as \`ref.query("answerName")\`. The implementation is
+tested against this: it may ask that query only with the inputs listed here.
+
 A value is a constant or a reference:
 
 - \`ref.input("field")\`: the command's input
 - \`ref.data("field")\`: remembered data
-- \`ref.query("field")\`: a query answer
+- \`ref.query("name")\`: the answer of a query without input, or an answer named in the command's \`asks\`
 - \`ref.decision("table", "column")\`: the value of a decision table's column in the row that applies. A cell
   written as \`null\` has no value in that row, so a reference to it must only be reached when another row applies
   (for example behind a \`when\`).
@@ -253,8 +294,8 @@ natural language, which you must then also define under \`meanings.conditions\`.
   the \`when\` sentences of effects), returning a boolean. \`calculations\`: one per calculation, returning a value
   of its type. \`invariants\`: one per invariant, returning a boolean that must always be true.
 - Conditions and calculations receive \`state\` with: \`status\` (the current state name); the remembered data,
-  each possibly \`undefined\` before it is set; the query answers; and the inputs of the command being executed,
-  \`undefined\` during other commands. \`invariants\` functions receive only \`status\` and the remembered data.
+  each possibly \`undefined\` before it is set; the answers of queries without input; and the inputs and the
+  \`asks\` answers of the command being executed, \`undefined\` during other commands. \`invariants\` functions receive only \`status\` and the remembered data.
 - Inside a function, \`decide(Component, "table", state)\` gives the row of a decision table that applies, and
   \`calculate(Component, "name", state)\` gives the result of another calculation.
 

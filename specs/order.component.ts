@@ -1,12 +1,12 @@
-import { component, compose, description, does, from, goTo, input, onlyIf, otherwise, when } from "@clp/core";
+import { component, compose, description, does, from, goTo, input, onlyIf, otherwise, output, typed, when } from "@clp/core";
 import { Campaign, Shipping } from "./order.decisions.ts";
 
 const Rank = ["Gold", "Silver", "Bronze"] as const;
 // Money is a whole number of yen. `around` lists thresholds the property-based test probes closely.
 const Yen = { type: "integer", min: 0, max: 1_000_000, around: [10_000] } as const;
 
-// Layer 1 of the "order" component, written by a person. Each part is either prose (`description`) or structure,
-// whichever the author wants to pin down. What the prose means — the rest of the structure, and the meaning of every
+// Layer 1 of the "order" component, written by a person. Every entry is prose (`description`), parts (`typed`,
+// `input`, `output`, `from`, `goTo`, ...), or both merged by `compose`, whichever the author wants to pin down. What the prose means — the rest of the structure, and the meaning of every
 // sentence — is derived by an LLM into order.interpretation.ts. To make something more precise, write more
 // structure here; the interpretation cannot override what is written as structure.
 export const Order = component({
@@ -17,33 +17,31 @@ export const Order = component({
   init: "DRAFT",
 
   // What the order remembers between commands (nothing is set at the start)
-  data: { rank: Rank, price: Yen },
+  data: { rank: typed(Rank), price: typed(Yen) },
 
   // What the order asks its dependencies (a clock, configuration, an external service's response)
   queries: {
-    isMonthEnd: "boolean",
-    paymentModuleActive: "boolean",
-    paymentResult: ["succeeded", "failed"],
+    isMonthEnd: compose(description("Whether today is the last day of the month."), output("boolean")),
+    paymentModuleActive: output("boolean"),
+    paymentResult: compose(description("What the payment module answered for this order."), output(["succeeded", "failed"])),
   },
 
   // The effects the order has on its dependencies
   effects: {
-    SendOrderConfirmation: {},
-    SendReceipt: { discountPercent: "integer", amount: "integer" },
-    IssueCoupon: { type: ["Premium", "Standard"] },
-    NotifyPaymentFailure: {},
-    SendShippingNotice: { priority: "boolean" },
-    Refund: {},
+    SendOrderConfirmation: input({}),
+    SendReceipt: input({ discountPercent: "integer", amount: "integer" }),
+    IssueCoupon: input({ type: ["Premium", "Standard"] }),
+    NotifyPaymentFailure: input({}),
+    SendShippingNotice: input({ priority: "boolean" }),
+    // Prose only: whether it carries anything is left to the interpretation
+    Refund: description("What the customer paid is returned."),
   },
 
   // ── Decisions and calculations ──────────────────────────────
   decisions: { campaign: Campaign, shipping: Shipping },
 
   calculations: {
-    amountCharged: {
-      is: "price × (100 − discount percent) ÷ 100, rounded down to a whole yen",
-      type: "integer",
-    },
+    amountCharged: compose(description("price × (100 − discount percent) ÷ 100, rounded down to a whole yen"), output("integer")),
   },
 
   // Properties that must hold after every command

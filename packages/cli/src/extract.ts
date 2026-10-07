@@ -9,7 +9,7 @@ import { compatible, conforms, describe } from "./schema.ts";
 // IR のキーは、仕様を書くときの語と同じにしている。
 // あわせて、型チェックをすり抜けた誤りを、分かりやすい文面で報告する。
 
-export const IR_VERSION = 4;
+export const IR_VERSION = 5;
 
 // --- 読み込んだ仕様を、扱いやすい形に正規化したもの (loader が作る) ---
 export type SpecModel = {
@@ -18,7 +18,8 @@ export type SpecModel = {
   data: Fields;
   // コマンド名 → 入力
   commands: Record<string, Fields>;
-  queries: Fields;
+  // 問い合わせの名前 → 引数と、答えの型。引数の無い問い合わせは、名前でそのまま読める
+  queries: Record<string, { input: Fields; output: FieldSchema }>;
   // 副作用の名前 → フィールド
   effects: Record<string, Fields>;
   // 計算の名前 → 式を述べる文と、結果の型
@@ -31,6 +32,8 @@ export type Reference = { $ref: "decision" | "calculation" | "input" | "data" | 
 export type SpecValue = Constant | Reference;
 export type SpecEffect = { name: string; payload: Record<string, SpecValue>; when?: string | Reference };
 // goTo が無ければ、状態は変わらない
+// 尋ねること: どの問い合わせを、どの引数で。答えは、付けた名前で読む
+export type SpecAsk = { query: string; input: Record<string, SpecValue> };
 export type SpecOutcome = { goTo?: string; does?: string; effects: SpecEffect[]; set: Record<string, SpecValue> };
 
 export type SpecInput = {
@@ -38,7 +41,10 @@ export type SpecInput = {
   name?: string;
   model?: SpecModel;
   // コマンド名 → 実行できる状態、事前条件、条件ごとの結果（分かれないコマンドは otherwise だけ）
-  behaviors: Record<string, { description?: string; from?: readonly string[]; onlyIf?: readonly string[]; when: Record<string, SpecOutcome> }>;
+  behaviors: Record<
+    string,
+    { description?: string; from?: readonly string[]; onlyIf?: readonly string[]; asks?: Record<string, SpecAsk>; when: Record<string, SpecOutcome> }
+  >;
   decisions: Record<string, Table>;
   // Layer 1 のコンポーネント（書かれたまま）、解釈を重ねたもの、解釈（意味の関数を含む）
   layer1?: object;
@@ -83,8 +89,15 @@ function typeOf(input: SpecInput, command: string, ref: Reference): { schema?: F
       return model.commands[command]?.[name] ? { schema: model.commands[command][name] } : { problem: `"${name}" は、コマンド ${command} の input にありません` };
     case "data":
       return model.data[name] ? { schema: model.data[name] } : { problem: `"${name}" は、data にありません` };
-    case "query":
-      return model.queries[name] ? { schema: model.queries[name] } : { problem: `"${name}" は、queries にありません` };
+    case "query": {
+      // そのコマンドが尋ねたことに付けた名前か、引数の無い問い合わせの名前
+      const asked = input.behaviors[command]?.asks?.[name];
+      if (asked) return model.queries[asked.query] ? { schema: model.queries[asked.query].output } : { problem: `問い合わせ "${asked.query}" は、queries にありません` };
+      const query = model.queries[name];
+      if (!query) return { problem: `"${name}" は、queries にも、コマンド ${command} の asks にもありません` };
+      if (Object.keys(query.input).length > 0) return { problem: `問い合わせ "${name}" には引数があります。asks で尋ねて、付けた名前で読んでください` };
+      return { schema: query.output };
+    }
     case "was": {
       const unknown = (ref.path as string[]).find((state) => !model.states.includes(state));
       return unknown === undefined ? { boolean: true } : { problem: `was: "${unknown}" は states にありません` };
@@ -142,6 +155,28 @@ export function extract(input: SpecInput) {
     }
     for (const precondition of behavior.onlyIf ?? []) condition(name, "", precondition);
 
+    // 尋ねること: 問い合わせがあること、引数がそろっていること、引数の型が合うこと
+    const asks: Record<string, unknown> = {};
+    for (const [alias, asked] of Object.entries(behavior.asks ?? {})) {
+      const query = model.queries[asked.query];
+      if (!query) {
+        report("unknown-query", name, "", `asks.${alias}: 問い合わせ "${asked.query}" は queries にありません`);
+        continue;
+      }
+      for (const field of Object.keys(query.input)) {
+        if (!(field in asked.input)) report("missing-field", name, "", `asks.${alias}: 問い合わせ ${asked.query} に、引数 "${field}" がありません`);
+      }
+      for (const [field, value] of Object.entries(asked.input)) {
+        const problem = !query.input[field]
+          ? `問い合わせ ${asked.query} に、引数 "${field}" はありません`
+          : isReference(value) && value.$ref !== "input" && value.$ref !== "data"
+            ? "引数に書けるのは、定数か、ref.input / ref.data です"
+            : mismatch(input, name, value, query.input[field]);
+        if (problem) report("bad-value", name, "", `asks.${alias}.${field}: ${problem}`);
+      }
+      asks[alias] = { query: asked.query, input: Object.fromEntries(Object.entries(asked.input).map(([field, value]) => [field, serialize(value)])) };
+    }
+
     const when: Record<string, unknown> = {};
     for (const caseName of Object.keys(behavior.when).sort()) {
       const outcome = behavior.when[caseName];
@@ -194,6 +229,7 @@ export function extract(input: SpecInput) {
       ...(behavior.description === undefined ? {} : { description: behavior.description }),
       from: [...(behavior.from ?? model.states)],
       onlyIf: [...(behavior.onlyIf ?? [])],
+      ...(Object.keys(asks).length > 0 ? { asks } : {}),
       when,
     });
   }

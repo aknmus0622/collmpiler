@@ -45,9 +45,10 @@ The IR describes one component by its boundary.
 - \`model.commands\`: the commands that drive the component from outside, each with the fields of its input.
 - \`model.data\`: what the component remembers between commands. Nothing is set in the initial state; an
   outcome's \`set\` says which fields it stores, and later commands can depend on them.
-- \`model.queries\`: values the component asks its environment for (a clock, configuration, the response of an
-  external service, ...). The answers can change from one command to the next, so ask when the value is needed
-  and do not cache it.
+- \`model.queries\`: what the component asks its environment for (a clock, configuration, the response of an
+  external service, ...), each with the type of its answer (\`output\`) and, if it is a question about
+  something, the fields of that something (\`input\`). The answers can change from one command to the next, so
+  ask when the value is needed and do not cache it.
 - \`model.effects\`: the side effects the component may perform on its environment, with their payload fields.
 - Field types: an array lists the allowed values; a string is a primitive type (\`integer\` is a whole number);
   an object such as \`{"type": "integer", "min": 0, "max": 1000000}\` is a number with constraints (\`around\`
@@ -67,7 +68,10 @@ The IR describes one component by its boundary.
   its vocabulary. It explains the intent; the structured fields are the precise form.
 - \`behaviors\`: what each command does. \`description\` (if present) describes the command in prose.
   \`from\` lists the states in which the command can be executed, and the conditions in \`onlyIf\` must also
-  hold; behaviour outside them is not tested. \`when\` maps each condition to what happens when it holds
+  hold; behaviour outside them is not tested. \`asks\` (if present) lists what the command asks through a
+  query that takes an input: each entry names the answer, the \`query\`, and the \`input\` to ask it with. Ask
+  with exactly that input; other questions through that query are not part of the specification. You need not
+  ask when the answer cannot matter. \`when\` maps each condition to what happens when it holds
   (a command that does not branch has only \`otherwise\`):
   - \`goTo\`: the resulting state. If it is absent, the state does not change.
   - \`does\` (if present): what happens, in prose. It explains the intent; the fields below are the precise form.
@@ -76,8 +80,8 @@ The IR describes one component by its boundary.
     boolean value.
   - \`set\`: the data to remember.
 - Values inside an outcome are constants or references:
-  - \`{"$ref": "input:<field>"}\`, \`{"$ref": "data:<field>"}\`, \`{"$ref": "query:<field>"}\`: that command
-    input, remembered field, or query answer.
+  - \`{"$ref": "input:<field>"}\`, \`{"$ref": "data:<field>"}\`, \`{"$ref": "query:<name>"}\`: that command
+    input, remembered field, or query answer (\`<name>\` is a query without input, or a name given in \`asks\`).
   - \`{"$ref": "calculation:<name>"}\`: the result of that computation.
   - \`{"$ref": "decision:<table>.<column>"}\`: the value of that column in the row whose condition holds.
   - \`{"$was": [<states>]}\`: true if the state before the command was one of those listed.`;

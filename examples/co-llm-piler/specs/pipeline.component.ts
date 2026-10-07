@@ -1,4 +1,4 @@
-import { component, compose, description, does, from, goTo, input, otherwise, when } from "@clp/core";
+import { component, compose, description, does, from, goTo, input, otherwise, output, when } from "@clp/core";
 import { Plan } from "./pipeline.decisions.ts";
 
 const Limit = { type: "integer", min: 1, max: 3 } as const;
@@ -37,16 +37,15 @@ export const Pipeline = component({
 
   // What the output directory holds
   queries: {
-    hasProductionCode: "boolean",
-    boundaryChanged: "boolean",
-    hasAdapter: "boolean",
+    hasProductionCode: output("boolean"),
+    boundaryChanged: compose(description("Whether the component's boundary differs from the one the previous run worked from."), output("boolean")),
+    hasAdapter: output("boolean"),
   },
 
   effects: {
-    StartSession: { phase: Phase, round: Count, attempt: Count },
-    // Grade the production code as it is, without an agent
-    GradeCurrentCode: { round: Count },
-    DiscardCode: {},
+    StartSession: input({ phase: Phase, round: Count, attempt: Count }),
+    GradeCurrentCode: compose(description("Grade the production code as it is, without an agent."), input({ round: Count })),
+    DiscardCode: input({}),
   },
 
   decisions: { plan: Plan },

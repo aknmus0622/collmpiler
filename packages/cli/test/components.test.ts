@@ -15,12 +15,12 @@ import { harness, repoRoot, specsDir, unstamped } from "./support.ts";
 const { tmpRoot, workdir } = harness("components");
 
 // 2つ目のコンポーネント（ランプ）。解釈も同じファイルに書いてある
-const LAMP = `import { component, compose, does, goTo, interpretation, otherwise, when } from "@clp/core";
+const LAMP = `import { component, compose, does, goTo, input, interpretation, otherwise, when } from "@clp/core";
 
 export const Lamp = component({
   states: ["OFF", "ON"],
   init: "OFF",
-  effects: { Notify: { on: "boolean" } },
+  effects: { Notify: input({ on: "boolean" }) },
   commands: {
     Flip: compose(
       when("The lamp is on", goTo("OFF"), does("The lamp turns off and a notice says so.")),

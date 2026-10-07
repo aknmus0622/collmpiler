@@ -12,7 +12,7 @@ import type { Workspace } from "./layout.ts";
 export type Ir = {
   irVersion: number;
   descriptions?: Record<string, string>;
-  behaviors: { name: string; description?: string; from: string[]; onlyIf: string[]; when: Record<string, { goTo?: string; does?: string }> }[];
+  behaviors: { name: string; description?: string; from: string[]; onlyIf: string[]; asks?: Record<string, { query: string; input: Record<string, unknown> }>; when: Record<string, { goTo?: string; does?: string }> }[];
   decisions: Record<string, { rows: Record<string, Record<string, unknown>> }>;
   model?: SpecModel;
 };
@@ -62,7 +62,10 @@ const members = (lines: string[]) => (lines.length === 0 ? "{}" : `{\n${lines.ma
 export function generateContract(ir: Ir): string {
   const model = requireModel(ir);
   const behaviors = [...ir.behaviors].sort((a, b) => (a.name < b.name ? -1 : 1));
-  const queries = Object.keys(model.queries).sort().map((name) => `${name}(): ${fieldType(model.queries[name])}`);
+  const queries = Object.keys(model.queries).sort().map((name) => {
+    const { input, output } = model.queries[name];
+    return `${name}(${Object.keys(input).length > 0 ? `input: ${shape(input)}` : ""}): ${fieldType(output)}`;
+  });
   const effects = Object.keys(model.effects).sort().map((name) => `${name}(payload: ${shape(model.effects[name])}): void`);
 
   return `${header(ir)}
@@ -80,6 +83,8 @@ export type Ports = {
   /**
    * Values the system asks its environment for (a clock, configuration, the response of an external service).
    * Answers can differ between commands: ask when needed, do not cache.
+   * A query that takes an \`input\` is a question about that input. Pass on exactly what the production code
+   * asked about; a question the specification does not ask in that command makes the test fail.
    */
   queries: ${members(queries)};
   /** Side effects the system performs on its environment. Calls are recorded in order and compared with the spec. */

@@ -117,28 +117,39 @@ export const ref = {
   was: <const S extends readonly string[]>(...states: S): Ref<"was", S> => ({ $ref: "was", path: states }),
 };
 
-// --- Layer 1: 記述と、コマンドの部品 ---
-// いちばん粗い書き方は、文だけ (description)。構造にしたい所だけを、部品を compose で組み合わせて書く。
+// --- Layer 1: 記述と部品 ---
+// どの項目も、文だけ (description) か、部品を compose で組み合わせたもので書く。構造にしたい所だけを部品にする。
 //   description("...")     … 文。何を構造にするかは、解釈 (Layer 2) が決める
-//   input({...})           … コマンドの入力
+//   compose(...)           … 部品を1つにまとめる。まとめたものは値なので、複数の項目で共有できる
+// 語彙の部品:
+//   typed(型)              … 覚えるデータの型
+//   input({...})           … コマンドの入力、問い合わせの引数、副作用のペイロード
+//   output(型)             … 問い合わせの答えの型、計算の結果の型
+// コマンドの部品:
 //   from("A", "B")         … 実行できる状態
 //   onlyIf("...")          … 事前条件（条件の文）
+//   asks({ 名前: { 問い合わせ: { 引数 } } }) … 尋ねること。答えは、付けた名前で読む
 //   when("...", ...)       … 条件で分かれるときの、1つの場合。中に goTo / does を書く
 //   otherwise(...)         … どの条件にも当たらない場合
 //   goTo("A")              … 遷移先。どこにも書かなければ、状態は変わらない
 //   does("...")            … 何が起きるかの文
-//   compose(...)           … 部品を1つにまとめる。まとめたものは値なので、複数のコマンドで共有できる
 export type Description = { readonly $description: string };
 export const description = (text: string): Description => ({ $description: text });
 export const isDescription = (value: unknown): value is Description =>
   typeof value === "object" && value !== null && "$description" in value;
 
 export type OutcomeShape = { goTo?: string; does?: string };
+// 尋ねること: 答えに付ける名前 → { 問い合わせの名前: 引数 }
+export type Asks = Record<string, Record<string, Record<string, unknown>>>;
+// 部品が決める構造。どの部品をどこに書けるかは、項目の種類で決まる（読み込みのあとで検査する）
 export type CommandShape = {
   description?: string;
   input?: Fields;
+  output?: FieldSchema;
+  type?: FieldSchema;
   from?: readonly string[];
   onlyIf?: readonly string[];
+  asks?: Asks;
   goTo?: string;
   does?: string;
   when?: Record<string, OutcomeShape>;
@@ -170,8 +181,17 @@ function mergeShapes(parts: readonly CommandShape[]): CommandShape {
     const text = joined(result.description, part.description);
     if (text !== undefined) result.description = text;
     if (part.input) result.input = { ...result.input, ...part.input };
+    for (const key of ["output", "type"] as const) {
+      if (part[key] === undefined) continue;
+      if (result[key] !== undefined) throw new Error(`型 (${key === "type" ? "typed" : key}) が2つ書かれています`);
+      result[key] = part[key];
+    }
     if (part.from) result.from = [...(result.from ?? []), ...part.from];
     if (part.onlyIf) result.onlyIf = [...(result.onlyIf ?? []), ...part.onlyIf];
+    for (const [name, asked] of Object.entries(part.asks ?? {})) {
+      if (result.asks?.[name] !== undefined) throw new Error(`尋ねること (asks) の名前 "${name}" が2つ書かれています`);
+      result.asks = { ...result.asks, [name]: asked };
+    }
     const outcome = mergeOutcomes(result, part);
     if (outcome.goTo !== undefined) result.goTo = outcome.goTo;
     if (outcome.does !== undefined) result.does = outcome.does;
@@ -181,12 +201,20 @@ function mergeShapes(parts: readonly CommandShape[]): CommandShape {
   }
   return result;
 }
-const shapeOf = (part: Fragment<unknown> | Description): CommandShape =>
-  isDescription(part) ? { description: part.$description } : part.$fragment;
+const shapeOf = (part: unknown): CommandShape =>
+  isDescription(part) ? { description: part.$description } : isFragment(part) ? part.$fragment : {};
 
+type NoWideType<T> = T extends readonly (infer Value)[]
+  ? string extends Value
+    ? Problem<"列挙は、その場に書くか as const を付けた配列で宣言してください">
+    : unknown
+  : unknown;
+export const typed = <const T extends FieldSchema>(schema: T & NoWideType<T>): Fragment<{ type: T }> => fragment({ type: schema });
+export const output = <const T extends FieldSchema>(schema: T & NoWideType<T>): Fragment<{ output: T }> => fragment({ output: schema });
 export const input = <const F extends Fields>(fields: F & NoWide<F>): Fragment<{ input: F }> => fragment({ input: fields });
 export const from = <const S extends readonly string[]>(...states: S): Fragment<{ from: S }> => fragment({ from: states });
 export const onlyIf = <const S extends readonly string[]>(...conditions: S): Fragment<{ onlyIf: S }> => fragment({ onlyIf: conditions });
+export const asks = <const A extends Asks>(asked: A): Fragment<{ asks: A }> => fragment({ asks: asked });
 export const goTo = <const S extends string>(state: S): Fragment<{ goTo: S }> => fragment({ goTo: state });
 export const does = (text: string): Fragment<{ does: string }> => fragment({ does: text });
 export const when = <const C extends string, const P extends readonly OutcomePart[]>(
@@ -199,30 +227,33 @@ export const compose = <const P extends readonly (Fragment<any> | Description)[]
   fragment(mergeShapes(parts.map(shapeOf)));
 
 // --- Layer 1: コンポーネント ---
-// 部品を記述する。どの項目も、文 (description) で済ませるか、構造で書くかを選べる。省いてもよい。
+// 部品を記述する。まとまりごと文 (description) にするか、項目を並べるかを選べる。省いてもよい。
+// 項目は、どれも文 (description) か、部品の組み合わせ (compose) で書く。
 //   description  … コンポーネント全体の説明（文）
-//   states / init … 状態名と初期状態
-//   data         … 部品が覚えているデータ（初めは未設定）
-//   queries      … 依存への問い合わせ（部品が外に尋ねて答えをもらう値）
-//   effects      … 依存への副作用（部品が外に対して行うこと）
+//   states / init … 状態名（配列。説明を添えるなら { 名前: description("...") }）と、初期状態
+//   data         … 部品が覚えているデータ（初めは未設定）。部品: typed
+//   queries      … 依存への問い合わせ（部品が外に尋ねて答えをもらう値）。部品: input (引数), output (答えの型)
+//   effects      … 依存への副作用（部品が外に対して行うこと）。部品: input (ペイロード)
 //   decisions    … 使う決定表
-//   calculations … 計算。名前ごとに、式を述べる文 (description) か、文と結果の型 ({ is, type })
+//   calculations … 計算。description が式を述べる文になる。部品: output (結果の型)
 //   invariants   … 不変条件（文）
-//   commands     … 外から部品を動かすコマンド。名前ごとに、文 (description) か、部品 (compose など)
+//   commands     … 外から部品を動かすコマンド。部品: input / from / onlyIf / asks / when / otherwise / goTo / does
 //   assets       … 実装を LLM に依頼するときに添付する資料。仕様の意味には影響しない
-// component(description("...")) と書けば、すべてを解釈に任せることになる
+// component(description("...")) と書けば、すべてを解釈に任せることになる。
+// 項目を並べたまとまりには、解釈は項目を足せない（計算と不変条件は足せる）
+type Entry = Description | Fragment<any>;
 export type Layer1 = {
   description?: string;
   assets?: readonly AssetDeclaration[];
-  states?: readonly string[] | Description;
+  states?: readonly string[] | Record<string, Description> | Description;
   init?: string;
-  data?: Fields | Description;
-  queries?: Fields | Description;
-  effects?: Record<string, Fields> | Description;
+  data?: Record<string, Entry> | Description;
+  queries?: Record<string, Entry> | Description;
+  effects?: Record<string, Entry> | Description;
   decisions?: Record<string, Table>;
-  calculations?: Record<string, Description | { is: string; type: FieldSchema }> | Description;
+  calculations?: Record<string, Entry> | Description;
   invariants?: readonly string[];
-  commands?: Record<string, Description | Fragment<any>> | Description;
+  commands?: Record<string, Entry> | Description;
 };
 
 // 構造として書かれた値（文や省略なら never）
@@ -231,7 +262,9 @@ type Or<A, Fallback> = [A] extends [never] ? Fallback : A;
 type AllIn<Actual, Allowed, What extends string> = [Actual] extends [Allowed] ? unknown : Problem<`${What} にない状態が書かれています`>;
 
 type Elements<T> = [T] extends [never] ? never : T extends readonly (infer X)[] ? X : never;
-type L1States<B> = Elements<Has<B, "states">>;
+// 状態名: 配列の要素か、{ 名前: 説明 } のキー
+type StateNames<T> = [T] extends [never] ? never : T extends readonly (infer X)[] ? X : keyof T;
+type L1States<B> = StateNames<Has<B, "states">>;
 type CheckL1Command<B, T> = [L1States<B>] extends [never]
   ? unknown
   : (T extends { from: readonly (infer F)[] } ? AllIn<F, L1States<B>, "states"> : unknown) &
@@ -240,17 +273,13 @@ type CheckL1Command<B, T> = [L1States<B>] extends [never]
 type CheckLayer1<B> = KnownKeys<B, keyof Layer1> & {
   [K in keyof B]: B[K] extends Description
     ? unknown
-    : K extends "data" | "queries"
-      ? NoWide<B[K]>
-      : K extends "effects"
-        ? NoWideIn<B[K]>
-        : K extends "init"
-          ? [L1States<B>] extends [never]
-            ? unknown
-            : OneOf<B[K], L1States<B>, "states">
-          : K extends "commands"
-            ? { [A in keyof B[K]]: CheckL1Command<B, ShapeOf<B[K][A]>> }
-            : unknown;
+    : K extends "init"
+      ? [L1States<B>] extends [never]
+        ? unknown
+        : OneOf<B[K], L1States<B>, "states">
+      : K extends "commands"
+        ? { [A in keyof B[K]]: CheckL1Command<B, ShapeOf<B[K][A]>> }
+        : unknown;
 };
 
 declare const componentBrand: unique symbol;
@@ -271,34 +300,45 @@ export function component(declaration: Layer1 | Description): Component<any> {
 // Layer 1 の文を、構造と意味に細かくしたもの。LLM が導き、人は読んで確かめる（書かない）。2つの部分を持つ:
 //   structure … 構造。Layer 1 が構造として書かなかった分を、宣言で書く。関数は無い。IR に出て、実装する LLM に渡る。
 //               語彙 (states / init / data / queries / effects / decisions / calculations / invariants) と、
-//               コマンドごとの入力 (input)、実行できる状態 (from)、事前条件 (onlyIf)、遷移先 (goTo)、
-//               副作用 (effects)、覚えるデータ (set)。条件で分かれるなら when の下に、条件ごとに書く。
+//               コマンドごとの入力 (input)、実行できる状態 (from)、事前条件 (onlyIf)、尋ねること (asks)、遷移先 (goTo)、
+//               副作用 (effects)、覚えるデータ (set)。語彙の項目は { type } / { input, output } / { input } / { is, output } で書く。条件で分かれるなら when の下に、条件ごとに書く。
 //               goTo を書かなければ、状態は変わらない
 //   meanings  … 意味。条件・計算・不変条件の名前が何を指すかを、関数で書く。
 //               IR には出ない。PBT が期待値を計算するための正解になる
 
 // Layer 1 と解釈の構造を合わせた語彙（型の検査に使う）
-type CalculationType<E> = E extends { type: infer T } ? T : never;
-type Calculated<B, S, L = Or<Has<B, "calculations">, {}>, R = Or<Has<S, "calculations">, {}>> = {
-  [N in keyof L | keyof R]: Or<N extends keyof L ? CalculationType<L[N]> : never, N extends keyof R ? CalculationType<R[N]> : never>;
-};
+// 項目の部品は、Layer 1 に書かれていればそれを、無ければ解釈のものを使う
+type L1Group<B, G extends string> = Or<Has<B, G>, {}>;
+type L2Group<S, G extends string> = Or<Has<S, G>, {}>;
+type Names<B, S, G extends string> = keyof L1Group<B, G> | keyof L2Group<S, G>;
+type Part<B, S, G extends string, N, P extends string, Fallback> = Or<
+  N extends keyof L1Group<B, G> ? Has<ShapeOf<L1Group<B, G>[N]>, P> : never,
+  Or<N extends keyof L2Group<S, G> ? Has<L2Group<S, G>[N], P> : never, Fallback>
+>;
 type L1Command<B, A, L = Or<Has<B, "commands">, {}>> = A extends keyof L ? ShapeOf<L[A]> : {};
 type L2Command<S, A, R = Or<Has<S, "commands">, {}>> = A extends keyof R ? R[A] : {};
-type Model<B, S> = {
-  states: Or<Has<B, "states">, Or<Has<S, "states">, readonly []>>;
-  data: Or<Has<B, "data">, Or<Has<S, "data">, {}>>;
-  queries: Or<Has<B, "queries">, Or<Has<S, "queries">, {}>>;
-  effects: Or<Has<B, "effects">, Or<Has<S, "effects">, {}>>;
-  decisions: Or<Has<B, "decisions">, Or<Has<S, "decisions">, {}>>;
-  calculations: Calculated<B, S>;
-  invariants: Elements<Has<B, "invariants">> | Elements<Has<S, "invariants">>;
-  inputs: {
-    [A in keyof Or<Has<B, "commands">, {}> | keyof Or<Has<S, "commands">, {}>]: Or<Has<L1Command<B, A>, "input">, Or<Has<L2Command<S, A>, "input">, {}>>;
-  };
+type QueriesOf<B, S> = { [N in Names<B, S, "queries">]: { input: Part<B, S, "queries", N, "input", {}>; output: Part<B, S, "queries", N, "output", never> } };
+// 尋ねること (asks) に付けた名前 → 答えの型
+type AskedOf<Q, K> = {
+  [Alias in keyof K]: keyof K[Alias] extends infer N ? (N extends keyof Q ? (Q[N] extends { output: infer O } ? O : never) : never) : never;
 };
-type States<M> = M extends { states: readonly (infer X)[] } ? X : never;
+type Model<B, S> = {
+  states: Or<L1States<B>, Elements<Has<S, "states">>>;
+  data: { [N in Names<B, S, "data">]: Part<B, S, "data", N, "type", never> };
+  queries: QueriesOf<B, S>;
+  effects: { [N in Names<B, S, "effects">]: Part<B, S, "effects", N, "input", {}> };
+  decisions: Or<Has<B, "decisions">, Or<Has<S, "decisions">, {}>>;
+  calculations: { [N in Names<B, S, "calculations">]: Part<B, S, "calculations", N, "output", never> };
+  invariants: Elements<Has<B, "invariants">> | Elements<Has<S, "invariants">>;
+  inputs: { [A in Names<B, S, "commands">]: Part<B, S, "commands", A, "input", {}> };
+  asked: { [A in Names<B, S, "commands">]: AskedOf<QueriesOf<B, S>, Part<B, S, "commands", A, "asks", {}>> };
+};
+type States<M> = M extends { states: infer X } ? X : never;
 type Data<M> = M extends { data: infer D } ? D : {};
 type Queries<M> = M extends { queries: infer D } ? D : {};
+// 引数の無い問い合わせ → 答えの型（宣言なしで、名前で読める）
+type Answers<M, Q = Queries<M>> = { [N in keyof Q as Q[N] extends { input: infer I } ? (keyof I extends never ? N : never) : never]: Q[N] extends { output: infer O } ? O : never };
+type AskedBy<M, A> = M extends { asked: infer K } ? (A extends keyof K ? K[A] : {}) : {};
 type EffectsOf<M> = M extends { effects: infer D } ? D : {};
 type Decisions<M> = M extends { decisions: infer D } ? D : {};
 type Calculations<M> = M extends { calculations: infer D } ? D : {};
@@ -315,7 +355,8 @@ type RefTo<M, A, T> =
   | { [N in keyof Calculations<M>]: FieldType<Calculations<M>[N]> extends T ? Ref<"calculation", N> : never }[keyof Calculations<M>]
   | { [N in keyof Input<M, A>]: FieldType<Input<M, A>[N]> extends T ? Ref<"input", N> : never }[keyof Input<M, A>]
   | { [N in keyof Data<M>]: FieldType<Data<M>[N]> extends T ? Ref<"data", N> : never }[keyof Data<M>]
-  | { [N in keyof Queries<M>]: FieldType<Queries<M>[N]> extends T ? Ref<"query", N> : never }[keyof Queries<M>]
+  | { [N in keyof Answers<M>]: FieldType<Answers<M>[N]> extends T ? Ref<"query", N> : never }[keyof Answers<M>]
+  | { [N in keyof AskedBy<M, A>]: FieldType<AskedBy<M, A>[N]> extends T ? Ref<"query", N> : never }[keyof AskedBy<M, A>]
   | (boolean extends T ? Ref<"was", readonly States<M>[]> : never);
 type Value<M, A, T> = T | RefTo<M, A, T>;
 
@@ -345,12 +386,20 @@ type CheckOutcomeKey<M, A, K, V> = K extends "effects"
       : K extends "does"
         ? string
         : Problem<`"${K & string}" はここには書けません。書けるのは goTo / does / effects / set です`>;
+// 尋ねること: 問い合わせの名前と、引数の型を検査する
+type CheckAsk<M, A, Q, Written> = Q extends keyof Queries<M>
+  ? Queries<M>[Q] extends { input: infer I }
+    ? { [F in keyof Written]: F extends keyof I ? Value<M, A, FieldType<I[F]>> : Problem<`"${F & string}" という引数は、この問い合わせにありません`> } & { [F in keyof I]: unknown }
+    : unknown
+  : Problem<`"${Q & string}" は queries にありません`>;
 type CheckCommand<M, A, C> = {
   [K in keyof C]: K extends "when"
     ? { [Condition in keyof C[K]]: { [O in keyof C[K][Condition]]: CheckOutcomeKey<M, A, O, C[K][Condition][O]> } }
     : K extends "input"
       ? NoWide<C[K]>
-      : K extends "from"
+      : K extends "asks"
+        ? { [Alias in keyof C[K]]: { [Q in keyof C[K][Alias]]: CheckAsk<M, A, Q, C[K][Alias][Q]> } }
+        : K extends "from"
         ? readonly States<M>[]
         : K extends "onlyIf"
           ? readonly string[]
@@ -362,11 +411,7 @@ type StructureKeys = "states" | "init" | "data" | "queries" | "effects" | "decis
 type CheckStructure<M, S> = {
   [K in keyof S]: K extends "commands"
     ? { [A in keyof S[K]]: CheckCommand<M, A, S[K][A]> }
-    : K extends "data" | "queries"
-      ? NoWide<S[K]>
-      : K extends "effects"
-        ? NoWideIn<S[K]>
-        : K extends "init"
+    : K extends "init"
           ? OneOf<S[K], States<M>, "states">
           : K extends StructureKeys
             ? unknown
@@ -392,8 +437,9 @@ type Shape<F> = F extends Fields ? { -readonly [K in keyof F]: FieldType<F[K]> }
 type StateOf<M> = { status: States<M> } & Partial<Shape<Data<M>>>;
 // 条件と計算が読めるデータ: 状態、問い合わせの答え、コマンドの入力（どのコマンドでも使われ得るので省略可能）
 type ContextOf<M> = StateOf<M> &
-  Shape<Queries<M>> &
-  (M extends { inputs: infer I } ? Partial<UnionToIntersection<{ [A in keyof I]: Shape<I[A]> }[keyof I]>> : {});
+  Shape<Answers<M>> &
+  (M extends { inputs: infer I } ? Partial<UnionToIntersection<{ [A in keyof I]: Shape<I[A]> }[keyof I]>> : {}) &
+  (M extends { asked: infer K } ? Partial<UnionToIntersection<{ [A in keyof K]: Shape<K[A]> }[keyof K]>> : {});
 
 type Meanings<B, S, M> = {
   conditions: { [N in ConditionNames<B, S, M>]: (state: ContextOf<M>) => boolean };
@@ -409,6 +455,8 @@ type Meanings<B, S, M> = {
 // --- 実行時に扱う形 ---
 // Layer 1 に解釈を重ねて、すべてが構造になったコンポーネント
 export type Outcome = { goTo?: string; does?: string };
+// 尋ねること: どの問い合わせを、どの引数で
+export type Asked = { query: string; input: Record<string, unknown> };
 export type CommandDeclaration = {
   description?: string;
   input?: Fields;
@@ -416,17 +464,20 @@ export type CommandDeclaration = {
   from?: readonly string[];
   // 事前条件（条件の文）。満たさない場合の挙動は仕様の対象外
   onlyIf?: readonly string[];
+  // 尋ねること。答えに付ける名前 → 問い合わせと引数
+  asks?: Record<string, Asked>;
   // 条件ごとの結果。条件で分かれないコマンドは otherwise だけ
   when: Record<string, Outcome>;
 };
+export type QueryDeclaration = { input: Fields; output: FieldSchema };
 export type Declaration = {
-  // 全体と、項目ごとの説明（Layer 1 が文で書いたもの）
+  // 全体と、項目ごとの説明（Layer 1 が文で書いたもの。キーは "component"、"queries"、"queries.isMonthEnd" など）
   descriptions: Record<string, string>;
   assets?: readonly AssetDeclaration[];
   states: readonly string[];
   init: string;
   data: Fields;
-  queries: Fields;
+  queries: Record<string, QueryDeclaration>;
   effects: Record<string, Fields>;
   decisions: Record<string, Table>;
   calculations: Record<string, { is: string; type: FieldSchema }>;
@@ -453,23 +504,33 @@ type CommandStructure = OutcomeStructure & {
   input?: Fields;
   from?: readonly string[];
   onlyIf?: readonly string[];
+  asks?: Asks;
   when?: Record<string, OutcomeStructure>;
 };
+type EntryStructure = Record<string, unknown>;
 type StructureValue = {
   states?: readonly string[];
   init?: string;
-  data?: Fields;
-  queries?: Fields;
-  effects?: Record<string, Fields>;
+  data?: Record<string, EntryStructure>;
+  queries?: Record<string, EntryStructure>;
+  effects?: Record<string, EntryStructure>;
   decisions?: Record<string, Table>;
-  calculations?: Record<string, { is?: string; type: FieldSchema }>;
+  calculations?: Record<string, EntryStructure>;
   invariants?: readonly string[];
   commands?: Record<string, CommandStructure>;
 };
 
 const OUTCOME_KEYS = ["goTo", "does", "effects", "set"] as const;
-const COMMAND_KEYS = ["description", "input", "from", "onlyIf", "when", ...OUTCOME_KEYS] as const;
+const COMMAND_KEYS = ["description", "input", "from", "onlyIf", "asks", "when", ...OUTCOME_KEYS] as const;
 const STRUCTURE_KEYS = ["states", "init", "data", "queries", "effects", "decisions", "calculations", "invariants", "commands"] as const;
+// まとまりごとの、項目に書ける部品。required は、Layer 1 か解釈のどちらかに無ければならないもの
+const ENTRY_PARTS = {
+  data: { parts: ["description", "type"], required: ["type"], additive: false },
+  queries: { parts: ["description", "input", "output"], required: ["output"], additive: false },
+  effects: { parts: ["description", "input"], required: [], additive: false },
+  calculations: { parts: ["description", "output"], required: ["description", "output"], additive: true },
+} as const;
+const COMMAND_PARTS = ["description", "input", "from", "onlyIf", "asks", "goTo", "does", "when"];
 
 // Layer 1 に解釈の構造を重ねる。Layer 1 が構造として書いたものは、解釈では書き換えられない。
 // 合わない点は problems に集める（読み込みの時点では投げない。報告は IR を作るときに行う）
@@ -486,43 +547,67 @@ export function resolveComponent(
   for (const key of Object.keys(structure)) {
     if (!(STRUCTURE_KEYS as readonly string[]).includes(key)) problems.push(`解釈の structure に "${key}" というキーはありません`);
   }
-  // 項目ごと: Layer 1 が構造で書いていればそれを、文か省略なら解釈のものを使う
-  const group = <K extends "states" | "data" | "queries" | "effects" | "decisions">(key: K): StructureValue[K] => {
-    const given = base[key];
-    if (isDescription(given)) descriptions[key] = given.$description;
-    if (given !== undefined && !isDescription(given)) {
-      if (structure[key] !== undefined) problems.push(`${key} は Layer 1 に構造として書かれているので、解釈では書けません`);
-      return given as StructureValue[K];
-    }
-    return structure[key];
-  };
 
-  const states = group("states");
+  // 状態: 配列か、{ 名前: 説明 }
+  let states: readonly string[] | undefined;
+  if (isDescription(base.states)) descriptions.states = base.states.$description;
+  else if (Array.isArray(base.states)) states = base.states as readonly string[];
+  else if (base.states !== undefined) {
+    states = Object.keys(base.states);
+    for (const [name, text] of Object.entries(base.states as Record<string, Description>)) {
+      if (isDescription(text)) descriptions[`states.${name}`] = text.$description;
+      else problems.push(`states の "${name}" には、description(...) を書いてください`);
+    }
+  }
+  if (states !== undefined && structure.states !== undefined) problems.push("states は Layer 1 に構造として書かれているので、解釈では書けません");
+  states = states ?? structure.states;
   if (states === undefined) problems.push("states が、Layer 1 にも解釈にもありません");
   if (base.init !== undefined && structure.init !== undefined) problems.push("init は Layer 1 に書かれているので、解釈では書けません");
   const init = base.init ?? structure.init;
   if (init === undefined) problems.push("init が、Layer 1 にも解釈にもありません");
 
-  // 計算: Layer 1 が文だけを書いたものは、型を解釈が決める。解釈は、計算を足してもよい
-  const calculations: Declaration["calculations"] = {};
-  const listed = base.calculations;
-  if (isDescription(listed)) descriptions.calculations = listed.$description;
-  const declared = listed === undefined || isDescription(listed) ? {} : listed;
-  for (const [name, entry] of Object.entries(declared)) {
-    const added = structure.calculations?.[name];
-    if (isDescription(entry)) {
-      if (added?.type === undefined) problems.push(`計算 "${name}" の型 (type) が、解釈にありません`);
-      else calculations[name] = { is: entry.$description, type: added.type };
-    } else {
-      if (added !== undefined) problems.push(`計算 "${name}" は Layer 1 に構造として書かれているので、解釈では書けません`);
-      calculations[name] = entry;
+  // 語彙のまとまり: 項目ごとに、Layer 1 の部品に、解釈の足りない分を重ねる
+  const entries = (key: keyof typeof ENTRY_PARTS): Record<string, CommandShape> => {
+    const { parts, required, additive } = ENTRY_PARTS[key];
+    const given = base[key];
+    if (isDescription(given)) descriptions[key] = given.$description;
+    const listed = given === undefined || isDescription(given) ? undefined : given;
+    const added = structure[key] ?? {};
+    const names = listed ? [...Object.keys(listed), ...(additive ? Object.keys(added).filter((name) => !(name in listed)) : [])] : Object.keys(added);
+    if (listed && !additive) {
+      for (const name of Object.keys(added)) {
+        if (!(name in listed)) problems.push(`${key} の "${name}" は Layer 1 にありません（Layer 1 が項目を並べているので、解釈では足せません）`);
+      }
     }
-  }
-  for (const [name, entry] of Object.entries(structure.calculations ?? {})) {
-    if (name in declared) continue;
-    if (entry.is === undefined) problems.push(`計算 "${name}" に、式を述べる文 (is) がありません`);
-    else calculations[name] = { is: entry.is, type: entry.type };
-  }
+    const result: Record<string, CommandShape> = {};
+    for (const name of names) {
+      const left = shapeOf(listed?.[name]) as Record<string, unknown>;
+      // 解釈では、計算の文は is と書く
+      const { is, ...rest } = (added[name] ?? {}) as Record<string, unknown>;
+      const right: Record<string, unknown> = key === "calculations" && is !== undefined ? { ...rest, description: is } : added[name] ?? {};
+      for (const part of Object.keys(left)) {
+        if (!(parts as readonly string[]).includes(part)) problems.push(`${key}.${name}: ここには ${part === "type" ? "typed" : part} を書けません`);
+      }
+      for (const part of Object.keys(right)) {
+        if (!(parts as readonly string[]).includes(part)) problems.push(`${key}.${name}: 解釈に "${part}" というキーは書けません`);
+        else if (left[part] !== undefined) problems.push(`${key}.${name} の ${part} は Layer 1 に書かれているので、解釈では書けません`);
+      }
+      const merged = { ...right, ...left } as CommandShape & Record<string, unknown>;
+      for (const part of required) {
+        if (merged[part] === undefined) problems.push(`${key}.${name} の ${part === "description" ? "式を述べる文 (is)" : `型 (${part})`} が、Layer 1 にも解釈にもありません`);
+      }
+      if (merged.description !== undefined && key !== "calculations") descriptions[`${key}.${name}`] = merged.description;
+      result[name] = merged;
+    }
+    return result;
+  };
+  const data = Object.fromEntries(Object.entries(entries("data")).map(([name, entry]) => [name, entry.type ?? "string"]));
+  const queries = Object.fromEntries(Object.entries(entries("queries")).map(([name, entry]) => [name, { input: entry.input ?? {}, output: entry.output ?? "boolean" }]));
+  const effects = Object.fromEntries(Object.entries(entries("effects")).map(([name, entry]) => [name, entry.input ?? {}]));
+  const calculations = Object.fromEntries(
+    Object.entries(entries("calculations")).map(([name, entry]) => [name, { is: entry.description ?? "", type: entry.output ?? "string" }]),
+  );
+  if (base.decisions !== undefined && structure.decisions !== undefined) problems.push("decisions は Layer 1 に書かれているので、解釈では書けません");
 
   // コマンド
   const commands: Declaration["commands"] = {};
@@ -539,8 +624,10 @@ export function resolveComponent(
   const names = sketched ? Object.keys(sketched) : Object.keys(refined);
   if (names.length === 0) problems.push("commands が、Layer 1 にも解釈にもありません");
   for (const name of names) {
-    const part = sketched?.[name];
-    const left: CommandShape = part === undefined ? {} : shapeOf(part);
+    const left = shapeOf(sketched?.[name]);
+    for (const part of Object.keys(left)) {
+      if (!COMMAND_PARTS.includes(part)) problems.push(`コマンド "${name}": ここには ${part === "type" ? "typed" : part} を書けません`);
+    }
     const right = refined[name];
     if (right === undefined) {
       problems.push(`コマンド "${name}" の構造が、解釈にありません（足すものが無ければ {} と書きます）`);
@@ -549,7 +636,7 @@ export function resolveComponent(
     for (const key of Object.keys(right)) {
       if (!(COMMAND_KEYS as readonly string[]).includes(key)) problems.push(`コマンド "${name}": 解釈に "${key}" というキーは書けません`);
     }
-    for (const key of ["input", "from", "onlyIf", "description"] as const) {
+    for (const key of ["input", "from", "onlyIf", "asks", "description"] as const) {
       if (left[key] !== undefined && right[key] !== undefined) {
         problems.push(`コマンド "${name}" の ${key} は Layer 1 に書かれているので、解釈では書けません`);
       }
@@ -597,6 +684,14 @@ export function resolveComponent(
       [outcomes.otherwise, cases.otherwise] = merge(`コマンド "${name}"`, left, right);
     }
     if (outcomes.otherwise === undefined && Object.keys(outcomes).length > 0) problems.push(`コマンド "${name}" に otherwise がありません`);
+
+    // 尋ねること: { 名前: { 問い合わせ: 引数 } } を、{ 名前: { query, input } } にする
+    const asked: Record<string, Asked> = {};
+    for (const [alias, entry] of Object.entries(left.asks ?? right.asks ?? {})) {
+      const queried = Object.keys(entry ?? {});
+      if (queried.length !== 1) problems.push(`コマンド "${name}" の asks.${alias}: 問い合わせを1つだけ書いてください (${queried.join(", ") || "なし"})`);
+      else asked[alias] = { query: queried[0], input: entry[queried[0]] ?? {} };
+    }
     const accepted = left.input ?? right.input;
     const allowed = left.from ?? right.from;
     const required = left.onlyIf ?? right.onlyIf;
@@ -605,6 +700,7 @@ export function resolveComponent(
       ...(accepted === undefined ? {} : { input: accepted }),
       ...(allowed === undefined ? {} : { from: allowed }),
       ...(required === undefined ? {} : { onlyIf: required }),
+      ...(Object.keys(asked).length === 0 ? {} : { asks: asked }),
       when: outcomes,
     };
     structures[name] = cases;
@@ -615,10 +711,10 @@ export function resolveComponent(
     ...(base.assets ? { assets: base.assets } : {}),
     states: states ?? [],
     init: init ?? "",
-    data: group("data") ?? {},
-    queries: group("queries") ?? {},
-    effects: group("effects") ?? {},
-    decisions: group("decisions") ?? {},
+    data,
+    queries,
+    effects,
+    decisions: base.decisions ?? structure.decisions ?? {},
     calculations,
     // 不変条件は、解釈が足してもよい
     invariants: [...(base.invariants ?? []), ...(structure.invariants ?? [])],

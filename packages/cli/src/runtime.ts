@@ -23,11 +23,14 @@ export type Adapter = {
 };
 
 type Values = Record<string, unknown>;
-type RawStep = { pick: number; inputs: Record<string, Values>; queries: Values };
+// answers: 引数つきの問い合わせの答え。問い合わせごとに、引数から答えを決める関数（同じ引数には同じ答え）
+type RawStep = { pick: number; inputs: Record<string, Values>; queries: Values; answers: Record<string, (input: Values) => unknown> };
 type Observation = { state: unknown; effects: unknown };
 
 // data は、そのコマンドの実行前に部品が覚えているはずのデータ。case は成立した条件（無ければ "otherwise"）
-export type Step = { from: string; data: Values; command: string; input: Values; queries: Values; case: string };
+// asks: そのコマンドで尋ねること（付けた名前、問い合わせ、引数）と、その答え
+export type Asked = { name: string; query: string; input: Values; answer: unknown };
+export type Step = { from: string; data: Values; command: string; input: Values; queries: Values; asks: Asked[]; case: string };
 
 export type PbtResult =
   | { status: "pass"; seed: number; numRuns: number }
@@ -115,12 +118,16 @@ const messageOf = (error: unknown) => (error instanceof Error ? `${error.name}: 
 // 仕様側のシミュレーション。実装には触れず、仕様だけで「次に何が起きるべきか」を進める
 function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecification, hints: Hints = literalsIn(binding)) {
   const commands = Object.keys(input.behaviors).sort();
+  // 引数の無い問い合わせは、1手に1つの答え。引数つきは、1手ごとに、引数から答えを決める関数
+  const nullary = Object.keys(model.queries).filter((name) => Object.keys(model.queries[name].input).length === 0);
+  const parameterized = Object.keys(model.queries).filter((name) => !nullary.includes(name));
 
   const sequences = fc.array(
     fc.record({
       pick: fc.nat(),
       inputs: fc.record(Object.fromEntries(commands.map((name) => [name, recordOf(model.commands[name] ?? {}, hints)]))),
-      queries: recordOf(model.queries, hints),
+      queries: recordOf(Object.fromEntries(nullary.map((name) => [name, model.queries[name].output])), hints),
+      answers: fc.record(Object.fromEntries(parameterized.map((name) => [name, fc.func(arbitraryOf(model.queries[name].output, hints))]))),
     }),
     { minLength: 1, maxLength: MAX_STEPS },
   );
@@ -177,7 +184,23 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
     try {
       // 意味の関数の中の decide / calculate が、この解釈を引くようにする
       activate(binding);
-      const contextOf = (name: string) => ({ status: state.status, ...state.data, ...raw.queries, ...raw.inputs[name] });
+      // そのコマンドが尋ねることを、引数を解決して、答えと一緒に並べる
+      const askedBy = (name: string): Asked[] => {
+        const base = { status: state.status, ...state.data, ...raw.queries, ...raw.inputs[name] };
+        return Object.entries(input.behaviors[name].asks ?? {}).map(([alias, asked]) => {
+          const answer = raw.answers[asked.query];
+          if (!answer) throw new Error(`asks.${alias}: 問い合わせ "${asked.query}" は、引数つきの問い合わせとして宣言されていません`);
+          const args = plain(Object.fromEntries(Object.entries(asked.input).map(([field, value]) => [field, resolve(value, base, name)]))) as Values;
+          return { name: alias, query: asked.query, input: args, answer: answer(args) };
+        });
+      };
+      const contextOf = (name: string) => ({
+        status: state.status,
+        ...state.data,
+        ...raw.queries,
+        ...raw.inputs[name],
+        ...Object.fromEntries(askedBy(name).map((asked) => [asked.name, asked.answer])),
+      });
       const enabled = commands.filter((name) => {
         const behavior = input.behaviors[name];
         return (
@@ -195,7 +218,7 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
       const context = contextOf(command);
       const cases = input.behaviors[command].when;
       const matched = matchCondition(binding, Object.keys(cases), context);
-      const step: Step = { from: state.status, data: plain(state.data), command, input: raw.inputs[command], queries: raw.queries, case: matched };
+      const step: Step = { from: state.status, data: plain(state.data), command, input: raw.inputs[command], queries: raw.queries, asks: plain(askedBy(command)), case: matched };
       steps.push(step);
 
       const outcome = cases[matched];
@@ -383,7 +406,8 @@ export async function runPbt(options: { specs: string; adapter: Adapter; compone
   return result;
 }
 
-async function check(
+// アダプターを通して本番システムを検証する（結果を返すだけ。出力や終了コードは runPbt が扱う）
+export async function check(
   specs: string,
   adapter: Adapter,
   select: { drafts: boolean; component?: string },
@@ -404,14 +428,26 @@ async function check(
     const steps: Step[] = [];
     let current: Step | undefined;
     let recorded: unknown[] = [];
+    // 仕様に無いことを尋ねた（引数つきの問い合わせを、そのコマンドが尋ねない引数で呼んだ）
+    let misasked: string | undefined;
 
     const ports: Ports = {
       queries: Object.fromEntries(
         Object.keys(model.queries).map((name) => [
           name,
-          () => {
+          (asked?: unknown) => {
             if (!current) throw new Error(`ports.queries.${name}() was called before any command; ask during the command instead`);
-            return current.queries[name];
+            if (Object.keys(model.queries[name].input).length === 0) return current.queries[name];
+            // 引数つき: そのコマンドが尋ねることの中から、引数が一致するものを探す。
+            // 尋ねなかったことは問わない（答えで結果が変わるなら、結果の不一致として現れる）
+            const given = plain(asked ?? {});
+            const allowed = current.asks.filter((entry) => entry.query === name);
+            const found = allowed.find((entry) => isDeepStrictEqual(entry.input, given));
+            if (found) return found.answer;
+            misasked = `ports.queries.${name} was asked with ${JSON.stringify(given)}, but in this command the specification asks it ${
+              allowed.length === 0 ? "nothing" : `only with ${allowed.map((entry) => JSON.stringify(entry.input)).join(" or ")}`
+            }`;
+            throw new Error(misasked);
           },
         ]),
       ),
@@ -437,7 +473,10 @@ async function check(
           expected = planned.expected;
           current = planned.step;
           recorded = [];
+          misasked = undefined;
           await adapter.executeCommand({ name: current.command, input: structuredClone(current.input) });
+          // 本番コードが例外を握りつぶしていても、仕様に無い問い合わせは不合格にする
+          if (misasked) return { steps, expected, actual: { error: misasked } };
           const actual = plain({ state: await adapter.getCurrentState(), effects: recorded });
           if (!isDeepStrictEqual(expected, actual)) return { steps, expected, actual };
           state = planned.after;
@@ -447,7 +486,7 @@ async function check(
       }
     } catch (error) {
       if (error instanceof SpecError) throw error;
-      return { steps, expected, actual: { error: messageOf(error) } };
+      return { steps, expected, actual: { error: misasked ?? messageOf(error) } };
     }
     return undefined;
   };

@@ -94,7 +94,7 @@ function specDir(declaration: string, structure?: string, meanings = "conditions
   const dir = mkdtempSync(join(tmpRoot, "s-"));
   writeFileSync(
     join(dir, "x.component.ts"),
-    `import { component, compose, decisionTable, description, dir, does, file, from, goTo, input, interpretation, onlyIf, otherwise, ref, text, when } from "@clp/core";
+    `import { asks, component, compose, decisionTable, description, dir, does, file, from, goTo, input, interpretation, onlyIf, otherwise, output, ref, text, typed, when } from "@clp/core";
 const Size = decisionTable({ "It is big": { count: 10, urgent: true }, otherwise: { count: 1, urgent: false } });
 export const Thing = component({ states: ["A", "B"], init: "A", ${declaration} });
 ${structure === undefined ? "" : `export const Interpretation = interpretation(Thing, { structure: { ${structure} }, meanings: { ${meanings} } });`}
@@ -107,7 +107,7 @@ const codes = async (dir: string) => extract(await loadSpecs(dir)).diagnostics.m
 const messages = async (dir: string) => extract(await loadSpecs(dir)).diagnostics.map((d) => d.message);
 
 test("読み込み: data・queries・入力の名前が重なるとエラー (条件から区別できないため)", async () => {
-  const dir = specDir(`data: { rank: "string" }, commands: { Place: compose(input({ rank: "string" }), ${go}) }`, `commands: { Place: {} }`);
+  const dir = specDir(`data: { rank: typed("string") }, commands: { Place: compose(input({ rank: "string" }), ${go}) }`, `commands: { Place: {} }`);
   await assert.rejects(loadSpecs(dir), /"rank" が重複しています \(data と input\)/);
 });
 
@@ -118,14 +118,17 @@ test("部品: 遷移先が2つ書かれていたらエラー。文は、つな�
 });
 
 test("解釈: Layer 1 が構造として書いたものは、書き換えられない", async () => {
-  const declaration = `effects: { Notify: {} }, commands: { Place: compose(input({ note: "string" }), from("A"), onlyIf("Flag is on"), when("It is big", goTo("B")), otherwise()), Back: compose(goTo("A")) }`;
+  const declaration = `effects: { Notify: input({}), Ping: description("A ping is sent.") }, commands: { Place: compose(input({ note: "string" }), from("A"), onlyIf("Flag is on"), when("It is big", goTo("B")), otherwise()), Back: compose(goTo("A")) }`;
   const report = async (structure: string) => (await messages(specDir(declaration, structure))).join("\n");
   const fine = `Place: { when: { "It is big": {}, otherwise: {} } }, Back: {}`;
 
   assert.doesNotMatch(await report(`commands: { ${fine} }`), /Layer 1/);
   assert.match(await report(`states: ["A", "B", "C"], commands: { ${fine} }`), /states は Layer 1 に構造として書かれているので、解釈では書けません/);
   assert.match(await report(`init: "B", commands: { ${fine} }`), /init は Layer 1 に書かれているので、解釈では書けません/);
-  assert.match(await report(`effects: { Notify: {}, Extra: {} }, commands: { ${fine} }`), /effects は Layer 1 に構造として書かれているので/);
+  // 項目を並べたまとまりには、項目を足せない。項目の、書かれていない部品だけを足せる
+  assert.match(await report(`effects: { Extra: {} }, commands: { ${fine} }`), /effects の "Extra" は Layer 1 にありません/);
+  assert.match(await report(`effects: { Notify: { input: { text: "string" } } }, commands: { ${fine} }`), /effects\.Notify の input は Layer 1 に書かれているので、解釈では書けません/);
+  assert.doesNotMatch(await report(`effects: { Ping: { input: { text: "string" } } }, commands: { ${fine} }`), /Layer 1/);
   assert.match(await report(`commands: { Place: { input: { other: "string" }, when: { "It is big": {}, otherwise: {} } }, Back: {} }`), /コマンド "Place" の input は Layer 1 に書かれているので/);
   assert.match(await report(`commands: { Place: { from: ["B"], when: { "It is big": {}, otherwise: {} } }, Back: {} }`), /コマンド "Place" の from は Layer 1 に書かれているので/);
   assert.match(await report(`commands: { Place: { when: { "It is big": { goTo: "A" }, otherwise: {} } }, Back: {} }`), /コマンド "Place" の条件 "It is big" の goTo は Layer 1 に書かれているので/);
@@ -167,9 +170,9 @@ export const Interpretation = interpretation(Counter, {
   structure: {
     states: ["OPEN", "CLOSED"],
     init: "OPEN",
-    data: { total: "integer" },
-    effects: { ReportTotal: { total: "integer" } },
-    calculations: { raised: { is: "the total so far (0 if none) plus the step", type: "integer" } },
+    data: { total: { type: "integer" } },
+    effects: { ReportTotal: { input: { total: "integer" } } },
+    calculations: { raised: { is: "the total so far (0 if none) plus the step", output: "integer" } },
     commands: {
       Raise: {
         input: { step: { type: "integer", min: 0, max: 10 } },
@@ -201,20 +204,26 @@ export const Interpretation = interpretation(Counter, {
   assert.deepEqual(extract(await loadSpecs(bare)).diagnostics.map((d) => d.code), ["unbound-specification"]);
 });
 
-test("解釈: 足りない構造 (states / init / 計算の型) を報告する", async () => {
+test("解釈: 足りない構造 (states / init / 項目の型) を報告する", async () => {
   const dir = mkdtempSync(join(tmpRoot, "s-"));
   writeFileSync(
     join(dir, "x.component.ts"),
     `import { component, description, interpretation } from "@clp/core";
-export const Thing = component({ calculations: { total: description("the sum") }, commands: description("It can be started.") });
+export const Thing = component({ data: { memo: description("A note.") }, queries: { ready: description("Whether it is ready.") }, calculations: { total: description("the sum") }, commands: description("It can be started.") });
 export const Interpretation = interpretation(Thing, { structure: { commands: { Start: {} } } as any, meanings: { conditions: {} } as any });
 `,
   );
-  assert.deepEqual((await messages(dir)).sort(), ['init が、Layer 1 にも解釈にもありません', 'states が、Layer 1 にも解釈にもありません', '計算 "total" の型 (type) が、解釈にありません']);
+  assert.deepEqual((await messages(dir)).sort(), [
+    "calculations.total の 型 (output) が、Layer 1 にも解釈にもありません",
+    "data.memo の 型 (type) が、Layer 1 にも解釈にもありません",
+    "init が、Layer 1 にも解釈にもありません",
+    "queries.ready の 型 (output) が、Layer 1 にも解釈にもありません",
+    "states が、Layer 1 にも解釈にもありません",
+  ]);
 });
 
 test("検査: 解釈が無い、名前の意味が書かれていない", async () => {
-  const declaration = `decisions: { size: Size }, calculations: { total: { is: "count times two", type: "integer" } }, invariants: ["It is fine"], commands: { Place: compose(onlyIf("Flag is on"), ${go}) }`;
+  const declaration = `decisions: { size: Size }, calculations: { total: compose(description("count times two"), output("integer")) }, invariants: ["It is fine"], commands: { Place: compose(onlyIf("Flag is on"), ${go}) }`;
   assert.deepEqual(await codes(specDir(declaration)), ["unbound-specification"]);
   assert.deepEqual(await codes(specDir(declaration, `commands: { Place: { effects: [] } }`)), [
     "unbound-calculation",
@@ -225,9 +234,9 @@ test("検査: 解釈が無い、名前の意味が書かれていない", async 
 });
 
 test("検査: 構造の誤りを、場所と理由が分かる文面で報告する", async () => {
-  const declaration = `data: { memo: "string", level: ["low", "high"] }, queries: { flag: "boolean", mode: ["x", "y"] },
-    effects: { Notify: { text: "string", count: "integer" }, Grade: { level: ["low", "high"] } },
-    decisions: { size: Size }, calculations: { title: { is: "the memo, upper-cased", type: "string" } },
+  const declaration = `data: { memo: typed("string"), level: typed(["low", "high"]) }, queries: { flag: output("boolean"), mode: output(["x", "y"]) },
+    effects: { Notify: input({ text: "string", count: "integer" }), Grade: input({ level: ["low", "high"] }) },
+    decisions: { size: Size }, calculations: { title: compose(description("the memo, upper-cased"), output("string")) },
     commands: { Place: compose(input({ note: "string" }), ${go}) }`;
   const meanings = `conditions: { "It is big": () => true }, calculations: { title: () => "t" }`;
   const report = async (structure: string) => (await messages(specDir(declaration, `commands: { Place: { ${structure} } }`, meanings))).join("\n");
@@ -322,7 +331,7 @@ test("事前検査: 2つの条件が同時に成り立つ仕様を、実装な�
 
 test("事前検査: 不変条件が破れるコマンド列を、最短で報告する", async () => {
   const dir = specDir(
-    `data: { note: "string" }, invariants: ["A note is remembered in B"],
+    `data: { note: typed("string") }, invariants: ["A note is remembered in B"],
      commands: { Place: compose(from("A"), ${go}), Back: compose(from("B"), goTo("A"), does("It goes back.")) }`,
     // Place がメモを覚え忘れている
     `commands: { Place: {}, Back: {} }`,
@@ -336,7 +345,7 @@ test("事前検査: 不変条件が破れるコマンド列を、最短で報告
 
 test("決定表: 値の無いセル (null) を書ける。その値が実際に使われる仕様は、事前検査が見つける", async () => {
   const declaration = (when: string) => [
-    `effects: { Tag: { label: ["big", "small"] } }, queries: { flag: "boolean" }, decisions: { kind: Kind }, commands: { Place: compose(${go}) }`,
+    `effects: { Tag: input({ label: ["big", "small"] }) }, queries: { flag: output("boolean") }, decisions: { kind: Kind }, commands: { Place: compose(${go}) }`,
     `commands: { Place: { effects: [{ Tag: { label: ref.decision("kind", "label") }${when} }] } }`,
     `conditions: { "It is big": (state) => state.flag }`,
   ] as const;
@@ -359,7 +368,7 @@ test("決定表: 値の無いセル (null) を書ける。その値が実際に�
 
 test("事前検査: 計算の結果が宣言した型に合わなければ報告する", async () => {
   const dir = specDir(
-    `effects: { Bill: { amount: "integer" } }, calculations: { half: { is: "half of it, no rounding", type: "integer" } }, commands: { Place: compose(${go}) }`,
+    `effects: { Bill: input({ amount: "integer" }) }, calculations: { half: compose(description("half of it, no rounding"), output("integer")) }, commands: { Place: compose(${go}) }`,
     `commands: { Place: { effects: [{ Bill: { amount: ref.calculation("half") } }] } }`,
     `conditions: {}, calculations: { half: () => 1.5 }`,
   );

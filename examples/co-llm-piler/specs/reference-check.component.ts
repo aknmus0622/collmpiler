@@ -1,8 +1,8 @@
-import { component, compose, description, does, from, goTo, input, otherwise, when } from "@clp/core";
+import { asks, component, compose, description, does, from, goTo, input, otherwise, output, ref, when } from "@clp/core";
 
 // The check of names used by a component's commands (part of packages/cli/src/extract.ts), written as a spec.
 // A structured input (commands → cases → references) is not passed as one value but walked by the caller,
-// one element per command. What is declared is not remembered here; it is asked of a dependency.
+// one element per command. What is declared is not remembered here; it is asked of a dependency, by name.
 export const ReferenceCheck = component({
   description:
     "Walks the commands of a specification, one element at a time, and reports every reference to a state or an " +
@@ -11,19 +11,19 @@ export const ReferenceCheck = component({
   states: ["IDLE", "BETWEEN_COMMANDS", "IN_COMMAND", "IN_CASE", "ACCEPTED", "REJECTED"],
   init: "IDLE",
 
-  // Answers about the name carried by the command being handled
+  // Questions about a name. What is asked about is part of the specification: see `asks` in the commands.
   queries: {
-    stateDeclared: "boolean",
-    effectDeclared: "boolean",
+    stateDeclared: compose(description("Whether the specification declares a state of this name."), input({ name: "string" }), output("boolean")),
+    effectDeclared: compose(description("Whether the specification declares an effect of this name."), input({ name: "string" }), output("boolean")),
   },
 
   effects: {
-    ReportDiagnostic: {
+    ReportDiagnostic: input({
       code: ["unknown-state", "unknown-effect"],
       command: "string",
       caseName: "string",
       subject: "string",
-    },
+    }),
   },
 
   commands: {
@@ -40,6 +40,7 @@ export const ReferenceCheck = component({
     AllowFrom: compose(
       input({ state: "string" }),
       from("IN_COMMAND"),
+      asks({ declared: { stateDeclared: { name: ref.input("state") } } }),
       when(
         "The named state is not declared",
         does(
@@ -55,6 +56,7 @@ export const ReferenceCheck = component({
     GoTo: compose(
       input({ state: "string" }),
       from("IN_CASE"),
+      asks({ declared: { stateDeclared: { name: ref.input("state") } } }),
       when(
         "The named state is not declared",
         does(
@@ -68,6 +70,7 @@ export const ReferenceCheck = component({
     UseEffect: compose(
       input({ name: "string" }),
       from("IN_CASE"),
+      asks({ declared: { effectDeclared: { name: ref.input("name") } } }),
       when(
         "The named effect is not declared",
         does(

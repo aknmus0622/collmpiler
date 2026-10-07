@@ -6,7 +6,7 @@ import { BINDING, COMPONENT, activate } from "@clp/core";
 import type { AssetDeclaration, BoundSpecification, Structure } from "@clp/core";
 import { resolveAssets } from "./assets.ts";
 import { stableStringify } from "./extract.ts";
-import type { SpecEffect, SpecInput, SpecModel, SpecOutcome, SpecValue } from "./extract.ts";
+import type { SpecAsk, SpecEffect, SpecInput, SpecModel, SpecOutcome, SpecValue } from "./extract.ts";
 
 // 下書き (LLM が導き、人がまだ確定していない解釈) のファイル名
 export const DRAFT_SUFFIX = ".draft.ts";
@@ -147,7 +147,7 @@ function normalize(name: string, layer1: object, binding: BoundSpecification | u
     ...(Object.keys(component.calculations).length > 0 ? { calculations: component.calculations } : {}),
     ...(component.invariants.length > 0 ? { invariants: component.invariants } : {}),
   };
-  validateModel(name, model);
+  validateModel(name, model, Object.values(component.commands).flatMap((decl) => Object.keys(decl.asks ?? {})));
 
   const behaviors: SpecInput["behaviors"] = {};
   for (const [command, decl] of Object.entries(component.commands)) {
@@ -161,7 +161,13 @@ function normalize(name: string, layer1: object, binding: BoundSpecification | u
         set: (written.set ?? {}) as Record<string, SpecValue>,
       };
     }
-    behaviors[command] = { ...(decl.description === undefined ? {} : { description: decl.description }), from: decl.from, onlyIf: decl.onlyIf, when };
+    behaviors[command] = {
+      ...(decl.description === undefined ? {} : { description: decl.description }),
+      from: decl.from,
+      onlyIf: decl.onlyIf,
+      ...(decl.asks ? { asks: decl.asks as Record<string, SpecAsk> } : {}),
+      when,
+    };
   }
 
   for (const [decision, table] of Object.entries(component.decisions)) {
@@ -170,11 +176,11 @@ function normalize(name: string, layer1: object, binding: BoundSpecification | u
   return { model, behaviors, decisions: component.decisions, layer1, component, binding };
 }
 
-function validateModel(name: string, model: SpecModel) {
+function validateModel(name: string, model: SpecModel, asked: string[]) {
   if (!model.states.includes(model.init)) {
     throw new Error(`コンポーネント "${name}" の init "${model.init}" が states にありません`);
   }
-  // 条件と計算からは data・queries・入力が同じ階層で見えるため、名前が重なると区別できない
+  // 条件と計算からは、data・引数の無い問い合わせ・入力・尋ねた答えに付けた名前が同じ階層で見えるため、名前が重なると区別できない
   const owners = new Map<string, string>([["status", "予約語"]]);
   const claim = (field: string, owner: string, shared = false) => {
     const taken = owners.get(field);
@@ -184,7 +190,9 @@ function validateModel(name: string, model: SpecModel) {
     owners.set(field, owner);
   };
   for (const field of Object.keys(model.data)) claim(field, "data");
-  for (const field of Object.keys(model.queries)) claim(field, "queries");
+  for (const [field, query] of Object.entries(model.queries)) if (Object.keys(query.input).length === 0) claim(field, "queries");
+  // 尋ねた答えに付けた名前どうしは、コマンドが違えば同名でよい
+  for (const alias of asked) claim(alias, "asks", true);
   // 入力どうしはコマンドが違えば同名でよい
   for (const fields of Object.values(model.commands)) for (const field of Object.keys(fields)) claim(field, "input", true);
 }

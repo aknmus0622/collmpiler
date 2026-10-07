@@ -1,6 +1,6 @@
 // 型の検査。誤った書き方が、型エラーになることを確かめる。
 // 実行するテストではなく、pnpm typecheck が通ること自体が確認になる（エラーにならなければ @ts-expect-error が落ちる）。
-import { component, compose, decisionTable, description, does, from, goTo, input, interpretation, otherwise, ref, when } from "../index.ts";
+import { asks, component, compose, decisionTable, description, does, from, goTo, input, interpretation, otherwise, output, ref, typed, when } from "../index.ts";
 
 const Size = decisionTable({ "It is big": { count: 10, label: null }, otherwise: { count: 1, label: "small" } });
 
@@ -26,7 +26,9 @@ component({ states: ["A"], init: "A", comands: {} });
 // E3: as const を忘れた列挙
 const wide = ["x", "y"];
 // @ts-expect-error
-component({ states: ["A"], init: "A", data: { kind: wide } });
+typed(wide);
+// @ts-expect-error
+output(wide);
 // @ts-expect-error
 input({ kind: wide });
 // E4: when の中に書けるのは goTo と does だけ
@@ -37,9 +39,9 @@ when("It is big", from("A"));
 const Thing = component({
   states: ["A", "B"],
   init: "A",
-  data: { total: "integer", name: "string" },
-  queries: { ready: "boolean" },
-  effects: { Notify: { count: "integer" } },
+  data: { total: typed("integer"), name: typed("string") },
+  queries: { ready: output("boolean"), limitOf: compose(input({ who: "string" }), output("integer")) },
+  effects: { Notify: input({ count: "integer" }) },
   decisions: { size: Size },
   calculations: { doubled: description("twice the amount") },
   invariants: ["The total is never negative"],
@@ -53,7 +55,7 @@ const meanings = {
   calculations: { doubled: () => 0 },
   invariants: { "The total is never negative": () => true },
 };
-const structure = { calculations: { doubled: { type: "integer" } }, commands: { Place: { when: { "It is ready": {}, otherwise: {} } }, Rest: {} } } as const;
+const structure = { calculations: { doubled: { output: "integer" } }, commands: { Place: { when: { "It is ready": {}, otherwise: {} } }, Rest: {} } } as const;
 interpretation(Thing, { structure, meanings });
 
 // E5: 意味の漏れと、使われていない名前
@@ -67,7 +69,7 @@ interpretation(Thing, { structure, meanings: { conditions: meanings.conditions, 
 // E6: 構造の誤り
 interpretation(Thing, {
   structure: {
-    calculations: { doubled: { type: "integer" } },
+    calculations: { doubled: { output: "integer" } },
     commands: {
       Place: {
         when: {
@@ -99,9 +101,20 @@ interpretation(Thing, {
         },
       },
       Rest: {
-        // このコマンドには無い入力
+        asks: {
+          limit: { limitOf: { who: ref.data("name") } },
+          // 知らない問い合わせ
+          // @ts-expect-error
+          other: { limitOff: { who: "x" } },
+          // 型の合わない引数
+          // @ts-expect-error
+          wrong: { limitOf: { who: 1 } },
+        },
+        // 尋ねた答えは、付けた名前で指せる（型も合う）
+        effects: [{ Notify: { count: ref.query("limit") } }],
+        // 引数つきの問い合わせは、尋ねずには読めない。このコマンドには無い入力も使えない
         // @ts-expect-error
-        set: { total: ref.input("amount") },
+        set: { total: ref.query("limitOf"), name: ref.input("amount") },
       },
     },
   },
@@ -110,7 +123,7 @@ interpretation(Thing, {
 // E7: 知らないキー
 interpretation(Thing, {
   structure: {
-    calculations: { doubled: { type: "integer" } },
+    calculations: { doubled: { output: "integer" } },
     commands: { Place: { when: { "It is ready": {}, otherwise: {} } }, Rest: {} },
     // @ts-expect-error
     comands: {},

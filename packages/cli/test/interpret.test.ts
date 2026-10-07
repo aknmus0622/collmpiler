@@ -212,7 +212,7 @@ test("確定: 文を直したが解釈はそのままでよいとき、導き直
   assert.equal(compile(dir).status, 0);
 
   // 解釈が使っている副作用を、Layer 1 から消す
-  const broken = fork(accepted, replaced("    Refund: {},\n", ""));
+  const broken = fork(accepted, replaced('    Refund: description("What the customer paid is returned."),\n', ""));
   const refused = await accept({ specs: broken });
   assert.deepEqual(refused.accepted, []);
   assert.match(refused.problems[0], /order: 解釈が、いまの Layer 1 に合いません/);
@@ -335,9 +335,9 @@ export const Interpretation = interpretation(Counter, {
   structure: {
     states: ["OPEN", "CLOSED"],
     init: "OPEN",
-    data: { total: "integer" },
-    effects: { ReportTotal: { total: "integer" } },
-    calculations: { raised: { is: "the total so far (0 if none) plus the step", type: "integer" } },
+    data: { total: { type: "integer" } },
+    effects: { ReportTotal: { input: { total: "integer" } } },
+    calculations: { raised: { is: "the total so far (0 if none) plus the step", output: "integer" } },
     commands: {
       Raise: {
         input: { step: { type: "integer", min: 0, max: 10 } },

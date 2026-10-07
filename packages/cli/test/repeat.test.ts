@@ -54,7 +54,7 @@ function specVariant(file: string, from: string, to: string) {
 // シルバー会員の割引が 50% だった版（fixture の "buggy" は、この版の正しい実装）
 const silverFifty = () => specVariant("order.decisions.ts", '"The customer is a Silver member": { discountPercent: 5,', '"The customer is a Silver member": { discountPercent: 50,');
 // 使われていない副作用が1つ多かった版（契約が違う）
-const extraEffect = () => specVariant("order.component.ts", "    Refund: {},", "    Refund: {},\n    Audit: {},");
+const extraEffect = () => specVariant("order.component.ts", "    NotifyPaymentFailure: input({}),", "    NotifyPaymentFailure: input({}),\n    Audit: input({}),");
 
 test("繰り返し: 仕様の値だけが変わったら、実装の段階だけが動く。最初の依頼に、いまのコードの不一致が載る", async () => {
   const out = workdir();

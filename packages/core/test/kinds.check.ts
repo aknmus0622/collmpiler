@@ -1,6 +1,6 @@
 // 型の検査。さまざまな種類の部品が、同じ形 (コンポーネント + 解釈) で書けることを確かめる。
 // 実行するテストではなく、pnpm typecheck が通ること自体が確認になる。
-import { component, compose, decide, decisionTable, description, does, from, goTo, input, interpretation, onlyIf, otherwise, ref, when } from "../index.ts";
+import { asks, component, compose, decide, decisionTable, description, does, from, goTo, input, interpretation, onlyIf, otherwise, output, ref, typed, when } from "../index.ts";
 
 // K1: 最小の部品。語彙も決定表も無い。Layer 1 がすべてを構造で書き、解釈は意味だけを持つ
 export const Toggle = component({
@@ -21,9 +21,9 @@ interpretation(Counter, {
   structure: {
     states: ["ACTIVE"],
     init: "ACTIVE",
-    data: { total: "integer" },
-    effects: { ReportTotal: { total: "integer" } },
-    calculations: { raised: { is: "the total so far (0 if none) plus the step", type: "integer" } },
+    data: { total: { type: "integer" } },
+    effects: { ReportTotal: { input: { total: "integer" } } },
+    calculations: { raised: { is: "the total so far (0 if none) plus the step", output: "integer" } },
     invariants: ["The total is never negative"],
     commands: {
       Raise: {
@@ -53,7 +53,8 @@ export const Shipment = component({
   states: ["NEW", "REQUESTED", "ACCEPTED", "FAILED"],
   init: "NEW",
   queries: description("Whether the carrier accepted."),
-  effects: description("A pickup request with the fee; a notice to the sender."),
+  // 項目ごとに、文だけか、部品かを選べる
+  effects: { RequestPickup: input({ fee: "integer" }), NotifySender: description("The sender is told that the carrier accepted.") },
   decisions: { fee: Fee },
   calculations: { nextTry: description("the number of tries so far plus one") },
   commands: {
@@ -64,10 +65,9 @@ export const Shipment = component({
 });
 interpretation(Shipment, {
   structure: {
-    data: { tries: { type: "integer", min: 0, max: 5 } },
-    queries: { accepted: "boolean" },
-    effects: { RequestPickup: { fee: "integer" }, NotifySender: {} },
-    calculations: { nextTry: { type: "integer" } },
+    data: { tries: { type: { type: "integer", min: 0, max: 5 } } },
+    queries: { accepted: { output: "boolean" } },
+    calculations: { nextTry: { output: "integer" } },
     commands: {
       Request: { set: { tries: 1 }, effects: [{ RequestPickup: { fee: ref.decision("fee", "fee") } }] },
       Answered: {
@@ -96,4 +96,40 @@ interpretation(Shipment, {
 });
 // 決定表の結果は、Layer 1 に表があれば型が付く
 export const feeOf = (state: object): number => decide(Shipment, "fee", state).fee;
+
+// K4: 引数つきの問い合わせ。何を尋ねるかを asks で宣言し、答えは付けた名前で読む
+export const Door = component({
+  states: ["CLOSED", "OPEN"],
+  init: "CLOSED",
+  data: { owner: typed("string") },
+  queries: {
+    isMember: compose(description("Whether this person is a member."), input({ person: "string" }), output("boolean")),
+    isHoliday: output("boolean"),
+    levelOf: compose(input({ person: "string" }), output(["guest", "staff"])),
+  },
+  effects: { Greet: input({ level: ["guest", "staff"] }) },
+  commands: {
+    // Layer 1 が、尋ねることを決めている
+    Knock: compose(input({ visitor: "string" }), from("CLOSED"), asks({ member: { isMember: { person: ref.input("visitor") } } }), when("The visitor is a member", goTo("OPEN")), otherwise()),
+    Ring: description("The owner rings; the door opens and greets them by their level."),
+  },
+});
+interpretation(Door, {
+  structure: {
+    commands: {
+      Knock: { when: { "The visitor is a member": { set: { owner: ref.input("visitor") } }, otherwise: {} } },
+      Ring: {
+        from: ["CLOSED"],
+        goTo: "OPEN",
+        // 解釈が決めた、尋ねること。覚えているデータを引数にする。答えは、構造の中でも名前で指せる
+        asks: { level: { levelOf: { person: ref.data("owner") } } },
+        effects: [{ Greet: { level: ref.query("level") }, when: ref.query("isHoliday") }],
+      },
+    },
+  },
+  meanings: {
+    // 答えは、ほかのコマンドの実行中は undefined（入力と同じ）
+    conditions: { "The visitor is a member": (s) => s.member === true && !s.isHoliday && s.level !== "staff" },
+  },
+});
 void onlyIf;
