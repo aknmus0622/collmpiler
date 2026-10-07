@@ -128,7 +128,10 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
         const [decision, column] = ref.path as [string, string];
         const table = input.decisions[decision];
         if (!table) throw new Error(`決定表 "${decision}" がありません`);
-        return table[matchCondition(binding, Object.keys(table), context)][column];
+        const row = matchCondition(binding, Object.keys(table), context);
+        const cell = table[row][column];
+        if (cell === null) throw new Error(`決定表 "${decision}" の行 "${row}" には、列 "${column}" の値がありません (null) が、その値が使われました`);
+        return cell;
       }
       case "calculation": {
         const calculation = binding.calculations?.[name];
@@ -243,7 +246,7 @@ export async function selfCheck(
   return { ok: false, message: "仕様の検査に失敗しましたが、再現できませんでした", steps: [] };
 }
 
-export async function runPbt(options: { specs: string; adapter: Adapter; args?: string[] }): Promise<PbtResult> {
+export async function runPbt(options: { specs: string; adapter: Adapter; component?: string; args?: string[] }): Promise<PbtResult> {
   const { values } = parseArgs({
     args: options.args ?? process.argv.slice(2),
     options: {
@@ -254,7 +257,7 @@ export async function runPbt(options: { specs: string; adapter: Adapter; args?: 
       drafts: { type: "boolean", default: false },
     },
   });
-  const result = await check(options.specs, options.adapter, values.drafts, {
+  const result = await check(options.specs, options.adapter, { drafts: values.drafts, component: options.component }, {
     seed: values.seed === undefined ? undefined : Number(values.seed),
     path: values.path,
     numRuns: values.runs === undefined ? DEFAULT_RUNS : Number(values.runs),
@@ -267,10 +270,10 @@ export async function runPbt(options: { specs: string; adapter: Adapter; args?: 
 async function check(
   specs: string,
   adapter: Adapter,
-  drafts: boolean,
+  select: { drafts: boolean; component?: string },
   params: { seed?: number; path?: string; numRuns: number },
 ): Promise<PbtResult> {
-  const input = await loadSpecs(specs, { drafts });
+  const input = await loadSpecs(specs, select);
   const model = input.model;
   if (!model) return { status: "error", message: "仕様にコンポーネントがありません" };
   if (!input.binding) return { status: "error", message: "コンポーネントの結び付け (bind) がありません" };

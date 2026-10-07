@@ -99,13 +99,17 @@ export interface TargetSystemAdapter {
 `;
 }
 
+// アダプターの雛形が出すエラー。本番コードの「未実装」とは別の文言にする。
+// 同じだと、配線の段階が何も書かなくても「未実装で失敗した」ように見えて、赤の確認を通ってしまう
+export const ADAPTER_NOT_WRITTEN = "the adapter is not written yet";
+
 export function generateAdapterSkeleton(ws: Workspace): string {
   const methods = ["setupIsolation(ports)", "teardownIsolation()", "executeCommand(command)", "getCurrentState()"];
   return `import type { TargetSystemAdapter } from "${importPath(ws.paths.adapter, ws.paths.contract)}";
 
 // Import the production code from ${dirFrom(ws.paths.adapter, ws.src)} and forward each call to it. No business logic here.
 export const adapter: TargetSystemAdapter = {
-${methods.map((method) => `  async ${method} {\n    throw new Error("not implemented");\n  },`).join("\n")}
+${methods.map((method) => `  async ${method} {\n    throw new Error("${ADAPTER_NOT_WRITTEN}");\n  },`).join("\n")}
 };
 `;
 }
@@ -117,7 +121,7 @@ import { fileURLToPath } from "node:url";
 import { runPbt } from "@aac/cli/runtime";
 import { adapter } from "./${posix.basename(ws.paths.adapter)}";
 
-await runPbt({ specs: fileURLToPath(new URL(${JSON.stringify(specs + "/")}, import.meta.url)), adapter });
+await runPbt({ specs: fileURLToPath(new URL(${JSON.stringify(specs + "/")}, import.meta.url)), component: ${JSON.stringify(ws.component)}, adapter });
 `;
 }
 

@@ -33,6 +33,8 @@ export type SpecEffect = { name: string; payload: Record<string, SpecValue>; whe
 export type SpecOutcome = { goTo: string; does: string; effects: SpecEffect[]; set: Record<string, SpecValue> };
 
 export type SpecInput = {
+  // コンポーネントの名前 (order など)
+  name?: string;
   model?: SpecModel;
   // コマンド名 → 実行できる状態、事前条件、条件ごとの結果（分かれないコマンドは otherwise だけ）
   behaviors: Record<string, { from?: readonly string[]; onlyIf?: readonly string[]; when: Record<string, SpecOutcome> }>;
@@ -43,7 +45,7 @@ export type SpecInput = {
   // コンポーネントの assets に宣言された添付資料（ファイルは内容を読み込んだもの）。IR には含めない
   assets?: Asset[];
   // どのファイルのどの export か（結び付けの下書きを書くときに使う）
-  sources?: { component?: { file: string; exportName: string }; binding?: string; decisions: Record<string, { file: string; exportName: string } | undefined> };
+  sources?: { component?: { file: string; exportName: string }; binding?: string; otherBindings?: string[]; decisions: Record<string, { file: string; exportName: string } | undefined> };
 };
 
 export type Diagnostic = {
@@ -58,7 +60,7 @@ export const isReference = (value: unknown): value is Reference =>
   typeof value === "object" && value !== null && "$ref" in value && "path" in value;
 
 // 参照が指すものの型。見つからなければ、その理由
-function typeOf(input: SpecInput, command: string, ref: Reference): { schema?: FieldSchema; values?: Constant[]; boolean?: true; problem?: string } {
+function typeOf(input: SpecInput, command: string, ref: Reference): { schema?: FieldSchema; values?: (Constant | null)[]; boolean?: true; problem?: string } {
   const model = input.model!;
   const name = String(ref.path);
   switch (ref.$ref) {
@@ -93,7 +95,8 @@ function mismatch(input: SpecInput, command: string, value: SpecValue, target: F
   if (found.problem) return found.problem;
   if (found.boolean) return target === "boolean" ? undefined : `was(...) は真偽値で、${describe(target)} には入りません`;
   if (found.values) {
-    const bad = found.values.find((cell) => !conforms(target, cell));
+    // null は「この行では値が無い」。その行でこの参照が使われないことは、仕様の事前検査が確かめる
+    const bad = found.values.find((cell) => cell !== null && !conforms(target, cell));
     return bad === undefined ? undefined : `決定表の値 ${JSON.stringify(bad)} は ${describe(target)} に入りません`;
   }
   return compatible(found.schema!, target) ? undefined : `${describe(found.schema!)} は ${describe(target)} に入りません`;

@@ -26,6 +26,10 @@ function renderFeedback(feedback: Feedback, current = false): string {
     return `The previous attempt crashed before producing a test result:\n\n\`\`\`\n${feedback.output}\n\`\`\``;
   }
   if (feedback.kind === "red") return feedback.message;
+  if (feedback.kind === "regression") {
+    const detail = feedback.result ? JSON.stringify(feedback.result, null, 2) : (feedback.crash ?? "");
+    return `The previous attempt satisfies the specification it was written for, but it broke another component of the same system: \`${feedback.component}\`. That component's tests passed before and fail now. The production code must satisfy every specification.\n\n\`\`\`\n${detail}\n\`\`\``;
+  }
   if (feedback.kind === "mutation") {
     const lines = feedback.violations.map((v) => `- \`${v.file}\` [${v.rule}] ${v.message}`);
     return `The previous attempt passed the property-based test, but failed the mutation check. The harness changes values in your production code one at a time and expects the test to fail each time:\n\n${lines.join("\n")}`;
@@ -57,7 +61,8 @@ The IR describes one component by its boundary.
   terms of the remembered data, the query answers, the input of the command, and the current state. The same
   sentence always means the same thing. Among the conditions of one table (or of one command's \`when\`) at
   most one holds; \`otherwise\` applies when none does.
-- \`decisions\`: decision tables. \`rows\` maps each condition to the values chosen when it holds.
+- \`decisions\`: decision tables. \`rows\` maps each condition to the values chosen when it holds. A \`null\`
+  cell means that row gives no value for that column; the value is never needed when that row applies.
 - \`behaviors\`: what each command does. \`from\` lists the states in which the command can be executed, and
   the conditions in \`onlyIf\` must also hold; behaviour outside them is not tested. \`when\` maps each
   condition to what happens when it holds:
@@ -80,8 +85,9 @@ const reserved = (ws: Workspace) =>
 
 const design = (target: Target, ws: Workspace, guide: string, incremental: boolean) => `${
   incremental
-    ? `The specification in \`${ws.paths.ir}\` has changed. The production code under \`${label(ws.src)}\` was written for an
-earlier version of it. Update the **public shape** of that code to fit the specification as it is now: types,
+    ? `Production code already exists under \`${label(ws.src)}\`, but it does not yet fit the specification in
+\`${ws.paths.ir}\`: it was written for an earlier version of that specification, or for other components of the
+same system. Update the **public shape** of the code to fit the specification as it is now: types,
 interfaces, and the signatures of exported classes and functions. Do not implement new behaviour yet.`
     : `Design the production code for the component specified in \`${ws.paths.ir}\`, and write it as a
 **skeleton** under \`${label(ws.src)}\`: every type, every interface, and every exported class and function with its
@@ -146,9 +152,9 @@ everything the system depends on, are defined in \`${ws.paths.contract}\`.
 
 ${
   incremental
-    ? `The production code and the adapter were written for an earlier version of the interface. The signatures and
-doc comments of the production code are now final for the current version; members that are not implemented
-yet fail with \`"${target.notImplemented}"\`, and someone else will fill them in later. Update the adapter so
+    ? `The production code already existed before the interface took its current form, and so may the adapter.
+The signatures and doc comments of the production code are now final for the current version; members that
+are not implemented yet fail with \`"${target.notImplemented}"\`, and someone else will fill them in later. Update the adapter so
 that it fits the current interface and the current production code; keep what still fits.`
     : `The production code is a skeleton: its signatures and doc comments are final, but its bodies fail with
 \`"${target.notImplemented}"\`. Someone else will fill them in later.`
@@ -173,7 +179,7 @@ ${target.request(ws).adapterGuide}
 const implementation = (target: Target, ws: Workspace, guide: string, incremental: boolean) => `${
   incremental
     ? `Change the production code under \`${label(ws.src)}\` so that it satisfies the specification in
-\`${ws.paths.ir}\`. The code was written for an earlier version of the specification. Its design and signatures
+\`${ws.paths.ir}\`. The code was written before the specification took its current form. Its design and signatures
 already fit the current version; members that are not implemented yet fail with
 \`"${target.notImplemented}"\`. Change what the specification now requires and leave the rest as it is.`
     : `Implement the production code under \`${label(ws.src)}\` so that it satisfies the specification in
@@ -248,8 +254,9 @@ export function renderRequest(
   feedback: Feedback | undefined,
   guide: string,
   assets: Asset[] = [],
-  // incremental: すでにある本番コードを、仕様の変更に合わせて直す
-  options: { incremental?: boolean } = {},
+  // incremental: すでにある本番コードを、仕様の変更に合わせて直す。
+  // others: 同じ本番コードを共有する、ほかのコンポーネントの IR の場所
+  options: { incremental?: boolean; others?: string[] } = {},
 ): string {
   const incremental = options.incremental ?? false;
   const body =
@@ -264,5 +271,11 @@ export function renderRequest(
     : attempt === 1
       ? `\n## Where the current code falls short\n\nThe harness checked the code as it is now, before any change:\n\n${renderFeedback(feedback, true)}\n`
       : `\n## Feedback from the previous attempt\n\n${renderFeedback(feedback)}\n`;
-  return `# ${TITLES[phase]} (attempt ${attempt})\n\n${body}${renderAssets(assets)}${previous}`;
+  // ほかのコンポーネントの仕様は、設計と実装の段階にだけ見せる
+  const others = options.others ?? [];
+  const system =
+    phase === "wiring" || others.length === 0
+      ? ""
+      : `\n## Other components of the same system\n\nThe production code is shared with other components. Their specifications are here, in the same format:\n\n${others.map((path) => `- \`${path}\``).join("\n")}\n\nYour task is the specification named at the top. The code must keep satisfying the others too: their tests are run again after yours pass. Do not change exported names or signatures that already exist unless your specification requires it. Reuse what fits; do not edit those files.\n`;
+  return `# ${TITLES[phase]} (attempt ${attempt})\n\n${body}${system}${renderAssets(assets)}${previous}`;
 }

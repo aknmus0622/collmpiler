@@ -75,12 +75,16 @@ export const text = (content: string, options: AssetOptions = {}): AssetDeclarat
 
 // --- 決定表 ---
 // 条件（自然言語）から値を選ぶ表。どの条件にも当たらないときの otherwise が必須で、全行が同じ列を持つ。
-// セルに書けるのは値だけ。副作用や計算は書かない（表が決めるのは率や区分といったパラメータ）
+// セルに書けるのは値だけ。副作用や計算は書かない（表が決めるのは率や区分といったパラメータ）。
+// その行では使われない列には、null を書く
 export type Constant = string | number | boolean;
-export type Table = Record<string, Record<string, Constant>>;
+// セルに null を書くと「この行では、この列の値は無い」という意味になる（使われない値を埋めずに済む）。
+// 値の無いセルが実際に使われる仕様は誤りで、仕様の事前検査が見つける
+export type Cell = Constant | null;
+export type Table = Record<string, Record<string, Cell>>;
 type Columns<T> = T extends { otherwise: infer Row } ? keyof Row : never;
 type CheckTable<T> = T & { otherwise: unknown } & {
-  [Row in keyof T]: { [C in Columns<T>]: Constant } & KnownKeys<T[Row], Columns<T>>;
+  [Row in keyof T]: { [C in Columns<T>]: Cell } & KnownKeys<T[Row], Columns<T>>;
 };
 
 export function decisionTable<const T extends Table>(table: CheckTable<T>): T {
@@ -202,7 +206,7 @@ type ColumnType<T, C> = T[keyof T] extends infer Row ? (Row extends unknown ? (C
 type RefTo<B extends Declaration, A extends keyof B["commands"], T> =
   | {
       [D in keyof Decisions<B>]: {
-        [C in Columns<Decisions<B>[D]>]: ColumnType<Decisions<B>[D], C> extends T ? Ref<"decision", readonly [D, C]> : never;
+        [C in Columns<Decisions<B>[D]>]: Exclude<ColumnType<Decisions<B>[D], C>, null> extends T ? Ref<"decision", readonly [D, C]> : never;
       }[Columns<Decisions<B>[D]>];
     }[keyof Decisions<B>]
   | { [N in keyof Calculations<B>]: Calculations<B>[N] extends { type: infer S } ? (FieldType<S> extends T ? Ref<"calculation", N> : never) : never }[keyof Calculations<B>]

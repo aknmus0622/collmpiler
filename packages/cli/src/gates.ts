@@ -56,6 +56,10 @@ export type GateContext = {
   incremental: boolean;
   // 設計の段階を始める前の本番コードの文面。そこにすでにあった仕様の文は、設計の段階が持ち込んだものではない
   baseline: string;
+  // 同じ本番コードを共有する、ほかのコンポーネント。
+  // 設計と実装の段階には、その IR も渡す（本番コードは、すべての仕様を満たし続けなければならない）。
+  // 実装の段階の採点では、配線済みのものの検証も回す（回帰）
+  others: { name: string; ir: Ir; ws: Workspace; seed: number }[];
 };
 
 // どの Strategy で何個壊し、何個検出したか（毎回結果に記録する）
@@ -73,7 +77,9 @@ export type Feedback =
   | { kind: "crash"; output: string }
   | { kind: "mutation"; violations: Violation[] }
   // 配線の段階: 「未実装で失敗する」はずの PBT が、そうならなかった
-  | { kind: "red"; message: string };
+  | { kind: "red"; message: string }
+  // このコンポーネントの検証には合格したが、ほかのコンポーネントの検証が通らなくなった
+  | { kind: "regression"; component: string; result?: PbtResult; crash?: string };
 
 export type Sandbox = {
   dir: string;
@@ -110,7 +116,10 @@ export function entryGate(ctx: GateContext, phase: Phase, attempt: number, feedb
   // 許可リスト。段階ごとに違う
   const assets = assetsFor(ctx.assets, phase);
   const inputs: Record<string, string> = {
-    [REQUEST]: renderRequest(ctx.target, ws, phase, attempt, feedback, ctx.guide, assets, { incremental: ctx.incremental }),
+    [REQUEST]: renderRequest(ctx.target, ws, phase, attempt, feedback, ctx.guide, assets, {
+      incremental: ctx.incremental,
+      others: ctx.others.map((other) => other.ws.paths.ir),
+    }),
   };
   for (const asset of assets) if (asset.kind === "file") inputs[`${ASSETS_DIR}/${asset.name}`] = asset.content;
   if (phase === "wiring") {
@@ -120,6 +129,8 @@ export function entryGate(ctx: GateContext, phase: Phase, attempt: number, feedb
       : ctx.target.generate.adapterSkeleton(ws);
   } else {
     inputs[ws.paths.ir] = stableStringify(ctx.ir);
+    // ほかのコンポーネントの仕様。配線の段階には渡さない（配線は、どの仕様も見ない）
+    for (const other of ctx.others) inputs[other.ws.paths.ir] = stableStringify(other.ir);
   }
   // 本番コード: 設計の段階ではやり直しのときの前回の成果、以降の段階では骨組み
   for (const rel of sourceFiles(ws)) inputs[rel] = readFileSync(join(ws.root, rel), "utf8");
@@ -152,9 +163,17 @@ export function scrubEnv(env: NodeJS.ProcessEnv, hidden: string[]): NodeJS.Proce
 const scrub = (ctx: GateContext, text: string) =>
   [ctx.ws.root, ctx.specsDir, process.cwd()].reduce((result, path) => result.split(path).join("."), text);
 
+// ほかのコンポーネントのうち、いまの仕様で配線まで済んでいるもの。
+// 出力先の IR がいまの仕様と同じで、アダプターがあるもの。仕様が変わってまだ一致させていないものは、
+// そのコンポーネントの番で直すので、ここでは見ない
+function settledOthers(ctx: GateContext) {
+  const read = (ws: Workspace, rel: string) => (existsSync(join(ws.root, rel)) ? readFileSync(join(ws.root, rel), "utf8") : undefined);
+  return ctx.others.filter((other) => read(other.ws, other.ws.paths.ir) === stableStringify(other.ir) && read(other.ws, other.ws.paths.adapter) !== undefined);
+}
+
 // PBT を実行する。どう実行するかは対象言語が決める
-function runVerify(ctx: GateContext): { result?: PbtResult; crash?: string } {
-  const { result, crash } = ctx.target.runTests({ ws: ctx.ws, seed: ctx.seed, runs: ctx.runs, drafts: ctx.drafts });
+function runVerify(ctx: GateContext, unit: { ws: Workspace; seed: number } = ctx): { result?: PbtResult; crash?: string } {
+  const { result, crash } = ctx.target.runTests({ ws: unit.ws, seed: unit.seed, runs: ctx.runs, drafts: ctx.drafts });
   // 出力に含まれるリポジトリのパスを、差し戻しに載せない
   return result ? { result } : { crash: scrub(ctx, crash ?? "") };
 }
@@ -270,11 +289,15 @@ async function judgeOutput(
   const ran = ctx.staticCheck ? { staticCheck: ctx.staticCheck.name } : {};
   if (ctx.staticCheck) {
     const sources = sourceFiles(ws);
-    const files = phase === "design" ? sources : [...sources, ADAPTER, ws.paths.contract];
+    // ほかのコンポーネントのアダプターも含める。本番コードの公開している形を変えると、そこが合わなくなる
+    const settled = settledOthers(ctx).flatMap((other) => [other.ws.paths.adapter, other.ws.paths.contract]);
+    const own = phase === "design" ? [] : [ADAPTER, ws.paths.contract];
+    const files = [...sources, ...own, ...(phase === "wiring" ? [] : settled)];
+    const hidden = new Set(phase === "wiring" ? [] : phase === "design" ? settled : [ADAPTER, ...settled]);
     const found = (await ctx.staticCheck.check({ dir: ws.root, files })).map((violation) =>
-      // 実装の段階はアダプターを見られない。アダプター側の誤りは、
+      // 設計と実装の段階はアダプターを見られない。アダプター側の誤りは、
       // 「公開している名前かシグネチャを変えた」ことの現れなので、そう伝える
-      phase === "implementation" && violation.file === ADAPTER
+      hidden.has(violation.file)
         ? {
             ...violation,
             file: ws.src || ".",
@@ -330,6 +353,18 @@ async function judgeOutput(
   // 緑: 合格しなければならない
   if (result.status !== "pass") return { ...ran, feedback: { kind: "pbt", result } };
 
+  // 回帰: 同じ本番コードを使う、ほかのコンポーネントの検証が通り続けていること
+  for (const other of settledOthers(ctx)) {
+    // 採点基準は生成し直す（出力先にあるテストの入口が、別の場所の仕様を指していることがあるため）
+    writeFileSync(join(other.ws.root, other.ws.paths.contract), target.generate.contract(other.ir));
+    writeFileSync(join(other.ws.root, other.ws.paths.verify), target.generate.verify(other.ir, other.ws, ctx.specsDir));
+    const regression = runVerify(ctx, other);
+    if (regression.result?.status === "error") throw new Error(`PBT を実行できませんでした (${other.name}): ${regression.result.message}`);
+    if (regression.result?.status !== "pass") {
+      return { ...ran, feedback: { kind: "regression", component: other.name, ...regression } };
+    }
+  }
+
   // ミューテーション: 本番コードを壊して PBT が落ちることを確かめる。合否の基準はゲート (judge) が持つ
   if (!ctx.mutation) return { ...ran };
   const values = decisionValues(ctx.ir);
@@ -347,7 +382,7 @@ async function judgeOutput(
       .filter((mutant) => !mutant.killed)
       .map(({ file, line, original }) => ({ file, line, original })),
   };
-  const survived = judge(report, values, readFileSync(join(ws.root, ADAPTER), "utf8"), ADAPTER, label(ws.src));
+  const survived = judge(report, values, readFileSync(join(ws.root, ADAPTER), "utf8"), ADAPTER, label(ws.src), ctx.others.length > 0);
   return survived.length > 0
     ? { ...ran, feedback: { kind: "mutation", violations: survived }, mutation }
     : { ...ran, mutation };

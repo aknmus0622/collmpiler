@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { resolveLayout, sourceFiles, workspaceOf } from "./layout.ts";
+import type { Workspace } from "./layout.ts";
 import { extract, stableStringify } from "./extract.ts";
 import { mergeAssets } from "./assets.ts";
 import type { Asset } from "./assets.ts";
@@ -9,7 +10,7 @@ import type { Feedback, GateContext, MutationSummary } from "./gates.ts";
 import { requireModel, specHash } from "./generate.ts";
 import type { Ir } from "./generate.ts";
 import { DEFAULT_GUIDE } from "./guide.ts";
-import { DRAFT_SUFFIX, loadSpecs } from "./loader.ts";
+import { DRAFT_SUFFIX, listComponents, loadSpecs } from "./loader.ts";
 import type { MutationStrategy } from "./mutation.ts";
 import { PHASES } from "./request.ts";
 import type { Phase } from "./request.ts";
@@ -39,6 +40,8 @@ export type ImplementOptions = {
   out?: string;
   src?: string;
   tests?: string;
+  // 一致させるコンポーネントの名前。省略時は、仕様にあるすべて（名前順）
+  component?: string;
   strategy: ImplementationStrategy;
   // 1つの段階の中で差し戻す回数の上限
   maxAttempts?: number;
@@ -68,6 +71,8 @@ export type ImplementOptions = {
 };
 
 export type Attempt = {
+  // どのコンポーネントのための試行か
+  component: string;
   round: number;
   phase: Phase;
   attempt: number;
@@ -89,57 +94,96 @@ export async function implement(options: ImplementOptions) {
   const typeErrors = typecheckSpecs(specsDir, { drafts });
   if (typeErrors.length > 0) throw new Error(`仕様に型エラーがあります:\n${formatTypeErrors(typeErrors)}`);
 
-  const spec = await loadSpecs(specsDir, { drafts });
-  const { ir: extracted, diagnostics } = await extract(spec);
-  const errors = diagnostics.filter((d) => d.severity === "error");
-  if (errors.length > 0) {
-    throw new Error(`仕様にエラーがあります:\n${errors.map((d) => `  ${d.behavior}.${d.case}: ${d.message}`).join("\n")}`);
-  }
-  const ir = JSON.parse(stableStringify(extracted)) as Ir;
-  requireModel(ir);
-
-  // 仕様の事前検査。仕様自身の誤りは、エージェントを呼ぶ前に人に報告する
-  const checked = await selfCheck(spec, { seed: 1 });
-  if (!checked.ok) {
-    throw new Error(`仕様に誤りがあります: ${checked.message}\n  再現するコマンド列: ${JSON.stringify(checked.steps)}`);
-  }
-
-  // 検証を決定的にするため、シードは仕様のハッシュから決める
-  const seed = Number.parseInt(specHash(ir).slice("sha256:".length, "sha256:".length + 7), 16);
+  // 仕様にあるコンポーネントをすべて読み、検査する。仕様自身の誤りは、エージェントを呼ぶ前に人に報告する
   const target = options.target ?? typescriptTarget;
-  const ws = workspaceOf(resolveLayout(options), target.files);
-  const ctx: GateContext = {
-    target,
-    ir,
-    specsDir,
-    ws,
-    seed,
-    runs: options.runs ?? DEFAULT_RUNS,
-    guide: DEFAULT_GUIDE,
-    assets: mergeAssets(spec.assets ?? [], options.assets ?? []),
-    drafts,
-    mutation: options.mutation === null ? undefined : (options.mutation ?? target.mutation),
-    staticCheck: options.staticCheck === null ? undefined : (options.staticCheck ?? target.staticCheck),
-    incremental: false,
-    baseline: "",
-  };
+  const layout = resolveLayout(options);
+  const names = await listComponents(specsDir, { drafts });
+  if (names.length === 0) throw new Error("仕様にコンポーネントがありません（component(...) を export してください）");
+  if (options.component !== undefined && !names.includes(options.component)) {
+    throw new Error(`コンポーネント "${options.component}" がありません (あるのは: ${names.join(", ")})`);
+  }
+  const units: Unit[] = [];
+  for (const name of names) {
+    const spec = await loadSpecs(specsDir, { drafts, component: name });
+    const { ir: extracted, diagnostics } = extract(spec);
+    const errors = diagnostics.filter((d) => d.severity === "error");
+    if (errors.length > 0) {
+      throw new Error(`仕様 (${name}) にエラーがあります:\n${errors.map((d) => `  ${d.behavior}.${d.case}: ${d.message}`).join("\n")}`);
+    }
+    const ir = JSON.parse(stableStringify(extracted)) as Ir;
+    requireModel(ir);
+    const checked = await selfCheck(spec, { seed: 1 });
+    if (!checked.ok) {
+      throw new Error(`仕様 (${name}) に誤りがあります: ${checked.message}\n  再現するコマンド列: ${JSON.stringify(checked.steps)}`);
+    }
+    units.push({
+      name,
+      ir,
+      ws: workspaceOf(layout, target.files, name, names),
+      // 検証を決定的にするため、シードは仕様のハッシュから決める
+      seed: Number.parseInt(specHash(ir).slice("sha256:".length, "sha256:".length + 7), 16),
+      assets: spec.assets ?? [],
+    });
+  }
 
-  const clear = () => {
-    for (const rel of [...sourceFiles(ws), ws.paths.adapter]) rmSync(join(ws.root, rel), { force: true });
-  };
-  if (options.fresh) clear();
-
-  // 何が変わったかを見て、動かす段階を決める。新規は「本番コードが無い」場合にすぎない
-  const plan = planOf(ctx, options.from);
-  ctx.incremental = plan.incremental;
-  log(`plan: ${plan.phases.join(" → ")} (${plan.reason})`);
+  // --fresh: 本番コードと、すべてのコンポーネントのアダプター・前回の IR を捨てる（何も無い状態からやり直す）
+  if (options.fresh) {
+    for (const rel of [...sourceFiles(units[0].ws), ...units.flatMap((unit) => [unit.ws.paths.adapter, unit.ws.paths.ir])]) {
+      rmSync(join(layout.root, rel), { force: true });
+    }
+  }
 
   // 正解 (結び付け) が人の確認を経たものか、下書きのままか
   const usesDraft = drafts && (readdirSync(specsDir, { recursive: true }) as string[]).some((file) => file.endsWith(DRAFT_SUFFIX));
   const oracle = usesDraft ? ("draft" as const) : ("reviewed" as const);
   if (usesDraft) log("注意: 人が確認していない結び付けの下書きを、正解として使っています");
 
+  // コンポーネントを1つずつ、名前順に一致させる。本番コードは共有なので、2つ目以降は「すでにある本番コードを直す」になる
   const attempts: Attempt[] = [];
+  let status: "pass" | "fail" = "pass";
+  for (const unit of units.filter((candidate) => options.component === undefined || candidate.name === options.component)) {
+    const ctx: GateContext = {
+      target,
+      ir: unit.ir,
+      specsDir,
+      ws: unit.ws,
+      seed: unit.seed,
+      runs: options.runs ?? DEFAULT_RUNS,
+      guide: DEFAULT_GUIDE,
+      assets: mergeAssets(unit.assets, options.assets ?? []),
+      drafts,
+      mutation: options.mutation === null ? undefined : (options.mutation ?? target.mutation),
+      staticCheck: options.staticCheck === null ? undefined : (options.staticCheck ?? target.staticCheck),
+      incremental: false,
+      baseline: "",
+      others: units.filter((other) => other !== unit).map(({ name, ir, ws, seed }) => ({ name, ir, ws, seed })),
+    };
+    const tag = units.length > 1 ? `${unit.name} ` : "";
+    const passed = await reconcile(ctx, options, attempts, (line) => log(`${tag}${line}`));
+    if (!passed) {
+      status = "fail";
+      break;
+    }
+  }
+  // seed は、最初のコンポーネントのもの（コンポーネントが1つのときの、従来の形）
+  return { status, oracle, attempts, seed: units[0].seed, seeds: Object.fromEntries(units.map((unit) => [unit.name, unit.seed])) };
+}
+
+type Unit = { name: string; ir: Ir; ws: Workspace; seed: number; assets: Asset[] };
+
+// 1つのコンポーネントについて、仕様・本番コード・アダプターを一致させる
+async function reconcile(ctx: GateContext, options: ImplementOptions, attempts: Attempt[], log: (line: string) => void): Promise<boolean> {
+  const { ws } = ctx;
+  const component = ws.component;
+  const clear = () => {
+    for (const rel of [...sourceFiles(ws), ws.paths.adapter]) rmSync(join(ws.root, rel), { force: true });
+  };
+
+  // 何が変わったかを見て、動かす段階を決める。新規は「本番コードが無い」場合にすぎない
+  const plan = planOf(ctx, options.from);
+  ctx.incremental = plan.incremental;
+  log(`plan: ${plan.phases.join(" → ")} (${plan.reason})`);
+
   const maxAttempts = options.maxAttempts ?? 3;
 
   rounds: for (let round = 1; round <= (options.maxRounds ?? 2); round++) {
@@ -163,6 +207,7 @@ export async function implement(options: ImplementOptions) {
         passed = feedback === undefined;
         log(`[${round}] verify: ${passed ? "pass (nothing to implement)" : describe(phase, feedback)}`);
         attempts.push({
+          component,
           round,
           phase,
           attempt: 0,
@@ -188,6 +233,7 @@ export async function implement(options: ImplementOptions) {
         passed = feedback === undefined;
         log(`[${round}] ${phase} #${attempt}: ${describe(phase, feedback)}${mutation ? ` (mutation: ${mutation.strategy}, ${mutation.killed}/${mutation.mutants} killed)` : ""}`);
         attempts.push({
+          component,
           round,
           phase,
           attempt,
@@ -204,9 +250,9 @@ export async function implement(options: ImplementOptions) {
         continue rounds;
       }
     }
-    return { status: "pass" as const, oracle, attempts, seed };
+    return true;
   }
-  return { status: "fail" as const, oracle, attempts, seed };
+  return false;
 }
 
 // 動かす段階を、出力先の状態から決める。
@@ -242,5 +288,6 @@ function describe(phase: Phase, feedback: Feedback | undefined): string {
     return `rejected (${[...new Set(feedback.violations.map((v) => v.rule))].join(", ")})`;
   }
   if (feedback.kind === "red") return "rejected (tests did not fail for the expected reason)";
+  if (feedback.kind === "regression") return `rejected (broke ${feedback.component})`;
   return feedback.kind === "pbt" ? `pbt ${feedback.result.status}` : "crashed";
 }

@@ -114,6 +114,8 @@ export function judge(
   adapterFile = "adapter",
   // 本番コードの置き場所の呼び方（メッセージ用）
   sources = "src/",
+  // true なら、本番コードをほかのコンポーネントと共有している
+  shared = false,
 ): Violation[] {
   const violations: Violation[] = [];
   const adapterNumbers = new Set(
@@ -146,8 +148,10 @@ export function judge(
   }
 
   // 決定表の値が本番コードに1つも見つからない場合（別の表現で書かれている等）は、
-  // 一般的な変異が1つでも検出されることだけを求める
-  if (!located && !report.mutants.some((mutant) => mutant.killed)) {
+  // 一般的な変異が1つでも検出されることだけを求める。
+  // 本番コードをほかのコンポーネントと共有しているときは、この基準は使わない: 壊した箇所の多くは
+  // ほかのコンポーネントのコードで、このコンポーネントのテストでは検出できなくて当然だからである
+  if (!located && !shared && !report.mutants.some((mutant) => mutant.killed)) {
     violations.push({
       file: sources,
       rule: "mutation-ineffective",

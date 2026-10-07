@@ -9,12 +9,18 @@ import type { SpecEffect, SpecInput, SpecModel, SpecOutcome, SpecValue } from ".
 // 下書き (LLM が書き、人がまだ確定していない結び付け) のファイル名
 export const DRAFT_SUFFIX = ".draft.ts";
 
-// 仕様の読み込みはここ1箇所に閉じ込める。パスは process.cwd() 基準。
+type Found = { name: string; declaration: Declaration; file: string; exportName: string };
+type Scan = { root: string; components: Found[]; bindings: { binding: BoundSpecification; file: string }[]; exported: Map<object, { file: string; exportName: string }> };
+
+// コンポーネントの名前: export 名を小文字とハイフンにしたもの (Order → order、CheckoutButton → checkout-button)。
+// テスト側のファイル名と、--component の指定に使う
+export const componentName = (exportName: string) =>
+  exportName.replace(/([a-z0-9])([A-Z])/g, "$1-$2").replace(/([A-Z])([A-Z][a-z])/g, "$1-$2").toLowerCase();
+
+// 仕様のファイルを読み込み、コンポーネントと結び付けを集める。
 // 下書き (*.draft.ts) は既定では読まない。人が確認して名前を変えるまで、正解として使われないようにするため。
-// drafts: true のときだけ下書きを読み、それが置き換える確定版 (X.draft.ts に対する X.ts) は読まない。
-// bindings: false のときは、結び付けを仕様に重ねない（どのファイルにあるかだけを記録する）。
-// コンポーネントが変わって結び付けが古くなっていても、コンポーネントの側を読めるようにするため
-export async function loadSpecs(dir: string, options: { drafts?: boolean; bindings?: boolean } = {}): Promise<SpecInput> {
+// drafts: true のときだけ下書きを読み、それが置き換える確定版 (X.draft.ts に対する X.ts) は読まない
+async function scanSpecs(dir: string, options: { drafts?: boolean }): Promise<Scan> {
   const root = resolve(process.cwd(), dir);
   const all = (readdirSync(root, { recursive: true }) as string[])
     .filter((file) => file.endsWith(".ts") && !file.endsWith(".d.ts"))
@@ -25,33 +31,62 @@ export async function loadSpecs(dir: string, options: { drafts?: boolean; bindin
     ? all.filter((file) => !replaced.has(file))
     : all.filter((file) => !file.endsWith(DRAFT_SUFFIX));
 
-  let found: { declaration: Declaration; file: string; exportName: string } | undefined;
-  const bindings: { binding: BoundSpecification; file: string }[] = [];
-  const exported = new Map<object, { file: string; exportName: string }>();
+  const components: Found[] = [];
+  const bindings: Scan["bindings"] = [];
+  const exported: Scan["exported"] = new Map();
   for (const file of files) {
     const mod = await import(pathToFileURL(join(root, file)).href);
     for (const [exportName, value] of Object.entries(mod)) {
       if (typeof value !== "object" || value === null) continue;
       exported.set(value, { file, exportName });
       if ((value as any)[COMPONENT]) {
-        if (found) throw new Error(`コンポーネントが複数あります (${file})。現在は1つだけ扱えます`);
-        found = { declaration: value as Declaration, file, exportName };
+        const name = componentName(exportName);
+        const same = components.find((other) => other.name === name);
+        if (same) throw new Error(`コンポーネントの名前 "${name}" が重なっています (${same.file} と ${file})`);
+        components.push({ name, declaration: value as Declaration, file, exportName });
       } else if ((value as any)[BINDING]) {
         bindings.push({ binding: value as BoundSpecification, file });
       }
     }
   }
-  if (!found) return { behaviors: {}, decisions: {} };
+  components.sort((a, b) => (a.name < b.name ? -1 : 1));
+  return { root, components, bindings, exported };
+}
 
-  const { declaration, file, exportName } = found;
+// 仕様にあるコンポーネントの名前（名前順）
+export async function listComponents(dir: string, options: { drafts?: boolean } = {}): Promise<string[]> {
+  return (await scanSpecs(dir, options)).components.map((found) => found.name);
+}
+
+// 仕様の読み込みはここ1箇所に閉じ込める。パスは process.cwd() 基準。
+// component: 読み込むコンポーネントの名前。省略できるのは、コンポーネントが1つのときだけ。
+// bindings: false のときは、結び付けを仕様に重ねない（どのファイルにあるかだけを記録する）。
+// コンポーネントが変わって結び付けが古くなっていても、コンポーネントの側を読めるようにするため
+export async function loadSpecs(
+  dir: string,
+  options: { drafts?: boolean; bindings?: boolean; component?: string } = {},
+): Promise<SpecInput> {
+  const { root, components, bindings, exported } = await scanSpecs(dir, options);
+  if (components.length === 0) return { behaviors: {}, decisions: {} };
+  const names = components.map((found) => found.name).join(", ");
+  if (options.component === undefined && components.length > 1) {
+    throw new Error(`コンポーネントが複数あります (${names})。どれを読むかを指定してください`);
+  }
+  const found = options.component === undefined ? components[0] : components.find((other) => other.name === options.component);
+  if (!found) throw new Error(`コンポーネント "${options.component}" がありません (あるのは: ${names})`);
+
+  const { name, declaration, file, exportName } = found;
   const bound = bindings.find(({ binding }) => binding.component === declaration);
   const input = normalize(exportName, declaration, options.bindings === false ? undefined : bound?.binding);
+  input.name = name;
   // 添付資料のパスは、コンポーネントのファイルがあるディレクトリからの相対
   input.assets = resolveAssets(declaration.assets ?? [], dirname(join(root, file)));
   input.sources = {
     component: { file, exportName },
     ...(bound ? { binding: bound.file } : {}),
-    decisions: Object.fromEntries(Object.entries(input.decisions).map(([name, table]) => [name, exported.get(table)])),
+    // ほかのコンポーネントの結び付けのファイル（このコンポーネントだけを検査するときに、そこの誤りを除くため）
+    otherBindings: bindings.filter((other) => other !== bound).map((other) => other.file),
+    decisions: Object.fromEntries(Object.entries(input.decisions).map(([table, value]) => [table, exported.get(value)])),
   };
   return input;
 }

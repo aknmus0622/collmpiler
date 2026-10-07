@@ -27,7 +27,7 @@ export function checkWorkspace(ws: Workspace, ir: Ir, specs: string, scope: "all
   // テスト側のファイルは決まった4つだけ。テスト側だけの専用のディレクトリなら、ほかのファイルを置かせない。
   // 本番コードと同じ場所や、ほかのテストと共用のディレクトリ (接頭辞つき) では、接頭辞の付いた名前だけを見る
   const testsDir = testsDirOf(ws);
-  const known = new Set(Object.values(ws.paths));
+  const known = new Set(ws.reserved);
   const dedicated = ws.prefix === "" && ws.tests !== ws.src;
   for (const entry of existsSync(testsDir) ? readdirSync(testsDir) : []) {
     const rel = relative(ws.root, join(testsDir, entry)).split(sep).join("/");

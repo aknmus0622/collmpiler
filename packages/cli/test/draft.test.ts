@@ -197,7 +197,7 @@ test("下書き: --drafts を明示すれば、人の確認を待たずに実装
   // 下書きを指定しなければ、結び付けが無いので始められない
   const refused = implementWith();
   assert.notEqual(refused.status, 0);
-  assert.match(refused.stderr, /仕様に(型)?エラーがあります/);
+  assert.match(refused.stderr, /仕様( \(order\) )?に(型)?エラーがあります/);
 
   const accepted = implementWith("--drafts");
   assert.equal(accepted.status, 0);

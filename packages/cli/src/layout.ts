@@ -13,8 +13,8 @@ import { dirname, join, posix, relative, resolve, sep } from "node:path";
 //
 // 引数は2つ: 本番コードの場所 (--src) と、テスト側の場所 (--tests)。
 // --tests は「テスト側のファイル名の前に付けるパス」で、"." で終われば最後の部分がファイル名の接頭辞になる:
-//   --tests test/aac               → test/aac/adapter.ts
-//   --tests src/order/order.aac.   → src/order/order.aac.adapter.ts
+//   --tests test/aac          → test/aac/order.adapter.ts
+//   --tests src/order/aac.    → src/order/aac.order.adapter.ts
 
 export type Layout = {
   // 絶対パス
@@ -26,9 +26,16 @@ export type Layout = {
   prefix: string;
 };
 
-// テスト側のファイル (root からの相対パス)
+// 1つのコンポーネントの、テスト側のファイル (root からの相対パス)。
+// ファイル名にはコンポーネントの名前が付く (aac/order.adapter.ts など)
 export type TestPaths = { ir: string; contract: string; adapter: string; verify: string };
-export type Workspace = Layout & { paths: TestPaths };
+export type Workspace = Layout & {
+  // このコンポーネントの名前と、そのテスト側のファイル
+  component: string;
+  paths: TestPaths;
+  // すべてのコンポーネントのテスト側のファイル。本番コードとしては扱わない
+  reserved: string[];
+};
 
 // 作業場所の中で、依頼文と添付資料を置く場所。配置によらず固定（エージェントの起動コマンドがここを指すため）
 export const CONTROL_DIR = "aac";
@@ -72,7 +79,7 @@ export function resolveLayout(options: LayoutOptions): Layout {
 
   // 本番コードとテスト側を同じ場所に置くなら、名前で見分けられなければならない
   if (layout.tests === layout.src && layout.prefix === "") {
-    throw new Error('本番コードとテスト側を同じディレクトリに置くときは、--tests にファイル名の接頭辞まで書いてください (例: --tests src/order/order.aac. 末尾の "." が接頭辞の印です)');
+    throw new Error('本番コードとテスト側を同じディレクトリに置くときは、--tests にファイル名の接頭辞まで書いてください (例: --tests src/order/aac. 末尾の "." が接頭辞の印です)');
   }
   // src の中身はエージェントが書き直す。プロジェクトのルートを指していたら、消してはいけないものまで消してしまう
   for (const name of ["package.json", "node_modules", ".git"]) {
@@ -83,16 +90,26 @@ export function resolveLayout(options: LayoutOptions): Layout {
   return layout;
 }
 
-export function workspaceOf(layout: Layout, files: { contract: string; adapter: string; verify: string }): Workspace {
-  const at = (name: string) => under(layout.tests, layout.prefix + name);
-  return { ...layout, paths: { ir: at(IR_FILE), contract: at(files.contract), adapter: at(files.adapter), verify: at(files.verify) } };
+// component: このコンポーネントの名前。all: 同じ出力先を使う、すべてのコンポーネントの名前
+export function workspaceOf(
+  layout: Layout,
+  files: { contract: string; adapter: string; verify: string },
+  component: string,
+  all: readonly string[] = [component],
+): Workspace {
+  const pathsOf = (name: string): TestPaths => {
+    const at = (file: string) => under(layout.tests, `${layout.prefix}${name}.${file}`);
+    return { ir: at(IR_FILE), contract: at(files.contract), adapter: at(files.adapter), verify: at(files.verify) };
+  };
+  const reserved = [...new Set([component, ...all])].flatMap((name) => Object.values(pathsOf(name)));
+  return { ...layout, component, paths: pathsOf(component), reserved };
 }
 
 // root からの相対パスが、本番コードのファイルかどうか。
 // src の中にあって、テスト側のファイルでも、作業場所の依頼文・添付資料でもないもの
 export function isSource(ws: Workspace, rel: string): boolean {
   if (!inside(ws.src, rel)) return false;
-  if (Object.values(ws.paths).includes(rel)) return false;
+  if (ws.reserved.includes(rel)) return false;
   if (rel === `${CONTROL_DIR}/REQUEST.md` || rel.startsWith(`${CONTROL_DIR}/assets/`)) return false;
   // 接頭辞つきの名前は、テスト側のために空けておく
   return ws.prefix === "" || !posix.basename(rel).startsWith(ws.prefix);

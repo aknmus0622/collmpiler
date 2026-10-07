@@ -249,3 +249,27 @@ file("x.md", { phases: ["review"] });
 // A2: 包まずに文字列を並べることはできない
 // @ts-expect-error
 component({ states: ["A"], init: "A", assets: ["docs/architecture.md"], commands: { Go: { then: { goTo: "A", does: "x" } } } });
+
+// ---- 決定表の、値の無いセル (null) ----
+const Sparse = decisionTable({ "It is big": { count: 10, note: "x" }, otherwise: { count: 1, note: null } });
+const D = component({
+  states: ["A"],
+  init: "A",
+  effects: { Ping: { count: "integer", note: "string" } },
+  decisions: { sparse: Sparse },
+  commands: { Go: { then: { goTo: "A", does: "x" } } },
+});
+// null を含む列も、値のある行の型で参照できる
+bind(D, {
+  commands: { Go: { effects: [{ Ping: { count: ref.decision("sparse", "count"), note: ref.decision("sparse", "note") } }] } },
+  conditions: { "It is big": () => true },
+});
+// N1: 型の合わないフィールドには渡せない (note は文字列)
+bind(D, {
+  // @ts-expect-error
+  commands: { Go: { effects: [{ Ping: { count: ref.decision("sparse", "note"), note: "y" } }] } },
+  conditions: { "It is big": () => true },
+});
+// N2: 行ごとに列をそろえる規則は変わらない (書かないのではなく、null と書く)
+// @ts-expect-error
+decisionTable({ "It is big": { count: 10, note: "x" }, otherwise: { count: 1 } });

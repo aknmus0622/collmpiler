@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { RuleConflictError, bind, calculate, component, decide, matchCondition } from "@aac/core";
@@ -16,7 +16,7 @@ const paid = { status: "PENDING", rank: "Gold", price: 1999, isMonthEnd: true, p
 
 test("意味: 決定表は、成り立つ条件の行を返す。どれも成り立たなければ otherwise", () => {
   assert.deepEqual(decide(Order, "campaign", paid), { discountPercent: 20, grantsCoupon: true, coupon: "Premium" });
-  assert.deepEqual(decide(Order, "campaign", { ...paid, rank: "Bronze" }), { discountPercent: 0, grantsCoupon: false, coupon: "Standard" });
+  assert.deepEqual(decide(Order, "campaign", { ...paid, rank: "Bronze" }), { discountPercent: 0, grantsCoupon: false, coupon: null });
 });
 
 test("意味: 計算は決定表の結果を使える (1999円の20%引きは、1599.2 を切り捨てて 1599)", () => {
@@ -65,7 +65,8 @@ test("specs/ の IR 出力は実行ごとにバイト一致する", () => {
     is: "price × (100 − discount percent) ÷ 100, rounded down to a whole yen",
     type: "integer",
   });
-  assert.deepEqual(ir.decisions.campaign.rows.otherwise, { discountPercent: 0, grantsCoupon: false, coupon: "Standard" });
+  // 値の無いセル (null) は、そのまま IR に出る
+  assert.deepEqual(ir.decisions.campaign.rows.otherwise, { discountPercent: 0, grantsCoupon: false, coupon: null });
   assert.ok(!first.includes("=>"));
 });
 
@@ -225,6 +226,28 @@ test("事前検査: 不変条件が破れるコマンド列を、最短で報告
   assert.ok(!result.ok);
   assert.match(result.message, /不変条件が破れました: "A note is remembered in B"/);
   assert.deepEqual(result.steps.map((step) => step.command), ["Place"]);
+});
+
+test("決定表: 値の無いセル (null) を書ける。その値が実際に使われる仕様は、事前検査が見つける", async () => {
+  const declaration = (when: string) => [
+    `effects: { Tag: { label: ["big", "small"] } }, queries: { flag: "boolean" }, decisions: { kind: Kind }, actions: {}, commands: { Place: { ${go} } }`.replace("actions: {}, ", ""),
+    `commands: { Place: { effects: [{ Tag: { label: ref.decision("kind", "label") }${when} }] } }, conditions: { "It is big": (state) => state.flag }`,
+  ] as const;
+  const withTable = (dir: string) => {
+    const file = join(dir, "x.component.ts");
+    writeFileSync(file, readFileSync(file, "utf8").replace("export const Thing", 'const Kind = decisionTable({ "It is big": { label: "big", tagged: true }, otherwise: { label: null, tagged: false } });\nexport const Thing'));
+    return dir;
+  };
+  // 値のある行でだけ使う（when で守る）なら、正しい仕様
+  const guarded = withTable(specDir(...declaration(`, when: ref.decision("kind", "tagged")`)));
+  assert.deepEqual(await codes(guarded), []);
+  assert.deepEqual(await selfCheck(await loadSpecs(guarded), { seed: 1, numRuns: 100 }), { ok: true, numRuns: 100 });
+  // 守らずに使うと、値の無い行に当たったときに誤りとして報告する
+  const unguarded = withTable(specDir(...declaration("")));
+  assert.deepEqual(await codes(unguarded), []);
+  const result = await selfCheck(await loadSpecs(unguarded), { seed: 1 });
+  assert.ok(!result.ok);
+  assert.match(result.message, /決定表 "kind" の行 "otherwise" には、列 "label" の値がありません \(null\) が、その値が使われました/);
 });
 
 test("事前検査: 計算の結果が宣言した型に合わなければ報告する", async () => {

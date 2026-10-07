@@ -11,6 +11,7 @@ import { dirname, join, posix } from "node:path";
 //     kept     … 骨組みではなく、実装済みのコードをそのまま残す（仕様が変わっても、形を直す必要が無かった場合）
 //   wiring … アダプター
 //     correct  … 正しい配線
+//     idle     … 何も書かない（渡された雛形のまま）
 //     mistyped … 存在しないメソッドを呼ぶ（型エラーになる）
 //     miswired … 型検査をすり抜けて、存在しないメソッドを呼ぶ（実行時に失敗する）
 //     fake     … 本番コードを使わず、アダプターの中に実装を持つ（骨組みのままでもテストが通ってしまう）
@@ -26,7 +27,7 @@ import { dirname, join, posix } from "node:path";
 export type Phase = "design" | "wiring" | "implementation";
 export type Step =
   | "correct" | "broken" | "crashing" | "leaky" | "kept"
-  | "mistyped" | "miswired" | "fake" | "touch" | "cheat"
+  | "mistyped" | "miswired" | "fake" | "touch" | "cheat" | "idle"
   | "buggy" | "norefund" | "boundary" | "rounding";
 
 const wrongDiscount = (step: Step) => step === "buggy";
@@ -146,7 +147,7 @@ const INTERCEPT = `    if (
 
 // 成果物を書く場所（作業場所からの相対パス）。配置によって変わる
 export type Place = { source: string; adapter: string };
-const DEFAULT_PLACE: Place = { source: "src/order-service.ts", adapter: "aac/adapter.ts" };
+const DEFAULT_PLACE: Place = { source: "src/order-service.ts", adapter: "aac/order.adapter.ts" };
 const relativeImport = (from: string, to: string) => {
   const rel = posix.relative(posix.dirname(from), to);
   return rel.startsWith(".") ? rel : `./${rel}`;
@@ -199,7 +200,7 @@ export function write(phase: Phase, step: Step, dir: string, place: Place = DEFA
               : skeleton;
     writeFileSync(join(dir, place.source), text);
   }
-  if (phase === "wiring") {
+  if (phase === "wiring" && step !== "idle") {
     writeFileSync(join(dir, place.adapter), adapter(step, place));
     if (step === "touch") writeFileSync(join(dir, place.source), source("correct"));
   }

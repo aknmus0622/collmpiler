@@ -2,6 +2,4 @@ oom
 node_modules
 .pnpm-store
 *.swp
-.tmp
-.tmp-specs
-.tmp-drafts
+.tmp*

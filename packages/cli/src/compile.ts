@@ -1,34 +1,50 @@
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { extract, stableStringify } from "./extract.ts";
-import { loadSpecs } from "./loader.ts";
+import { listComponents, loadSpecs } from "./loader.ts";
 import { selfCheck } from "./runtime.ts";
 import { typecheckSpecs } from "./typecheck.ts";
 
-// 暫定エントリ: node packages/cli/src/compile.ts [specs-dir] [--drafts]  → IR を stdout へ
+// 暫定エントリ: node packages/cli/src/compile.ts [specs-dir] [--component <name>] [--drafts]  → IR を stdout へ
+// コンポーネントが1つならその IR を、複数なら { 名前: IR } を出力する。--component で1つを選べる
+// （そのときは、ほかのコンポーネントの結び付けにある型エラーは報告しない）。
 // --drafts: 結び付けの下書き (*.draft.ts) を、確定版の代わりに読む（下書きの検査用）
-const { values, positionals } = parseArgs({ options: { drafts: { type: "boolean", default: false } }, allowPositionals: true });
+const { values, positionals } = parseArgs({
+  options: { drafts: { type: "boolean", default: false }, component: { type: "string" } },
+  allowPositionals: true,
+});
 const dir = resolve(process.cwd(), positionals[0] ?? "specs");
+const all = await listComponents(dir, { drafts: values.drafts });
+const names = values.component === undefined ? all : [values.component];
+
+const irs: Record<string, unknown> = {};
+const ignored = new Set<string>();
+const checks: (() => Promise<void>)[] = [];
+for (const name of names) {
+  const spec = await loadSpecs(dir, { drafts: values.drafts, component: name });
+  if (values.component !== undefined) for (const file of spec.sources?.otherBindings ?? []) ignored.add(file);
+  const { ir, diagnostics } = extract(spec);
+  const tag = names.length > 1 ? `${name}: ` : "";
+  for (const d of diagnostics) console.error(`${d.severity}[${d.code}] ${tag}${d.behavior}.${d.case}: ${d.message}`);
+  if (diagnostics.some((d) => d.severity === "error")) process.exitCode = 1;
+  irs[name] = ir;
+
+  // 仕様の事前検査: 仕様だけをランダムなコマンド列で実行し、条件の衝突や不変条件の破れを見つける
+  checks.push(async () => {
+    if (!spec.model) return;
+    const checked = await selfCheck(spec, { seed: 1 });
+    if (checked.ok) return;
+    console.error(`error[spec-check] ${tag}${checked.message}`);
+    console.error(`  再現するコマンド列: ${JSON.stringify(checked.steps)}`);
+    process.exitCode = 1;
+  });
+}
 
 // 型チェック: 結び付けの漏れや、条件・フィールド名の typo はここで見つかる
-const typeErrors = typecheckSpecs(dir, { drafts: values.drafts });
+const typeErrors = typecheckSpecs(dir, { drafts: values.drafts }).filter((e) => !ignored.has(e.file));
 for (const e of typeErrors) console.error(`error[type-error] ${e.file}: ${e.message}`);
 if (typeErrors.length > 0) process.exitCode = 1;
 
-const spec = await loadSpecs(dir, { drafts: values.drafts });
-const { ir, diagnostics } = await extract(spec);
-for (const d of diagnostics) {
-  console.error(`${d.severity}[${d.code}] ${d.behavior}.${d.case}: ${d.message}`);
-}
-process.stdout.write(stableStringify(ir));
-if (diagnostics.some((d) => d.severity === "error")) process.exitCode = 1;
-
-// 仕様の事前検査: 仕様だけをランダムなコマンド列で実行し、条件の衝突や不変条件の破れを見つける
-if (spec.model && process.exitCode !== 1) {
-  const checked = await selfCheck(spec, { seed: 1 });
-  if (!checked.ok) {
-    console.error(`error[spec-check] ${checked.message}`);
-    console.error(`  再現するコマンド列: ${JSON.stringify(checked.steps)}`);
-    process.exitCode = 1;
-  }
-}
+// コンポーネントが無いときは、空の IR（従来どおり）
+process.stdout.write(stableStringify(names.length === 1 ? irs[names[0]] : all.length === 0 ? extract({ behaviors: {}, decisions: {} }).ir : irs));
+if (process.exitCode !== 1) for (const check of checks) await check();

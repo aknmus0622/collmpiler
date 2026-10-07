@@ -7,7 +7,7 @@ import type { Asset } from "./assets.ts";
 import type { SpecInput } from "./extract.ts";
 import { scrubEnv } from "./gates.ts";
 import { TEST_DIR, FILES } from "./generate.ts";
-import { DRAFT_SUFFIX, loadSpecs } from "./loader.ts";
+import { DRAFT_SUFFIX, listComponents, loadSpecs } from "./loader.ts";
 import { ASSETS_DIR, renderAssets } from "./request.ts";
 import type { ImplementationStrategy } from "./strategy.ts";
 
@@ -24,6 +24,8 @@ import type { ImplementationStrategy } from "./strategy.ts";
 
 export type DraftOptions = {
   specs: string;
+  // 下書きを書くコンポーネントの名前。省略時は、結び付けが無いか合わなくなっている最初のもの（名前順）
+  component?: string;
   strategy: ImplementationStrategy;
   // 依頼に添付する資料（用語集など）。コンポーネントの assets に宣言したものに追加される
   assets?: Asset[];
@@ -126,7 +128,8 @@ A value is a constant or a reference:
 - \`ref.data("field")\`: remembered data (${names(model.data)})
 - \`ref.query("field")\`: a query answer (${names(model.queries)})
 - \`ref.decision("table", "column")\`: the value of a decision table's column in the row that applies
-  (tables: ${names(spec.decisions)})
+  (tables: ${names(spec.decisions)}). A cell written as \`null\` has no value in that row, so a reference to it
+  must only be reached when another row applies (for example behind a \`when\`).
 - \`ref.calculation("name")\`: the result of a calculation (${names(model.calculations ?? {})})
 
 An effect's \`when\` is either a boolean reference (\`ref.decision(...)\`, \`ref.query(...)\`, \`ref.data(...)\`, or
@@ -168,17 +171,27 @@ export async function draftBinding(options: DraftOptions): Promise<DraftResult> 
   const specsDir = resolve(process.cwd(), options.specs);
   const log = options.log ?? (() => {});
 
+  // コンポーネントを名前順に見て、下書きが要る最初のものを選ぶ。
   // 結び付けは重ねずに読む（コンポーネントが変わって、結び付けが合わなくなっていても読めるように）
-  const spec = await loadSpecs(specsDir, { bindings: false });
+  const names = options.component === undefined ? await listComponents(specsDir) : [options.component];
+  if (names.length === 0) throw new Error("仕様にコンポーネントがありません");
+  let chosen: { spec: SpecInput; name: string; problems: string | undefined } | undefined;
+  for (const name of names) {
+    const candidate = await loadSpecs(specsDir, { bindings: false, component: name });
+    // 確定した結び付けがあり、いまの仕様に合っていれば、何もしない。
+    // 合わなくなっていれば、その結び付けを出発点にして直させる
+    const stale = candidate.sources?.binding === undefined ? undefined : check(specsDir, false, name);
+    if (candidate.sources?.binding !== undefined && stale === undefined) continue;
+    chosen = { spec: candidate, name, problems: stale };
+    break;
+  }
+  if (!chosen) return { status: "nothing-to-draft" };
+  const { spec, name: componentName } = chosen;
   const component = spec.sources?.component;
   if (!spec.model || !component) throw new Error("仕様にコンポーネントがありません");
-
-  // 確定した結び付けがあり、いまの仕様に合っていれば、何もしない。
-  // 合わなくなっていれば、その結び付けを出発点にして直させる
   const existing = spec.sources?.binding;
   const update = existing !== undefined;
-  let problems = update ? check(specsDir, false) : undefined;
-  if (update && problems === undefined) return { status: "nothing-to-draft" };
+  let problems = chosen.problems;
 
   // 下書きの名前: order.binding.ts → order.binding.draft.ts（無ければ order.component.ts から決める）。
   // 下書きを読むときは、同じ名前の確定版は読まれない
@@ -230,7 +243,7 @@ export async function draftBinding(options: DraftOptions): Promise<DraftResult> 
         const content = readFileSync(join(dir, SPEC_DIR, draftFile), "utf8");
         cpSync(join(dir, SPEC_DIR, draftFile), previous);
         writeFileSync(previous, content.startsWith(HEADER) ? content : HEADER + content);
-        problems = check(specsDir, true);
+        problems = check(specsDir, true, componentName);
       }
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -243,8 +256,9 @@ export async function draftBinding(options: DraftOptions): Promise<DraftResult> 
 }
 
 // 仕様を読み込み、型チェックと仕様の検査にかける。別プロセスで行う。drafts が true なら、下書きを使って検査する
-function check(specsDir: string, drafts: boolean): string | undefined {
-  const run = spawnSync(process.execPath, [join(import.meta.dirname, "compile.ts"), specsDir, ...(drafts ? ["--drafts"] : [])], {
+// 見るのは指定したコンポーネントだけ（ほかのコンポーネントの結び付けの誤りは、そのコンポーネントの番で直す）
+function check(specsDir: string, drafts: boolean, component: string): string | undefined {
+  const run = spawnSync(process.execPath, [join(import.meta.dirname, "compile.ts"), specsDir, "--component", component, ...(drafts ? ["--drafts"] : [])], {
     encoding: "utf8",
     timeout: 120_000,
   });
