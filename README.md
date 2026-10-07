@@ -7,8 +7,8 @@ Phase 1 spike. TypeScript targets only.
 **What works today**
 
 - **Write a spec as TypeScript data.** Decision tables, plus a component: its vocabulary (states, remembered
-  data, queries and commands to dependencies), the skeleton of its state machine, and what each action does
-  in prose. No functions. A separate binding says what the prose means: the structure of each action as
+  data, queries to and effects on dependencies), the skeleton of its state machine, and what each command does
+  in prose. No functions. A separate binding says what the prose means: the structure of each command as
   declarations, and the meaning of each condition, calculation, and invariant as functions.
 - **Have an LLM draft the binding.** The draft is kept out of use until a person has reviewed it, and it
   flags sentences that can be read in more than one way.
@@ -17,7 +17,7 @@ Phase 1 spike. TypeScript targets only.
 - **Have an LLM agent write the production code from the spec**, test-first, in three isolated sessions:
   design a skeleton, wire it to the test harness, then implement it. The framework generates test-side code
   only and places nothing in production code.
-- **Verify the result.** Property-based tests run sequences of actions and shrink failures to the shortest
+- **Verify the result.** Property-based tests run sequences of commands and shrink failures to the shortest
   sequence; a mutation gate confirms that the tested behaviour really comes from production code. Failures go
   back to the agent until it passes.
 
@@ -79,14 +79,14 @@ const Yen = { type: "integer", min: 0, max: 1_000_000, around: [10_000] } as con
 
 export const Order = component({
   states: ["DRAFT", "PENDING", "PAID", "SHIPPED", "CANCELLED"],
-  startsIn: "DRAFT",
-  remembers: { rank: Rank, price: Yen },                  // what the order remembers
-  asks: {                                                 // what it asks its dependencies
+  init: "DRAFT",
+  data: { rank: Rank, price: Yen },                       // what the order remembers
+  queries: {                                              // what it asks its dependencies
     isMonthEnd: "boolean",
     paymentModuleActive: "boolean",
     paymentResult: ["succeeded", "failed"],
   },
-  tells: {                                                // what it does to its dependencies
+  effects: {                                              // what it does to its dependencies
     SendReceipt: { discountPercent: "integer", amount: "integer" },
     IssueCoupon: { type: ["Premium", "Standard"] },
     // ...
@@ -95,19 +95,19 @@ export const Order = component({
   calculations: {
     amountCharged: { is: "price × (100 − discount percent) ÷ 100, rounded down to a whole yen", type: "integer" },
   },
-  alwaysTrue: ["Every order past the draft state has a member rank and a price"],
+  invariants: ["Every order past the draft state has a member rank and a price"],
 
-  actions: {
+  commands: {                                             // what drives it from outside
     PlaceOrder: {
-      takes: { customerRank: Rank, listPrice: Yen },
-      allowedIn: ["DRAFT"],
+      input: { customerRank: Rank, listPrice: Yen },
+      from: ["DRAFT"],
       then: {
         goTo: "PENDING",
         does: "The order remembers the customer's rank and the list price. An order confirmation is sent.",
       },
     },
     Checkout: {
-      allowedIn: ["PENDING"],
+      from: ["PENDING"],
       onlyIf: ["The external payment module is active"],
       when: {
         "The payment succeeded": {
@@ -120,7 +120,7 @@ export const Order = component({
       },
     },
     Cancel: {
-      allowedIn: ["PENDING", "PAID"],
+      from: ["PENDING", "PAID"],
       then: { goTo: "CANCELLED", does: "If the order had been paid, a refund is issued." },
     },
     // ...
@@ -128,28 +128,28 @@ export const Order = component({
 });
 ```
 
-**The binding** (`specs/order.binding.ts`). It has two parts. `actions` is the *structure*: what each `does`
-sentence means, written as declarations and references. It goes into the IR. The rest is the *meaning*: what
+**The binding** (`specs/order.binding.ts`). It has two parts. `commands` is the *structure*: what each `does`
+sentence means, written as declarations and references (`ref.*`). It goes into the IR. The rest is the *meaning*: what
 each name refers to, written as functions. That is the oracle for the tests and is never shown to the agent.
 A missing entry, an unknown name, or a reference of the wrong type is a compile error.
 
 ```ts
 export const Binding = bind(Order, {
-  actions: {
+  commands: {
     PlaceOrder: {
-      remember: { rank: given("customerRank"), price: given("listPrice") },
-      tell: [{ SendOrderConfirmation: {} }],
+      set: { rank: ref.input("customerRank"), price: ref.input("listPrice") },
+      effects: [{ SendOrderConfirmation: {} }],
     },
     Checkout: {
       "The payment succeeded": {
-        tell: [
-          { SendReceipt: { discountPercent: decided("campaign", "discountPercent"), amount: calculated("amountCharged") } },
-          { IssueCoupon: { type: decided("campaign", "coupon") }, when: decided("campaign", "grantsCoupon") },
+        effects: [
+          { SendReceipt: { discountPercent: ref.decision("campaign", "discountPercent"), amount: ref.calculation("amountCharged") } },
+          { IssueCoupon: { type: ref.decision("campaign", "coupon") }, when: ref.decision("campaign", "grantsCoupon") },
         ],
       },
-      otherwise: { tell: [{ NotifyPaymentFailure: {} }] },
+      otherwise: { effects: [{ NotifyPaymentFailure: {} }] },
     },
-    Cancel: { tell: [{ Refund: {}, when: was("PAID") }] },
+    Cancel: { effects: [{ Refund: {}, when: ref.was("PAID") }] },
     // ...
   },
 
@@ -163,7 +163,7 @@ export const Binding = bind(Order, {
     amountCharged: (state) =>
       Math.floor(((state.price ?? 0) * (100 - decide(Order, "campaign", state).discountPercent)) / 100),
   },
-  alwaysTrue: {
+  invariants: {
     "Every order past the draft state has a member rank and a price": (state) =>
       state.status === "DRAFT" || (state.rank !== undefined && state.price !== undefined),
   },
@@ -198,19 +198,19 @@ pnpm -s run ir
 ```
 
 This type-checks the spec, checks it on its own, and prints the IR: the spec as language-independent JSON. The
-prose and the structure are both there; the bound functions are left out, so the IR says *what* must hold but
+prose and the structure are both there, under the same keys as in the spec; the bound functions are left out, so the IR says *what* must hold but
 not *how* to decide it.
 
 ```json
 "The payment succeeded": {
-  "nextState": "PAID",
-  "description": "A receipt is sent with the campaign's discount percent and the amount charged. Then a coupon is issued if the campaign grants one.",
-  "emittedCommands": [
-    { "action": "SendReceipt",
+  "goTo": "PAID",
+  "does": "A receipt is sent with the campaign's discount percent and the amount charged. Then a coupon is issued if the campaign grants one.",
+  "effects": [
+    { "name": "SendReceipt",
       "payload": {
         "discountPercent": { "$ref": "decision:campaign.discountPercent" },
-        "amount": { "$ref": "formula:amountCharged" } } },
-    { "action": "IssueCoupon",
+        "amount": { "$ref": "calculation:amountCharged" } } },
+    { "name": "IssueCoupon",
       "payload": { "type": { "$ref": "decision:campaign.coupon" } },
       "when": { "$ref": "decision:campaign.grantsCoupon" } }
   ]
@@ -257,15 +257,16 @@ A second argument chooses the steps an asset goes to, for example `text("...", {
 ```text
 [1] design #1: ok
 [1] wiring #1: ok (tests fail as expected: not implemented)
-[1] implementation #1: rejected (mutation-survived) (mutation: builtin, 13/15 killed)
-[1] implementation #2: pass (mutation: builtin, 13/13 killed)
+[1] implementation #1: rejected (mutation-survived) (mutation: builtin, 12/16 killed)
+[1] implementation #2: pass (mutation: builtin, 12/14 killed)
 ```
 
 Here the design and the wiring passed on their first attempt, and the implementation on its second. The first
 implementation copied the `coupon: "Standard"` cells of the rows that grant no coupon. Those values are never
 used, so changing them left the tests passing, and the mutation gate sent the work back; the second attempt
-dropped them. A run fails when changing a value from a decision table leaves the tests passing; other
-surviving mutations are reported but do not fail the run.
+made them matter by deriving "grants a coupon" from the coupon type. A run fails when changing a value from a
+decision table leaves the tests passing; other surviving mutations are reported but do not fail the run (here,
+two constants in the agent's own month-end calendar logic, which the spec's month-end flag cannot exercise).
 
 ### 4. What you get
 
@@ -274,8 +275,7 @@ examples/checkout-ts/
 ├── src/                      written by the agent; no framework imports, no framework types
 │   ├── types.ts
 │   ├── ports.ts              the dependencies, in the production code's own terms
-│   ├── policies.ts           the business decisions, as pure functions
-│   ├── errors.ts
+│   ├── rules.ts              the business decisions, as pure functions
 │   ├── order.ts
 │   └── index.ts
 └── aac/                      the test side
@@ -285,53 +285,50 @@ examples/checkout-ts/
     └── adapter.ts            skeleton generated, filled in by the agent
 ```
 
-**Production code** (`src/policies.ts`). The agent turned the natural-language conditions into code: the
+**Production code** (`src/rules.ts`). The agent turned the natural-language conditions into code: the
 decision table, the calculation with its rounding, and the 10,000-yen threshold.
 
 ```ts
-export function campaignTermsFor(rank: CustomerRank, monthEnd: boolean): CampaignTerms {
+export function campaignFor(rank: CustomerRank, monthEnd: boolean): CampaignTerms {
   if (rank === "Gold" && monthEnd) {
-    return { discountPercent: 20, coupon: "Premium", grantsCoupon: true };
+    return campaignTerms(20, "Premium");
   }
   if (rank === "Silver") {
-    return { discountPercent: 5, grantsCoupon: false };
+    return campaignTerms(5, "Standard");
   }
-  return { discountPercent: 0, grantsCoupon: false };
+  return campaignTerms(0, "Standard");
 }
 
-export function amountCharged(price: number, discountPercent: number): number {
-  return Math.floor((price * (100 - discountPercent)) / 100);
+export function amountCharged(priceYen: number, discountPercent: number): number {
+  return Math.floor((priceYen * (100 - discountPercent)) / 100);
 }
 
-export function shipsWithPriority(rank: CustomerRank, price: number): boolean {
-  if (rank === "Gold" || price >= PRIORITY_SHIPPING_MIN_PRICE) {
-    return true;
-  }
-  return false;
+export function isPriorityShipping(rank: CustomerRank, priceYen: number): boolean {
+  return rank === "Gold" || priceYen >= PRIORITY_SHIPPING_MIN_PRICE_YEN;
 }
 ```
 
 **The adapter** (`aac/adapter.ts`). Production code defines its dependencies in its own terms; the adapter
 connects them to the stand-ins the test harness provides, translating where the two differ. Here the
-production calendar returns a date, while the spec speaks of a month-end flag.
+production clock returns a date, while the spec speaks of a month-end flag.
 
 ```ts
-const MONTH_END_DAY: CalendarDate = { year: 2026, month: 1, day: 31 };
-const ORDINARY_DAY: CalendarDate = { year: 2026, month: 1, day: 15 };
-
-function dependenciesFor(ports: Ports): OrderDependencies {
-  return {
-    calendar: {
-      today: () => (ports.queries.isMonthEnd() ? { ...MONTH_END_DAY } : { ...ORDINARY_DAY }),
+async setupIsolation(ports) {
+  order = new Order({
+    clock: {
+      today: () =>
+        ports.queries.isMonthEnd()
+          ? { year: 2026, month: 1, day: 31 }
+          : { year: 2026, month: 1, day: 15 },
     },
-    payments: {
+    paymentGateway: {
       isActive: () => ports.queries.paymentModuleActive(),
-      charge: (_amountYen) => ports.queries.paymentResult(),
-      refund: () => ports.commands.Refund({}),
+      charge: () => ports.queries.paymentResult(),
+      refund: () => ports.effects.Refund({}),
     },
     // ...
-  };
-}
+  });
+},
 ```
 
 ### 5. Verify again at any time
@@ -342,11 +339,11 @@ pnpm typecheck                               # type-check the specs and the fram
 pnpm test                                    # the framework's own tests
 ```
 
-When an implementation is wrong, the test reports the shortest sequence of actions that shows it. For an
+When an implementation is wrong, the test reports the shortest sequence of commands that shows it. For an
 implementation that forgets the refund when a paid order is cancelled:
 
 ```text
 PlaceOrder  →  Checkout (The payment succeeded)  →  Cancel
-expected: state CANCELLED, commands [Refund]
-actual:   state CANCELLED, commands []
+expected: state CANCELLED, effects [Refund]
+actual:   state CANCELLED, effects []
 ```

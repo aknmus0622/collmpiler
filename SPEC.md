@@ -28,8 +28,8 @@
 
 | 領域 | レイヤー | 責務と特性 | 書き手 |
 | --- | --- | --- | --- |
-| **IN SCOPE**(プラットフォーム) | **Layer 1: Spec** | 業務の真実（What）を宣言する。決定表（条件から値を選ぶ）と、コンポーネント（語彙、状態機械の骨組み、アクションの説明の文）。**関数は一切書かない。**`as const` と `satisfies` で型安全にする。関数は `cases` のマッピングだけで、構文を制限する（§3.1）。 | 人 |
-|  | **Layer 2: Binding** | Layer 1 の文と名前に内容を結び付ける。アクションの構造（宣言。IR に出る）と、名前の意味（関数。PBT の正解として使い、IR には含めない）。 | 人（LLM が下書きできる） |
+| **IN SCOPE**(プラットフォーム) | **Layer 1: Spec** | 業務の真実（What）を宣言する。決定表（条件から値を選ぶ）と、コンポーネント（語彙、状態機械の骨組み、コマンドの説明の文）。**関数は一切書かない。**`as const` と `satisfies` で型安全にする。関数は `cases` のマッピングだけで、構文を制限する（§3.1）。 | 人 |
+|  | **Layer 2: Binding** | Layer 1 の文と名前に内容を結び付ける。コマンドの構造（宣言。IR に出る）と、名前の意味（関数。PBT の正解として使い、IR には含めない）。 | 人（LLM が下書きできる） |
 |  | **Universal IR** | Layer 1 と、Layer 2 の構造から作る、**完全な言語非依存のJSON**。Layer 2 の関数は含まない。 | 生成 |
 |  | **Layer 3: Verification** | Layer 1, 2 から構築されるPBTエンジン。Target System をアダプター経由で操作して検証する。テスト側にのみ生成される。 | 生成 |
 | **境界線** | **Adapter Contract** | テストごとの状態リセット（`setupIsolation` / `teardownIsolation`）を強制し、決定論的なリプレイを可能にするインターフェース。本番システムの依存は、フレームワークが用意する代役（Ports）に置き換える。型は生成され、中身は実装エージェントが書く。 | 生成＋LLM |
@@ -40,7 +40,7 @@
 PBTエンジンがエラーを発見した場合、巨大なログダンプを避け、以下のステップでデバッグ体験を提供します。
 
 * **自動 Shrinking:** エラー発見後、エンジンがアダプターの「状態リセット」を駆使して再試行を繰り返し、エラーが発生する最短手順（例: 15手 → 3手）を特定する。
-* **State Diff の可視化:** Trace Visualizer にて、最小化された手順ごとに「直前の状態から何が変化したか（Delta）」と「発行されたCommand」のみをハイライトする。
+* **State Diff の可視化:** Trace Visualizer にて、最小化された手順ごとに「直前の状態から何が変化したか（Delta）」と「起きた副作用 (Effect)」のみをハイライトする。
 * **決定論的リプレイ:** エンジニアが `npx pbt-runner --seed X --path Y` をローカルで実行。「DBの初期化契約」により、CI上のクラッシュをローカル環境で100%再現する。
 
 ### 2.3. LLM による実装ループ
@@ -96,14 +96,14 @@ PBTエンジンがエラーを発見した場合、巨大なログダンプを�
 
 #### 仕様の型チェックと事前検査（LLM を呼ぶ前）
 
-まず仕様を型チェックします。結び付けの漏れや余り、フィールド名や条件の typo、存在しない状態や指示、型の合わない参照は、ここで見つかります（§3.1、§3.2）。続いて IR を作るときに、同じ種類の誤りを実行時にも検査し、場所と理由を添えて報告します。
+まず仕様を型チェックします。結び付けの漏れや余り、フィールド名や条件の typo、存在しない状態や副作用、型の合わない参照は、ここで見つかります（§3.1、§3.2）。続いて IR を作るときに、同じ種類の誤りを実行時にも検査し、場所と理由を添えて報告します。
 
-IR の抽出に続いて、仕様だけをランダムなアクション列で実行します（実装は使いません）。次のものを見つけたら、**仕様の誤りとして人に報告して止まり、LLM には渡しません。**
+IR の抽出に続いて、仕様だけをランダムなコマンド列で実行します（実装は使いません）。次のものを見つけたら、**仕様の誤りとして人に報告して止まり、LLM には渡しません。**
 
-* 2つの条件が同時に成り立つ（決定表でも、アクションの `when` でも）
+* 2つの条件が同時に成り立つ（決定表でも、コマンドの `when` でも）
 * 結び付けの無い条件・計算・不変条件がある
-* 不変条件が破れる（最短のアクション列つきで報告）
-* 覚えるデータや指示の値が、宣言した型・範囲に合わない（計算の結果が整数でない、など）
+* 不変条件が破れる（最短のコマンド列つきで報告）
+* 覚えるデータや副作用の値が、宣言した型・範囲に合わない（計算の結果が整数でない、など）
 
 PBT の実行中に同じ種類の問題が見つかった場合も、実装の誤りとは区別し、エージェントへは差し戻しません。
 
@@ -199,7 +199,7 @@ PBT の実行中に同じ種類の問題が見つかった場合も、実装の�
 
 | 段階 | 段階ごとの検査 |
 | --- | --- |
-| 設計 | 仕様の文（条件・アクションの説明・計算の式・不変条件）を骨組みに書き写していない。全ファイルを1回 import して読み込める |
+| 設計 | 仕様の文（条件・コマンドの説明・計算の式・不変条件）を骨組みに書き写していない。全ファイルを1回 import して読み込める |
 | 配線 | PBT が失敗する（赤）。合格したら不合格。アダプター自身の誤りで失敗した場合（エラーの文言が「未実装」でない）も不合格 |
 | 実装 | PBT に合格する（緑）。ミューテーションのゲートに合格する |
 
@@ -290,8 +290,8 @@ PBT は別プロセスで実行します。LLM が書いたコードが実行さ
 | 書くもの | 内容 | 関数 | Layer |
 | --- | --- | --- | --- |
 | 決定表 | 条件から値を選ぶ表 | なし | 1 |
-| コンポーネント | 語彙、状態機械の骨組み、アクションの説明（文） | なし | 1 |
-| 結び付け | アクションの構造（宣言）と、名前の意味（関数）（§3.2） | 意味の部分だけ | 2 |
+| コンポーネント | 語彙、状態機械の骨組み、コマンドの説明（文） | なし | 1 |
+| 結び付け | コマンドの構造（宣言）と、名前の意味（関数）（§3.2） | 意味の部分だけ | 2 |
 
 シナリオ（ユースケース）、ドメインの部品、UI の部品は、どれも同じ形のコンポーネントとして書きます。値として宣言するので、IR に出力でき、PBT の入力生成にも、LLM への情報提供にもそのまま使えます。TypeScript の型は、宣言した値から導出します。
 
@@ -317,7 +317,7 @@ export const Shipping = decisionTable({
 ```
 
 * どの条件にも当たらないときの `otherwise` が必須で、全行が同じ列を持ちます（どちらも型エラーになります）。
-* **セルに書けるのは値だけです。** 表が決めるのは率や区分といったパラメータで、指示や計算は書きません。「指示を出すかどうか」は真偽値の列にし、結び付けの構造の側で条件として使います（§3.2）。
+* **セルに書けるのは値だけです。** 表が決めるのは率や区分といったパラメータで、副作用や計算は書きません。「副作用を起こすかどうか」は真偽値の列にし、結び付けの構造の側で条件として使います（§3.2）。
 * 同時に成り立つ条件は1つまでです（Hit Policy: Unique）。
 
 #### コンポーネント
@@ -326,29 +326,29 @@ export const Shipping = decisionTable({
 
 | 宣言 | 意味 | 例 |
 | --- | --- | --- |
-| `states` / `startsIn` | 状態名と初期状態 | 下書き、決済待ち、決済済み |
-| `remembers` | 部品が覚えているデータ。初めは未設定 | 注文時の会員ランクと価格 |
-| `asks` | 依存への問い合わせ（部品が外に尋ねて答えをもらう値） | 時計、設定、決済サービスの応答 |
-| `tells` | 依存への指示（部品が外に対して行う副作用） | 領収書の送信、返金 |
+| `states` / `init` | 状態名と初期状態 | 下書き、決済待ち、決済済み |
+| `data` | 部品が覚えているデータ。初めは未設定 | 注文時の会員ランクと価格 |
+| `queries` | 依存への問い合わせ（部品が外に尋ねて答えをもらう値） | 時計、設定、決済サービスの応答 |
+| `effects` | 依存への副作用（部品が外に対して行うこと） | 領収書の送信、返金 |
 | `decisions` | 使う決定表 | キャンペーン、出荷 |
 | `calculations` | 計算。短い名前と、式を述べる文（`is`）と、結果の型 | 請求金額 |
-| `alwaysTrue` | 不変条件（文） | 下書き以外の注文には会員ランクと価格がある |
-| `actions` | 外から部品を動かすアクション（下記） | 注文する、決済する |
+| `invariants` | 不変条件（文） | 下書き以外の注文には会員ランクと価格がある |
+| `commands` | 外から部品を動かすコマンド（下記） | 注文する、決済する |
 | `assets` | 実装を LLM に依頼するときに添付する資料（§2.3）。仕様の意味には影響しない | アーキテクチャの決まり、用語集 |
 
-`states`・`startsIn`・`actions` 以外は省略できます。
+`states`・`init`・`commands` 以外は省略できます。
 
-アクションには、次のものを書きます。
+コマンドには、次のものを書きます。
 
 | キー | 意味 |
 | --- | --- |
-| `takes` | 入力 |
-| `allowedIn` | 実行できる状態。省略すると全状態 |
-| `onlyIf` | 事前条件（条件の文）。`allowedIn` と `onlyIf` を満たさない場合の挙動は仕様の対象外で、PBT も検証しない |
+| `input` | 入力 |
+| `from` | 実行できる状態。省略すると全状態 |
+| `onlyIf` | 事前条件（条件の文）。`from` と `onlyIf` を満たさない場合の挙動は仕様の対象外で、PBT も検証しない |
 | `then` | 何が起きるか。遷移先（`goTo`）と、説明の文（`does`） |
 | `when` | 条件で分かれるとき、`then` の代わりに書く。キーは条件の文で、`otherwise` が必須 |
 
-**状態機械の骨組み（どの状態から、どの状態へ）は構造として書き、何が起きるかの中身は文で書きます。** 文が意味する構造（どの指示を、どの順で、どの値で出すか）は、結び付けに書きます。
+**状態機械の骨組み（どの状態から、どの状態へ）は構造として書き、何が起きるかの中身は文で書きます。** 文が意味する構造（どの副作用を、どの順で、どの値で起こすか）は、結び付けに書きます。
 
 ```typescript
 // --- specs/order.component.ts ---
@@ -362,14 +362,14 @@ const Yen = { type: "integer", min: 0, max: 1_000_000, around: [10_000] } as con
 export const Order = component({
   // 語彙
   states: ["DRAFT", "PENDING", "PAID", "SHIPPED", "CANCELLED"],
-  startsIn: "DRAFT",
-  remembers: { rank: Rank, price: Yen },
-  asks: {
+  init: "DRAFT",
+  data: { rank: Rank, price: Yen },
+  queries: {
     isMonthEnd: "boolean",
     paymentModuleActive: "boolean",
     paymentResult: ["succeeded", "failed"],
   },
-  tells: {
+  effects: {
     SendOrderConfirmation: {},
     SendReceipt: { discountPercent: "integer", amount: "integer" },
     IssueCoupon: { type: ["Premium", "Standard"] },
@@ -386,20 +386,20 @@ export const Order = component({
       type: "integer",
     },
   },
-  alwaysTrue: ["Every order past the draft state has a member rank and a price"],
+  invariants: ["Every order past the draft state has a member rank and a price"],
 
-  // アクション
-  actions: {
+  // コマンド
+  commands: {
     PlaceOrder: {
-      takes: { customerRank: Rank, listPrice: Yen },
-      allowedIn: ["DRAFT"],
+      input: { customerRank: Rank, listPrice: Yen },
+      from: ["DRAFT"],
       then: {
         goTo: "PENDING",
         does: "The order remembers the customer's rank and the list price. An order confirmation is sent.",
       },
     },
     Checkout: {
-      allowedIn: ["PENDING"],
+      from: ["PENDING"],
       onlyIf: ["The external payment module is active"],
       when: {
         "The payment succeeded": {
@@ -412,11 +412,11 @@ export const Order = component({
       },
     },
     Ship: {
-      allowedIn: ["PAID"],
+      from: ["PAID"],
       then: { goTo: "SHIPPED", does: "A shipping notice is sent, with priority as the shipping decision says." },
     },
     Cancel: {
-      allowedIn: ["PENDING", "PAID"],
+      from: ["PENDING", "PAID"],
       then: { goTo: "CANCELLED", does: "If the order had been paid, a refund is issued." },
     },
   },
@@ -424,16 +424,16 @@ export const Order = component({
 ```
 
 * **型の付け方**: `component` に直接書いた値は、`as const` を付けなくても文字列リテラルや列挙として推論されます。ただし `Rank` のように変数に取り出した配列には `as const` が必要です。忘れると `string[]` に広がって列挙の検査が効かなくなるため、広がった配列は型エラーにしています。
-* **構造の検査**: `startsIn`・`allowedIn`・`goTo` に `states` にない名前を書く、`then` も `when` もない、`when` に `otherwise` がない、キーを書き間違える、はどれも型エラーになります。コンポーネントに指示の構造（`tell` など）を書くこともできません。
-* **名前の重複**: 条件と計算からは、状態名（`status`）、覚えているデータ、問い合わせの答え、アクションの入力が同じ階層で見えます。そのため `remembers`・`asks`・入力のフィールド名は重複できません（入力どうしは、アクションが違えば同名で構いません）。
+* **構造の検査**: `init`・`from`・`goTo` に `states` にない名前を書く、`then` も `when` もない、`when` に `otherwise` がない、キーを書き間違える、はどれも型エラーになります。コンポーネントに副作用の構造（`effects` など）を書くこともできません。
+* **名前の重複**: 条件と計算からは、状態名（`status`）、覚えているデータ、問い合わせの答え、コマンドの入力が同じ階層で見えます。そのため `data`・`queries`・入力のフィールド名は重複できません（入力どうしは、コマンドが違えば同名で構いません）。
 * **数値**: 金額は整数で扱い、丸め方を計算の文に明記します。小数の計算は式の順序だけで結果がずれ、正解と実装が正当な理由なく食い違うためです。
 * **しきい値**: 条件に数値の境目があるときは、`around` に宣言します。ちょうどその値と前後の値を重点的に生成しないと、「以上」と「より大きい」の取り違えを見逃します。
 
 今後の課題:
 
 * 多重度（`One<T>` / `Lone<T>` / `Some<T>` / `Many<T>`）は型としてのみ提供しています。値として宣言できる形への拡張が必要です。
-* 戻り値を持つ操作（値オブジェクトの演算など）は書けません。アクションの結果は「次の状態」と「指示」だけです。
-* 決定表のセルに「値が無い」ことは書けません。指示を出さない行にも、列の値を埋める必要があります（上の例の `coupon: "Standard"`）。この値は使われないので、実装が忠実に写すと「変えても結果が変わらない値」になり、ミューテーションのゲートが差し戻します（1回の差し戻しで直りますが、仕様の側の埋め草が原因です）。
+* 戻り値を持つ操作（値オブジェクトの演算など）は書けません。コマンドの結果は「次の状態」と「副作用」だけです。
+* 決定表のセルに「値が無い」ことは書けません。副作用を起こさない行にも、列の値を埋める必要があります（上の例の `coupon: "Standard"`）。この値は使われないので、実装が忠実に写すと「変えても結果が変わらない値」になり、ミューテーションのゲートが差し戻します（1回の差し戻しで直りますが、仕様の側の埋め草が原因です）。
 * 読み込めるコンポーネントは1つだけです。複数のコンポーネントと、その組み合わせ（ある部品の依存を、代役ではなく別の本物の部品につなぐ）は未実装です。
 
 #### 自然言語で書くもの
@@ -443,9 +443,9 @@ Layer 1 では、次のものを自然言語で書きます。意味や構造は
 | 種類 | 書く場所 | 結び付けに書くもの |
 | --- | --- | --- |
 | 条件 | 決定表の行、`onlyIf`、`when` のキー | 真偽を返す関数 |
-| アクションの説明 | `does` | 構造（指示と覚えるデータの宣言） |
+| コマンドの説明 | `does` | 構造（副作用と覚えるデータの宣言） |
 | 計算 | `calculations` の `is` | 値を返す関数 |
-| 不変条件 | `alwaysTrue` | 真偽を返す関数 |
+| 不変条件 | `invariants` | 真偽を返す関数 |
 
 同じ条件の文は、どこに書かれても同じ意味になります。
 
@@ -453,35 +453,35 @@ Layer 1 では、次のものを自然言語で書きます。意味や構造は
 
 コンポーネントの文と名前に、内容を結び付けます。`bind` の1か所に、性質の違う2種類を書きます。
 
-| | 構造（`actions`） | 意味（`conditions` / `calculations` / `alwaysTrue`） |
+| | 構造（`commands`） | 意味（`conditions` / `calculations` / `invariants`） |
 | --- | --- | --- |
-| 何を書くか | アクションの文（`does`）が意味すること。どの指示を、どの順で、どの値で出すか。何を覚えるか | 名前が指すもの。条件の真偽、計算の値、不変条件の真偽 |
+| 何を書くか | コマンドの文（`does`）が意味すること。どの副作用を、どの順で、どの値で起こすか。何を覚えるか | 名前が指すもの。条件の真偽、計算の値、不変条件の真偽 |
 | 書き方 | 宣言と参照（関数は書かない） | 関数 |
 | IR に出るか | **出る。** 実装する LLM に渡る | **出ない。** PBT が期待値を計算するための正解 |
 
 ```typescript
 // --- specs/order.binding.ts ---
-import { bind, calculated, decide, decided, given, was } from "@aac/core";
+import { bind, decide, ref } from "@aac/core";
 import { Order } from "./order.component.ts";
 
 export const Binding = bind(Order, {
   // 構造: 文が何を意味するか（宣言。IR に出る）
-  actions: {
+  commands: {
     PlaceOrder: {
-      remember: { rank: given("customerRank"), price: given("listPrice") },
-      tell: [{ SendOrderConfirmation: {} }],
+      set: { rank: ref.input("customerRank"), price: ref.input("listPrice") },
+      effects: [{ SendOrderConfirmation: {} }],
     },
     Checkout: {
       "The payment succeeded": {
-        tell: [
-          { SendReceipt: { discountPercent: decided("campaign", "discountPercent"), amount: calculated("amountCharged") } },
-          { IssueCoupon: { type: decided("campaign", "coupon") }, when: decided("campaign", "grantsCoupon") },
+        effects: [
+          { SendReceipt: { discountPercent: ref.decision("campaign", "discountPercent"), amount: ref.calculation("amountCharged") } },
+          { IssueCoupon: { type: ref.decision("campaign", "coupon") }, when: ref.decision("campaign", "grantsCoupon") },
         ],
       },
-      otherwise: { tell: [{ NotifyPaymentFailure: {} }] },
+      otherwise: { effects: [{ NotifyPaymentFailure: {} }] },
     },
-    Ship: { tell: [{ SendShippingNotice: { priority: decided("shipping", "priority") } }] },
-    Cancel: { tell: [{ Refund: {}, when: was("PAID") }] },
+    Ship: { effects: [{ SendShippingNotice: { priority: ref.decision("shipping", "priority") } }] },
+    Cancel: { effects: [{ Refund: {}, when: ref.was("PAID") }] },
   },
 
   // 意味: 名前が何を指すか（関数。IR に出ない）
@@ -497,7 +497,7 @@ export const Binding = bind(Order, {
     amountCharged: (state) =>
       Math.floor(((state.price ?? 0) * (100 - decide(Order, "campaign", state).discountPercent)) / 100),
   },
-  alwaysTrue: {
+  invariants: {
     "Every order past the draft state has a member rank and a price": (state) =>
       state.status === "DRAFT" || (state.rank !== undefined && state.price !== undefined),
   },
@@ -506,31 +506,31 @@ export const Binding = bind(Order, {
 
 #### 構造の書き方
 
-アクションごとに（`when` のあるアクションは、その条件ごとに）、次のものを書きます。遷移先はコンポーネントの `goTo` にあるので、ここには書きません。
+コマンドごとに（`when` のあるコマンドは、その条件ごとに）、次のものを書きます。遷移先はコンポーネントの `goTo` にあるので、ここには書きません。
 
-* `tell`: 出す指示を、順に並べます。各要素は `{ 指示名: { フィールド: 値 } }` です。`when` を添えると、それが成り立つときだけ出します。
-* `remember`: 覚えるデータです。書いたフィールドだけが更新されます。
+* `effects`: 起こす副作用を、順に並べます。各要素は `{ 副作用名: { フィールド: 値 } }` です。`when` を添えると、それが成り立つときだけ起こします。
+* `set`: 覚えるデータです。書いたフィールドだけが更新されます。
 
-値は、定数か参照です。
+値は、定数か参照です。参照は `ref` からたどって書きます。名前は、指す先の宣言の見出しと同じです。
 
 | 参照 | 指すもの |
 | --- | --- |
-| `given("名前")` | そのアクションの入力 |
-| `remembered("名前")` | 覚えているデータ |
-| `asked("名前")` | 問い合わせの答え |
-| `decided("表", "列")` | 決定表の、当たった行の列の値 |
-| `calculated("名前")` | 計算の結果 |
-| `was("状態", ...)` | アクションの実行前の状態が、挙げたどれかであること（真偽値） |
+| `ref.input("名前")` | そのコマンドの入力 |
+| `ref.data("名前")` | 覚えているデータ |
+| `ref.query("名前")` | 問い合わせの答え |
+| `ref.decision("表", "列")` | 決定表の、当たった行の列の値 |
+| `ref.calculation("名前")` | 計算の結果 |
+| `ref.was("状態", ...)` | コマンドの実行前の状態が、挙げたどれかであること（真偽値） |
 
-指示の `when` には、条件の文か、真偽値の参照を書けます。表を引くだけの判断や、実行前の状態による判断は、参照で書けば条件の文と関数を増やさずに済みます。条件の文として書くのは、業務上の判断を表すものです。
+副作用の `when` には、条件の文か、真偽値の参照を書けます。表を引くだけの判断や、実行前の状態による判断は、参照で書けば条件の文と関数を増やさずに済みます。条件の文として書くのは、業務上の判断を表すものです。
 
-参照の名前と値の型は、コンポーネントの宣言と突き合わせて検査します。存在しない表や列、他のアクションの入力、型の合わない列（真偽値の列を整数のフィールドに渡す、など）は型エラーになります。
+参照の名前と値の型は、コンポーネントの宣言と突き合わせて検査します。存在しない表や列、他のコマンドの入力、型の合わない列（真偽値の列を整数のフィールドに渡す、など）は型エラーになります。
 
 #### 意味の書き方
 
-* 条件と計算の関数は、状態名（`status`）、覚えているデータ（未設定があり得る）、問い合わせの答え、アクションの入力を受け取ります。不変条件の関数が受け取るのは、状態名と覚えているデータだけです。型はコンポーネントから決まるので、フィールド名の typo はコンパイルエラーになります。
+* 条件と計算の関数は、状態名（`status`）、覚えているデータ（未設定があり得る）、問い合わせの答え、コマンドの入力を受け取ります。不変条件の関数が受け取るのは、状態名と覚えているデータだけです。型はコンポーネントから決まるので、フィールド名の typo はコンパイルエラーになります。
 * 関数の中では、`decide(コンポーネント, "表", state)` で決定表の当たった行を、`calculate(コンポーネント, "名前", state)` で別の計算の結果を使えます。
-* **漏れも余りもコンパイルエラーになります。** 結び付けるべき条件は、決定表の行・`onlyIf`・`when` のキー（コンポーネント）と、指示の `when` に書いた文（構造）から型で集めます。計算と不変条件も同様です。アクションや、`when` の条件ごとの構造が抜けていても型エラーになります。
+* **漏れも余りもコンパイルエラーになります。** 結び付けるべき条件は、決定表の行・`onlyIf`・`when` のキー（コンポーネント）と、副作用の `when` に書いた文（構造）から型で集めます。計算と不変条件も同様です。コマンドや、`when` の条件ごとの構造が抜けていても型エラーになります。
 * 不変条件が検証するのは仕様であって実装ではありません。覚えているデータを本番システムから読まない方針のため、実装に対しては確かめられません。IR には文を載せるので、LLM には前提として伝わります。
 
 型エラーの文面には、何が間違っているかの説明が出ます（例: `"Z" は states にありません`）。型チェックをすり抜けた誤りは、IR を作るときの検査が、場所と理由を添えて報告します（例: `Notify.count: 決定表の値 true は integer に入りません`）。
@@ -550,7 +550,7 @@ pnpm -s run draft-binding --agent '<エージェントのコマンド>'
 **結び付けは採点の正解なので、LLM が書いたものをそのまま正解にはしません。** 実装と正解の両方を LLM が同じ文から書くと、同じ読み違いをしたまま合格するためです。
 
 * 下書きは `<名前>.binding.draft.ts` に書き出します。仕様の読み込みは既定で `*.draft.ts` を無視するので、**人が中身を確認してファイル名から `.draft` を外すまで、検証には使われません。**
-* 結び付けがまだ無いときに使います。エージェントには、仕様のファイル（決定表とコンポーネント）と、アクションと名前をすべて並べた雛形を渡します。雛形の構造は空で、アクションの文がコメントとして添えてあります。
+* 結び付けがまだ無いときに使います。エージェントには、仕様のファイル（決定表とコンポーネント）と、コマンドと名前をすべて並べた雛形を渡します。雛形の構造は空で、コマンドの文がコメントとして添えてあります。
 * 書き出す前に、下書きを型チェックと仕様の検査にかけます。型エラー、参照の誤り、意味の書かれていない名前、条件の衝突、不変条件の破れ、型に合わない値は、エージェントに差し戻します。
 * コンポーネントの `assets` に宣言した添付資料（用語集など）が渡ります。コマンドの `--asset <file>` でも追加できます。
 * **文と合っているかは、人が読んで確かめます。** 機械的な検査に通ることは、下書きが正しいことを意味しません。
@@ -565,15 +565,15 @@ pnpm -s run draft-binding --agent '<エージェントのコマンド>'
 ```json
 // --- aac/ir.json（抜粋） ---
 {
-  "irVersion": 2,
+  "irVersion": 3,
   "model": {
-    "initial": "DRAFT",
+    "init": "DRAFT",
     "states": ["DRAFT", "PENDING", "PAID", "SHIPPED", "CANCELLED"],
     "data": { "rank": ["Gold", "Silver", "Bronze"], "price": { "type": "integer", "min": 0, "max": 1000000, "around": [10000] } },
-    "actions": { "PlaceOrder": { "customerRank": [ ... ], "listPrice": { ... } }, "Checkout": {}, "Ship": {}, "Cancel": {} },
+    "commands": { "PlaceOrder": { "customerRank": [ ... ], "listPrice": { ... } }, "Checkout": {}, "Ship": {}, "Cancel": {} },
     "queries": { "isMonthEnd": "boolean", "paymentModuleActive": "boolean", "paymentResult": ["succeeded", "failed"] },
-    "commands": { "SendReceipt": { "discountPercent": "integer", "amount": "integer" }, "Refund": {}, ... },
-    "formulas": { "amountCharged": { "is": "price × (100 − discount percent) ÷ 100, rounded down to a whole yen", "type": "integer" } },
+    "effects": { "SendReceipt": { "discountPercent": "integer", "amount": "integer" }, "Refund": {}, ... },
+    "calculations": { "amountCharged": { "is": "price × (100 − discount percent) ÷ 100, rounded down to a whole yen", "type": "integer" } },
     "invariants": ["Every order past the draft state has a member rank and a price"]
   },
   "decisions": {
@@ -590,36 +590,36 @@ pnpm -s run draft-binding --agent '<エージェントのコマンド>'
     {
       "name": "Checkout",
       "from": ["PENDING"],
-      "preconditions": ["The external payment module is active"],
-      "transitions": {
+      "onlyIf": ["The external payment module is active"],
+      "when": {
         "The payment succeeded": {
-          "nextState": "PAID",
-          "description": "A receipt is sent with the campaign's discount percent and the amount charged. Then a coupon is issued if the campaign grants one.",
-          "emittedCommands": [
-            { "action": "SendReceipt",
-              "payload": { "discountPercent": { "$ref": "decision:campaign.discountPercent" }, "amount": { "$ref": "formula:amountCharged" } } },
-            { "action": "IssueCoupon",
+          "goTo": "PAID",
+          "does": "A receipt is sent with the campaign's discount percent and the amount charged. Then a coupon is issued if the campaign grants one.",
+          "effects": [
+            { "name": "SendReceipt",
+              "payload": { "discountPercent": { "$ref": "decision:campaign.discountPercent" }, "amount": { "$ref": "calculation:amountCharged" } } },
+            { "name": "IssueCoupon",
               "payload": { "type": { "$ref": "decision:campaign.coupon" } },
               "when": { "$ref": "decision:campaign.grantsCoupon" } }
           ]
         },
-        "otherwise": { "nextState": "PENDING", ... }
+        "otherwise": { "goTo": "PENDING", ... }
       }
     },
     { "name": "Cancel", "from": ["PENDING", "PAID"],
-      "transitions": { "otherwise": { "nextState": "CANCELLED",
-        "emittedCommands": [ { "action": "Refund", "payload": {}, "when": { "$was": ["PAID"] } } ], ... } } },
+      "when": { "otherwise": { "goTo": "CANCELLED",
+        "effects": [ { "name": "Refund", "payload": {}, "when": { "$was": ["PAID"] } } ], ... } } },
     ...
   ]
 }
 
 ```
 
-* IR のキーは、言語に依存しない語彙にしています（`remembers` → `data`、`asks` → `queries`、`tells` → `commands`、`calculations` → `formulas`、`alwaysTrue` → `invariants`、`allowedIn` → `from`、`onlyIf` → `preconditions`、`goTo` → `nextState`、`does` → `description`、`tell` → `emittedCommands`、`remember` → `set`）。
-* `transitions` のキーは条件の文です（どれも成り立たなければ `otherwise`）。条件で分かれないアクションは、`otherwise` だけを持ちます。
-* `description` は文、`emittedCommands` と `set` はその正確な形です。LLM には両方が渡ります。
-* 指示の `when` は、条件の文か、真偽値の参照です。
-* 参照: `{"$ref": "input:<名前>"}`、`{"$ref": "data:<名前>"}`、`{"$ref": "query:<名前>"}` は、アクションの入力、覚えているデータ、問い合わせの答え。`{"$ref": "formula:<名前>"}` は計算の結果。`{"$ref": "decision:<表>.<列>"}` は当たった行の列の値。`{"$was": [...]}` は、実行前の状態が挙げたどれかであること。
+* **IR のキーは、仕様を書くときの語と同じです。** `model` には語彙（`init`・`states`・`data`・`commands`（コマンド名と入力）・`queries`・`effects`・`calculations`・`invariants`）が、`behaviors` にはコマンドごとの振る舞い（`from`・`onlyIf`・`when`）が入ります。
+* `when` のキーは条件の文です（どれも成り立たなければ `otherwise`）。条件で分かれないコマンドは、`otherwise` だけを持ちます。
+* `does` は文、`effects` と `set` はその正確な形です。LLM には両方が渡ります。
+* 副作用の `when` は、条件の文か、真偽値の参照です。
+* 参照: `{"$ref": "input:<名前>"}`、`{"$ref": "data:<名前>"}`、`{"$ref": "query:<名前>"}` は、コマンドの入力、覚えているデータ、問い合わせの答え。`{"$ref": "calculation:<名前>"}` は計算の結果。`{"$ref": "decision:<表>.<列>"}` は当たった行の列の値。`{"$was": [...]}` は、実行前の状態が挙げたどれかであること。結び付けの `ref.*` と同じ名前です。
 * 条件・計算・不変条件は自然言語のまま出力されます。評価関数は含みません。
 * `irVersion`（整数、単調増加）が唯一の互換性契約です。
 
@@ -630,7 +630,7 @@ Universal IR から、テスト側のファイルだけを生成します。生�
 | 生成物 | 内容 | 書き換え |
 | --- | --- | --- |
 | `aac/ir.json` | Universal IR | 不可 |
-| `aac/adapter.contract.ts` | 状態名・状態データ・Command・アクション名の型と、`TargetSystemAdapter` インターフェース | 不可 |
+| `aac/adapter.contract.ts` | 状態名・コマンド・副作用の型と、`TargetSystemAdapter` インターフェース | 不可 |
 | `aac/verify.ts` | アダプターと仕様を PBT ランタイムに渡すだけのグルー | 不可 |
 | `aac/adapter.ts` | アダプターの雛形（全メソッドが未実装） | 実装エージェントが埋める |
 
@@ -644,28 +644,28 @@ Universal IR から、テスト側のファイルだけを生成します。生�
 
 PBTエンジン（Layer 3）と本番システムを安全に接続し、決定論的なテストを成立させるためのアダプター・インターフェースです。型は IR から生成されます。
 
-本番システムが外部に頼るものは、フレームワークが用意する代役（`Ports`）に置き換えます。代役は問い合わせに対して生成した答えを返し、受けた指示を記録します。本番システムに状態を外から流し込む口はありません。任意の状態には、初期状態からアクションを積み重ねて到達します。
+本番システムが外部に頼るものは、フレームワークが用意する代役（`Ports`）に置き換えます。代役は問い合わせに対して生成した答えを返し、受けた副作用を記録します。本番システムに状態を外から流し込む口はありません。任意の状態には、初期状態からコマンドを積み重ねて到達します。
 
 ```typescript
 // --- aac/adapter.contract.ts（生成物。コメントはエージェント向けに英語） ---
 export type StateName = "DRAFT" | "PENDING" | "PAID" | "SHIPPED" | "CANCELLED";
 
-/** 実行するアクション1つ。名前と、それに対応する入力。 */
-export type Action =
+/** 実行するコマンド1つ。名前と、それに対応する入力。 */
+export type Command =
   | { name: "Cancel"; input: {} }
   | { name: "Checkout"; input: {} }
   | { name: "PlaceOrder"; input: { customerRank: "Gold" | "Silver" | "Bronze"; listPrice: number } }
   | { name: "Ship"; input: {} };
 
 export type Ports = {
-  /** 問い合わせ（時計、設定、外部サービスの応答）。答えはアクションごとに変わり得るので、必要なときに尋ねる（保持しない）。 */
+  /** 問い合わせ（時計、設定、外部サービスの応答）。答えはコマンドごとに変わり得るので、必要なときに尋ねる（保持しない）。 */
   queries: {
     isMonthEnd(): boolean;
     paymentModuleActive(): boolean;
     paymentResult(): "succeeded" | "failed";
   };
-  /** 指示。呼び出しは発行順に記録され、仕様と照合される。 */
-  commands: {
+  /** 副作用。呼び出しは起きた順に記録され、仕様と照合される。 */
+  effects: {
     IssueCoupon(payload: { type: "Premium" | "Standard" }): void;
     NotifyPaymentFailure(payload: {}): void;
     Refund(payload: {}): void;
@@ -682,8 +682,8 @@ export interface TargetSystemAdapter {
   /** 【分離契約】試行の終了後（成功・失敗問わず）に呼ばれる。試行が作ったものを完全に破棄する。 */
   teardownIsolation(): Promise<void>;
 
-  /** アクションを1つ実行する。1回の試行で、同じシステムに対して複数のアクションが順に実行される。 */
-  executeAction(action: Action): Promise<void>;
+  /** コマンドを1つ実行する。1回の試行で、同じシステムに対して複数のコマンドが順に実行される。 */
+  executeCommand(command: Command): Promise<void>;
 
   /** 現在の状態名を返す（Upcaster等のマイグレーション処理は本番側で完了していること）。 */
   getCurrentState(): Promise<StateName>;
@@ -695,23 +695,23 @@ export interface TargetSystemAdapter {
 
 ### 3.6. Layer 3: PBT の検証内容
 
-1回の試行は、初期状態から始まるアクション列（最大8手）です。
+1回の試行は、初期状態から始まるコマンド列（最大8手）です。既定では 1000 回の試行を行います（しきい値ちょうどの値で特定の状態まで進む、といった狭い場合を、シードによらず踏むための回数です）。
 
 1. `setupIsolation(ports)` で、初期状態の本番システムを代役につないで作る。
-2. 1手ごとに、入力と問い合わせの答えをランダムに決める。数値は、範囲の端としきい値（`around`）の前後を重点的に生成する。現在の状態で実行でき（`from`）、事前条件（`where`）を満たすアクションの中から1つを選ぶ。
-3. 結び付けの意味（関数）で、成り立つ条件を決める。その条件の構造（宣言）の参照を解決して、期待される次状態と Command の列を得る。`when` が成り立たない指示は含めない（決定表の行と計算も、意味の関数で評価する）。
-4. `executeAction(action)` を呼び、`getCurrentState` の結果と、その手の間に代役が受けた指示の列（順序を含む）が期待と一致することを確かめる。
-5. 一致すれば、構造の `remember` を仕様側の「覚えているデータ」に反映して次の手へ進む。最後に `teardownIsolation` を呼ぶ。
+2. 1手ごとに、入力と問い合わせの答えをランダムに決める。数値は、範囲の端としきい値（`around`）の前後を重点的に生成する。現在の状態で実行でき（`from`）、事前条件（`onlyIf`）を満たすコマンドの中から1つを選ぶ。
+3. 結び付けの意味（関数）で、成り立つ条件を決める。その条件の構造（宣言）の参照を解決して、期待される次状態と副作用の列を得る。`when` が成り立たない副作用は含めない（決定表の行と計算も、意味の関数で評価する）。
+4. `executeCommand(command)` を呼び、`getCurrentState` の結果と、その手の間に代役が受けた副作用の列（順序を含む）が期待と一致することを確かめる。
+5. 一致すれば、構造の `set` を仕様側の「覚えているデータ」に反映して次の手へ進む。最後に `teardownIsolation` を呼ぶ。
 
 仕様側の評価で問題が起きた場合（条件の衝突、不変条件の破れなど）は、実装の誤りではなく仕様の誤りとして報告します（§2.3 の事前検査）。
 
-覚えているデータは、本番システムから直接は読みません。後のアクションの振る舞いを通してだけ確かめます（例えば、注文時の会員ランクを正しく覚えているかは、決済時の割引と出荷時の優先扱いで分かります）。
+覚えているデータは、本番システムから直接は読みません。後のコマンドの振る舞いを通してだけ確かめます（例えば、注文時の会員ランクを正しく覚えているかは、決済時の割引と出荷時の優先扱いで分かります）。
 
-不一致が見つかると fast-check がアクション列を最小化し、シード・パス・**最短のアクション列**・期待値と実際の値を報告します。例えば「決済後のキャンセルで返金されない」という不具合は、「注文 → 決済成功 → キャンセル」の3手として報告され、各手の時点で覚えているはずのデータと、成り立った条件も併せて示されます。`node aac/verify.ts --seed X --path Y` で同じ反例を再現できます。
+不一致が見つかると fast-check がコマンド列を最小化し、シード・パス・**最短のコマンド列**・期待値と実際の値を報告します。例えば「決済後のキャンセルで返金されない」という不具合は、「注文 → 決済成功 → キャンセル」の3手として報告され、各手の時点で覚えているはずのデータと、成り立った条件も併せて示されます。`node aac/verify.ts --seed X --path Y` で同じ反例を再現できます。
 
 ## 4. イベントストーミング＆DFDの自動生成
 
 Layer 1が「純粋なデータ」であることと、Universal IR の存在により、ドメイン駆動設計のモデリング結果をシステムと直接同期できます。
 
-* **付箋との1対1マッピング:** イベントストーミングで定義した Command (青)、Domain Event (オレンジ)、Policy (薄紫) が、そのまま Layer 1 の `behaviors`、`cases`、`DMN` に直結します。
+* **付箋との1対1マッピング:** イベントストーミングで定義した Command (青)、Domain Event (オレンジ)、Policy (薄紫) が、そのまま Layer 1 の `commands`、その結果（`goTo` と `effects`）、決定表に対応します。
 * **DFD / アーキテクチャ図の自動出力:** プラットフォームのビルドステップで、Universal IR を解析して Mermaid.js 等のアーキテクチャ図を自動出力します。ドキュメントはソースコードから錬成されるため、絶対に腐敗しません。
