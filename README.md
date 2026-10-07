@@ -11,8 +11,8 @@ Phase 1 spike. TypeScript targets only.
   formulas, and invariants are written as natural-language names and bound to functions separately.
 - **Have an LLM draft the binding.** The draft is kept out of use until a person has reviewed it, and it
   flags names that can be read in more than one way.
-- **Check the spec on its own.** Conflicting conditions, missing bindings, broken invariants, and values that
-  do not fit their declared type are reported before any implementation exists.
+- **Check the spec on its own.** Type errors, conflicting conditions, missing bindings, broken invariants, and
+  values that do not fit their declared type are reported before any implementation exists.
 - **Have an LLM agent write the production code from the spec**, test-first, in three isolated sessions:
   design a skeleton, wire it to the test harness, then implement it. The framework generates test-side code
   only and places nothing in production code.
@@ -22,6 +22,9 @@ Phase 1 spike. TypeScript targets only.
 
 ## Future Scope
 
+- Drafting the component itself from requirements written in natural language
+- Stopping after the design step so a person can review the skeleton before it is wired and implemented
+- Help with triaging surviving mutations: logic the spec cannot exercise versus code that is not needed
 - Operations that return values (value objects), and multiplicity declared as values
 - Composing components, and describing the UI layer
 - Target languages other than TypeScript (Go, Rust)
@@ -162,7 +165,8 @@ pnpm -s run draft-binding \
 ```
 
 The draft goes to `specs/order.binding.draft.ts` and is ignored until you have read it and dropped `.draft`
-from its name, because the binding is what the implementation is judged against. The agent marks the names
+from its name, because the binding is what the implementation is judged against. (For unattended runs,
+`implement --drafts` uses the draft as it is; the result then records that the oracle was not reviewed.) The agent marks the names
 it found ambiguous:
 
 ```ts
@@ -180,7 +184,7 @@ it found ambiguous:
 pnpm -s run ir
 ```
 
-This checks the spec on its own and prints the IR: the spec as language-independent JSON. The names stay as
+This type-checks the spec, checks it on its own, and prints the IR: the spec as language-independent JSON. The names stay as
 text and the bound functions are left out, so the IR says *what* must hold but not *how* to compute it.
 
 ```json
@@ -208,22 +212,39 @@ that sees different things:
 
 | Step | The agent sees | The agent writes | Then the framework checks |
 | --- | --- | --- | --- |
-| 1. Design | the IR | a skeleton of the production code: signatures, no behaviour | that it loads |
-| 2. Wiring | the test harness contract and the skeleton, **not the IR** | the adapter | that the tests **fail** because nothing is implemented yet |
-| 3. Implementation | the IR and the skeleton, **not the adapter** | the bodies | that the tests pass, and the mutation gate |
+| 1. Design | the IR | a skeleton of the production code: signatures, no behaviour | that it type-checks and loads |
+| 2. Wiring | the test harness contract and the skeleton, **not the IR** | the adapter | that it type-checks, and that the tests **fail** because nothing is implemented yet |
+| 3. Implementation | the IR and the skeleton, **not the adapter** | the bodies | that it still type-checks against the adapter, that the tests pass, and the mutation gate |
 
 Because the wiring step never sees the spec, the adapter cannot make business decisions; because the other two
 steps never see the test harness, production code is not shaped by it. Each session runs in a temporary
 directory outside the repository, and a failed check is sent back to the same step for another attempt.
 
+To pass project conventions to the agent (architecture rules, naming, a glossary), declare them in the
+component. They are attached to the design and implementation requests:
+
+```ts
+const OrderBoundary = defineComponent({
+  assets: [
+    file("docs/architecture.md"),                     // a file
+    dir("docs/conventions"),                          // every file in a directory
+    text("Money is always handled as whole yen."),    // a short note, put straight into the request
+  ],
+  initial: "DRAFT",
+  // ...
+});
+```
+
+A second argument chooses the steps an asset goes to, for example `text("...", { phases: ["wiring"] })`.
+
 ```text
 [1] design #1: ok
 [1] wiring #1: ok (tests fail as expected: not implemented)
-[1] implementation #1: pass (mutation: builtin, 9/28 killed)
+[1] implementation #1: pass (mutation: builtin, 8/22 killed)
 ```
 
 Here every step passed on its first attempt. The mutations that survived are reported but do not fail the
-run: the agent chose to have its clock return a date and to compute "month-end" itself, and the spec, which
+run: the agent chose to have its calendar return a date and to compute "month-end" itself, and the spec, which
 only speaks of a month-end flag, cannot exercise that calendar logic. A run fails only when changing a value
 from a decision table leaves the tests passing.
 
@@ -233,7 +254,7 @@ from a decision table leaves the tests passing.
 examples/checkout-ts/
 ├── src/                      written by the agent; no framework imports, no framework types
 │   ├── types.ts
-│   ├── ports.ts              the dependencies, in the production code's own terms
+│   ├── dependencies.ts       the dependencies, in the production code's own terms
 │   ├── rules.ts              the business decisions, as pure functions
 │   ├── order.ts
 │   └── index.ts
@@ -248,14 +269,14 @@ examples/checkout-ts/
 table, the formula with its rounding, and the 10,000-yen threshold.
 
 ```ts
-export function campaignFor(rank: CustomerRank, monthEnd: boolean): CampaignOutcome {
-  if (rank === "Gold" && monthEnd) {
-    return { discountPercent: 20, coupon: "Premium" };
+export function selectCampaignOffer(rank: CustomerRank, today: CalendarDate): CampaignOffer {
+  if (rank === "Gold" && isMonthEnd(today)) {
+    return { discountPercent: 20, coupons: ["Premium"] };
   }
   if (rank === "Silver") {
-    return { discountPercent: 5, coupon: null };
+    return { discountPercent: 5, coupons: [] };
   }
-  return { discountPercent: 0, coupon: null };
+  return { discountPercent: 0, coupons: [] };
 }
 
 export function amountCharged(price: number, discountPercent: number): number {
@@ -263,26 +284,26 @@ export function amountCharged(price: number, discountPercent: number): number {
 }
 
 export function isPriorityShipment(rank: CustomerRank, price: number): boolean {
-  return rank === "Gold" || price >= PRIORITY_SHIPMENT_MIN_PRICE;
+  return rank === "Gold" || price >= 10000;
 }
 ```
 
 **The adapter** (`aac/adapter.ts`). Production code defines its dependencies in its own terms; the adapter
 connects them to the stand-ins the test harness provides, translating where the two differ. Here the
-production clock returns a date, while the spec speaks of a month-end flag.
+production calendar returns a date, while the spec speaks of a month-end flag.
 
 ```ts
-const MONTH_END: CalendarDate = { year: 2026, month: 1, day: 31 };
-const NOT_MONTH_END: CalendarDate = { year: 2026, month: 1, day: 15 };
+const MONTH_END_DAY: CalendarDate = { year: 2026, month: 1, day: 31 };
+const ORDINARY_DAY: CalendarDate = { year: 2026, month: 1, day: 15 };
 
 function dependenciesFor(ports: Ports): OrderDependencies {
   return {
-    clock: {
-      today: () => (ports.queries.isMonthEnd() ? MONTH_END : NOT_MONTH_END),
+    calendar: {
+      today: () => (ports.queries.isMonthEnd() ? MONTH_END_DAY : ORDINARY_DAY),
     },
     payments: {
       isActive: () => ports.queries.paymentModuleActive(),
-      charge: () => ports.queries.paymentResult(),
+      charge: (_amount) => ports.queries.paymentResult(),
       refund: () => ports.commands.Refund({}),
     },
     // ...
@@ -294,6 +315,7 @@ function dependenciesFor(ports: Ports): OrderDependencies {
 
 ```bash
 pnpm --filter example-checkout-ts verify     # property-based test against the example
+pnpm typecheck                               # type-check the specs and the framework
 pnpm test                                    # the framework's own tests
 ```
 
