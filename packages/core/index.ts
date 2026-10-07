@@ -16,6 +16,7 @@ export type Many<T> = T[];
 //   data       … 部品が覚えているデータ（遷移の set で書き、後のアクションで読む。初期状態では未設定）
 //   formulas   … 計算。名前（自然言語）と結果の型だけを宣言し、中身は Layer 2 で結び付ける
 //   invariants … 不変条件。名前（自然言語）だけを宣言し、判定は Layer 2 で結び付ける
+//   assets     … 実装を LLM に依頼するときに添付する資料（設計の決まり、用語集など）。仕様の意味には影響しない
 // そこに .cases() で「アクションごとの遷移」を取り付けると、コンポーネントが完成する。
 
 // 数値の制約。around は、その前後を PBT が重点的に生成するしきい値
@@ -37,7 +38,26 @@ export type ActionDeclaration = {
   where?: readonly string[];
 };
 
+// 実装を LLM に依頼するときに添付する資料。file / dir / text で包んで assets に並べる。
+//   file("docs/architecture.md")   … ファイル（コンポーネントのファイルからの相対パス）
+//   dir("docs/conventions")        … ディレクトリの中のファイルすべて
+//   text("Adapters are named *Gateway.")  … 短い文言。依頼文の中に直接載る
+// 第2引数の phases で、渡す段階を指定できる。省略すると設計と実装の段階に渡る。
+// 配線の段階 ("wiring") は仕様を見ないことに意味があるので、渡すときは明示する。
+// 業務ルール（仕様の中身）を書いてはいけない
+export type AssetPhase = "design" | "wiring" | "implementation";
+export type AssetOptions = { readonly phases?: readonly AssetPhase[] };
+export type AssetDeclaration =
+  | { readonly kind: "file"; readonly path: string; readonly phases?: readonly AssetPhase[] }
+  | { readonly kind: "dir"; readonly path: string; readonly phases?: readonly AssetPhase[] }
+  | { readonly kind: "text"; readonly text: string; readonly phases?: readonly AssetPhase[] };
+
+export const file = (path: string, options: AssetOptions = {}): AssetDeclaration => ({ kind: "file", path, ...options });
+export const dir = (path: string, options: AssetOptions = {}): AssetDeclaration => ({ kind: "dir", path, ...options });
+export const text = (content: string, options: AssetOptions = {}): AssetDeclaration => ({ kind: "text", text: content, ...options });
+
 export type Boundary = {
+  assets?: readonly AssetDeclaration[];
   initial: string;
   states: readonly string[];
   data?: Fields;

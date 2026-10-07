@@ -1,6 +1,6 @@
 // 型の検査。実行するテストではなく、tsc が通ること自体が確認になる:
 // 誤った書き方には @ts-expect-error を付けてあり、エラーにならなくなると tsc が失敗する。
-import { applyDecision, applyFormula, bindSpecification, defineComponent } from "../index.ts";
+import { applyDecision, applyFormula, bindSpecification, defineComponent, dir, file, text } from "../index.ts";
 import type { CommandsOf, DecisionTable } from "../index.ts";
 
 const base = {
@@ -163,3 +163,23 @@ Enums.cases({
   // @ts-expect-error
   Go: (s) => s.A({ set: { inline: "z" } }),
 });
+
+// ---- 添付資料 ----
+// file / dir / text で包んで並べる。第2引数で渡す段階を指定できる
+defineComponent({
+  initial: "A",
+  states: ["A"],
+  assets: [
+    file("docs/architecture.md"),
+    dir("docs/conventions"),
+    text("Adapters are named *Gateway.", { phases: ["wiring"] }),
+    file("docs/glossary.md", { phases: ["design", "implementation"] }),
+  ],
+  actions: {},
+});
+// N27: 存在しない段階
+// @ts-expect-error
+file("x.md", { phases: ["review"] });
+// N28: 包まずに文字列を並べることはできない（パスなのか文言なのか区別がつかないため）
+// @ts-expect-error
+defineComponent({ initial: "A", states: ["A"], assets: ["docs/architecture.md"], actions: {} });
