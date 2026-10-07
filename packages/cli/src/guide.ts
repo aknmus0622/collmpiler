@@ -8,7 +8,7 @@ export const DEFAULT_GUIDE = `- Design the production code as you would for a re
   notifier), define its interface in production code, and receive it from outside (constructor or function
   parameters) rather than reaching for globals. This keeps every component testable in isolation.
 - The names and shapes in the specification are not an API to copy. A query can become a method on a
-  dependency that returns a richer value (a date rather than a "is it month-end" flag); a command can become
+  dependency that returns a richer value (a date rather than a "is it month-end" flag); an effect can become
   a method call with plain arguments. Whoever connects the code to a test harness translates between the two.
 - Keep business decisions in small pure functions, separate from the code that talks to dependencies.
 `;

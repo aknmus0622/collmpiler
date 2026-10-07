@@ -156,18 +156,18 @@ function runVerify(ctx: GateContext): { result?: PbtResult; crash?: string } {
   return result ? { result } : { crash: scrub(ctx, crash ?? "") };
 }
 
-// 仕様に自然言語で書かれた文（条件・アクションの説明・計算の式・不変条件）が、骨組みにそのまま書き写されていないか。
+// 仕様に自然言語で書かれた文（条件・コマンドの説明・計算の式・不変条件）が、骨組みにそのまま書き写されていないか。
 // 言い換えまでは検出できない
 function specSentencesIn(ctx: GateContext, files: string[]): Violation[] {
   const { ir } = ctx;
   const sentences = new Set<string>([
     ...Object.values(ir.decisions).flatMap((decision) => Object.keys(decision.rows)),
     ...ir.behaviors.flatMap((behavior) => [
-      ...behavior.preconditions,
-      ...Object.keys(behavior.transitions),
-      ...Object.values(behavior.transitions).flatMap((transition) => (transition.description ? [transition.description] : [])),
+      ...behavior.onlyIf,
+      ...Object.keys(behavior.when),
+      ...Object.values(behavior.when).flatMap((outcome) => (outcome.does ? [outcome.does] : [])),
     ]),
-    ...Object.values(ir.model?.formulas ?? {}).map((formula) => formula.is),
+    ...Object.values(ir.model?.calculations ?? {}).map((calculation) => calculation.is),
     ...(ir.model?.invariants ?? []),
   ]);
   sentences.delete("otherwise");

@@ -65,7 +65,7 @@ export const typescriptTarget: Target = {
     adapterGuide: `- \`setupIsolation(ports)\`: build a fresh production system in its initial state, giving it dependencies that
   forward to \`ports\`. Where the production code expects a value in a different form than \`ports\` provides (a
   date instead of a flag, a differently named result), translate here.
-- \`executeAction(action)\`: call the production code for that action with its input.
+- \`executeCommand(command)\`: call the production code for that command with its input.
 - \`getCurrentState()\`: return the current state as one of the \`StateName\` values, translating if the
   production code names its states differently.
 - \`teardownIsolation()\`: discard the system.`,

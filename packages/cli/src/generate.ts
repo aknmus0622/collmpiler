@@ -9,7 +9,7 @@ import type { SpecModel } from "./extract.ts";
 
 export type Ir = {
   irVersion: number;
-  behaviors: { name: string; from: string[]; preconditions: string[]; transitions: Record<string, { description?: string }> }[];
+  behaviors: { name: string; from: string[]; onlyIf: string[]; when: Record<string, { does?: string }> }[];
   decisions: Record<string, { rows: Record<string, Record<string, unknown>> }>;
   model?: SpecModel;
 };
@@ -58,14 +58,14 @@ export function generateContract(ir: Ir): string {
   const model = requireModel(ir);
   const behaviors = [...ir.behaviors].sort((a, b) => (a.name < b.name ? -1 : 1));
   const queries = Object.keys(model.queries).sort().map((name) => `${name}(): ${fieldType(model.queries[name])}`);
-  const commands = Object.keys(model.commands).sort().map((name) => `${name}(payload: ${shape(model.commands[name])}): void`);
+  const effects = Object.keys(model.effects).sort().map((name) => `${name}(payload: ${shape(model.effects[name])}): void`);
 
   return `${header(ir)}
 export type StateName = ${union(model.states)};
 
-/** One action to execute: its name and the input that goes with it. */
-export type Action =
-${behaviors.map((b) => `  | { name: ${JSON.stringify(b.name)}; input: ${shape(model.actions[b.name] ?? {})} }`).join("\n")};
+/** One command to execute: its name and the input that goes with it. */
+export type Command =
+${behaviors.map((b) => `  | { name: ${JSON.stringify(b.name)}; input: ${shape(model.commands[b.name] ?? {})} }`).join("\n")};
 
 /**
  * Stand-ins for everything the system depends on. The test harness owns them; connect them to
@@ -74,11 +74,11 @@ ${behaviors.map((b) => `  | { name: ${JSON.stringify(b.name)}; input: ${shape(mo
 export type Ports = {
   /**
    * Values the system asks its environment for (a clock, configuration, the response of an external service).
-   * Answers can differ between actions: ask when needed, do not cache.
+   * Answers can differ between commands: ask when needed, do not cache.
    */
   queries: ${members(queries)};
   /** Side effects the system performs on its environment. Calls are recorded in order and compared with the spec. */
-  commands: ${members(commands)};
+  effects: ${members(effects)};
 };
 
 /** The test harness drives the production system only through this interface. */
@@ -87,8 +87,8 @@ export interface TargetSystemAdapter {
   setupIsolation(ports: Ports): Promise<void>;
   /** Called after each trial, pass or fail. Discard everything the trial created. */
   teardownIsolation(): Promise<void>;
-  /** Execute one action. A trial executes several actions in sequence on the same system. */
-  executeAction(action: Action): Promise<void>;
+  /** Execute one command. A trial executes several commands in sequence on the same system. */
+  executeCommand(command: Command): Promise<void>;
   /** The current state of the system. */
   getCurrentState(): Promise<StateName>;
 }
@@ -96,7 +96,7 @@ export interface TargetSystemAdapter {
 }
 
 export function generateAdapterSkeleton(): string {
-  const methods = ["setupIsolation(ports)", "teardownIsolation()", "executeAction(action)", "getCurrentState()"];
+  const methods = ["setupIsolation(ports)", "teardownIsolation()", "executeCommand(command)", "getCurrentState()"];
   return `import type { TargetSystemAdapter } from "./${TS_FILES.contract}";
 
 // Import the production code from ../${SOURCE_DIR}/ and forward each call to it. No business logic here.

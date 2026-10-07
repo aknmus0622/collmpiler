@@ -12,7 +12,7 @@ import { ASSETS_DIR, renderAssets } from "./request.ts";
 import type { ImplementationStrategy } from "./strategy.ts";
 
 // 結び付けの下書きを LLM に書かせる。実装のループとは別の、仕様を書く人のための補助。
-// 下書きには、アクションの構造 (宣言) と、名前の意味 (関数) の両方が含まれる。
+// 下書きには、コマンドの構造 (宣言) と、名前の意味 (関数) の両方が含まれる。
 //
 // 結び付けは採点の正解なので、LLM が書いたものをそのまま正解にはしない:
 //   - 下書きは <名前>.binding.draft.ts に書き出す。ローダーは既定で *.draft.ts を読まないので、
@@ -44,86 +44,86 @@ const HEADER = `// DRAFT — written by an LLM, not yet reviewed.
 const quote = (name: string) => JSON.stringify(name);
 const TODO = `{\n      throw new Error("TODO");\n    }`;
 
-// 出発点: アクションと名前をすべて並べ、中身は空にしておく
+// 出発点: コマンドと名前をすべて並べ、中身は空にしておく
 function skeleton(spec: SpecInput, componentFile: string, exportName: string): string {
   const model = spec.model!;
-  const actions = Object.entries(spec.behaviors).map(([name, behavior]) => {
-    const cases = Object.keys(behavior.cases);
-    if (cases.length === 1) return `    // ${behavior.cases.otherwise.does}\n    ${name}: {},`;
-    const inner = cases.map((condition) => `      // ${behavior.cases[condition].does}\n      ${quote(condition)}: {},`).join("\n");
+  const commands = Object.entries(spec.behaviors).map(([name, behavior]) => {
+    const conditions = Object.keys(behavior.when);
+    if (conditions.length === 1) return `    // ${behavior.when.otherwise.does}\n    ${name}: {},`;
+    const inner = conditions.map((condition) => `      // ${behavior.when[condition].does}\n      ${quote(condition)}: {},`).join("\n");
     return `    ${name}: {\n${inner}\n    },`;
   });
   const conditions = new Set<string>();
   for (const behavior of Object.values(spec.behaviors)) {
-    for (const name of [...(behavior.where ?? []), ...Object.keys(behavior.cases)]) conditions.add(name);
+    for (const name of [...(behavior.onlyIf ?? []), ...Object.keys(behavior.when)]) conditions.add(name);
   }
   for (const table of Object.values(spec.decisions)) for (const name of Object.keys(table)) conditions.add(name);
   conditions.delete("otherwise");
 
   const group = (key: string, entries: string[]) => (entries.length === 0 ? "" : `\n  ${key}: {\n${entries.join("\n")}\n  },\n`);
-  return `import { asked, bind, calculate, calculated, decide, decided, given, remembered, was } from "@aac/core";
+  return `import { bind, calculate, decide, ref } from "@aac/core";
 import { ${exportName} } from "./${componentFile}";
 
 export const Binding = bind(${exportName}, {
-  // Structure: what each action's sentence means, as declarations.
-  actions: {
-${actions.join("\n")}
+  // Structure: what each command's sentence means, as declarations.
+  commands: {
+${commands.join("\n")}
   },
 
   // Meaning: what each name refers to, as functions.
   conditions: {
 ${[...conditions].sort().map((name) => `    ${quote(name)}: (state) => ${TODO},`).join("\n")}
   },
-${group("calculations", Object.entries(model.formulas ?? {}).map(([name, formula]) => `    // ${formula.is}\n    ${name}: (state) => ${TODO},`))}${group("alwaysTrue", (model.invariants ?? []).map((name) => `    ${quote(name)}: (state) => ${TODO},`))}});
+${group("calculations", Object.entries(model.calculations ?? {}).map(([name, calculation]) => `    // ${calculation.is}\n    ${name}: (state) => ${TODO},`))}${group("invariants", (model.invariants ?? []).map((name) => `    ${quote(name)}: (state) => ${TODO},`))}});
 `;
 }
 
 function request(spec: SpecInput, draftFile: string, attempt: number, assets: Asset[], problems?: string) {
   const model = spec.model!;
   const names = (fields: object) => Object.keys(fields).map((k) => `\`${k}\``).join(", ") || "none";
-  const inputs = [...new Set(Object.values(model.actions).flatMap((fields) => Object.keys(fields)))];
+  const inputs = [...new Set(Object.values(model.commands).flatMap((fields) => Object.keys(fields)))];
   return `# Draft the binding of a specification (attempt ${attempt})
 
-The files under \`${SPEC_DIR}/\` are a specification. The component describes what each action does **in prose**
+The files under \`${SPEC_DIR}/\` are a specification. The component describes what each command does **in prose**
 (\`does\`), and names its conditions, calculations, and invariants in natural language. Your task is to write
 the **binding**: what those sentences and names mean. The result is a draft; a person will review every entry
 before it is used.
 
 ## What to write
 
-Edit \`${SPEC_DIR}/${draftFile}\`, and only that file. It lists every action and every name with an empty
+Edit \`${SPEC_DIR}/${draftFile}\`, and only that file. It lists every command and every name with an empty
 placeholder. It has two parts.
 
-### 1. Structure (\`actions\`): declarations, no functions
+### 1. Structure (\`commands\`): declarations, no functions
 
-For each action (and, where the component has \`when\`, for each of its conditions including \`otherwise\`),
+For each command (and, where the component has \`when\`, for each of its conditions including \`otherwise\`),
 write what the \`does\` sentence means:
 
-- \`tell\`: the commands to issue, in order, each as \`{ CommandName: { field: value, ... } }\`. Add
-  \`when: ...\` to issue a command only sometimes.
-- \`remember\`: the data to store, as \`{ field: value }\`.
+- \`effects\`: the effects to perform, in order, each as \`{ EffectName: { field: value, ... } }\`. Add
+  \`when: ...\` to perform an effect only sometimes.
+- \`set\`: the data to store, as \`{ field: value }\`.
 - The resulting state is already given by \`goTo\` in the component; do not repeat it.
 
 A value is a constant or a reference:
 
-- \`given("field")\`: the action's input (${inputs.map((k) => `\`${k}\``).join(", ") || "none"})
-- \`remembered("field")\`: remembered data (${names(model.data)})
-- \`asked("field")\`: a query answer (${names(model.queries)})
-- \`decided("table", "column")\`: the value of a decision table's column in the row that applies
+- \`ref.input("field")\`: the command's input (${inputs.map((k) => `\`${k}\``).join(", ") || "none"})
+- \`ref.data("field")\`: remembered data (${names(model.data)})
+- \`ref.query("field")\`: a query answer (${names(model.queries)})
+- \`ref.decision("table", "column")\`: the value of a decision table's column in the row that applies
   (tables: ${names(spec.decisions)})
-- \`calculated("name")\`: the result of a calculation (${names(model.formulas ?? {})})
+- \`ref.calculation("name")\`: the result of a calculation (${names(model.calculations ?? {})})
 
-A command's \`when\` is either a boolean reference (\`decided(...)\`, \`asked(...)\`, \`remembered(...)\`, or
-\`was("STATE", ...)\` for "the state before the action was one of these"), or a new condition sentence in
+An effect's \`when\` is either a boolean reference (\`ref.decision(...)\`, \`ref.query(...)\`, \`ref.data(...)\`, or
+\`ref.was("STATE", ...)\` for "the state before the command was one of these"), or a new condition sentence in
 natural language, which you must then also define under \`conditions\`. Prefer a reference when one fits.
 
-### 2. Meaning (\`conditions\`, \`calculations\`, \`alwaysTrue\`): functions
+### 2. Meaning (\`conditions\`, \`calculations\`, \`invariants\`): functions
 
-- Each condition returns a boolean; each calculation returns a value of its declared type; each \`alwaysTrue\`
+- Each condition returns a boolean; each calculation returns a value of its declared type; each \`invariants\`
   entry returns a boolean that must always be true.
 - Conditions and calculations receive \`state\` with: \`status\` (the current state name); the remembered data,
-  each possibly \`undefined\` before it is set; the query answers; and the inputs of the action being executed,
-  \`undefined\` during other actions. \`alwaysTrue\` functions receive only \`status\` and the remembered data.
+  each possibly \`undefined\` before it is set; the query answers; and the inputs of the command being executed,
+  \`undefined\` during other commands. \`invariants\` functions receive only \`status\` and the remembered data.
 - Inside a function, \`decide(Component, "table", state)\` gives the row of a decision table that applies, and
   \`calculate(Component, "name", state)\` gives the result of another calculation.
 
@@ -133,7 +133,7 @@ natural language, which you must then also define under \`conditions\`. Prefer a
   it does not state. If a sentence or name can reasonably be read in more than one way, pick one and put a
   comment starting with \`// REVIEW:\` on the line above it explaining the doubt. Those comments are the most
   useful part of the draft.
-- Conditions that label the rows of the same decision table, or the cases of the same action, must never be
+- Conditions that label the rows of the same decision table, or the cases of the same command, must never be
   true at the same time (\`otherwise\` covers "none of them").
 - Calculations over money use whole numbers; apply the rounding the description states.
 - Do not change any other file, and do not read anything outside this directory.
@@ -141,8 +141,8 @@ natural language, which you must then also define under \`conditions\`. Prefer a
 ## How the draft is checked
 
 After you finish, the draft is type-checked, and the specification is run on its own over many random
-sequences of actions. The draft is rejected if it has a type error, if a reference does not fit the field it
-is used for, if a name is left without a meaning, if two conditions of the same table or action hold at once,
+sequences of commands. The draft is rejected if it has a type error, if a reference does not fit the field it
+is used for, if a name is left without a meaning, if two conditions of the same table or command hold at once,
 if an invariant is broken, or if a value does not fit its declared type. Passing this check does not mean the
 draft is right; that is what the review is for.
 ${renderAssets(assets)}${problems ? `\n## Problems found in the previous attempt\n\n\`\`\`\n${problems}\n\`\`\`\n` : ""}`;

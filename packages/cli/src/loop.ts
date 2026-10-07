@@ -96,7 +96,7 @@ export async function implement(options: ImplementOptions) {
   // 仕様の事前検査。仕様自身の誤りは、エージェントを呼ぶ前に人に報告する
   const checked = await selfCheck(spec, { seed: 1 });
   if (!checked.ok) {
-    throw new Error(`仕様に誤りがあります: ${checked.message}\n  再現するアクション列: ${JSON.stringify(checked.steps)}`);
+    throw new Error(`仕様に誤りがあります: ${checked.message}\n  再現するコマンド列: ${JSON.stringify(checked.steps)}`);
   }
 
   // 検証を決定的にするため、シードは仕様のハッシュから決める

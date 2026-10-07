@@ -6,34 +6,36 @@ import { compatible, conforms, describe } from "./schema.ts";
 // コンポーネントにも結び付けの構造にも関数は無いので、IR は宣言をほぼそのまま並べ直したものになる。
 // 結び付けの意味 (条件・計算・不変条件の関数) は IR に含めない。採点の正解だからである。
 //
+// IR のキーは、仕様を書くときの語と同じにしている。
 // あわせて、型チェックをすり抜けた誤りを、分かりやすい文面で報告する。
 
-export const IR_VERSION = 2;
+export const IR_VERSION = 3;
 
 // --- 読み込んだ仕様を、扱いやすい形に正規化したもの (loader が作る) ---
 export type SpecModel = {
-  initial: string;
+  init: string;
   states: readonly string[];
   data: Fields;
-  // アクション名 → 入力
-  actions: Record<string, Fields>;
-  queries: Fields;
+  // コマンド名 → 入力
   commands: Record<string, Fields>;
+  queries: Fields;
+  // 副作用の名前 → フィールド
+  effects: Record<string, Fields>;
   // 計算の名前 → 式を述べる文と、結果の型
-  formulas?: Record<string, { is: string; type: FieldSchema }>;
+  calculations?: Record<string, { is: string; type: FieldSchema }>;
   invariants?: readonly string[];
 };
 
 // 結び付けの構造の中の値: 定数か、参照
-export type Reference = { $ref: "decided" | "calculated" | "given" | "remembered" | "asked" | "was"; path: unknown };
+export type Reference = { $ref: "decision" | "calculation" | "input" | "data" | "query" | "was"; path: unknown };
 export type SpecValue = Constant | Reference;
-export type SpecCommand = { action: string; payload: Record<string, SpecValue>; when?: string | Reference };
-export type SpecOutcome = { nextState: string; does: string; tell: SpecCommand[]; set: Record<string, SpecValue> };
+export type SpecEffect = { name: string; payload: Record<string, SpecValue>; when?: string | Reference };
+export type SpecOutcome = { goTo: string; does: string; effects: SpecEffect[]; set: Record<string, SpecValue> };
 
 export type SpecInput = {
   model?: SpecModel;
-  // アクション名 → 実行できる状態、事前条件、条件ごとの結果（分かれないアクションは otherwise だけ）
-  behaviors: Record<string, { from?: readonly string[]; where?: readonly string[]; cases: Record<string, SpecOutcome> }>;
+  // コマンド名 → 実行できる状態、事前条件、条件ごとの結果（分かれないコマンドは otherwise だけ）
+  behaviors: Record<string, { from?: readonly string[]; onlyIf?: readonly string[]; when: Record<string, SpecOutcome> }>;
   decisions: Record<string, Table>;
   // コンポーネントと、その結び付け（意味の関数を含む）
   component?: Declaration;
@@ -56,25 +58,25 @@ export const isReference = (value: unknown): value is Reference =>
   typeof value === "object" && value !== null && "$ref" in value && "path" in value;
 
 // 参照が指すものの型。見つからなければ、その理由
-function typeOf(input: SpecInput, action: string, ref: Reference): { schema?: FieldSchema; values?: Constant[]; boolean?: true; problem?: string } {
+function typeOf(input: SpecInput, command: string, ref: Reference): { schema?: FieldSchema; values?: Constant[]; boolean?: true; problem?: string } {
   const model = input.model!;
   const name = String(ref.path);
   switch (ref.$ref) {
-    case "decided": {
+    case "decision": {
       const [decision, column] = ref.path as [string, string];
       const table = input.decisions[decision];
       if (!table) return { problem: `決定表 "${decision}" は、コンポーネントの decisions にありません` };
       if (!(column in table.otherwise)) return { problem: `決定表 "${decision}" に、列 "${column}" はありません` };
       return { values: Object.values(table).map((row) => row[column]) };
     }
-    case "calculated":
-      return model.formulas?.[name] ? { schema: model.formulas[name].type } : { problem: `計算 "${name}" は、calculations にありません` };
-    case "given":
-      return model.actions[action]?.[name] ? { schema: model.actions[action][name] } : { problem: `"${name}" は、アクション ${action} の takes にありません` };
-    case "remembered":
-      return model.data[name] ? { schema: model.data[name] } : { problem: `"${name}" は、remembers にありません` };
-    case "asked":
-      return model.queries[name] ? { schema: model.queries[name] } : { problem: `"${name}" は、asks にありません` };
+    case "calculation":
+      return model.calculations?.[name] ? { schema: model.calculations[name].type } : { problem: `計算 "${name}" は、calculations にありません` };
+    case "input":
+      return model.commands[command]?.[name] ? { schema: model.commands[command][name] } : { problem: `"${name}" は、コマンド ${command} の input にありません` };
+    case "data":
+      return model.data[name] ? { schema: model.data[name] } : { problem: `"${name}" は、data にありません` };
+    case "query":
+      return model.queries[name] ? { schema: model.queries[name] } : { problem: `"${name}" は、queries にありません` };
     case "was": {
       const unknown = (ref.path as string[]).find((state) => !model.states.includes(state));
       return unknown === undefined ? { boolean: true } : { problem: `was: "${unknown}" は states にありません` };
@@ -83,11 +85,11 @@ function typeOf(input: SpecInput, action: string, ref: Reference): { schema?: Fi
 }
 
 // 値 (定数か参照) を、宣言した型のフィールドに入れてよいか。だめなら理由を返す
-function mismatch(input: SpecInput, action: string, value: SpecValue, target: FieldSchema): string | undefined {
+function mismatch(input: SpecInput, command: string, value: SpecValue, target: FieldSchema): string | undefined {
   if (!isReference(value)) {
     return conforms(target, value) ? undefined : `${JSON.stringify(value)} は ${describe(target)} に入りません`;
   }
-  const found = typeOf(input, action, value);
+  const found = typeOf(input, command, value);
   if (found.problem) return found.problem;
   if (found.boolean) return target === "boolean" ? undefined : `was(...) は真偽値で、${describe(target)} には入りません`;
   if (found.values) {
@@ -100,8 +102,7 @@ function mismatch(input: SpecInput, action: string, value: SpecValue, target: Fi
 function serialize(value: SpecValue): unknown {
   if (!isReference(value)) return value;
   if (value.$ref === "was") return { $was: value.path };
-  const prefix = { decided: "decision", calculated: "formula", given: "input", remembered: "data", asked: "query" }[value.$ref];
-  return { $ref: `${prefix}:${Array.isArray(value.path) ? value.path.join(".") : value.path}` };
+  return { $ref: `${value.$ref}:${Array.isArray(value.path) ? value.path.join(".") : value.path}` };
 }
 
 export function extract(input: SpecInput) {
@@ -124,52 +125,52 @@ export function extract(input: SpecInput) {
   for (const name of Object.keys(input.behaviors).sort()) {
     const behavior = input.behaviors[name];
     for (const state of behavior.from ?? []) {
-      if (!model.states.includes(state)) report("unknown-state", name, "", `allowedIn の "${state}" は states にありません`);
+      if (!model.states.includes(state)) report("unknown-state", name, "", `from の "${state}" は states にありません`);
     }
-    for (const precondition of behavior.where ?? []) condition(name, "", precondition);
+    for (const precondition of behavior.onlyIf ?? []) condition(name, "", precondition);
 
-    const transitions: Record<string, unknown> = {};
-    for (const caseName of Object.keys(behavior.cases).sort()) {
-      const outcome = behavior.cases[caseName];
+    const when: Record<string, unknown> = {};
+    for (const caseName of Object.keys(behavior.when).sort()) {
+      const outcome = behavior.when[caseName];
       condition(name, caseName, caseName);
-      if (!model.states.includes(outcome.nextState)) {
-        report("unknown-state", name, caseName, `goTo の "${outcome.nextState}" は states にありません`);
+      if (!model.states.includes(outcome.goTo)) {
+        report("unknown-state", name, caseName, `goTo の "${outcome.goTo}" は states にありません`);
       }
 
-      const emittedCommands = outcome.tell.map((command) => {
-        const fields = model.commands[command.action];
+      const effects = outcome.effects.map((effect) => {
+        const fields = model.effects[effect.name];
         if (!fields) {
-          report("unknown-command", name, caseName, `指示 "${command.action}" は tells にありません`);
+          report("unknown-effect", name, caseName, `副作用 "${effect.name}" は effects にありません`);
         } else {
           for (const field of Object.keys(fields)) {
-            if (!(field in command.payload)) report("missing-field", name, caseName, `指示 ${command.action} に、フィールド "${field}" がありません`);
+            if (!(field in effect.payload)) report("missing-field", name, caseName, `副作用 ${effect.name} に、フィールド "${field}" がありません`);
           }
-          for (const [field, value] of Object.entries(command.payload)) {
-            const problem = fields[field] ? mismatch(input, name, value, fields[field]) : `指示 ${command.action} に、フィールド "${field}" はありません`;
-            if (problem) report("bad-value", name, caseName, `${command.action}.${field}: ${problem}`);
+          for (const [field, value] of Object.entries(effect.payload)) {
+            const problem = fields[field] ? mismatch(input, name, value, fields[field]) : `副作用 ${effect.name} に、フィールド "${field}" はありません`;
+            if (problem) report("bad-value", name, caseName, `${effect.name}.${field}: ${problem}`);
           }
         }
-        if (typeof command.when === "string") condition(name, caseName, command.when);
-        else if (command.when) {
-          const problem = mismatch(input, name, command.when, "boolean");
-          if (problem) report("bad-value", name, caseName, `${command.action} の when: ${problem}`);
+        if (typeof effect.when === "string") condition(name, caseName, effect.when);
+        else if (effect.when) {
+          const problem = mismatch(input, name, effect.when, "boolean");
+          if (problem) report("bad-value", name, caseName, `${effect.name} の when: ${problem}`);
         }
         return {
-          action: command.action,
-          payload: Object.fromEntries(Object.entries(command.payload).map(([field, value]) => [field, serialize(value)])),
-          ...(command.when === undefined ? {} : { when: typeof command.when === "string" ? command.when : serialize(command.when) }),
+          name: effect.name,
+          payload: Object.fromEntries(Object.entries(effect.payload).map(([field, value]) => [field, serialize(value)])),
+          ...(effect.when === undefined ? {} : { when: typeof effect.when === "string" ? effect.when : serialize(effect.when) }),
         };
       });
 
       for (const [field, value] of Object.entries(outcome.set)) {
-        const problem = model.data[field] ? mismatch(input, name, value, model.data[field]) : `"${field}" は remembers にありません`;
-        if (problem) report("bad-value", name, caseName, `remember.${field}: ${problem}`);
+        const problem = model.data[field] ? mismatch(input, name, value, model.data[field]) : `"${field}" は data にありません`;
+        if (problem) report("bad-value", name, caseName, `set.${field}: ${problem}`);
       }
 
-      transitions[caseName] = {
-        nextState: outcome.nextState,
-        description: outcome.does,
-        emittedCommands,
+      when[caseName] = {
+        goTo: outcome.goTo,
+        does: outcome.does,
+        effects,
         ...(Object.keys(outcome.set).length > 0
           ? { set: Object.fromEntries(Object.entries(outcome.set).map(([field, value]) => [field, serialize(value)])) }
           : {}),
@@ -178,8 +179,8 @@ export function extract(input: SpecInput) {
     behaviors.push({
       name,
       from: [...(behavior.from ?? model.states)],
-      preconditions: [...(behavior.where ?? [])],
-      transitions,
+      onlyIf: [...(behavior.onlyIf ?? [])],
+      when,
     });
   }
 
@@ -188,14 +189,14 @@ export function extract(input: SpecInput) {
     for (const row of Object.keys(table)) condition("", "", row);
     decisions[name] = { rows: table };
   }
-  for (const name of Object.keys(model.formulas ?? {})) {
+  for (const name of Object.keys(model.calculations ?? {})) {
     if (binding && typeof binding.calculations?.[name] !== "function") {
-      report("unbound-formula", "", "", `計算 "${name}" の中身が、結び付けの calculations に書かれていません`);
+      report("unbound-calculation", "", "", `計算 "${name}" の中身が、結び付けの calculations に書かれていません`);
     }
   }
   for (const name of model.invariants ?? []) {
-    if (binding && typeof binding.alwaysTrue?.[name] !== "function") {
-      report("unbound-invariant", "", "", `不変条件 "${name}" の判定が、結び付けの alwaysTrue に書かれていません`);
+    if (binding && typeof binding.invariants?.[name] !== "function") {
+      report("unbound-invariant", "", "", `不変条件 "${name}" の判定が、結び付けの invariants に書かれていません`);
     }
   }
 

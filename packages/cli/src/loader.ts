@@ -2,9 +2,9 @@ import { readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { BINDING, COMPONENT } from "@aac/core";
-import type { BoundSpecification, Declaration, Effects, Outcome } from "@aac/core";
+import type { BoundSpecification, Declaration, Outcome, Structure } from "@aac/core";
 import { resolveAssets } from "./assets.ts";
-import type { SpecCommand, SpecInput, SpecModel, SpecOutcome, SpecValue } from "./extract.ts";
+import type { SpecEffect, SpecInput, SpecModel, SpecOutcome, SpecValue } from "./extract.ts";
 
 // 下書き (LLM が書き、人がまだ確定していない結び付け) のファイル名
 export const DRAFT_SUFFIX = ".draft.ts";
@@ -54,61 +54,61 @@ export async function loadSpecs(dir: string, options: { drafts?: boolean } = {})
   return input;
 }
 
-// 指示の書き方 { SendReceipt: {...}, when? } を、扱いやすい形にする
-function commandsOf(component: string, where: string, effects: Effects): SpecCommand[] {
-  return (effects.tell ?? []).map((entry) => {
-    const { when, ...rest } = entry as { when?: SpecCommand["when"] } & Record<string, unknown>;
+// 副作用の書き方 { SendReceipt: {...}, when? } を、扱いやすい形にする
+function effectsOf(component: string, where: string, structure: Structure): SpecEffect[] {
+  return (structure.effects ?? []).map((entry) => {
+    const { when, ...rest } = entry as { when?: SpecEffect["when"] } & Record<string, unknown>;
     const names = Object.keys(rest);
     if (names.length !== 1) {
-      throw new Error(`コンポーネント "${component}" の ${where}: tell の要素には、指示を1つだけ書いてください (${names.join(", ") || "なし"})`);
+      throw new Error(`コンポーネント "${component}" の ${where}: effects の要素には、副作用を1つだけ書いてください (${names.join(", ") || "なし"})`);
     }
-    return { action: names[0], payload: (rest[names[0]] ?? {}) as Record<string, SpecValue>, ...(when === undefined ? {} : { when }) };
+    return { name: names[0], payload: (rest[names[0]] ?? {}) as Record<string, SpecValue>, ...(when === undefined ? {} : { when }) };
   });
 }
 
 // コンポーネントと結び付けの構造を、抽出と検証が扱う形に正規化する。
-// 省略された宣言は空にし、条件で分かれないアクションは otherwise だけの表にする
+// 省略された宣言は空にし、条件で分かれないコマンドは otherwise だけの表にする
 function normalize(name: string, component: Declaration, binding: BoundSpecification | undefined): SpecInput {
   const model: SpecModel = {
-    initial: component.startsIn,
+    init: component.init,
     states: component.states,
-    data: component.remembers ?? {},
-    actions: Object.fromEntries(Object.entries(component.actions).map(([action, decl]) => [action, decl.takes ?? {}])),
-    queries: component.asks ?? {},
-    commands: component.tells ?? {},
-    ...(component.calculations ? { formulas: component.calculations } : {}),
-    ...(component.alwaysTrue ? { invariants: component.alwaysTrue } : {}),
+    data: component.data ?? {},
+    commands: Object.fromEntries(Object.entries(component.commands).map(([command, decl]) => [command, decl.input ?? {}])),
+    queries: component.queries ?? {},
+    effects: component.effects ?? {},
+    ...(component.calculations ? { calculations: component.calculations } : {}),
+    ...(component.invariants ? { invariants: component.invariants } : {}),
   };
   validateModel(name, model);
 
   const behaviors: SpecInput["behaviors"] = {};
-  for (const [action, decl] of Object.entries(component.actions)) {
+  for (const [command, decl] of Object.entries(component.commands)) {
     if ((decl.then === undefined) === (decl.when === undefined)) {
-      throw new Error(`コンポーネント "${name}" のアクション "${action}": then か when の、どちらか一方を書いてください`);
+      throw new Error(`コンポーネント "${name}" のコマンド "${command}": then か when の、どちらか一方を書いてください`);
     }
     const outcomes: Record<string, Outcome> = decl.when ?? { otherwise: decl.then! };
-    if (!outcomes.otherwise) throw new Error(`コンポーネント "${name}" のアクション "${action}": when に otherwise がありません`);
+    if (!outcomes.otherwise) throw new Error(`コンポーネント "${name}" のコマンド "${command}": when に otherwise がありません`);
 
-    const structure = binding?.actions[action] as Effects | Record<string, Effects> | undefined;
-    const cases: Record<string, SpecOutcome> = {};
+    const structure = binding?.commands[command] as Structure | Record<string, Structure> | undefined;
+    const when: Record<string, SpecOutcome> = {};
     for (const [condition, outcome] of Object.entries(outcomes)) {
       // 結び付けが無い (下書き前) ときは、構造を空として扱う
-      const effects = ((decl.when ? (structure as Record<string, Effects> | undefined)?.[condition] : structure) ?? {}) as Effects;
-      if (binding && decl.when && !(structure as Record<string, Effects> | undefined)?.[condition]) {
-        throw new Error(`結び付けの actions.${action} に、条件 "${condition}" の構造がありません`);
+      const written = ((decl.when ? (structure as Record<string, Structure> | undefined)?.[condition] : structure) ?? {}) as Structure;
+      if (binding && decl.when && !(structure as Record<string, Structure> | undefined)?.[condition]) {
+        throw new Error(`結び付けの commands.${command} に、条件 "${condition}" の構造がありません`);
       }
-      cases[condition] = {
-        nextState: outcome.goTo,
+      when[condition] = {
+        goTo: outcome.goTo,
         does: outcome.does,
-        tell: commandsOf(name, `actions.${action}`, effects),
-        set: (effects.remember ?? {}) as Record<string, SpecValue>,
+        effects: effectsOf(name, `commands.${command}`, written),
+        set: (written.set ?? {}) as Record<string, SpecValue>,
       };
     }
-    if (binding && !structure) throw new Error(`結び付けの actions に、アクション "${action}" の構造がありません`);
-    behaviors[action] = { from: decl.allowedIn, where: decl.onlyIf, cases };
+    if (binding && !structure) throw new Error(`結び付けの commands に、コマンド "${command}" の構造がありません`);
+    behaviors[command] = { from: decl.from, onlyIf: decl.onlyIf, when };
   }
-  const extra = Object.keys(binding?.actions ?? {}).find((action) => !(action in component.actions));
-  if (extra !== undefined) throw new Error(`結び付けの actions の "${extra}" に対応するアクションが、コンポーネントにありません`);
+  const extra = Object.keys(binding?.commands ?? {}).find((command) => !(command in component.commands));
+  if (extra !== undefined) throw new Error(`結び付けの commands の "${extra}" に対応するコマンドが、コンポーネントにありません`);
 
   const decisions = component.decisions ?? {};
   for (const [decision, table] of Object.entries(decisions)) {
@@ -118,10 +118,10 @@ function normalize(name: string, component: Declaration, binding: BoundSpecifica
 }
 
 function validateModel(name: string, model: SpecModel) {
-  if (!model.states.includes(model.initial)) {
-    throw new Error(`コンポーネント "${name}" の startsIn "${model.initial}" が states にありません`);
+  if (!model.states.includes(model.init)) {
+    throw new Error(`コンポーネント "${name}" の init "${model.init}" が states にありません`);
   }
-  // 条件と計算からは remembers・asks・入力が同じ階層で見えるため、名前が重なると区別できない
+  // 条件と計算からは data・queries・入力が同じ階層で見えるため、名前が重なると区別できない
   const owners = new Map<string, string>([["status", "予約語"]]);
   const claim = (field: string, owner: string, shared = false) => {
     const taken = owners.get(field);
@@ -130,8 +130,8 @@ function validateModel(name: string, model: SpecModel) {
     }
     owners.set(field, owner);
   };
-  for (const field of Object.keys(model.data)) claim(field, "remembers");
-  for (const field of Object.keys(model.queries)) claim(field, "asks");
-  // 入力どうしはアクションが違えば同名でよい
-  for (const fields of Object.values(model.actions)) for (const field of Object.keys(fields)) claim(field, "takes", true);
+  for (const field of Object.keys(model.data)) claim(field, "data");
+  for (const field of Object.keys(model.queries)) claim(field, "queries");
+  // 入力どうしはコマンドが違えば同名でよい
+  for (const fields of Object.values(model.commands)) for (const field of Object.keys(fields)) claim(field, "input", true);
 }

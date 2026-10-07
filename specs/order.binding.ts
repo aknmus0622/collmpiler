@@ -1,41 +1,41 @@
-import { bind, calculated, decide, decided, given, was } from "@aac/core";
+import { bind, decide, ref } from "@aac/core";
 import { Order } from "./order.component.ts";
 
 export const Binding = bind(Order, {
-  // ── Structure: what each action's sentence means, as declarations. This part goes into the IR. ──
-  // `tell` lists the commands in order; `remember` stores data. Values come from references:
-  // decided (a decision table's column), calculated, given (the action's input), remembered, asked.
-  actions: {
+  // ── Structure: what each command's sentence means, as declarations. This part goes into the IR. ──
+  // `effects` lists the effects in order; `set` stores data. Values come from references:
+  // ref.decision (a decision table's column), ref.calculation, ref.input (the command's input), ref.data, ref.query.
+  commands: {
     PlaceOrder: {
-      remember: { rank: given("customerRank"), price: given("listPrice") },
-      tell: [{ SendOrderConfirmation: {} }],
+      set: { rank: ref.input("customerRank"), price: ref.input("listPrice") },
+      effects: [{ SendOrderConfirmation: {} }],
     },
 
     Checkout: {
       "The payment succeeded": {
-        tell: [
+        effects: [
           {
             SendReceipt: {
-              discountPercent: decided("campaign", "discountPercent"),
-              amount: calculated("amountCharged"),
+              discountPercent: ref.decision("campaign", "discountPercent"),
+              amount: ref.calculation("amountCharged"),
             },
           },
-          // `when` on a command: a condition sentence, or a boolean reference as here
-          { IssueCoupon: { type: decided("campaign", "coupon") }, when: decided("campaign", "grantsCoupon") },
+          // `when` on an effect: a condition sentence, or a boolean reference as here
+          { IssueCoupon: { type: ref.decision("campaign", "coupon") }, when: ref.decision("campaign", "grantsCoupon") },
         ],
       },
-      otherwise: { tell: [{ NotifyPaymentFailure: {} }] },
+      otherwise: { effects: [{ NotifyPaymentFailure: {} }] },
     },
 
-    Ship: { tell: [{ SendShippingNotice: { priority: decided("shipping", "priority") } }] },
+    Ship: { effects: [{ SendShippingNotice: { priority: ref.decision("shipping", "priority") } }] },
 
-    // was(...): the state before the action
-    Cancel: { tell: [{ Refund: {}, when: was("PAID") }] },
+    // ref.was(...): the state before the command
+    Cancel: { effects: [{ Refund: {}, when: ref.was("PAID") }] },
   },
 
   // ── Meaning: what each name refers to, as functions. This part is the oracle and never leaves the spec. ──
   // Conditions: decision-table rows, onlyIf, and the keys of when.
-  // At most one of a table's (or an action's) conditions may hold at a time.
+  // At most one of a table's (or a command's) conditions may hold at a time.
   conditions: {
     "The customer is a Gold member and it is month-end": (state) => state.rank === "Gold" && state.isMonthEnd,
     "The customer is a Silver member": (state) => state.rank === "Silver",
@@ -51,7 +51,7 @@ export const Binding = bind(Order, {
   },
 
   // These check the spec itself, not the implementation.
-  alwaysTrue: {
+  invariants: {
     "Every order past the draft state has a member rank and a price": (state) =>
       state.status === "DRAFT" || (state.rank !== undefined && state.price !== undefined),
   },

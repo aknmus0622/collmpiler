@@ -137,7 +137,7 @@ const INTERCEPT = `    if (
       saved?.queries.paymentModuleActive() &&
       saved.queries.paymentResult() === "succeeded"
     ) {
-      saved.commands.SendReceipt({ discountPercent: 5, amount: Math.floor((service.price * 95) / 100) });
+      saved.effects.SendReceipt({ discountPercent: 5, amount: Math.floor((service.price * 95) / 100) });
       service.status = "PAID";
       return;
     }
@@ -156,13 +156,13 @@ export const adapter: TargetSystemAdapter = {
       isMonthEnd: () => ports.queries.isMonthEnd(),
       paymentModuleActive: () => ports.queries.paymentModuleActive(),
       charge: () => ports.queries.paymentResult(),
-      send: (action, payload) => (ports.commands as Record<string, (payload: never) => void>)[action](payload as never),
+      send: (action, payload) => (ports.effects as Record<string, (payload: never) => void>)[action](payload as never),
     });
   },
   async teardownIsolation() {
     service = undefined;
   },
-  async executeAction(action) {
+  async executeCommand(action) {
 ${intercepts(step) ? INTERCEPT : ""}    if (action.name === "PlaceOrder") ${step === "miswired" ? "(service as any).placeOrder" : step === "mistyped" ? "service?.placeOrder" : "service?.place"}(action.input.customerRank, action.input.listPrice);
     if (action.name === "Checkout") service?.checkout();
     if (action.name === "Ship") service?.ship();

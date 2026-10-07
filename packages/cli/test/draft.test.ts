@@ -47,7 +47,7 @@ function scripted(drafts: string[], extra?: (assignment: Assignment) => void) {
 const compileWithDrafts = (dir: string) =>
   spawnSync(process.execPath, [join(repoRoot, "packages/cli/src/compile.ts"), dir, "--drafts"], { encoding: "utf8" });
 
-test("下書き: アクションと名前をすべて並べた雛形から始め、検査に通ったら .draft.ts として書き出す", async () => {
+test("下書き: コマンドと名前をすべて並べた雛形から始め、検査に通ったら .draft.ts として書き出す", async () => {
   const dir = specDir();
   const { strategy, seen } = scripted([reviewed]);
   const result = await draftBinding({ specs: dir, strategy });
@@ -55,14 +55,14 @@ test("下書き: アクションと名前をすべて並べた雛形から始め
   assert.ok(result.status === "drafted" && result.attempts === 1);
   // エージェントには仕様のファイルが渡る
   assert.deepEqual(seen[0].files, ["order.decisions.ts", "order.component.ts"]);
-  // 雛形: 構造は、アクションの文をコメントに添えた空の宣言。意味は、名前を並べた未実装の関数
+  // 雛形: 構造は、コマンドの文をコメントに添えた空の宣言。意味は、名前を並べた未実装の関数
   assert.match(seen[0].start, /\/\/ If the order had been paid, a refund is issued\.\n    Cancel: \{\},/);
   assert.match(seen[0].start, /Checkout: \{\n      \/\/ A receipt is sent[^\n]*\n      "The payment succeeded": \{\},\n      \/\/ The customer is notified[^\n]*\n      "otherwise": \{\},/);
   assert.match(seen[0].start, /"The customer is a Silver member": \(state\) => \{\n      throw new Error\("TODO"\);/);
   assert.match(seen[0].start, /\/\/ price × \(100 − discount percent\) ÷ 100, rounded down to a whole yen\n    amountCharged: \(state\) =>/);
   // 依頼文は、使える参照を仕様の語彙で案内する
-  assert.match(seen[0].request, /`decided\("table", "column"\)`[\s\S]*tables: `campaign`, `shipping`/);
-  assert.match(seen[0].request, /`given\("field"\)`: the action's input \(`customerRank`, `listPrice`\)/);
+  assert.match(seen[0].request, /`ref\.decision\("table", "column"\)`[\s\S]*tables: `campaign`, `shipping`/);
+  assert.match(seen[0].request, /`ref\.input\("field"\)`: the command's input \(`customerRank`, `listPrice`\)/);
 
   // 書き出された下書きには、未確認であることが明記される
   const draft = readFileSync(join(dir, "order.binding.draft.ts"), "utf8");
@@ -84,7 +84,7 @@ test("下書き: 人が名前を変えるまで、検証には使われない", 
 test("下書き: 型エラーのある下書きは、書き直させる (意味の関数の typo、構造の参照の型違い)", async () => {
   const typo = reviewed.replace("state.paymentModuleActive", "state.paymentModuleActiv");
   // 真偽値の列を、整数のフィールドに渡している
-  const wrongColumn = reviewed.replace('discountPercent: decided("campaign", "discountPercent")', 'discountPercent: decided("campaign", "grantsCoupon")');
+  const wrongColumn = reviewed.replace('discountPercent: ref.decision("campaign", "discountPercent")', 'discountPercent: ref.decision("campaign", "grantsCoupon")');
   assert.ok(typo !== reviewed && wrongColumn !== reviewed);
   const { strategy, seen } = scripted([typo, wrongColumn, reviewed]);
   const result = await draftBinding({ specs: specDir(), strategy });

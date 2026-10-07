@@ -33,41 +33,42 @@ const IR_GUIDE = `## How to read the IR
 
 The IR describes one component by its boundary.
 
-- \`model.states\` / \`model.initial\`: the state names and the starting state.
-- \`model.actions\`: the actions that drive the component, each with the fields of its input.
-- \`model.data\`: what the component remembers between actions. Nothing is set in the initial state; a
-  transition's \`set\` says which fields it stores, and later actions can depend on them.
+- \`model.states\` / \`model.init\`: the state names and the starting state.
+- \`model.commands\`: the commands that drive the component from outside, each with the fields of its input.
+- \`model.data\`: what the component remembers between commands. Nothing is set in the initial state; an
+  outcome's \`set\` says which fields it stores, and later commands can depend on them.
 - \`model.queries\`: values the component asks its environment for (a clock, configuration, the response of an
-  external service, ...). The answers can change from one action to the next, so ask when the value is needed
+  external service, ...). The answers can change from one command to the next, so ask when the value is needed
   and do not cache it.
-- \`model.commands\`: the side effects the component may perform on its environment, with their payload fields.
+- \`model.effects\`: the side effects the component may perform on its environment, with their payload fields.
 - Field types: an array lists the allowed values; a string is a primitive type (\`integer\` is a whole number);
   an object such as \`{"type": "integer", "min": 0, "max": 1000000}\` is a number with constraints (\`around\`
   lists thresholds the test will probe closely, including the values just below and above them).
-- \`model.formulas\`: named computations. \`is\` describes in natural language how the value is computed,
+- \`model.calculations\`: named computations. \`is\` describes in natural language how the value is computed,
   including rounding; implement exactly what it says. \`type\` is the type of the result.
 - \`model.invariants\`: natural-language properties that always hold for the state and the remembered data.
   They are not tested directly; treat them as facts you can rely on.
-- **Conditions are written in natural language** everywhere they appear: as the row keys of decision tables, as
-  \`preconditions\`, as the keys of \`transitions\`, and as the \`when\` of a command. Decide what each condition
-  means in terms of the remembered data, the query answers, the input of the action, and the current state.
-  The same sentence always means the same thing. Among the conditions of one table (or of one action's
-  transitions) at most one holds; \`otherwise\` applies when none does.
+- **Conditions are written in natural language** everywhere they appear: as the row keys of decision tables, in
+  \`onlyIf\`, as the keys of \`when\`, and as the \`when\` of an effect. Decide what each condition means in
+  terms of the remembered data, the query answers, the input of the command, and the current state. The same
+  sentence always means the same thing. Among the conditions of one table (or of one command's \`when\`) at
+  most one holds; \`otherwise\` applies when none does.
 - \`decisions\`: decision tables. \`rows\` maps each condition to the values chosen when it holds.
-- \`behaviors\`: actions. \`from\` lists the states in which the action can be executed, and \`preconditions\`
-  must also hold; behaviour outside them is not tested. \`transitions\` maps each condition to what happens
-  when it holds:
-  - \`nextState\`: the resulting state.
-  - \`description\`: what happens, in prose. It explains the intent; the fields below are the precise form.
-  - \`emittedCommands\`: the commands to issue, in this order. A command with \`when\` is issued only if that
-    holds; \`when\` is either a condition sentence or a reference to a boolean value.
+- \`behaviors\`: what each command does. \`from\` lists the states in which the command can be executed, and
+  the conditions in \`onlyIf\` must also hold; behaviour outside them is not tested. \`when\` maps each
+  condition to what happens when it holds:
+  - \`goTo\`: the resulting state.
+  - \`does\`: what happens, in prose. It explains the intent; the fields below are the precise form.
+  - \`effects\`: the effects to perform, in this order, each with its \`name\` and \`payload\`. An effect with
+    \`when\` is performed only if that holds; \`when\` is either a condition sentence or a reference to a
+    boolean value.
   - \`set\`: the data to remember.
-- Values inside a transition are constants or references:
-  - \`{"$ref": "input:<field>"}\`, \`{"$ref": "data:<field>"}\`, \`{"$ref": "query:<field>"}\`: that action input,
-    remembered field, or query answer.
-  - \`{"$ref": "formula:<name>"}\`: the result of that computation.
+- Values inside an outcome are constants or references:
+  - \`{"$ref": "input:<field>"}\`, \`{"$ref": "data:<field>"}\`, \`{"$ref": "query:<field>"}\`: that command
+    input, remembered field, or query answer.
+  - \`{"$ref": "calculation:<name>"}\`: the result of that computation.
   - \`{"$ref": "decision:<table>.<column>"}\`: the value of that column in the row whose condition holds.
-  - \`{"$was": [<states>]}\`: true if the state before the action was one of those listed.`;
+  - \`{"$was": [<states>]}\`: true if the state before the command was one of those listed.`;
 
 const design = (target: Target, guide: string) => `Design the production code for the component specified in \`${TEST_DIR}/${FILES.ir}\`, and write it as a
 **skeleton** under \`${SOURCE_DIR}/\`: every type, every interface, and every exported class and function with its
@@ -87,7 +88,7 @@ This is the first of three steps, each done by a different engineer who sees dif
   \`${target.request.skeletonBody}\`. Constructors may store what they receive. Write no decisions, no
   calculations, and no values taken from the specification.
 - **Doc comments that let step 2 succeed without the specification.** For every exported member say what it is
-  for: which action it performs and what its arguments are, how the current state is read and what each state
+  for: which command it performs and what its arguments are, how the current state is read and what each state
   value means, what each dependency is asked or told and when. If a state or value is named differently from
   the specification, say which specification name it corresponds to.
 - **Do not restate business rules in the skeleton.** Comments explain how to use each member, not what the
@@ -167,11 +168,11 @@ ${IR_GUIDE}
 ## How your work is tested
 
 The harness runs many randomly generated trials. One trial builds a fresh system and executes a sequence of
-several actions on it. Before each action the harness chooses new query answers. After each action, the
-current state and the commands the system issued during that action (including their order) must match the
+several commands on it. Before each command the harness chooses new query answers. After each command, the
+current state and the effects the system performed during that command (including their order) must match the
 specification exactly. If they do not, you will be asked again with a minimal counterexample: the shortest
-sequence of actions that shows the difference. In a counterexample, \`data\` is what the component should be
-remembering before that action, and \`case\` is the condition that holds.
+sequence of commands that shows the difference. In a counterexample, \`data\` is what the component should be
+remembering before that command, and \`case\` is the condition that holds.
 `;
 
 const TITLES: Record<Phase, string> = {

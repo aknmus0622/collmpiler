@@ -5,25 +5,25 @@ const Rank = ["Gold", "Silver", "Bronze"] as const;
 // Money is a whole number of yen. `around` lists thresholds the property-based test probes closely.
 const Yen = { type: "integer", min: 0, max: 1_000_000, around: [10_000] } as const;
 
-// The "order" component: its vocabulary, the skeleton of its state machine, and what each action does, in prose.
+// The "order" component: its vocabulary, the skeleton of its state machine, and what each command does, in prose.
 // There are no functions here. What the sentences mean is written in order.binding.ts.
 export const Order = component({
   // ── Vocabulary ──────────────────────────────────────────────
   states: ["DRAFT", "PENDING", "PAID", "SHIPPED", "CANCELLED"],
-  startsIn: "DRAFT",
+  init: "DRAFT",
 
-  // What the order remembers between actions (nothing is set at the start)
-  remembers: { rank: Rank, price: Yen },
+  // What the order remembers between commands (nothing is set at the start)
+  data: { rank: Rank, price: Yen },
 
   // What the order asks its dependencies (a clock, configuration, an external service's response)
-  asks: {
+  queries: {
     isMonthEnd: "boolean",
     paymentModuleActive: "boolean",
     paymentResult: ["succeeded", "failed"],
   },
 
-  // What the order tells its dependencies to do
-  tells: {
+  // The effects the order has on its dependencies
+  effects: {
     SendOrderConfirmation: {},
     SendReceipt: { discountPercent: "integer", amount: "integer" },
     IssueCoupon: { type: ["Premium", "Standard"] },
@@ -42,14 +42,14 @@ export const Order = component({
     },
   },
 
-  // Properties that must hold after every action
-  alwaysTrue: ["Every order past the draft state has a member rank and a price"],
+  // Properties that must hold after every command
+  invariants: ["Every order past the draft state has a member rank and a price"],
 
-  // ── Actions ─────────────────────────────────────────────────
-  actions: {
+  // ── Commands ────────────────────────────────────────────────
+  commands: {
     PlaceOrder: {
-      takes: { customerRank: Rank, listPrice: Yen },
-      allowedIn: ["DRAFT"],
+      input: { customerRank: Rank, listPrice: Yen },
+      from: ["DRAFT"],
       then: {
         goTo: "PENDING",
         does: "The order remembers the customer's rank and the list price. An order confirmation is sent.",
@@ -57,7 +57,7 @@ export const Order = component({
     },
 
     Checkout: {
-      allowedIn: ["PENDING"],
+      from: ["PENDING"],
       onlyIf: ["The external payment module is active"],
       when: {
         "The payment succeeded": {
@@ -74,7 +74,7 @@ export const Order = component({
     },
 
     Ship: {
-      allowedIn: ["PAID"],
+      from: ["PAID"],
       then: {
         goTo: "SHIPPED",
         does: "A shipping notice is sent, with priority as the shipping decision says.",
@@ -82,7 +82,7 @@ export const Order = component({
     },
 
     Cancel: {
-      allowedIn: ["PENDING", "PAID"],
+      from: ["PENDING", "PAID"],
       then: {
         goTo: "CANCELLED",
         does: "If the order had been paid, a refund is issued.",

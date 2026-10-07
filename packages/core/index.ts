@@ -1,8 +1,8 @@
 // 仕様を書くための型と関数。書くものは3つ:
 //
 //   決定表 (decisionTable)   … 条件から値を選ぶ表。値だけを返す
-//   コンポーネント (component) … 語彙、状態機械の骨組み、アクションの説明 (文)。関数は書かない
-//   結び付け (bind)           … アクションの構造 (宣言) と、名前の意味 (関数)
+//   コンポーネント (component) … 語彙、状態機械の骨組み、コマンドの説明 (文)。関数は書かない
+//   結び付け (bind)           … コマンドの構造 (宣言) と、名前の意味 (関数)
 //
 // 型は実行時に消えるため、すべて「値」として宣言し、型はそこから導出する。
 // 値として残るので IR に出力でき、PBT の入力生成にもそのまま使える。
@@ -75,7 +75,7 @@ export const text = (content: string, options: AssetOptions = {}): AssetDeclarat
 
 // --- 決定表 ---
 // 条件（自然言語）から値を選ぶ表。どの条件にも当たらないときの otherwise が必須で、全行が同じ列を持つ。
-// セルに書けるのは値だけ。指示や計算は書かない（表が決めるのは率や区分といったパラメータ）
+// セルに書けるのは値だけ。副作用や計算は書かない（表が決めるのは率や区分といったパラメータ）
 export type Constant = string | number | boolean;
 export type Table = Record<string, Record<string, Constant>>;
 type Columns<T> = T extends { otherwise: infer Row } ? keyof Row : never;
@@ -91,39 +91,42 @@ export function decisionTable<const T extends Table>(table: CheckTable<T>): T {
 // 結び付けの構造の中で、「どこから来る値か」を指す。関数だが、返すのは純粋なデータ
 export type Ref<Kind extends string, Path> = { readonly $ref: Kind; readonly path: Path };
 
-// 決定表の、当たった行の列の値
-export const decided = <const D extends string, const C extends string>(decision: D, column: C): Ref<"decided", readonly [D, C]> => ({
-  $ref: "decided",
-  path: [decision, column],
-});
-// 計算の結果
-export const calculated = <const N extends string>(name: N): Ref<"calculated", N> => ({ $ref: "calculated", path: name });
-// そのアクションの入力
-export const given = <const N extends string>(name: N): Ref<"given", N> => ({ $ref: "given", path: name });
-// 覚えているデータ
-export const remembered = <const N extends string>(name: N): Ref<"remembered", N> => ({ $ref: "remembered", path: name });
-// 問い合わせの答え
-export const asked = <const N extends string>(name: N): Ref<"asked", N> => ({ $ref: "asked", path: name });
-// アクションの実行前の状態が、挙げた状態のどれかであること（真偽値）
-export const was = <const S extends readonly string[]>(...states: S): Ref<"was", S> => ({ $ref: "was", path: states });
+// 参照は ref.input("x") のように、ref からたどって書く。名前は、指す先の宣言の見出しと同じ
+export const ref = {
+  // そのコマンドの入力
+  input: <const N extends string>(name: N): Ref<"input", N> => ({ $ref: "input", path: name }),
+  // 覚えているデータ
+  data: <const N extends string>(name: N): Ref<"data", N> => ({ $ref: "data", path: name }),
+  // 問い合わせの答え
+  query: <const N extends string>(name: N): Ref<"query", N> => ({ $ref: "query", path: name }),
+  // 決定表の、当たった行の列の値
+  decision: <const D extends string, const C extends string>(decision: D, column: C): Ref<"decision", readonly [D, C]> => ({
+    $ref: "decision",
+    path: [decision, column],
+  }),
+  // 計算の結果
+  calculation: <const N extends string>(name: N): Ref<"calculation", N> => ({ $ref: "calculation", path: name }),
+  // コマンドの実行前の状態が、挙げた状態のどれかであること（真偽値）
+  was: <const S extends readonly string[]>(...states: S): Ref<"was", S> => ({ $ref: "was", path: states }),
+};
 
 // --- コンポーネント ---
 // 部品を、語彙と骨組みと文で記述する。関数は書かない。
-//   states / startsIn … 状態名と初期状態
-//   remembers    … 部品が覚えているデータ（結び付けの remember で書き、後のアクションで読む。初めは未設定）
-//   asks         … 依存への問い合わせ（部品が外に尋ねて答えをもらう値。時計・設定・外部サービスの応答など）
-//   tells        … 依存への指示（部品が外に対して行う副作用）
+//   states / init … 状態名と初期状態
+//   data         … 部品が覚えているデータ（結び付けの set で書き、後のコマンドで読む。初めは未設定）
+//   queries      … 依存への問い合わせ（部品が外に尋ねて答えをもらう値。時計・設定・外部サービスの応答など）
+//   effects      … 依存への副作用（部品が外に対して行うこと）
 //   decisions    … 使う決定表
 //   calculations … 計算。短い名前と、式を述べる文 (is) と、結果の型。中身は結び付けに書く
-//   alwaysTrue   … 不変条件（文）。判定は結び付けに書く
-//   actions      … 外から部品を動かすアクション。入力 (takes)、実行できる状態 (allowedIn)、事前条件 (onlyIf)、
+//   invariants   … 不変条件（文）。判定は結び付けに書く
+//   commands     … 外から部品を動かすコマンド。入力 (input)、実行できる状態 (from)、事前条件 (onlyIf)、
 //                  そして何が起きるか: 遷移先 (goTo) と、説明の文 (does)。条件で分かれるなら when に並べる
 //   assets       … 実装を LLM に依頼するときに添付する資料。仕様の意味には影響しない
 export type Outcome = { goTo: string; does: string };
-export type ActionDeclaration = {
-  takes?: Fields;
-  // このアクションを実行できる状態。省略時は全状態
-  allowedIn?: readonly string[];
+export type CommandDeclaration = {
+  input?: Fields;
+  // このコマンドを実行できる状態。省略時は全状態
+  from?: readonly string[];
   // 事前条件（条件の文）。満たさない場合の挙動は仕様の対象外
   onlyIf?: readonly string[];
   // 条件で分かれないとき
@@ -134,44 +137,44 @@ export type ActionDeclaration = {
 export type Declaration = {
   assets?: readonly AssetDeclaration[];
   states: readonly string[];
-  startsIn: string;
-  remembers?: Fields;
-  asks?: Fields;
-  tells?: Record<string, Fields>;
+  init: string;
+  data?: Fields;
+  queries?: Fields;
+  effects?: Record<string, Fields>;
   decisions?: Record<string, Table>;
   calculations?: Record<string, { is: string; type: FieldSchema }>;
-  alwaysTrue?: readonly string[];
-  actions: Record<string, ActionDeclaration>;
+  invariants?: readonly string[];
+  commands: Record<string, CommandDeclaration>;
 };
 
 type Opt<T> = T extends object ? T : {};
 type States<B extends Declaration> = B["states"][number];
-type Remembers<B extends Declaration> = Opt<B["remembers"]>;
-type Asks<B extends Declaration> = Opt<B["asks"]>;
-type Tells<B extends Declaration> = Opt<B["tells"]>;
+type Data<B extends Declaration> = Opt<B["data"]>;
+type Queries<B extends Declaration> = Opt<B["queries"]>;
+type EffectsOf<B extends Declaration> = Opt<B["effects"]>;
 type Decisions<B extends Declaration> = Opt<B["decisions"]>;
 type Calculations<B extends Declaration> = Opt<B["calculations"]>;
-type Takes<B extends Declaration, A extends keyof B["actions"]> = Opt<B["actions"][A]["takes"]>;
+type Input<B extends Declaration, A extends keyof B["commands"]> = Opt<B["commands"][A]["input"]>;
 
 type CheckOutcome<B extends Declaration, O> = KnownKeys<O, keyof Outcome> & {
   goTo: O extends { goTo: infer G } ? OneOf<G, States<B>, "states"> : string;
   does: string;
 };
-type CheckAction<B extends Declaration, A extends keyof B["actions"]> = KnownKeys<B["actions"][A], keyof ActionDeclaration> & {
-  takes?: NoWide<B["actions"][A]["takes"]>;
-  allowedIn?: readonly States<B>[];
-} & (B["actions"][A] extends { when: infer W }
+type CheckCommand<B extends Declaration, A extends keyof B["commands"]> = KnownKeys<B["commands"][A], keyof CommandDeclaration> & {
+  input?: NoWide<B["commands"][A]["input"]>;
+  from?: readonly States<B>[];
+} & (B["commands"][A] extends { when: infer W }
     ? { when: { [C in keyof W]: CheckOutcome<B, W[C]> } & { otherwise: unknown }; then?: never }
-    : B["actions"][A] extends { then: infer O }
+    : B["commands"][A] extends { then: infer O }
       ? { then: CheckOutcome<B, O> }
       : { then: Problem<"then (条件で分かれない) か when (条件で分かれる) のどちらかが必要です"> });
 type Checked<B extends Declaration> = B &
   KnownKeys<B, keyof Declaration> & {
-    startsIn: OneOf<B["startsIn"], States<B>, "states">;
-    remembers?: NoWide<B["remembers"]>;
-    asks?: NoWide<B["asks"]>;
-    tells?: NoWideIn<B["tells"]>;
-    actions: { [A in keyof B["actions"]]: CheckAction<B, A> };
+    init: OneOf<B["init"], States<B>, "states">;
+    data?: NoWide<B["data"]>;
+    queries?: NoWide<B["queries"]>;
+    effects?: NoWideIn<B["effects"]>;
+    commands: { [A in keyof B["commands"]]: CheckCommand<B, A> };
   };
 
 declare const componentBrand: unique symbol;
@@ -188,111 +191,111 @@ export function component<const B extends Declaration>(declaration: Checked<B>):
 
 // --- 結び付け ---
 // コンポーネントの文と名前に、内容を結び付ける。2種類を書く:
-//   actions      … 構造。アクションの文 (does) が何を意味するかを、宣言で書く:
-//                  何を指示するか (tell)、何を覚えるか (remember)。値は参照 (decided など) で指す。
+//   commands     … 構造。コマンドの文 (does) が何を意味するかを、宣言で書く:
+//                  どの副作用を起こすか (effects)、何を覚えるか (set)。値は参照 (ref.decision など) で指す。
 //                  IR に出て、実装する LLM に渡る
-//   conditions / calculations / alwaysTrue … 意味。名前が何を指すかを、関数で書く。
+//   conditions / calculations / invariants … 意味。名前が何を指すかを、関数で書く。
 //                  IR には出ない。PBT が期待値を計算するための正解になる
 
 // 型 T の値として使える参照
 type ColumnType<T, C> = T[keyof T] extends infer Row ? (Row extends unknown ? (C extends keyof Row ? Row[C] : never) : never) : never;
-type RefTo<B extends Declaration, A extends keyof B["actions"], T> =
+type RefTo<B extends Declaration, A extends keyof B["commands"], T> =
   | {
       [D in keyof Decisions<B>]: {
-        [C in Columns<Decisions<B>[D]>]: ColumnType<Decisions<B>[D], C> extends T ? Ref<"decided", readonly [D, C]> : never;
+        [C in Columns<Decisions<B>[D]>]: ColumnType<Decisions<B>[D], C> extends T ? Ref<"decision", readonly [D, C]> : never;
       }[Columns<Decisions<B>[D]>];
     }[keyof Decisions<B>]
-  | { [N in keyof Calculations<B>]: Calculations<B>[N] extends { type: infer S } ? (FieldType<S> extends T ? Ref<"calculated", N> : never) : never }[keyof Calculations<B>]
-  | { [N in keyof Takes<B, A>]: FieldType<Takes<B, A>[N]> extends T ? Ref<"given", N> : never }[keyof Takes<B, A>]
-  | { [N in keyof Remembers<B>]: FieldType<Remembers<B>[N]> extends T ? Ref<"remembered", N> : never }[keyof Remembers<B>]
-  | { [N in keyof Asks<B>]: FieldType<Asks<B>[N]> extends T ? Ref<"asked", N> : never }[keyof Asks<B>]
+  | { [N in keyof Calculations<B>]: Calculations<B>[N] extends { type: infer S } ? (FieldType<S> extends T ? Ref<"calculation", N> : never) : never }[keyof Calculations<B>]
+  | { [N in keyof Input<B, A>]: FieldType<Input<B, A>[N]> extends T ? Ref<"input", N> : never }[keyof Input<B, A>]
+  | { [N in keyof Data<B>]: FieldType<Data<B>[N]> extends T ? Ref<"data", N> : never }[keyof Data<B>]
+  | { [N in keyof Queries<B>]: FieldType<Queries<B>[N]> extends T ? Ref<"query", N> : never }[keyof Queries<B>]
   | (boolean extends T ? Ref<"was", readonly States<B>[]> : never);
-type Value<B extends Declaration, A extends keyof B["actions"], T> = T | RefTo<B, A, T>;
+type Value<B extends Declaration, A extends keyof B["commands"], T> = T | RefTo<B, A, T>;
 
 // 実際に書かれたキーをなぞって検査する（書かれた型そのものとの交差では、余計なキーを検出できないため）
-type CheckPayload<B extends Declaration, A extends keyof B["actions"], Schema, P> = {
+type CheckPayload<B extends Declaration, A extends keyof B["commands"], Schema, P> = {
   [F in keyof P]: F extends keyof Schema
     ? Value<B, A, FieldType<Schema[F]>>
-    : Problem<`"${F & string}" というフィールドは、この指示にありません`>;
+    : Problem<`"${F & string}" というフィールドは、この副作用にありません`>;
 } & { [F in keyof Schema]: unknown };
-type CheckTell<B extends Declaration, A extends keyof B["actions"], E> = {
+type CheckEffect<B extends Declaration, A extends keyof B["commands"], E> = {
   // when: 条件の文か、真偽値の参照（決定表の列、問い合わせ、実行前の状態）
   [K in keyof E]: K extends "when"
     ? string | RefTo<B, A, boolean>
-    : K extends keyof Tells<B>
-      ? CheckPayload<B, A, Tells<B>[K], E[K]>
-      : Problem<`"${K & string}" は tells にありません`>;
+    : K extends keyof EffectsOf<B>
+      ? CheckPayload<B, A, EffectsOf<B>[K], E[K]>
+      : Problem<`"${K & string}" は effects にありません`>;
 };
 // 型引数をそのままなぞる形にしないと、タプルの要素ごとの検査にならない
-type CheckTells<B extends Declaration, A extends keyof B["actions"], T> = { [I in keyof T]: CheckTell<B, A, T[I]> };
-type CheckRemember<B extends Declaration, A extends keyof B["actions"], R> = {
-  [K in keyof R]: K extends keyof Remembers<B>
-    ? Value<B, A, FieldType<Remembers<B>[K]>>
-    : Problem<`"${K & string}" は remembers にありません`>;
+type CheckEffectList<B extends Declaration, A extends keyof B["commands"], T> = { [I in keyof T]: CheckEffect<B, A, T[I]> };
+type CheckSet<B extends Declaration, A extends keyof B["commands"], R> = {
+  [K in keyof R]: K extends keyof Data<B>
+    ? Value<B, A, FieldType<Data<B>[K]>>
+    : Problem<`"${K & string}" は data にありません`>;
 };
-type CheckEffects<B extends Declaration, A extends keyof B["actions"], E> = {
-  [K in keyof E]: K extends "tell"
-    ? CheckTells<B, A, E[K]>
-    : K extends "remember"
-      ? CheckRemember<B, A, E[K]>
-      : Problem<`"${K & string}" はここには書けません。書けるのは tell と remember です (遷移先はコンポーネントの goTo に書きます)`>;
+type CheckStructureOf<B extends Declaration, A extends keyof B["commands"], E> = {
+  [K in keyof E]: K extends "effects"
+    ? CheckEffectList<B, A, E[K]>
+    : K extends "set"
+      ? CheckSet<B, A, E[K]>
+      : Problem<`"${K & string}" はここには書けません。書けるのは effects と set です (遷移先はコンポーネントの goTo に書きます)`>;
 };
-// アクションごとの構造。when のあるアクションは、その条件ごと (otherwise を含む) に書く
+// コマンドごとの構造。when のあるコマンドは、その条件ごと (otherwise を含む) に書く
 type CheckStructure<B extends Declaration, S> = {
-  [A in keyof B["actions"]]: B["actions"][A] extends { when: infer W }
-    ? { [C in keyof W]: A extends keyof S ? (C extends keyof S[A] ? CheckEffects<B, A, S[A][C]> : unknown) : unknown } &
+  [A in keyof B["commands"]]: B["commands"][A] extends { when: infer W }
+    ? { [C in keyof W]: A extends keyof S ? (C extends keyof S[A] ? CheckStructureOf<B, A, S[A][C]> : unknown) : unknown } &
         (A extends keyof S ? KnownKeys<S[A], keyof W> : unknown)
     : A extends keyof S
-      ? CheckEffects<B, A, S[A]>
+      ? CheckStructureOf<B, A, S[A]>
       : unknown;
-} & KnownKeys<S, keyof B["actions"]>;
+} & KnownKeys<S, keyof B["commands"]>;
 
-// 条件の名前は、決定表の行・onlyIf・when のキー（コンポーネント）と、指示の when（結び付けの構造）から集める。
+// 条件の名前は、決定表の行・onlyIf・when のキー（コンポーネント）と、副作用の when（結び付けの構造）から集める。
 // 結び付けの漏れも、どこにも使われていない条件（typo）も、コンパイルエラーになる
-type TellConditions<E> = E extends { tell: readonly (infer T)[] } ? (T extends { when: infer W } ? (W extends string ? W : never) : never) : never;
+type EffectConditions<E> = E extends { effects: readonly (infer T)[] } ? (T extends { when: infer W } ? (W extends string ? W : never) : never) : never;
 type StructureConditions<B extends Declaration, S> = {
-  [A in keyof S]: A extends keyof B["actions"]
-    ? B["actions"][A] extends { when: unknown }
-      ? TellConditions<S[A][keyof S[A]]>
-      : TellConditions<S[A]>
+  [A in keyof S]: A extends keyof B["commands"]
+    ? B["commands"][A] extends { when: unknown }
+      ? EffectConditions<S[A][keyof S[A]]>
+      : EffectConditions<S[A]>
     : never;
 }[keyof S];
 type DeclaredConditions<B extends Declaration> =
   | Exclude<{ [D in keyof Decisions<B>]: keyof Decisions<B>[D] }[keyof Decisions<B>], "otherwise">
   | {
-      [A in keyof B["actions"]]:
-        | (B["actions"][A] extends { onlyIf: readonly (infer N)[] } ? N : never)
-        | (B["actions"][A] extends { when: infer W } ? Exclude<keyof W, "otherwise"> : never);
-    }[keyof B["actions"]];
+      [A in keyof B["commands"]]:
+        | (B["commands"][A] extends { onlyIf: readonly (infer N)[] } ? N : never)
+        | (B["commands"][A] extends { when: infer W } ? Exclude<keyof W, "otherwise"> : never);
+    }[keyof B["commands"]];
 export type ConditionNames<B extends Declaration, S> = (DeclaredConditions<B> | StructureConditions<B, S>) & string;
 
 type Shape<F> = F extends Fields ? { -readonly [K in keyof F]: FieldType<F[K]> } : {};
 type UnionToIntersection<U> = (U extends unknown ? (value: U) => void : never) extends (value: infer I) => void ? I : never;
 // 部品が覚えている状態: 状態名 (status) と、覚えているデータ（未設定があり得る）
-export type StateOf<B extends Declaration> = { status: States<B> } & Partial<Shape<B["remembers"]>>;
-// 条件と計算が読めるデータ: 状態、問い合わせの答え、アクションの入力（どのアクションでも使われ得るので省略可能）
+export type StateOf<B extends Declaration> = { status: States<B> } & Partial<Shape<B["data"]>>;
+// 条件と計算が読めるデータ: 状態、問い合わせの答え、コマンドの入力（どのコマンドでも使われ得るので省略可能）
 export type ContextOf<B extends Declaration> = StateOf<B> &
-  Shape<B["asks"]> &
-  Partial<UnionToIntersection<{ [A in keyof B["actions"]]: Shape<B["actions"][A]["takes"]> }[keyof B["actions"]]>>;
+  Shape<B["queries"]> &
+  Partial<UnionToIntersection<{ [A in keyof B["commands"]]: Shape<B["commands"][A]["input"]> }[keyof B["commands"]]>>;
 
 type Meanings<B extends Declaration, S> = {
   conditions: { [N in ConditionNames<B, S>]: (state: ContextOf<B>) => boolean };
 } & (keyof Calculations<B> extends never
   ? { calculations?: never }
   : { calculations: { [N in keyof Calculations<B>]: (state: ContextOf<B>) => Calculations<B>[N] extends { type: infer T } ? FieldType<T> : never } }) &
-  (B["alwaysTrue"] extends readonly string[]
-    ? { alwaysTrue: { [N in B["alwaysTrue"][number]]: (state: StateOf<B>) => boolean } }
-    : { alwaysTrue?: never });
+  (B["invariants"] extends readonly string[]
+    ? { invariants: { [N in B["invariants"][number]]: (state: StateOf<B>) => boolean } }
+    : { invariants?: never });
 
 // 実行時に扱う形（型の検査は bind の引数で済んでいる）
-export type Effects = { tell?: readonly Record<string, unknown>[]; remember?: Record<string, unknown> };
+export type Structure = { effects?: readonly Record<string, unknown>[]; set?: Record<string, unknown> };
 export type BoundSpecification = {
   component: Declaration;
-  // アクション名 → 構造。when のあるアクションは、条件 → 構造
-  actions: Record<string, Effects | Record<string, Effects>>;
+  // コマンド名 → 構造。when のあるコマンドは、条件 → 構造
+  commands: Record<string, Structure | Record<string, Structure>>;
   conditions: Record<string, (state: any) => boolean>;
   calculations?: Record<string, (state: any) => unknown>;
-  alwaysTrue?: Record<string, (state: any) => boolean>;
+  invariants?: Record<string, (state: any) => boolean>;
 };
 
 // コンポーネント → その結び付け。decide / calculate が、意味の関数の中から引けるようにする
@@ -301,7 +304,7 @@ export const bindingOf = (target: object): BoundSpecification | undefined => reg
 
 export function bind<B extends Declaration, const S>(
   target: Component<B>,
-  bindings: { actions: S & CheckStructure<B, S> } & Meanings<B, S>,
+  bindings: { commands: S & CheckStructure<B, S> } & Meanings<B, S>,
 ): BoundSpecification {
   const value = { component: target as Declaration, ...(bindings as unknown as Omit<BoundSpecification, "component">) };
   Object.defineProperty(value, BINDING, { value: true });

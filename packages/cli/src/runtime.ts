@@ -8,26 +8,26 @@ import { loadSpecs } from "./loader.ts";
 import { conforms, isEnum, isNumberSchema } from "./schema.ts";
 
 // 生成された verify.ts から呼ばれる PBT ランタイム。
-// 1回の試行は「初期状態から始まるアクション列」。期待値は仕様 (Layer 1/2) を具体値で実行して得る。
-// 本番システムの依存は代役 (Ports) に置き換え、問い合わせには生成した答えを返し、指示は記録して照合する。
+// 1回の試行は「初期状態から始まるコマンド列」。期待値は仕様 (Layer 1/2) を具体値で実行して得る。
+// 本番システムの依存は代役 (Ports) に置き換え、問い合わせには生成した答えを返し、副作用は記録して照合する。
 
 type Fn = (...args: any[]) => any;
 
-export type Ports = { queries: Record<string, Fn>; commands: Record<string, Fn> };
+export type Ports = { queries: Record<string, Fn>; effects: Record<string, Fn> };
 
 export type Adapter = {
   setupIsolation(ports: any): Promise<void>;
   teardownIsolation(): Promise<void>;
-  executeAction(action: any): Promise<void>;
+  executeCommand(command: any): Promise<void>;
   getCurrentState(): Promise<unknown>;
 };
 
 type Values = Record<string, unknown>;
 type RawStep = { pick: number; inputs: Record<string, Values>; queries: Values };
-type Observation = { state: unknown; commands: unknown };
+type Observation = { state: unknown; effects: unknown };
 
-// data は、そのアクションの実行前に部品が覚えているはずのデータ。case は成立した条件（無ければ "otherwise"）
-export type Step = { from: string; data: Values; action: string; input: Values; queries: Values; case: string };
+// data は、そのコマンドの実行前に部品が覚えているはずのデータ。case は成立した条件（無ければ "otherwise"）
+export type Step = { from: string; data: Values; command: string; input: Values; queries: Values; case: string };
 
 export type PbtResult =
   | { status: "pass"; seed: number; numRuns: number }
@@ -91,26 +91,26 @@ const messageOf = (error: unknown) => (error instanceof Error ? `${error.name}: 
 
 // 仕様側のシミュレーション。実装には触れず、仕様だけで「次に何が起きるべきか」を進める
 function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecification) {
-  const actions = Object.keys(input.behaviors).sort();
+  const commands = Object.keys(input.behaviors).sort();
 
   const sequences = fc.array(
     fc.record({
       pick: fc.nat(),
-      inputs: fc.record(Object.fromEntries(actions.map((name) => [name, recordOf(model.actions[name] ?? {})]))),
+      inputs: fc.record(Object.fromEntries(commands.map((name) => [name, recordOf(model.commands[name] ?? {})]))),
       queries: recordOf(model.queries),
     }),
     { minLength: 1, maxLength: MAX_STEPS },
   );
 
   const start = () => ({
-    status: model.initial,
+    status: model.init,
     // 未設定のデータも undefined のキーとして持つ
     data: Object.fromEntries(Object.keys(model.data).map((field) => [field, undefined])) as Values,
   });
 
   const checkInvariants = (state: { status: string; data: Values }, steps: Step[]) => {
     for (const name of model.invariants ?? []) {
-      const invariant = binding.alwaysTrue?.[name];
+      const invariant = binding.invariants?.[name];
       if (!invariant) throw new SpecError(`不変条件 "${name}" の判定が、結び付けにありません`, steps);
       if (!invariant({ status: state.status, ...state.data })) {
         throw new SpecError(`不変条件が破れました: "${name}" (状態 ${state.status}, データ ${JSON.stringify(state.data)})`, steps);
@@ -119,42 +119,42 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
   };
 
   // 参照を、その場の値に解決する
-  const resolve = (value: SpecValue, context: Values & { status: string }, action: string): unknown => {
+  const resolve = (value: SpecValue, context: Values & { status: string }, command: string): unknown => {
     if (!isReference(value)) return value;
     const ref: Reference = value;
     const name = String(ref.path);
     switch (ref.$ref) {
-      case "decided": {
+      case "decision": {
         const [decision, column] = ref.path as [string, string];
         const table = input.decisions[decision];
         if (!table) throw new Error(`決定表 "${decision}" がありません`);
         return table[matchCondition(binding, Object.keys(table), context)][column];
       }
-      case "calculated": {
+      case "calculation": {
         const calculation = binding.calculations?.[name];
         if (!calculation) throw new Error(`計算 "${name}" の中身が、結び付けにありません`);
         return calculation(context);
       }
-      case "given":
-        if (!(name in (model.actions[action] ?? {}))) throw new Error(`"${name}" は、アクション ${action} の入力ではありません`);
+      case "input":
+        if (!(name in (model.commands[command] ?? {}))) throw new Error(`"${name}" は、コマンド ${command} の入力ではありません`);
         return context[name];
-      case "remembered":
-      case "asked":
+      case "data":
+      case "query":
         return context[name];
       case "was":
         return (ref.path as string[]).includes(context.status);
     }
   };
 
-  // 1手進める。実行できるアクションが無ければ undefined。仕様の評価に失敗したら SpecError
+  // 1手進める。実行できるコマンドが無ければ undefined。仕様の評価に失敗したら SpecError
   const next = (state: { status: string; data: Values }, raw: RawStep, steps: Step[]) => {
     try {
       const contextOf = (name: string) => ({ status: state.status, ...state.data, ...raw.queries, ...raw.inputs[name] });
-      const enabled = actions.filter((name) => {
+      const enabled = commands.filter((name) => {
         const behavior = input.behaviors[name];
         return (
           (behavior.from ?? model.states).includes(state.status) &&
-          (behavior.where ?? []).every((text) => {
+          (behavior.onlyIf ?? []).every((text) => {
             const condition = binding.conditions[text];
             if (!condition) throw new Error(`事前条件 "${text}" の意味が、結び付けにありません`);
             return condition(contextOf(name));
@@ -163,56 +163,56 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
       });
       if (enabled.length === 0) return undefined;
 
-      const action = enabled[raw.pick % enabled.length];
-      const context = contextOf(action);
-      const cases = input.behaviors[action].cases;
+      const command = enabled[raw.pick % enabled.length];
+      const context = contextOf(command);
+      const cases = input.behaviors[command].when;
       const matched = matchCondition(binding, Object.keys(cases), context);
-      const step: Step = { from: state.status, data: plain(state.data), action, input: raw.inputs[action], queries: raw.queries, case: matched };
+      const step: Step = { from: state.status, data: plain(state.data), command, input: raw.inputs[command], queries: raw.queries, case: matched };
       steps.push(step);
 
       const outcome = cases[matched];
-      if (!model.states.includes(outcome.nextState)) throw new Error(`goTo "${outcome.nextState}" は states にありません`);
+      if (!model.states.includes(outcome.goTo)) throw new Error(`goTo "${outcome.goTo}" は states にありません`);
 
-      // 指示: when が成り立つものだけを、書かれた順に
-      const commands: { action: string; payload: Values }[] = [];
-      for (const command of outcome.tell) {
+      // 副作用: when が成り立つものだけを、書かれた順に
+      const effects: { name: string; payload: Values }[] = [];
+      for (const effect of outcome.effects) {
         const issued =
-          command.when === undefined
+          effect.when === undefined
             ? true
-            : typeof command.when === "string"
-              ? matchCondition(binding, [command.when], context) === command.when
-              : resolve(command.when, context, action) === true;
+            : typeof effect.when === "string"
+              ? matchCondition(binding, [effect.when], context) === effect.when
+              : resolve(effect.when, context, command) === true;
         if (!issued) continue;
-        const fields = model.commands[command.action];
-        if (!fields) throw new Error(`指示 "${command.action}" は tells にありません`);
-        const payload = Object.fromEntries(Object.entries(command.payload).map(([field, value]) => [field, resolve(value, context, action)]));
+        const fields = model.effects[effect.name];
+        if (!fields) throw new Error(`副作用 "${effect.name}" は effects にありません`);
+        const payload = Object.fromEntries(Object.entries(effect.payload).map(([field, value]) => [field, resolve(value, context, command)]));
         for (const [field, schema] of Object.entries(fields)) {
           if (!conforms(schema, payload[field])) {
-            throw new Error(`${command.action}.${field} = ${JSON.stringify(payload[field])} が宣言した型・範囲に合いません`);
+            throw new Error(`${effect.name}.${field} = ${JSON.stringify(payload[field])} が宣言した型・範囲に合いません`);
           }
         }
-        commands.push({ action: command.action, payload });
+        effects.push({ name: effect.name, payload });
       }
 
       // 覚えるデータ
       const set: Values = {};
       for (const [field, value] of Object.entries(outcome.set)) {
-        if (!(field in model.data)) throw new Error(`remember: "${field}" は remembers にありません`);
-        set[field] = resolve(value, context, action);
+        if (!(field in model.data)) throw new Error(`set: "${field}" は data にありません`);
+        set[field] = resolve(value, context, command);
         if (!conforms(model.data[field], set[field])) {
-          throw new Error(`remember: ${field} = ${JSON.stringify(set[field])} が宣言した型・範囲に合いません`);
+          throw new Error(`set: ${field} = ${JSON.stringify(set[field])} が宣言した型・範囲に合いません`);
         }
       }
 
-      const after = { status: outcome.nextState, data: { ...state.data, ...set } as Values };
+      const after = { status: outcome.goTo, data: { ...state.data, ...set } as Values };
       checkInvariants(after, steps);
-      return { step, expected: plain({ state: outcome.nextState, commands }) as Observation, after };
+      return { step, expected: plain({ state: outcome.goTo, effects }) as Observation, after };
     } catch (error) {
       throw error instanceof SpecError ? error : new SpecError(messageOf(error), steps);
     }
   };
 
-  return { actions, sequences, start, next, checkInvariants };
+  return { commands, sequences, start, next, checkInvariants };
 }
 
 // 仕様の事前検査: 実装なしで、仕様だけをランダムなアクション列で実行する。
@@ -275,7 +275,7 @@ async function check(
   if (!model) return { status: "error", message: "仕様にコンポーネントがありません" };
   if (!input.binding) return { status: "error", message: "コンポーネントの結び付け (bind) がありません" };
   const sim = simulator(input, model, input.binding);
-  if (sim.actions.length === 0) return { status: "error", message: "検証する behavior がありません" };
+  if (sim.commands.length === 0) return { status: "error", message: "検証するコマンドがありません" };
 
   // 1試行を実行し、不一致があればその内容を返す。仕様側の問題は SpecError として投げる
   const trial = async (raw: RawStep[]) => {
@@ -288,25 +288,25 @@ async function check(
         Object.keys(model.queries).map((name) => [
           name,
           () => {
-            if (!current) throw new Error(`ports.queries.${name}() was called before any action; ask during the action instead`);
+            if (!current) throw new Error(`ports.queries.${name}() was called before any command; ask during the command instead`);
             return current.queries[name];
           },
         ]),
       ),
-      commands: Object.fromEntries(
-        Object.keys(model.commands).map((action) => [
-          action,
-          (payload: unknown) => void recorded.push({ action, payload: plain(payload ?? {}) }),
+      effects: Object.fromEntries(
+        Object.keys(model.effects).map((name) => [
+          name,
+          (payload: unknown) => void recorded.push({ name, payload: plain(payload ?? {}) }),
         ]),
       ),
     };
 
-    let expected: Observation = { state: model.initial, commands: [] };
+    let expected: Observation = { state: model.init, effects: [] };
     try {
       await adapter.setupIsolation(ports);
       try {
         let state = sim.start();
-        const initial = plain({ state: await adapter.getCurrentState(), commands: recorded });
+        const initial = plain({ state: await adapter.getCurrentState(), effects: recorded });
         if (!isDeepStrictEqual(expected, initial)) return { steps, expected, actual: initial };
 
         for (const rawStep of raw) {
@@ -315,8 +315,8 @@ async function check(
           expected = planned.expected;
           current = planned.step;
           recorded = [];
-          await adapter.executeAction({ name: current.action, input: structuredClone(current.input) });
-          const actual = plain({ state: await adapter.getCurrentState(), commands: recorded });
+          await adapter.executeCommand({ name: current.command, input: structuredClone(current.input) });
+          const actual = plain({ state: await adapter.getCurrentState(), effects: recorded });
           if (!isDeepStrictEqual(expected, actual)) return { steps, expected, actual };
           state = planned.after;
         }

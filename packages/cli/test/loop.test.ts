@@ -222,14 +222,14 @@ test("実装 (緑): PBT の反例を差し戻し、次の試行で合格する",
   const first = attempts[2].feedback;
   assert.ok(first?.kind === "pbt" && first.result.status === "fail");
   assert.deepEqual(
-    first.result.steps.map((s) => [s.from, s.action, s.case, s.input.customerRank, s.data.rank]),
+    first.result.steps.map((s) => [s.from, s.command, s.case, s.input.customerRank, s.data.rank]),
     [
       ["DRAFT", "PlaceOrder", "otherwise", "Silver", undefined],
       ["PENDING", "Checkout", "The payment succeeded", undefined, "Silver"],
     ],
   );
   // 割引率だけが食い違う（価格は縮小の止まった値で、ここでは問わない）
-  const percentOf = (o: unknown) => (o as { commands: { payload: { discountPercent: number } }[] }).commands[0].payload.discountPercent;
+  const percentOf = (o: unknown) => (o as { effects: { payload: { discountPercent: number } }[] }).effects[0].payload.discountPercent;
   assert.equal(percentOf(first.result.expected), 5);
   assert.equal(percentOf(first.result.actual), 50);
 
@@ -247,21 +247,21 @@ test("実装 (緑): PBT の反例を差し戻し、次の試行で合格する",
   assert.deepEqual(mutation.survivors.map((s) => s.original), ["0"]);
 });
 
-test("複数ステップ: 3手でしか現れない不具合を、最小のアクション列まで縮めて報告する", async () => {
+test("複数ステップ: 3手でしか現れない不具合を、最小のコマンド列まで縮めて報告する", async () => {
   const { attempts } = await run({ implementation: ["norefund"] }, { maxAttempts: 1 });
   const feedback = attempts.at(-1)?.feedback;
   assert.ok(feedback?.kind === "pbt" && feedback.result.status === "fail");
   // 決済に成功してからキャンセルしたときだけ、返金が必要になる
   assert.deepEqual(
-    feedback.result.steps.map((s) => [s.from, s.action, s.case]),
+    feedback.result.steps.map((s) => [s.from, s.command, s.case]),
     [
       ["DRAFT", "PlaceOrder", "otherwise"],
       ["PENDING", "Checkout", "The payment succeeded"],
       ["PAID", "Cancel", "otherwise"],
     ],
   );
-  assert.deepEqual(feedback.result.expected, { state: "CANCELLED", commands: [{ action: "Refund", payload: {} }] });
-  assert.deepEqual(feedback.result.actual, { state: "CANCELLED", commands: [] });
+  assert.deepEqual(feedback.result.expected, { state: "CANCELLED", effects: [{ name: "Refund", payload: {} }] });
+  assert.deepEqual(feedback.result.actual, { state: "CANCELLED", effects: [] });
 });
 
 test("しきい値: 「以上」と「より大きい」の取り違えを、ちょうどの値で見つける", async () => {
@@ -269,17 +269,17 @@ test("しきい値: 「以上」と「より大きい」の取り違えを、ち
   const feedback = attempts.at(-1)?.feedback;
   assert.ok(feedback?.kind === "pbt" && feedback.result.status === "fail");
   const ship = feedback.result.steps.at(-1);
-  assert.equal(ship?.action, "Ship");
+  assert.equal(ship?.command, "Ship");
   assert.equal(ship.data.price, 10000);
-  assert.deepEqual(feedback.result.expected, { state: "SHIPPED", commands: [{ action: "SendShippingNotice", payload: { priority: true } }] });
-  assert.deepEqual(feedback.result.actual, { state: "SHIPPED", commands: [{ action: "SendShippingNotice", payload: { priority: false } }] });
+  assert.deepEqual(feedback.result.expected, { state: "SHIPPED", effects: [{ name: "SendShippingNotice", payload: { priority: true } }] });
+  assert.deepEqual(feedback.result.actual, { state: "SHIPPED", effects: [{ name: "SendShippingNotice", payload: { priority: false } }] });
 });
 
 test("計算: 丸め方の違い (切り捨てと四捨五入) を見つける", async () => {
   const { attempts } = await run({ implementation: ["rounding"] }, { maxAttempts: 1 });
   const feedback = attempts.at(-1)?.feedback;
   assert.ok(feedback?.kind === "pbt" && feedback.result.status === "fail");
-  const amountOf = (o: unknown) => (o as { commands: { payload: { amount: number } }[] }).commands[0].payload.amount;
+  const amountOf = (o: unknown) => (o as { effects: { payload: { amount: number } }[] }).effects[0].payload.amount;
   assert.equal(amountOf(feedback.result.actual), amountOf(feedback.result.expected) + 1);
 });
 
