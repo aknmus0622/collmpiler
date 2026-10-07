@@ -1,18 +1,21 @@
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, readdirSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { extract, stableStringify } from "./extract.ts";
+import { mergeAssets } from "./assets.ts";
+import type { Asset } from "./assets.ts";
 import { entryGate, exitGate } from "./gates.ts";
 import type { Feedback, GateContext, MutationSummary } from "./gates.ts";
 import { FILES, SOURCE_DIR, TEST_DIR, requireModel, specHash } from "./generate.ts";
 import type { Ir } from "./generate.ts";
 import { DEFAULT_GUIDE } from "./guide.ts";
-import { loadSpecs } from "./loader.ts";
+import { DRAFT_SUFFIX, loadSpecs } from "./loader.ts";
 import { builtinMutation } from "./mutation.ts";
 import type { MutationStrategy } from "./mutation.ts";
 import { PHASES } from "./request.ts";
 import type { Phase } from "./request.ts";
 import { selfCheck } from "./runtime.ts";
 import type { ImplementationStrategy } from "./strategy.ts";
+import { formatTypeErrors, typecheckSpecs } from "./typecheck.ts";
 
 // 仕様 → IR → TDD の3段階 (設計 → 配線 → 実装)。
 // 各段階は [入口ゲート → Strategy (エージェント) → 出口ゲート] で、段階ごとに別のセッションとして起動する。
@@ -28,8 +31,12 @@ export type ImplementOptions = {
   // 最初の段階からやり直す回数の上限（最初の1周を含む）
   maxRounds?: number;
   runs?: number;
-  // 依頼文に載せる設計方針。省略時は既定の方針
-  guide?: string;
+  // 依頼に添付する資料（設計方針、用語集など）。コンポーネントの assets に宣言したものに追加される。
+  // 既定では設計と実装の段階に渡す
+  assets?: Asset[];
+  // true なら、人がまだ確認していない結び付けの下書き (*.draft.ts) を正解として使う。
+  // 下書きから実装までを人手を挟まずに流すためのもの。結果には oracle: "draft" と記録される
+  drafts?: boolean;
   // ミューテーションのゲートの Strategy。省略時は自前、null で無効
   mutation?: MutationStrategy | null;
   // どの段階から始めるか。省略時は、出力先に本番コードとアダプターが無ければ設計から、あれば実装から。
@@ -59,7 +66,11 @@ export async function implement(options: ImplementOptions) {
   const outDir = resolve(process.cwd(), options.out);
   const log = options.log ?? (() => {});
 
-  const spec = await loadSpecs(specsDir);
+  const drafts = options.drafts ?? false;
+  const typeErrors = typecheckSpecs(specsDir, { drafts });
+  if (typeErrors.length > 0) throw new Error(`仕様に型エラーがあります:\n${formatTypeErrors(typeErrors)}`);
+
+  const spec = await loadSpecs(specsDir, { drafts });
   const { ir: extracted, diagnostics } = await extract(spec);
   const errors = diagnostics.filter((d) => d.severity === "error");
   if (errors.length > 0) {
@@ -82,7 +93,9 @@ export async function implement(options: ImplementOptions) {
     outDir,
     seed,
     runs: options.runs ?? 200,
-    guide: options.guide ?? DEFAULT_GUIDE,
+    guide: DEFAULT_GUIDE,
+    assets: mergeAssets(spec.assets ?? [], options.assets ?? []),
+    drafts,
     mutation: options.mutation === null ? undefined : (options.mutation ?? builtinMutation),
   };
 
@@ -93,6 +106,11 @@ export async function implement(options: ImplementOptions) {
   if (options.fresh) clear();
   const built = existsSync(join(outDir, SOURCE_DIR)) && existsSync(join(outDir, TEST_DIR, FILES.adapter));
   const first: Phase = options.fresh ? "design" : (options.from ?? (built ? "implementation" : "design"));
+
+  // 正解 (結び付け) が人の確認を経たものか、下書きのままか
+  const usesDraft = drafts && (readdirSync(specsDir, { recursive: true }) as string[]).some((file) => file.endsWith(DRAFT_SUFFIX));
+  const oracle = usesDraft ? ("draft" as const) : ("reviewed" as const);
+  if (usesDraft) log("注意: 人が確認していない結び付けの下書きを、正解として使っています");
 
   const attempts: Attempt[] = [];
   const maxAttempts = options.maxAttempts ?? 3;
@@ -133,9 +151,9 @@ export async function implement(options: ImplementOptions) {
         continue rounds;
       }
     }
-    return { status: "pass" as const, attempts, seed };
+    return { status: "pass" as const, oracle, attempts, seed };
   }
-  return { status: "fail" as const, attempts, seed };
+  return { status: "fail" as const, oracle, attempts, seed };
 }
 
 function describe(phase: Phase, feedback: Feedback | undefined): string {

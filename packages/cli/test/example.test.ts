@@ -96,7 +96,7 @@ function specDir(boundary: string, cases: string, bindings = "conditions: {}") {
   const dir = mkdtempSync(join(tmpRoot, "s-"));
   writeFileSync(
     join(dir, "x.component.ts"),
-    `import { applyFormula, bindSpecification, defineComponent } from "@aac/core";
+    `import { applyFormula, bindSpecification, defineComponent, dir, file, text } from "@aac/core";
 const Boundary = defineComponent({ initial: "A", states: ["A", "B"], ${boundary} });
 export const Component = Boundary.cases({ ${cases} });
 bindSpecification(Component, { ${bindings} });
@@ -130,6 +130,43 @@ test("コンポーネント: case の無いアクション、default の無い�
     loadSpecs(specDir(`actions: { Place: {} }`, `Place: { "何かの場合": ${noop} }`)),
     /アクション "Place" に case がありません/,
   );
+});
+
+test("添付資料: file / dir / text で宣言でき、パスはコンポーネントのファイルからの相対で読む", async () => {
+  const dir = specDir(
+    `assets: [file("docs/architecture.md"), dir("docs/conventions", { phases: ["design"] }), text("Adapters are named *Gateway.", { phases: ["wiring"] })], actions: { Place: {} }`,
+    `Place: ${noop}`,
+  );
+  mkdirSync(join(dir, "docs/conventions/naming"), { recursive: true });
+  writeFileSync(join(dir, "docs/architecture.md"), "- Use the repository pattern.");
+  writeFileSync(join(dir, "docs/conventions/errors.md"), "- Never swallow errors.");
+  writeFileSync(join(dir, "docs/conventions/naming/files.md"), "- kebab-case.");
+  writeFileSync(join(dir, "docs/conventions/.hidden"), "ignored");
+  const spec = await loadSpecs(dir);
+  assert.deepEqual(spec.assets, [
+    { kind: "file", name: "docs/architecture.md", content: "- Use the repository pattern." },
+    // ディレクトリは中のファイルすべて。相対パスの構造を保つ。ドットファイルは対象外
+    { kind: "file", name: "docs/conventions/errors.md", content: "- Never swallow errors.", phases: ["design"] },
+    { kind: "file", name: "docs/conventions/naming/files.md", content: "- kebab-case.", phases: ["design"] },
+    { kind: "text", text: "Adapters are named *Gateway.", phases: ["wiring"] },
+  ]);
+  // 添付資料は仕様の意味ではないので、IR には出ない（内容を変えても検証のシードは変わらない）
+  const { ir } = await extract(spec);
+  assert.ok(!JSON.stringify(ir).includes("architecture"));
+});
+
+test("添付資料: 無いパス、file と dir の取り違え、名前の重なりはエラー", async () => {
+  const load = async (assets: string, prepare?: (dir: string) => void) => {
+    const dir = specDir(`assets: [${assets}], actions: { Place: {} }`, `Place: ${noop}`);
+    mkdirSync(join(dir, "docs"));
+    writeFileSync(join(dir, "docs/a.md"), "a");
+    prepare?.(dir);
+    return loadSpecs(dir);
+  };
+  await assert.rejects(load(`file("docs/missing.md")`), /添付資料がありません: docs\/missing\.md/);
+  await assert.rejects(load(`file("docs")`), /はディレクトリです。dir\(\) で指定してください/);
+  await assert.rejects(load(`dir("docs/a.md")`), /はファイルです。file\(\) で指定してください/);
+  await assert.rejects(load(`file("docs/a.md"), dir("docs")`), /添付資料の名前が重なっています: docs\/a\.md/);
 });
 
 test("IR 抽出: 結び付けの無い条件・計算・不変条件はエラー", async () => {

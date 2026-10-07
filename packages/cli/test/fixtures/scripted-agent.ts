@@ -5,11 +5,13 @@ import { join } from "node:path";
 // 段階ごとに書くものが違う:
 //   design … 骨組み
 //     correct  … 正しい骨組み（中身は "not implemented" を投げる）
-//     broken   … 構文エラーで読み込めない
+//     broken   … 構文エラー
+//     crashing … 型は通るが、読み込むと例外を投げる
 //     leaky    … 仕様の条件の文を、コメントにそのまま書き写している
 //   wiring … アダプター
 //     correct  … 正しい配線
-//     miswired … 存在しないメソッドを呼ぶ
+//     mistyped … 存在しないメソッドを呼ぶ（型エラーになる）
+//     miswired … 型検査をすり抜けて、存在しないメソッドを呼ぶ（実行時に失敗する）
 //     fake     … 本番コードを使わず、アダプターの中に実装を持つ（骨組みのままでもテストが通ってしまう）
 //     touch    … 配線は正しいが、本番コード（骨組み）を書き換える
 //     cheat    … シルバー会員の決済をアダプターが肩代わりする（本番側の該当コードが死ぬ）
@@ -22,8 +24,8 @@ import { join } from "node:path";
 
 export type Phase = "design" | "wiring" | "implementation";
 export type Step =
-  | "correct" | "broken" | "leaky"
-  | "miswired" | "fake" | "touch" | "cheat"
+  | "correct" | "broken" | "crashing" | "leaky"
+  | "mistyped" | "miswired" | "fake" | "touch" | "cheat"
   | "buggy" | "norefund" | "boundary" | "rounding";
 
 const wrongDiscount = (step: Step) => step === "buggy";
@@ -161,7 +163,7 @@ export const adapter: TargetSystemAdapter = {
     service = undefined;
   },
   async executeAction(action) {
-${intercepts(step) ? INTERCEPT : ""}    if (action.name === "PlaceOrder") service?.${step === "miswired" ? "placeOrder" : "place"}(action.input.customerRank, action.input.listPrice);
+${intercepts(step) ? INTERCEPT : ""}    if (action.name === "PlaceOrder") ${step === "miswired" ? "(service as any).placeOrder" : step === "mistyped" ? "service?.placeOrder" : "service?.place"}(action.input.customerRank, action.input.listPrice);
     if (action.name === "Checkout") service?.checkout();
     if (action.name === "Ship") service?.ship();
     if (action.name === "Cancel") service?.cancel();
@@ -181,7 +183,9 @@ export function write(phase: Phase, step: Step, dir: string) {
         ? "export const = ;\n"
         : step === "leaky"
           ? `// Discount applies when: The customer is a Silver member\n${skeleton}`
-          : skeleton;
+          : step === "crashing"
+            ? `${skeleton}\nthrow new Error("boom at load");\n`
+            : skeleton;
     writeFileSync(join(dir, "src/order-service.ts"), text);
   }
   if (phase === "wiring") {

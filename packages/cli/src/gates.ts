@@ -3,6 +3,8 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, 
 import type { Dirent } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, relative, sep } from "node:path";
+import { assetsFor } from "./assets.ts";
+import type { Asset } from "./assets.ts";
 import { checkWorkspace } from "./check.ts";
 import type { Violation } from "./check.ts";
 import { stableStringify } from "./extract.ts";
@@ -10,10 +12,11 @@ import { FILES, SOURCE_DIR, TEST_DIR, generateAdapterSkeleton, generateContract,
 import type { Ir } from "./generate.ts";
 import { decisionValues, judge } from "./mutation.ts";
 import type { MutationStrategy } from "./mutation.ts";
-import { NOT_IMPLEMENTED, renderRequest } from "./request.ts";
+import { ASSETS_DIR, NOT_IMPLEMENTED, renderRequest } from "./request.ts";
 import type { Phase } from "./request.ts";
 import { RESULT_PREFIX } from "./runtime.ts";
 import type { PbtResult } from "./runtime.ts";
+import { typecheck } from "./typecheck.ts";
 
 // Strategy の前後に置くゲート。エージェントの隔離はここで成立させる。
 //   入口ゲート: リポジトリの外に作業場所を作り、その段階に許可した入力だけを置く
@@ -33,8 +36,12 @@ export type GateContext = {
   outDir: string;
   seed: number;
   runs: number;
-  // 依頼文に載せる設計方針
+  // 依頼文に載せる既定の設計方針
   guide: string;
+  // プロジェクトが依頼に添付する資料
+  assets: Asset[];
+  // true なら、人がまだ確認していない結び付けの下書きを正解として使う
+  drafts: boolean;
   // undefined ならミューテーションのゲートを省く
   mutation: MutationStrategy | undefined;
 };
@@ -92,7 +99,11 @@ export function entryGate(ctx: GateContext, phase: Phase, attempt: number, feedb
   }
 
   // 許可リスト。段階ごとに違う
-  const inputs: Record<string, string> = { [REQUEST]: renderRequest(phase, attempt, feedback, ctx.guide) };
+  const assets = assetsFor(ctx.assets, phase);
+  const inputs: Record<string, string> = {
+    [REQUEST]: renderRequest(phase, attempt, feedback, ctx.guide, assets),
+  };
+  for (const asset of assets) if (asset.kind === "file") inputs[`${ASSETS_DIR}/${asset.name}`] = asset.content;
   if (phase === "wiring") {
     inputs[CONTRACT] = generateContract(ctx.ir);
     inputs[ADAPTER] = existsSync(join(ctx.outDir, ADAPTER))
@@ -137,7 +148,7 @@ const scrub = (ctx: GateContext, text: string) =>
 function runVerify(ctx: GateContext): { result?: PbtResult; crash?: string } {
   const run = spawnSync(
     process.execPath,
-    [join(TEST_DIR, FILES.verify), "--seed", String(ctx.seed), "--runs", String(ctx.runs)],
+    [join(TEST_DIR, FILES.verify), "--seed", String(ctx.seed), "--runs", String(ctx.runs), ...(ctx.drafts ? ["--drafts"] : [])],
     { cwd: ctx.outDir, encoding: "utf8", timeout: 120_000 },
   );
   const line = run.stdout?.split("\n").find((text) => text.startsWith(RESULT_PREFIX));
@@ -234,7 +245,24 @@ export async function exitGate(ctx: GateContext, sandbox: Sandbox): Promise<{ fe
   violations.push(...checkWorkspace(ctx.outDir, ctx.ir, ctx.specsDir, phase === "design" ? "source" : "all"));
   if (violations.length > 0) return { feedback: { kind: "check", violations } };
 
-  // 5. 段階ごとの検査
+  // 5. 型チェック。設計の段階は本番コードだけ、以降はアダプターと契約も含める。
+  //    実装の段階が骨組みのシグネチャを変えると、アダプターが型エラーになってここで見つかる
+  const sources = filesUnder(join(ctx.outDir, SOURCE_DIR))
+    .filter(({ rel }) => rel.endsWith(".ts"))
+    .map(({ rel }) => `${SOURCE_DIR}/${rel}`);
+  const typeErrors = typecheck(ctx.outDir, phase === "design" ? sources : [...sources, ADAPTER, CONTRACT]).map(
+    (violation) =>
+      phase === "implementation" && violation.file === ADAPTER
+        ? {
+            ...violation,
+            file: SOURCE_DIR,
+            message: `The test harness no longer type-checks against your code, which means an exported name or signature was changed. Restore it. (${violation.message})`,
+          }
+        : violation,
+  );
+  if (typeErrors.length > 0) return { feedback: { kind: "check", violations: typeErrors } };
+
+  // 6. 段階ごとの検査
   if (phase === "design") {
     // 骨組みは配線の段階に渡る。仕様の文がそのまま書かれていると、IR を見せない意味が薄れる
     const leaked = specSentencesIn(ctx, outputs);

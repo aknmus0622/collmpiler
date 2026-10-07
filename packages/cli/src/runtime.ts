@@ -211,9 +211,15 @@ export async function selfCheck(
 export async function runPbt(options: { specs: string; adapter: Adapter; args?: string[] }): Promise<PbtResult> {
   const { values } = parseArgs({
     args: options.args ?? process.argv.slice(2),
-    options: { seed: { type: "string" }, path: { type: "string" }, runs: { type: "string" } },
+    options: {
+      seed: { type: "string" },
+      path: { type: "string" },
+      runs: { type: "string" },
+      // 人がまだ確認していない結び付けの下書き (*.draft.ts) を、正解として使う
+      drafts: { type: "boolean", default: false },
+    },
   });
-  const result = await check(options.specs, options.adapter, {
+  const result = await check(options.specs, options.adapter, values.drafts, {
     seed: values.seed === undefined ? undefined : Number(values.seed),
     path: values.path,
     numRuns: values.runs === undefined ? 200 : Number(values.runs),
@@ -226,9 +232,10 @@ export async function runPbt(options: { specs: string; adapter: Adapter; args?: 
 async function check(
   specs: string,
   adapter: Adapter,
+  drafts: boolean,
   params: { seed?: number; path?: string; numRuns: number },
 ): Promise<PbtResult> {
-  const input = await loadSpecs(specs);
+  const input = await loadSpecs(specs, { drafts });
   const model = input.model;
   if (!model) return { status: "error", message: "仕様にコンポーネントがありません" };
   const sim = simulator(input, model);

@@ -97,11 +97,19 @@ test("3段階: 段階ごとに見せるものが違う (配線は IR を見な�
   }
 });
 
-test("設計: 読み込めない骨組みは差し戻す", async () => {
-  const { status, trail, seen } = await run({ design: ["broken", "correct"] }, { mutation: null });
+test("設計: 型エラーや構文エラーのある骨組みは差し戻す", async () => {
+  const { status, trail, attempts } = await run({ design: ["broken", "correct"] }, { mutation: null });
   assert.equal(status, "pass");
+  assert.deepEqual(trail, ["design:check", "design:ok", "wiring:ok", "implementation:ok"]);
+  const feedback = attempts[0].feedback;
+  assert.ok(feedback?.kind === "check");
+  assert.deepEqual([...new Set(feedback.violations.map((v) => `${v.file}:${v.rule}`))], ["src/order-service.ts:type-error"]);
+});
+
+test("設計: 読み込むと失敗する骨組みは差し戻す", async () => {
+  const { trail, seen } = await run({ design: ["crashing", "correct"] }, { mutation: null });
   assert.deepEqual(trail, ["design:crash", "design:ok", "wiring:ok", "implementation:ok"]);
-  assert.match(of(seen, "design")[1].files["aac/REQUEST.md"], /crashed before producing a test result[\s\S]*SyntaxError/);
+  assert.match(of(seen, "design")[1].files["aac/REQUEST.md"], /crashed before producing a test result[\s\S]*boom at load/);
 });
 
 test("設計: 仕様の文をそのまま書き写した骨組みは差し戻す (配線の段階に仕様が漏れるため)", async () => {
@@ -129,6 +137,30 @@ test("配線 (赤): アダプター自身の誤りによる失敗は、未実装
   const feedback = attempts[1].feedback;
   assert.ok(feedback?.kind === "red");
   assert.match(feedback.message, /error in the adapter[\s\S]*placeOrder is not a function/);
+});
+
+test("配線: 骨組みに無いメンバーを呼ぶアダプターは、型エラーとして差し戻す", async () => {
+  const { trail, attempts } = await run({ wiring: ["mistyped", "correct"] }, { mutation: null });
+  assert.deepEqual(trail, ["design:ok", "wiring:check", "wiring:ok", "implementation:ok"]);
+  const feedback = attempts[1].feedback;
+  assert.ok(feedback?.kind === "check");
+  assert.deepEqual(feedback.violations.map((v) => `${v.file}:${v.rule}`), ["aac/adapter.ts:type-error"]);
+  assert.match(feedback.violations[0].message, /placeOrder/);
+});
+
+test("実装: 骨組みのシグネチャを変えると、アダプターが型エラーになって差し戻される", async () => {
+  // 実装の段階でメソッド名を変えてしまう例
+  const { trail, attempts } = await run({}, { maxAttempts: 1, mutation: null }, ({ dir, phase }) => {
+    if (phase !== "implementation") return;
+    const file = join(dir, "src/order-service.ts");
+    writeFileSync(file, readFileSync(file, "utf8").replace("  ship() {", "  dispatch() {"));
+  });
+  assert.deepEqual(trail, ["design:ok", "wiring:ok", "implementation:check"]);
+  const feedback = attempts[2].feedback;
+  assert.ok(feedback?.kind === "check");
+  // 実装の段階はアダプターを見られないので、何が起きたかを言葉で伝える
+  assert.match(feedback.violations[0].message, /an exported name or signature was changed[\s\S]*ship/);
+  assert.equal(feedback.violations[0].file, "src");
 });
 
 test("配線: 本番コード (骨組み) を書き換えたら不合格", async () => {
@@ -312,17 +344,47 @@ test("ミューテーション: 判定の基準", () => {
   );
 });
 
-// --- 設計方針 ---
+// --- 添付資料と設計方針 ---
 
-test("設計方針: 設計と実装の依頼文に載り、プロジェクトの方針で差し替えられる。配線の依頼文には載らない", async () => {
-  const standard = await run({}, { mutation: null });
-  assert.ok(of(standard.seen, "design")[0].files["aac/REQUEST.md"].includes(DEFAULT_GUIDE.trim()));
-  assert.ok(of(standard.seen, "implementation")[0].files["aac/REQUEST.md"].includes(DEFAULT_GUIDE.trim()));
-  assert.ok(!of(standard.seen, "wiring")[0].files["aac/REQUEST.md"].includes("Design guidance"));
+test("設計方針: 既定の方針は設計と実装の依頼文に載り、配線の依頼文には載らない", async () => {
+  const { seen } = await run({}, { mutation: null });
+  assert.ok(of(seen, "design")[0].files["aac/REQUEST.md"].includes(DEFAULT_GUIDE.trim()));
+  assert.ok(of(seen, "implementation")[0].files["aac/REQUEST.md"].includes(DEFAULT_GUIDE.trim()));
+  assert.ok(!of(seen, "wiring")[0].files["aac/REQUEST.md"].includes("Design guidance"));
+});
 
-  const custom = await run({}, { mutation: null, guide: "- Use the repository pattern." });
-  assert.match(of(custom.seen, "design")[0].files["aac/REQUEST.md"], /## Design guidance[\s\S]*- Use the repository pattern\./);
-  assert.ok(!of(custom.seen, "design")[0].files["aac/REQUEST.md"].includes(DEFAULT_GUIDE.trim()));
+test("添付資料: ファイルは作業場所に置かれ、文言は依頼文に載る。既定では設計と実装の段階にだけ渡る", async () => {
+  const assets = [
+    { kind: "file", name: "docs/architecture.md", content: "- Use the repository pattern." },
+    { kind: "text", text: "Money is always handled as whole yen." },
+    { kind: "text", text: "Adapters are named *Gateway.", phases: ["wiring"] },
+  ] as const;
+  const { seen, status } = await run({}, { mutation: null, assets: [...assets] });
+  assert.equal(status, "pass");
+  const files = (phase: Phase) => Object.keys(of(seen, phase)[0].files).filter((name) => name.startsWith("aac/assets/"));
+  assert.deepEqual(files("design"), ["aac/assets/docs/architecture.md"]);
+  assert.deepEqual(files("implementation"), ["aac/assets/docs/architecture.md"]);
+  assert.deepEqual(files("wiring"), []);
+
+  // ファイルは置き場所が案内され、文言はそのまま載る
+  const design = of(seen, "design")[0].files;
+  assert.match(design["aac/REQUEST.md"], /## Project conventions[\s\S]*- Money is always handled as whole yen\.[\s\S]*`aac\/assets\/docs\/architecture\.md`/);
+  assert.equal(design["aac/assets/docs/architecture.md"], "- Use the repository pattern.");
+  assert.ok(!design["aac/REQUEST.md"].includes("Gateway"));
+  // 配線の段階には、明示したものだけが渡る
+  const wiring = of(seen, "wiring")[0].files["aac/REQUEST.md"];
+  assert.match(wiring, /## Project conventions[\s\S]*- Adapters are named \*Gateway\./);
+  assert.ok(!wiring.includes("whole yen"));
+});
+
+test("添付資料: エージェントが書き換えたら差し戻す", async () => {
+  const assets = [{ kind: "file" as const, name: "architecture.md", content: "- Use the repository pattern." }];
+  const { attempts } = await run({}, { maxAttempts: 1, mutation: null, assets }, ({ dir, phase }) => {
+    if (phase === "design") writeFileSync(join(dir, "aac/assets/architecture.md"), "- Anything goes.");
+  });
+  const feedback = attempts[0].feedback;
+  assert.ok(feedback?.kind === "check");
+  assert.deepEqual(feedback.violations.map((v) => `${v.file}:${v.rule}`), ["aac/assets/architecture.md:read-only-file-modified"]);
 });
 
 // --- 隔離 ---

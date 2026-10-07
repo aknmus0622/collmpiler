@@ -4,7 +4,10 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { getCondition, getFormula, getInvariant } from "@aac/core";
 import type { SpecInput } from "./extract.ts";
+import { assetsFor, mergeAssets } from "./assets.ts";
+import type { Asset } from "./assets.ts";
 import { scrubEnv } from "./gates.ts";
+import { ASSETS_DIR, renderAssets } from "./request.ts";
 import { TEST_DIR, FILES } from "./generate.ts";
 import { DRAFT_SUFFIX, loadSpecs } from "./loader.ts";
 import type { ImplementationStrategy } from "./strategy.ts";
@@ -14,12 +17,14 @@ import type { ImplementationStrategy } from "./strategy.ts";
 // 結び付けは採点の正解なので、LLM が書いたものをそのまま正解にはしない:
 //   - 下書きは <名前>.binding.draft.ts に書き出す。ローダーは既定で *.draft.ts を読まないので、
 //     人が中身を確認して <名前>.binding.ts に名前を変えるまで、検証には使われない
-//   - 機械的に確かめられること（結び付け漏れ、条件の衝突、不変条件、値の型）は、書き出す前に検査して差し戻す。
+//   - 機械的に確かめられること（型エラー、結び付け漏れ、条件の衝突、不変条件、値の型）は、書き出す前に検査して差し戻す。
 //     意味が合っているかは、人が読んで確かめる
 
 export type DraftOptions = {
   specs: string;
   strategy: ImplementationStrategy;
+  // 依頼に添付する資料（用語集など）。コンポーネントの assets に宣言したものに追加される
+  assets?: Asset[];
   maxAttempts?: number;
   log?: (line: string) => void;
 };
@@ -75,7 +80,15 @@ ${group("conditions", names.conditions) || "\n  conditions: {},\n"}${group("form
 `;
 }
 
-function request(spec: SpecInput, names: Names, draftFile: string, extending: boolean, attempt: number, problems?: string) {
+function request(
+  spec: SpecInput,
+  names: Names,
+  draftFile: string,
+  extending: boolean,
+  attempt: number,
+  assets: Asset[],
+  problems?: string,
+) {
   const model = spec.model!;
   const list = (items: string[]) => items.map((item) => `  - ${quote(item)}`).join("\n") || "  (none)";
   const inputs = [...new Set(Object.values(model.actions).flatMap((fields) => Object.keys(fields)))];
@@ -120,11 +133,11 @@ ${list(names.invariants)}
 
 ## How the draft is checked
 
-After you finish, the specification is run on its own with your functions, over many random sequences of
-actions. The draft is rejected if a name is left unbound, if two conditions of the same table or action hold
+After you finish, the draft is type-checked, and the specification is run on its own with your functions,
+over many random sequences of actions. The draft is rejected if it has a type error, if a name is left unbound, if two conditions of the same table or action hold
 at once, if an invariant is broken, or if a formula returns a value that does not fit its declared type.
 Passing this check does not mean the functions are right; that is what the review is for.
-${problems ? `\n## Problems found in the previous attempt\n\n\`\`\`\n${problems}\n\`\`\`\n` : ""}`;
+${renderAssets(assets)}${problems ? `\n## Problems found in the previous attempt\n\n\`\`\`\n${problems}\n\`\`\`\n` : ""}`;
 }
 
 export async function draftBinding(options: DraftOptions): Promise<DraftResult> {
@@ -167,7 +180,14 @@ export async function draftBinding(options: DraftOptions): Promise<DraftResult> 
       const previous = join(specsDir, draftFile);
       writeFileSync(join(dir, SPEC_DIR, draftFile), existsSync(previous) && attempt > 1 ? readFileSync(previous, "utf8") : start);
       mkdirSync(join(dir, TEST_DIR), { recursive: true });
-      writeFileSync(join(dir, REQUEST), request(spec, missing, draftFile, extending, attempt, problems));
+      // 仕様に宣言された資料と、コマンドで渡された資料のうち、設計の段階に渡るもの
+      const assets = assetsFor(mergeAssets(spec.assets ?? [], options.assets ?? []), "design");
+      for (const asset of assets) {
+        if (asset.kind !== "file") continue;
+        mkdirSync(dirname(join(dir, ASSETS_DIR, asset.name)), { recursive: true });
+        writeFileSync(join(dir, ASSETS_DIR, asset.name), asset.content);
+      }
+      writeFileSync(join(dir, REQUEST), request(spec, missing, draftFile, extending, attempt, assets, problems));
 
       log(`[binding #${attempt}] ${options.strategy.name} (in ${dir})`);
       await options.strategy.run({ dir, phase: "binding", attempt, env: scrubEnv(process.env, hidden) });

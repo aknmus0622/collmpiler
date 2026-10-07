@@ -1,3 +1,4 @@
+import type { Asset } from "./assets.ts";
 import type { Feedback } from "./gates.ts";
 import { FILES, SOURCE_DIR, TEST_DIR } from "./generate.ts";
 
@@ -186,8 +187,30 @@ const TITLES: Record<Phase, string> = {
   implementation: "Step 3 of 3: implement the production code",
 };
 
-export function renderRequest(phase: Phase, attempt: number, feedback: Feedback | undefined, guide: string): string {
+// 添付資料の置き場所（作業場所の中）
+export const ASSETS_DIR = `${TEST_DIR}/assets`;
+
+// プロジェクトが添付した資料。文言は依頼文に直接載せ、ファイルは置き場所を案内する
+export function renderAssets(assets: Asset[]): string {
+  const notes = assets.flatMap((asset) => (asset.kind === "text" ? [asset.text] : []));
+  const files = assets.flatMap((asset) => (asset.kind === "file" ? [asset.name] : []));
+  if (notes.length + files.length === 0) return "";
+  const parts = ["\n## Project conventions\n\nThe project supplied the following. Where it disagrees with the general guidance in this request, it takes precedence. It does not change the rules that are checked mechanically.\n"];
+  if (notes.length > 0) parts.push(notes.map((note) => `- ${note}`).join("\n") + "\n");
+  if (files.length > 0) {
+    parts.push(`Read these files before you start:\n\n${files.map((name) => `- \`${ASSETS_DIR}/${name}\``).join("\n")}\n`);
+  }
+  return parts.join("\n");
+}
+
+export function renderRequest(
+  phase: Phase,
+  attempt: number,
+  feedback: Feedback | undefined,
+  guide: string,
+  assets: Asset[] = [],
+): string {
   const body = phase === "design" ? design(guide) : phase === "wiring" ? wiring() : implementation(guide);
   const previous = feedback ? `\n## Feedback from the previous attempt\n\n${renderFeedback(feedback)}\n` : "";
-  return `# ${TITLES[phase]} (attempt ${attempt})\n\n${body}${previous}`;
+  return `# ${TITLES[phase]} (attempt ${attempt})\n\n${body}${renderAssets(assets)}${previous}`;
 }

@@ -80,6 +80,29 @@ test("下書き: 人が名前を変えるまで、検証には使われない", 
   assert.equal(compileWithDrafts(dir).status, 0);
 });
 
+test("下書き: 型エラーのある下書きは、書き直させる", async () => {
+  // フィールド名の typo
+  const mistyped = reviewed.replace("state.paymentModuleActive", "state.paymentModuleActiv");
+  const dir = specDir();
+  const { strategy, seen } = scripted([mistyped, reviewed]);
+  const result = await draftBinding({ specs: dir, strategy });
+  assert.ok(result.status === "drafted" && result.attempts === 2);
+  assert.match(seen[1].request, /Problems found in the previous attempt[\s\S]*type-error[\s\S]*paymentModuleActiv/);
+});
+
+test("下書き: 添付資料を渡せる", async () => {
+  const { strategy, seen } = scripted([reviewed]);
+  await draftBinding({
+    specs: specDir(),
+    strategy,
+    assets: [
+      { kind: "file", name: "glossary.md", content: "- month-end: the last day." },
+      { kind: "text", text: "Prices never include tax." },
+    ],
+  });
+  assert.match(seen[0].request, /## Project conventions[\s\S]*- Prices never include tax\.[\s\S]*`aac\/assets\/glossary\.md`/);
+});
+
 test("下書き: 機械的に分かる誤り (条件の衝突) は、書き直させる", async () => {
   // シルバー会員の条件を「常に真」にすると、ゴールド会員かつ月末の条件と同時に成り立つ
   const conflicting = reviewed.replace('(state) => state.rank === "Silver"', "() => true");
@@ -142,4 +165,78 @@ test("下書き: 結び付けが揃っていれば、何もしない", () => {
     { encoding: "utf8" },
   );
   assert.deepEqual(JSON.parse(out), { status: "nothing-to-draft" });
+});
+
+test("下書き: --drafts を明示すれば、人の確認を待たずに実装まで流せる。結果には下書きを使ったことが残る", async () => {
+  const dir = specDir();
+  await draftBinding({ specs: dir, strategy: scripted([reviewed]).strategy });
+
+  // 結び付けはプロセス全体で共有されるので、実装は別プロセス (コマンド) で実行する
+  const out = mkdtempSync(join(tmpRoot, "o-"));
+  const agent = `"${process.execPath}" "${join(import.meta.dirname, "fixtures/scripted-agent.ts")}"`;
+  const implementWith = (...flags: string[]) =>
+    spawnSync(
+      process.execPath,
+      [join(repoRoot, "packages/cli/src/implement.ts"), "--specs", dir, "--out", out, "--agent", agent, "--mutation", "off", ...flags],
+      { encoding: "utf8" },
+    );
+
+  // 下書きを指定しなければ、結び付けが無いので始められない
+  const refused = implementWith();
+  assert.notEqual(refused.status, 0);
+  assert.match(refused.stderr, /仕様に(型)?エラーがあります/);
+
+  const accepted = implementWith("--drafts");
+  assert.equal(accepted.status, 0);
+  const result = JSON.parse(accepted.stdout);
+  assert.equal(result.status, "pass");
+  assert.equal(result.oracle, "draft");
+  assert.match(accepted.stderr, /人が確認していない結び付けの下書きを、正解として使っています/);
+});
+
+test("添付資料: 仕様に宣言した資料が、実装の各段階に渡る (配線には、明示したものだけ)", async () => {
+  // 例のコンポーネントに assets を足した仕様
+  const dir = specDir(reviewed);
+  const component = join(dir, "order.component.ts");
+  writeFileSync(
+    component,
+    readFileSync(component, "utf8")
+      .replace('import { applyDecision, applyFormula, defineComponent } from "@aac/core";', 'import { applyDecision, applyFormula, defineComponent, dir, file, text } from "@aac/core";')
+      .replace(
+        "const OrderBoundary = defineComponent({",
+        `const OrderBoundary = defineComponent({
+  assets: [
+    file("docs/architecture.md"),
+    dir("docs/conventions"),
+    text("Adapters are named *Gateway.", { phases: ["wiring"] }),
+  ],`,
+      ),
+  );
+  mkdirSync(join(dir, "docs/conventions"), { recursive: true });
+  writeFileSync(join(dir, "docs/architecture.md"), "- Use the repository pattern.");
+  writeFileSync(join(dir, "docs/conventions/errors.md"), "- Never swallow errors.");
+
+  const out = mkdtempSync(join(tmpRoot, "o-"));
+  const agent = `"${process.execPath}" "${join(import.meta.dirname, "fixtures/scripted-agent.ts")}"`;
+  const run = spawnSync(
+    process.execPath,
+    [join(repoRoot, "packages/cli/src/implement.ts"), "--specs", dir, "--out", out, "--agent", agent, "--mutation", "off", "--keep-sandbox"],
+    { encoding: "utf8" },
+  );
+  assert.equal(run.status, 0, run.stderr);
+  const attempts = JSON.parse(run.stdout).attempts as { phase: string; inputs: string[]; sandbox: string }[];
+  try {
+    const of = (phase: string) => attempts.find((a) => a.phase === phase)!;
+    const assetsOf = (phase: string) => of(phase).inputs.filter((name) => name.startsWith("aac/assets/"));
+    const documents = ["aac/assets/docs/architecture.md", "aac/assets/docs/conventions/errors.md"];
+    assert.deepEqual(assetsOf("design"), documents);
+    assert.deepEqual(assetsOf("implementation"), documents);
+    assert.deepEqual(assetsOf("wiring"), []);
+
+    assert.equal(readFileSync(join(of("design").sandbox, "aac/assets/docs/architecture.md"), "utf8"), "- Use the repository pattern.");
+    assert.ok(!readFileSync(join(of("design").sandbox, "aac/REQUEST.md"), "utf8").includes("Gateway"));
+    assert.match(readFileSync(join(of("wiring").sandbox, "aac/REQUEST.md"), "utf8"), /- Adapters are named \*Gateway\./);
+  } finally {
+    for (const { sandbox } of attempts) rmSync(sandbox, { recursive: true, force: true });
+  }
 });

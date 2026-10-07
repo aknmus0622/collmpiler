@@ -1,8 +1,9 @@
 import { readdirSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { COMPONENT } from "@aac/core";
 import type { Boundary } from "@aac/core";
+import { resolveAssets } from "./assets.ts";
 import type { SpecInput, SpecModel } from "./extract.ts";
 
 // 下書き (LLM が書き、人がまだ確定していない結び付け) のファイル名
@@ -32,6 +33,8 @@ export async function loadSpecs(dir: string, options: { drafts?: boolean } = {})
         if (input.model) throw new Error(`コンポーネントが複数あります (${file})。現在は1つだけ扱えます`);
         Object.assign(input, normalize(exportName, value as Boundary & { behaviors: Record<string, unknown> }));
         input.sources = { ...input.sources, component: { file, exportName }, tables: input.sources?.tables ?? {} };
+        // 添付資料のパスは、コンポーネントのファイルがあるディレクトリからの相対
+        input.assets = resolveAssets((value as Boundary).assets ?? [], dirname(join(root, file)));
       } else if ("default" in value) {
         if (exportName in input.tables && input.tables[exportName] !== value) {
           throw new Error(`DecisionTable "${exportName}" が重複しています (${file})`);

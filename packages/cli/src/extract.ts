@@ -1,5 +1,6 @@
 import { ABSTRACT_APPLY, ABSTRACT_FORMULA, getCondition, getFormula, getInvariant } from "@aac/core";
 import type { FieldSchema, Fields } from "@aac/core";
+import type { Asset } from "./assets.ts";
 import { lintCase } from "./lint.ts";
 
 // レコーディング Proxy による抽象実行: cases の関数を「記号的な state」で1回走らせ、
@@ -28,6 +29,8 @@ export type SpecInput = {
   // export 名 → DecisionTable。applyDecision に渡された表の名前解決に使う
   tables: Record<string, object>;
   model?: SpecModel;
+  // コンポーネントの assets に宣言された添付資料（ファイルは内容を読み込んだもの）。IR には含めない
+  assets?: Asset[];
   // どのファイルのどの export か（結び付けの下書きを書くときに使う）
   sources?: { component?: { file: string; exportName: string }; tables: Record<string, string> };
 };
