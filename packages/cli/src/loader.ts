@@ -11,8 +11,10 @@ export const DRAFT_SUFFIX = ".draft.ts";
 
 // 仕様の読み込みはここ1箇所に閉じ込める。パスは process.cwd() 基準。
 // 下書き (*.draft.ts) は既定では読まない。人が確認して名前を変えるまで、正解として使われないようにするため。
-// drafts: true のときだけ下書きを読み、それが置き換える確定版 (X.draft.ts に対する X.ts) は読まない
-export async function loadSpecs(dir: string, options: { drafts?: boolean } = {}): Promise<SpecInput> {
+// drafts: true のときだけ下書きを読み、それが置き換える確定版 (X.draft.ts に対する X.ts) は読まない。
+// bindings: false のときは、結び付けを仕様に重ねない（どのファイルにあるかだけを記録する）。
+// コンポーネントが変わって結び付けが古くなっていても、コンポーネントの側を読めるようにするため
+export async function loadSpecs(dir: string, options: { drafts?: boolean; bindings?: boolean } = {}): Promise<SpecInput> {
   const root = resolve(process.cwd(), dir);
   const all = (readdirSync(root, { recursive: true }) as string[])
     .filter((file) => file.endsWith(".ts") && !file.endsWith(".d.ts"))
@@ -43,7 +45,7 @@ export async function loadSpecs(dir: string, options: { drafts?: boolean } = {})
 
   const { declaration, file, exportName } = found;
   const bound = bindings.find(({ binding }) => binding.component === declaration);
-  const input = normalize(exportName, declaration, bound?.binding);
+  const input = normalize(exportName, declaration, options.bindings === false ? undefined : bound?.binding);
   // 添付資料のパスは、コンポーネントのファイルがあるディレクトリからの相対
   input.assets = resolveAssets(declaration.assets ?? [], dirname(join(root, file)));
   input.sources = {

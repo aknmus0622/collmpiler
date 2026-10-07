@@ -15,6 +15,8 @@ import type { ImplementationStrategy } from "./strategy.ts";
 // 下書きには、コマンドの構造 (宣言) と、名前の意味 (関数) の両方が含まれる。
 //
 // 結び付けは採点の正解なので、LLM が書いたものをそのまま正解にはしない:
+//   - 結び付けがまだ無ければ、雛形から書かせる。すでにあって、コンポーネントの変更で合わなくなっていれば、
+//     いまの結び付けを出発点にして、合わなくなった所だけを直させる
 //   - 下書きは <名前>.binding.draft.ts に書き出す。ローダーは既定で *.draft.ts を読まないので、
 //     人が中身を確認して <名前>.binding.ts に名前を変えるまで、検証には使われない
 //   - 機械的に確かめられること（型エラー、参照の誤り、条件の衝突、不変条件、値の型）は、書き出す前に検査して差し戻す。
@@ -31,7 +33,8 @@ export type DraftOptions = {
 
 export type DraftResult =
   | { status: "nothing-to-draft" }
-  | { status: "drafted" | "failed"; draft: string; attempts: number; problems?: string };
+  // updates: 下書きが、すでにある結び付けを直したものであるとき、その元のファイル
+  | { status: "drafted" | "failed"; draft: string; attempts: number; problems?: string; updates?: string };
 
 const SPEC_DIR = "spec";
 const REQUEST = `${TEST_DIR}/${FILES.request}`;
@@ -78,21 +81,34 @@ ${group("calculations", Object.entries(model.calculations ?? {}).map(([name, cal
 `;
 }
 
-function request(spec: SpecInput, draftFile: string, attempt: number, assets: Asset[], problems?: string) {
+// update: すでにある結び付けを、コンポーネントの変更に合わせて直す
+function request(spec: SpecInput, draftFile: string, attempt: number, assets: Asset[], problems: string | undefined, update: boolean) {
   const model = spec.model!;
   const names = (fields: object) => Object.keys(fields).map((k) => `\`${k}\``).join(", ") || "none";
   const inputs = [...new Set(Object.values(model.commands).flatMap((fields) => Object.keys(fields)))];
-  return `# Draft the binding of a specification (attempt ${attempt})
+  return `# ${update ? "Update" : "Draft"} the binding of a specification (attempt ${attempt})
 
 The files under \`${SPEC_DIR}/\` are a specification. The component describes what each command does **in prose**
-(\`does\`), and names its conditions, calculations, and invariants in natural language. Your task is to write
+(\`does\`), and names its conditions, calculations, and invariants in natural language. ${
+    update
+      ? `The **binding** says what those sentences and names mean. The specification has changed since the binding was
+written, and the binding no longer fits it. Your task is to bring the binding up to date. The result is a draft;
+a person will review what you changed before it is used.`
+      : `Your task is to write
 the **binding**: what those sentences and names mean. The result is a draft; a person will review every entry
-before it is used.
+before it is used.`
+  }
 
 ## What to write
 
-Edit \`${SPEC_DIR}/${draftFile}\`, and only that file. It lists every command and every name with an empty
-placeholder. It has two parts.
+Edit \`${SPEC_DIR}/${draftFile}\`, and only that file. ${
+    update
+      ? `It holds the binding as it was, already reviewed by a person. **Change only what the specification now
+requires**: add what is missing, remove what is no longer used, and correct an entry only if its sentence
+changed. Leave every other entry exactly as it is, including its formatting. The problems the current binding
+has are listed at the end of this request.`
+      : "It lists every command and every name with an empty\nplaceholder."
+  } It has two parts.
 
 ### 1. Structure (\`commands\`): declarations, no functions
 
@@ -145,32 +161,40 @@ sequences of commands. The draft is rejected if it has a type error, if a refere
 is used for, if a name is left without a meaning, if two conditions of the same table or command hold at once,
 if an invariant is broken, or if a value does not fit its declared type. Passing this check does not mean the
 draft is right; that is what the review is for.
-${renderAssets(assets)}${problems ? `\n## Problems found in the previous attempt\n\n\`\`\`\n${problems}\n\`\`\`\n` : ""}`;
+${renderAssets(assets)}${problems ? `\n## ${update && attempt === 1 ? "Problems with the current binding" : "Problems found in the previous attempt"}\n\n\`\`\`\n${problems}\n\`\`\`\n` : ""}`;
 }
 
 export async function draftBinding(options: DraftOptions): Promise<DraftResult> {
   const specsDir = resolve(process.cwd(), options.specs);
   const log = options.log ?? (() => {});
 
-  const spec = await loadSpecs(specsDir);
+  // 結び付けは重ねずに読む（コンポーネントが変わって、結び付けが合わなくなっていても読めるように）
+  const spec = await loadSpecs(specsDir, { bindings: false });
   const component = spec.sources?.component;
   if (!spec.model || !component) throw new Error("仕様にコンポーネントがありません");
-  // 確定した結び付けがあれば、何もしない
-  if (spec.binding) return { status: "nothing-to-draft" };
 
-  // order.component.ts → 下書き order.binding.draft.ts
+  // 確定した結び付けがあり、いまの仕様に合っていれば、何もしない。
+  // 合わなくなっていれば、その結び付けを出発点にして直させる
+  const existing = spec.sources?.binding;
+  const update = existing !== undefined;
+  let problems = update ? check(specsDir, false) : undefined;
+  if (update && problems === undefined) return { status: "nothing-to-draft" };
+
+  // 下書きの名前: order.binding.ts → order.binding.draft.ts（無ければ order.component.ts から決める）。
+  // 下書きを読むときは、同じ名前の確定版は読まれない
   const stem = join(dirname(component.file), basename(component.file).replace(/(\.component)?\.ts$/, ""));
-  const draftFile = `${stem}.binding${DRAFT_SUFFIX}`;
-  const start = skeleton(spec, basename(component.file), component.exportName);
+  const draftFile = update ? existing.replace(/\.ts$/, DRAFT_SUFFIX) : `${stem}.binding${DRAFT_SUFFIX}`;
+  const start = update ? readFileSync(join(specsDir, existing), "utf8") : skeleton(spec, basename(component.file), component.exportName);
+
+  const updates = update ? { updates: join(specsDir, existing) } : {};
 
   const hidden = [...new Set([process.cwd(), specsDir])];
+  // 作業場所には、下書きが置き換える確定版は置かない（同じ export が2つあると紛らわしい）
   const specFiles = (readdirSync(specsDir, { recursive: true }) as string[]).filter(
-    (file) => file.endsWith(".ts") && !file.endsWith(DRAFT_SUFFIX),
+    (file) => file.endsWith(".ts") && !file.endsWith(DRAFT_SUFFIX) && file !== existing,
   );
   // 仕様に宣言された資料と、コマンドで渡された資料のうち、設計の段階に渡るもの
   const assets = assetsFor(mergeAssets(spec.assets ?? [], options.assets ?? []), "design");
-  let problems: string | undefined;
-
   for (let attempt = 1; attempt <= (options.maxAttempts ?? 3); attempt++) {
     // 作業場所: 仕様のファイルと依頼文だけを置く。下書きは、前回の試行の成果か出発点
     const dir = mkdtempSync(join(realpathSync(tmpdir()), "aac-"));
@@ -189,7 +213,7 @@ export async function draftBinding(options: DraftOptions): Promise<DraftResult> 
         mkdirSync(dirname(join(dir, ASSETS_DIR, asset.name)), { recursive: true });
         writeFileSync(join(dir, ASSETS_DIR, asset.name), asset.content);
       }
-      writeFileSync(join(dir, REQUEST), request(spec, draftFile, attempt, assets, problems));
+      writeFileSync(join(dir, REQUEST), request(spec, draftFile, attempt, assets, problems, update));
 
       log(`[binding #${attempt}] ${options.strategy.name} (in ${dir})`);
       await options.strategy.run({ dir, phase: "binding", attempt, env: scrubEnv(process.env, hidden) });
@@ -206,21 +230,21 @@ export async function draftBinding(options: DraftOptions): Promise<DraftResult> 
         const content = readFileSync(join(dir, SPEC_DIR, draftFile), "utf8");
         cpSync(join(dir, SPEC_DIR, draftFile), previous);
         writeFileSync(previous, content.startsWith(HEADER) ? content : HEADER + content);
-        problems = check(specsDir);
+        problems = check(specsDir, true);
       }
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
 
     log(`[binding #${attempt}] ${problems === undefined ? "ok" : "rejected"}`);
-    if (problems === undefined) return { status: "drafted", draft: join(specsDir, draftFile), attempts: attempt };
+    if (problems === undefined) return { status: "drafted", draft: join(specsDir, draftFile), attempts: attempt, ...updates };
   }
-  return { status: "failed", draft: join(specsDir, draftFile), attempts: options.maxAttempts ?? 3, problems };
+  return { status: "failed", draft: join(specsDir, draftFile), attempts: options.maxAttempts ?? 3, problems, ...updates };
 }
 
-// 下書きを読み込み、型チェックと仕様の検査にかける。別プロセスで行う
-function check(specsDir: string): string | undefined {
-  const run = spawnSync(process.execPath, [join(import.meta.dirname, "compile.ts"), specsDir, "--drafts"], {
+// 仕様を読み込み、型チェックと仕様の検査にかける。別プロセスで行う。drafts が true なら、下書きを使って検査する
+function check(specsDir: string, drafts: boolean): string | undefined {
+  const run = spawnSync(process.execPath, [join(import.meta.dirname, "compile.ts"), specsDir, ...(drafts ? ["--drafts"] : [])], {
     encoding: "utf8",
     timeout: 120_000,
   });

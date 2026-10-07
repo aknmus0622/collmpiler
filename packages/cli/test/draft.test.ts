@@ -139,6 +139,38 @@ test("下書き: 仕様のファイルを書き換えたら差し戻す", async 
   assert.equal(readFileSync(join(dir, "order.component.ts"), "utf8"), original);
 });
 
+test("下書き: 仕様が変わって結び付けが合わなくなったら、いまの結び付けを出発点にして、合わない所だけを直させる", async () => {
+  const dir = specDir();
+  writeFileSync(join(dir, "order.binding.ts"), reviewed);
+  // 追加要件: 出荷には「倉庫が開いている」という事前条件が要る
+  const component = join(dir, "order.component.ts");
+  writeFileSync(
+    component,
+    readFileSync(component, "utf8")
+      .replace('    isMonthEnd: "boolean",', '    isMonthEnd: "boolean",\n    warehouseOpen: "boolean",')
+      .replace('    Ship: {\n      from: ["PAID"],', '    Ship: {\n      from: ["PAID"],\n      onlyIf: ["The warehouse is open"],'),
+  );
+  assert.notEqual(spawnSync(process.execPath, [join(repoRoot, "packages/cli/src/compile.ts"), dir], { encoding: "utf8" }).status, 0);
+
+  const updated = reviewed.replace('  conditions: {\n', '  conditions: {\n    "The warehouse is open": (state) => state.warehouseOpen,\n');
+  assert.notEqual(updated, reviewed);
+  const { strategy, seen } = scripted([updated]);
+  const result = await draftBinding({ specs: dir, strategy });
+
+  assert.ok(result.status === "drafted" && result.attempts === 1);
+  assert.equal(result.updates, join(dir, "order.binding.ts"));
+  // 出発点は雛形ではなく、いまの結び付け。作業場所には、下書きが置き換える確定版は置かない
+  assert.equal(seen[0].start, reviewed);
+  assert.deepEqual(seen[0].files, ["order.decisions.ts", "order.component.ts"]);
+  assert.match(seen[0].request, /^# Update the binding[\s\S]*\*\*Change only what the specification now\s+requires\*\*/);
+  assert.match(seen[0].request, /## Problems with the current binding[\s\S]*The warehouse is open/);
+
+  // 確定版はそのまま。下書きを読むよう明示したときだけ、新しい結び付けが使われる
+  assert.equal(readFileSync(join(dir, "order.binding.ts"), "utf8"), reviewed);
+  assert.ok(readFileSync(join(dir, "order.binding.draft.ts"), "utf8").endsWith(updated));
+  assert.equal(compileWithDrafts(dir).status, 0);
+});
+
 test("下書き: 結び付けが揃っていれば、何もしない", () => {
   const out = execFileSync(
     process.execPath,

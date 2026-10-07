@@ -32,6 +32,10 @@ const result = await draftBinding({
 console.log(JSON.stringify(result, null, 2));
 if (result.status === "drafted") {
   console.error(`\n下書きを書き出しました: ${result.draft}`);
-  console.error("すべての関数を読んで意味を確認し、ファイル名から .draft を外すと有効になります。");
+  console.error(
+    result.updates
+      ? `いまの結び付け (${result.updates}) を、仕様の変更に合わせて直したものです。差分を読んで確認し、下書きで置き換える (.draft を外した名前にする) と有効になります。`
+      : "すべての関数を読んで意味を確認し、ファイル名から .draft を外すと有効になります。",
+  );
 }
 if (result.status === "failed") process.exitCode = 1;
