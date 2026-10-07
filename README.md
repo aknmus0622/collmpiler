@@ -36,13 +36,13 @@ A spec is **decision tables**, one **component**, and its **binding**. A scenari
 part are all written as components of the same shape.
 
 **Decision tables** (`specs/order.decisions.ts`). Each row is a condition in natural language; cells are
-values. `otherwise` is mandatory.
+values, or `null` where a row gives no value for a column. `otherwise` is mandatory.
 
 ```ts
 export const Campaign = decisionTable({
   "The customer is a Gold member and it is month-end": { discountPercent: 20, grantsCoupon: true, coupon: "Premium" },
-  "The customer is a Silver member": { discountPercent: 5, grantsCoupon: false, coupon: "Standard" },
-  otherwise: { discountPercent: 0, grantsCoupon: false, coupon: "Standard" },
+  "The customer is a Silver member": { discountPercent: 5, grantsCoupon: false, coupon: null },
+  otherwise: { discountPercent: 0, grantsCoupon: false, coupon: null },
 });
 ```
 
@@ -150,7 +150,7 @@ The binding does not have to be written from scratch. An agent can draft it, str
 
 ```bash
 pnpm -s run draft-binding \
-  --agent 'claude -p "Read aac/REQUEST.md and carry out the request." --permission-mode acceptEdits'
+  --agent 'claude -p "Read clp/REQUEST.md and carry out the request." --permission-mode acceptEdits'
 ```
 
 The draft goes to `specs/order.binding.draft.ts` and is ignored until you have read it and dropped `.draft`
@@ -197,7 +197,7 @@ not *how* to decide it.
 
 ```bash
 pnpm -s run implement --out examples/checkout-ts --fresh \
-  --agent 'claude -p "Read aac/REQUEST.md and carry out the request." --permission-mode acceptEdits'
+  --agent 'claude -p "Read clp/REQUEST.md and carry out the request." --permission-mode acceptEdits'
 ```
 
 Any command can be the agent. The work follows a test-driven flow in three steps, each a separate session
@@ -233,26 +233,27 @@ A second argument chooses the steps an asset goes to, for example `text("...", {
 ```text
 [1] design #1: ok
 [1] wiring #1: ok (tests fail as expected: not implemented)
-[1] implementation #1: rejected (mutation-survived) (mutation: builtin, 12/16 killed)
-[1] implementation #2: pass (mutation: builtin, 12/14 killed)
+[1] implementation #1: pass (mutation: builtin, 9/12 killed)
 ```
 
-Here the design and the wiring passed on their first attempt, and the implementation on its second. The first
-implementation copied the `coupon: "Standard"` cells of the rows that grant no coupon. Those values are never
-used, so changing them left the tests passing, and the mutation gate sent the work back; the second attempt
-made them matter by deriving "grants a coupon" from the coupon type. A run fails when changing a value from a
-decision table leaves the tests passing; other surviving mutations are reported but do not fail the run (here,
-two constants in the agent's own month-end calendar logic, which the spec's month-end flag cannot exercise).
+Here every step passed on its first attempt. A run fails when changing a value from a decision table leaves
+the tests passing; other surviving mutations are reported but do not fail the run (here, constants in the
+agent's own month-end calendar logic, which the spec's month-end flag cannot exercise).
 
-By default the production code goes to `<out>/src` and the test side to `<out>/aac`. To follow another
+The specs directory may hold several components. They share the production code, and each gets its own
+test-side files, named after it (`clp/order.adapter.ts`). All of them are brought into agreement in turn
+(`--component <name>` picks one); after a change for one component the others are verified again, and a change
+that breaks one of them is sent back.
+
+By default the production code goes to `<out>/src` and the test side to `<out>/clp`. To follow another
 layout, name the two places directly:
 
 ```bash
 # src/ and test/ kept apart
-pnpm -s run implement --src app/src --tests test/aac --agent '...'
+pnpm -s run implement --src app/src --tests test/clp --agent '...'
 
-# side by side: src/order/order.ts next to src/order/order.aac.adapter.ts, order.aac.ir.json, ...
-pnpm -s run implement --src src/order --tests src/order/order.aac. --agent '...'
+# side by side: src/order/order.ts next to src/order/clp.order.adapter.ts, clp.order.ir.json, ...
+pnpm -s run implement --src src/order --tests src/order/clp. --agent '...'
 ```
 
 `--tests` is the path put in front of the test-side file names: when it ends with a `.`, its last part is a
@@ -266,60 +267,60 @@ examples/checkout-ts/
 ├── src/                      written by the agent; no framework imports, no framework types
 │   ├── types.ts
 │   ├── ports.ts              the dependencies, in the production code's own terms
-│   ├── rules.ts              the business decisions, as pure functions
+│   ├── policy.ts             the business decisions, as pure functions
 │   ├── order.ts
 │   └── index.ts
-└── aac/                      the test side
-    ├── ir.json               generated
-    ├── adapter.contract.ts   generated
-    ├── verify.ts             generated
-    └── adapter.ts            skeleton generated, filled in by the agent
+└── clp/                      the test side
+    ├── order.ir.json               generated
+    ├── order.adapter.contract.ts   generated
+    ├── order.verify.ts             generated
+    └── order.adapter.ts            skeleton generated, filled in by the agent
 ```
 
-**Production code** (`src/rules.ts`). The agent turned the natural-language conditions into code: the
+**Production code** (`src/policy.ts`). The agent turned the natural-language conditions into code: the
 decision table, the calculation with its rounding, and the 10,000-yen threshold.
 
 ```ts
-export function campaignFor(rank: CustomerRank, monthEnd: boolean): CampaignTerms {
-  if (rank === "Gold" && monthEnd) {
-    return campaignTerms(20, "Premium");
+export function decideCampaign(rank: MemberRank, today: CalendarDate): CampaignTerms {
+  if (rank === "Gold" && isMonthEnd(today)) {
+    return { discountPercent: 20, coupon: "Premium" };
   }
   if (rank === "Silver") {
-    return campaignTerms(5, "Standard");
+    return { discountPercent: 5, coupon: null };
   }
-  return campaignTerms(0, "Standard");
+  return { discountPercent: 0, coupon: null };
 }
 
-export function amountCharged(priceYen: number, discountPercent: number): number {
-  return Math.floor((priceYen * (100 - discountPercent)) / 100);
+export function amountCharged(price: number, discountPercent: number): number {
+  return Math.floor((price * (100 - discountPercent)) / 100);
 }
 
-export function isPriorityShipping(rank: CustomerRank, priceYen: number): boolean {
-  return rank === "Gold" || priceYen >= PRIORITY_SHIPPING_MIN_PRICE_YEN;
+export function isPriorityShipping(rank: MemberRank, price: number): boolean {
+  return rank === "Gold" || price >= PRIORITY_SHIPPING_MIN_PRICE;
 }
 ```
 
-**The adapter** (`aac/adapter.ts`). Production code defines its dependencies in its own terms; the adapter
+**The adapter** (`clp/order.adapter.ts`). Production code defines its dependencies in its own terms; the adapter
 connects them to the stand-ins the test harness provides, translating where the two differ. Here the
-production clock returns a date, while the spec speaks of a month-end flag.
+production calendar returns a date, while the spec speaks of a month-end flag.
 
 ```ts
-async setupIsolation(ports) {
-  order = new Order({
-    clock: {
-      today: () =>
-        ports.queries.isMonthEnd()
-          ? { year: 2026, month: 1, day: 31 }
-          : { year: 2026, month: 1, day: 15 },
+const MONTH_END_DATE = { year: 2025, month: 1, day: 31 };
+const MID_MONTH_DATE = { year: 2025, month: 1, day: 15 };
+
+function connect(ports: Ports): OrderDependencies {
+  return {
+    calendar: {
+      today: () => (ports.queries.isMonthEnd() ? MONTH_END_DATE : MID_MONTH_DATE),
     },
-    paymentGateway: {
+    payments: {
       isActive: () => ports.queries.paymentModuleActive(),
       charge: () => ports.queries.paymentResult(),
       refund: () => ports.effects.Refund({}),
     },
     // ...
-  });
-},
+  };
+}
 ```
 
 ### 5. Verify again at any time
@@ -347,15 +348,15 @@ actual:   state CANCELLED, effects []
 - Stopping after the design step so a person can review the skeleton before it is wired and implemented
 - Applying a spec to existing production code (legacy code): wiring and verification only, with mismatches
   reported to a person instead of being sent back to the agent (design notes in `INCREMENTAL.md`)
-- Several components sharing production code: a writable scope narrower than "everything under `--src`", and
-  re-verifying the other components after a change
+- A writable scope narrower than "everything under `--src`" when several components share production code
 - Help with triaging surviving mutations: logic the spec cannot exercise versus code that is not needed
 - Operations that return values (value objects), and multiplicity declared as values
-- Composing components, and describing the UI layer
+- Composing components (connecting one component's dependency to another real component instead of a stand-in),
+  and describing the UI layer
 - Target languages other than TypeScript (Go, Rust, Python). The per-language parts (test-side generation,
   running the tests, static checks, mutation) already sit behind one interface, but TypeScript is its only
   implementation
-- A single `aac` command in place of the current scripts
+- A single `clp` command in place of the current scripts
 - Stronger agent isolation (containers)
 - Diagrams generated from the IR, and a trace visualizer
 - Larger specs: how often the agent succeeds, and whether the feedback loop converges

@@ -7,21 +7,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Phase 1 spike. The design documents (written in Japanese) are still the bulk of the repo. The code:
 
 - `packages/core/index.ts` — `decisionTable`, `component` (vocabulary, state-machine skeleton and prose, declared as a value with types derived from it), `bind` (structure as declarations + meanings as functions), the references `ref.input` / `ref.data` / `ref.query` / `ref.decision` / `ref.calculation` / `ref.was`, and `decide` / `calculate` / `matchCondition` for evaluating meanings. Bindings are registered per component in a `WeakMap` (no process-global registry). Zero dependencies. `packages/core/test/*.check.ts` are type-level checks: they are verified by `pnpm typecheck` passing (wrong usages carry `@ts-expect-error`), not by the test runner.
-- `packages/cli/src/` (no `aac` bin yet; `compile.ts`, `implement.ts` and `draft-binding.ts` are temporary entry points)
-  - `loader.ts` — the single `SpecLoader`. It finds the component and its binding, and normalizes them into the internal `SpecModel` + behaviours form the rest of the CLI uses (a command without `when` becomes a table with only `otherwise`; omitted declarations become empty).
+- `packages/cli/src/` (no `clp` bin yet; `compile.ts`, `implement.ts` and `draft-binding.ts` are temporary entry points)
+  - `loader.ts` — the single `SpecLoader`. `listComponents` names the components in a specs directory (a name is the export name in kebab case, `Order` → `order`); `loadSpecs` reads one (`{ component }`, optional only when there is exactly one). It finds the component and its binding, and normalizes them into the internal `SpecModel` + behaviours form the rest of the CLI uses (a command without `when` becomes a table with only `otherwise`; omitted declarations become empty).
   - `extract.ts` — builds the IR by rearranging the component, the decision tables and the binding's structure (all function-free data; nothing is executed), and reports what the type check let through (unknown names, references whose type does not fit) with readable Japanese messages. `schema.ts` — runtime checks on field types.
   - `target.ts` — the `Target` interface: everything that depends on the language the production system is written in. `target-typescript.ts` — the only implementation, assembled from the TypeScript-specific modules below (`generate.ts`, `check.ts` + `scan.ts`, `runtime.ts`, `mutation.ts`'s built-in strategy, `static-check.ts`'s `tsc`).
   - `layout.ts` — where production code and the test-side files go (`--out`, or `--src` / `--tests`), and the one definition of "which files are production code" (`isSource` / `sourceFiles`).
   - `generate.ts` — IR → test-side files. `runtime.ts` — PBT runtime (fast-check) called by the generated `verify.ts`, plus `selfCheck`, the spec-only simulation run before any agent.
   - `strategy.ts` — how an agent session is launched (an external command). `gates.ts` — per-phase entry gate (isolated sandbox with allowlisted inputs) and exit gate (collect allowlisted outputs, checks, PBT). `request.ts` — the three phase-specific request texts. `loop.ts` — the design → wiring → implementation pipeline with feedback and restarts.
   - `check.ts` + `scan.ts` — mechanical checks on what the LLM wrote (imports and generated files only; adapter contents are unrestricted).
-  - `typecheck.ts` — runs `tsc`; `typecheckSpecs` is the fixed, always-on check of the specs. `static-check.ts` — the swappable `StaticCheckStrategy` for what the agent wrote (the TypeScript one is `tsc`; `--static-check off` disables it). `assets.ts` — resolves asset declarations (files keep their relative path under `aac/assets/`; text goes inline into the request) from the component's `assets` (relative to the component file) and from `--asset`.
+  - `typecheck.ts` — runs `tsc`; `typecheckSpecs` is the fixed, always-on check of the specs. `static-check.ts` — the swappable `StaticCheckStrategy` for what the agent wrote (the TypeScript one is `tsc`; `--static-check off` disables it). `assets.ts` — resolves asset declarations (files keep their relative path under `clp/assets/`; text goes inline into the request) from the component's `assets` (relative to the component file) and from `--asset`.
   - `draft.ts` — has an agent draft the Layer 2 binding into `<name>.binding.draft.ts` (entry point `draft-binding.ts`). Separate from the implementation pipeline. With no binding it starts from a generated skeleton; with a binding that no longer fits the component it starts from that binding and asks for the minimal update; with one that fits it does nothing.
   - `mutation.ts` — the mutation gate: a swappable `MutationStrategy` (built-in literal mutation) plus `judge`, the pass rule owned by the gate. `guide.ts` — default design guidance embedded in the request.
-- `specs/` — the example: `order.decisions.ts` and `order.component.ts` (Layer 1) and `order.binding.ts` (Layer 2). Only one component can be loaded at present.
-- `examples/checkout-ts/` — `src/` is production code written by an LLM agent from the IR; `aac/` is the generated test side. Do not hand-edit `src/` to make verification pass; rerun the loop.
+- `specs/` — the example: `order.decisions.ts` and `order.component.ts` (Layer 1) and `order.binding.ts` (Layer 2). A specs directory may hold several components; the example has one.
+- `examples/checkout-ts/` — `src/` is production code written by an LLM agent from the IR; `clp/` is the generated test side. Do not hand-edit `src/` to make verification pass; rerun the loop.
 - Run tests through `pnpm test` (explicit glob). A bare `node --test` executes every file under any `test/` directory, including fixtures and temporary work directories.
-- Tests: `example.test.ts` covers the example spec, IR output, and the loader / extraction / self-check diagnostics; `loop.test.ts` the loop and the checks (using `test/fixtures/scripted-agent.ts` as a stand-in LLM); `draft.test.ts` the binding draft. Update them when behaviour changes.
+- Tests: `example.test.ts` covers the example spec, IR output, and the loader / extraction / self-check diagnostics; `draft.test.ts` the binding draft; the pipeline tests are split by topic so that `node --test` runs them in parallel — `loop.test.ts` (the three phases and their checks), `gates.test.ts` (target, restarts, mutation, assets, isolation), `repeat.test.ts` (repeated runs after a spec change), `layout.test.ts` (layouts and the workspace checks). They share `test/support.ts` (`harness(name)` gives each file its own work directory; never share one, a file's `after` hook deletes it) and use `test/fixtures/scripted-agent.ts` as a stand-in LLM. Update them when behaviour changes.
 
 The repo is a colocated Jujutsu (`.jj/`) + git repository, so `git` normally shows a detached `HEAD`. Commit with `jj`.
 
@@ -33,12 +33,12 @@ pnpm typecheck                                        # tsc over the whole repo,
 pnpm test                                             # all packages/**/*.test.ts
 node --test packages/cli/test/example.test.ts         # one file
 node --test --test-name-pattern="事前検査" "packages/**/*.test.ts"   # tests by name
-pnpm -s run ir                                        # type-check + self-check the specs, IR JSON on stdout, diagnostics on stderr
+pnpm -s run ir                                        # type-check + self-check the specs, IR JSON on stdout ({name: IR} if several components), diagnostics on stderr
 pnpm --filter example-checkout-ts verify              # PBT against examples/checkout-ts (add -- --seed N --path P to replay)
 
 # Have an agent draft the binding (Layer 2) for names that are not bound yet. The result is
 # specs/<name>.binding.draft.ts, ignored until a person reviews it and drops ".draft" from the name.
-pnpm -s run draft-binding --agent 'claude -p "Read aac/REQUEST.md and carry out the request." --permission-mode acceptEdits'
+pnpm -s run draft-binding --agent 'claude -p "Read clp/REQUEST.md and carry out the request." --permission-mode acceptEdits'
 
 # Have an agent (re)write an implementation in three sessions (design, wiring, implementation).
 # Any command works; each session runs in an isolated temp directory. Run it again after changing the spec: which
@@ -48,14 +48,15 @@ pnpm -s run draft-binding --agent 'claude -p "Read aac/REQUEST.md and carry out 
 # --asset [<phases>=]<file> attaches a file to the requests (repeatable); --drafts uses unreviewed draft bindings
 # as the oracle; --mutation auto|builtin|off and --static-check auto|tsc|off select those strategies (auto = the target's own);
 # --target typescript selects the target language (the only one so far).
-# --out puts production code in <out>/src and the test side in <out>/aac; --src / --tests name the two places
+# --out puts production code in <out>/src and the test side in <out>/clp; --src / --tests name the two places
 # directly. --tests is the path put in front of the test-side file names: ending with "." makes its last part a file-name
-# prefix (--tests src/order/order.aac. → src/order/order.aac.adapter.ts; required when both are the same directory).
+# prefix (--tests src/order/clp. → src/order/clp.order.adapter.ts; required when both are the same directory).
+# --component <name> works on one component; by default every component in the specs is reconciled, in name order.
 pnpm -s run implement --out examples/checkout-ts --fresh --max-attempts 3 \
-  --agent 'claude -p "Read aac/REQUEST.md and carry out the request." --permission-mode acceptEdits'
+  --agent 'claude -p "Read clp/REQUEST.md and carry out the request." --permission-mode acceptEdits'
 ```
 
-`typescript` (in `@aac/cli`, plus `@types/node` at the root) and `fast-check` are the only third-party dependencies; `packages/core` has none. Type checking is part of the framework, not just a dev convenience: `compile.ts` / `implement` type-check the specs, and every exit gate type-checks what the agent wrote.
+`typescript` (in `@clp/cli`, plus `@types/node` at the root) and `fast-check` are the only third-party dependencies; `packages/core` has none. Type checking is part of the framework, not just a dev convenience: `compile.ts` / `implement` type-check the specs, and every exit gate type-checks what the agent wrote.
 
 ## Vocabulary
 
@@ -65,7 +66,7 @@ pnpm -s run implement --out examples/checkout-ts --fresh --max-attempts 3 \
 
 A "Specification & Verification Engine": specs are written as pure TypeScript data, compiled to a language-independent JSON IR, and used to generate property-based tests (PBT) that verify a production system from the outside. The platform deliberately owns *only* spec/verification and places no constraints on the target system's architecture.
 
-The same thing goes by several names across the docs: `co-llm-piler` (repo), `aac` (CLI command), `@aac/*` (package scope), "SpecForge" and `aac-engine-monorepo` (older names).
+The same thing goes by several names across the docs: `co-llm-piler` (repo), `clp` (the CLI command, the `@clp/*` package scope, the default test-side directory `clp/`, and the `CLP_*` environment variables). Older names that may still appear in history: `aac` (the previous name of all of those), "SpecForge" and `aac-engine-monorepo`.
 
 ## Documents and their precedence
 
@@ -74,7 +75,7 @@ The same thing goes by several names across the docs: `co-llm-piler` (repo), `aa
 | `SPEC.md` | Concept and layer design, with the intended TypeScript schemas |
 | `PACKAGE.md` | Long-term monorepo layout and the Phase 1–4 roadmap |
 | `SELF_HOSTING.md` | Stage 0/1/2 bootstrap and fixed-point verification of the compiler |
-| `DISTRIBUTION.md` | How the `aac` CLI is built and shared; the most recent and most concrete doc |
+| `DISTRIBUTION.md` | How the `clp` CLI is built and shared; the most recent and most concrete doc |
 | `INCREMENTAL.md` | Using the framework repeatedly: new code, changed specs and legacy code as one flow; what is implemented and the design of what is not |
 
 `DISTRIBUTION.md` is the most concrete on layout and distribution and **overrides `PACKAGE.md` and `SELF_HOSTING.md` where they conflict**; `SPEC.md` has been updated to match the code and is authoritative for the layers, the IR, and the LLM loop:
@@ -102,7 +103,7 @@ The framework generates **test-side code only**; it never places types, signatur
 | Phase | Agent sees | Agent writes | Phase check |
 | --- | --- | --- | --- |
 | `design` | IR, guide, assets | `src/` skeleton (signatures; bodies throw `"not implemented"`) | type-checks; loads; quotes no spec sentence |
-| `wiring` | adapter contract, skeleton — **not the IR** | `aac/adapter.ts` | type-checks; PBT must fail for the "not implemented" reason (red) |
+| `wiring` | adapter contract, skeleton — **not the IR** | `clp/order.adapter.ts` | type-checks; PBT must fail for the "not implemented" reason (red) |
 | `implementation` | IR, skeleton, guide, assets — **not the adapter or contract** | `src/` bodies | type-checks together with the adapter (catches changed signatures); PBT passes (green); mutation gate |
 
 A failed check goes into the same phase's next `REQUEST.md`; when a phase exhausts its attempts the whole pipeline restarts from `design` (the failing phase cannot be attributed mechanically).
@@ -112,7 +113,9 @@ The same pipeline serves new code and changed specs (`INCREMENTAL.md`); "new" is
 Invariants to preserve when changing this:
 
 - What each phase may see is the mechanism, not a detail: the wiring phase never sees the IR (so the adapter cannot encode business decisions) and the design/implementation phases never see the adapter contract (so production code is not shaped by the harness). Do not add an input to a phase, and do not mention `ports` or the harness in the design/implementation requests or the default guide, without re-examining these two properties. The skeleton is the one channel between them; `gates.ts` rejects skeletons that quote spec sentences.
-- The layout is data, not convention. Nothing outside `layout.ts` may assume `src/` or `aac/`: ask the `Workspace` for `paths.*` and use `sourceFiles` / `isSource` for production code. The sandbox mirrors the output's relative layout (so relative imports are identical in both); only `REQUEST.md` and assets always live in the sandbox's `aac/`, because agent commands point there. Production code is removed file by file, never by deleting the directory — test-side files may sit next to it — and `resolveLayout` refuses a `--src` that looks like a project root.
+- The layout is data, not convention. Nothing outside `layout.ts` may assume `src/` or `clp/`: ask the `Workspace` for `paths.*` and use `sourceFiles` / `isSource` for production code. The sandbox mirrors the output's relative layout (so relative imports are identical in both); only `REQUEST.md` and assets always live in the sandbox's `clp/`, because agent commands point there. Production code is removed file by file, never by deleting the directory — test-side files may sit next to it — and `resolveLayout` refuses a `--src` that looks like a project root.
+- Several components share the production code and each has its own test side, named by component (`clp/order.adapter.ts`; always, even with one component, so that adding a second never renames files). `implement` reconciles them one at a time; `ctx.others` carries the rest. Keep these properties: design and implementation see every component's IR, wiring sees none and no other component's test side; after a component's own tests pass, the settled others (on-disk IR equal to the current spec, adapter present) are run again and a failure is `regression` feedback; the static check of design and implementation includes the others' adapters, so a changed public signature is caught. The agent's writable scope is still all of the production code, and mutation still breaks all of it, so `judge` drops the `mutation-ineffective` rule when code is shared (most mutants are in other components' code); with the rule on, a real run rejected a correct component that had no decision table.
+- The adapter skeleton and unimplemented production code must fail with different messages (`ADAPTER_NOT_WRITTEN` vs. the target's `notImplemented`); when they were the same, a wiring session that wrote nothing passed the red check.
 - Do not add a mode for "new" versus "changed": express differences as state (what exists, what changed) read in `planOf`, so that every scenario stays one flow. The one axis that is not state — whether the agent may write production code at all (legacy code) — is not implemented; when it is, it belongs in `planOf` too (drop design and implementation, send mismatches to a person, never to the wiring phase).
 - On repeated runs the wiring phase reads fully implemented production code, so the mutation gate is the only guard against decisions copied into the adapter. Do not weaken it for incremental runs.
 - Isolation belongs to the gates, not to strategies. Nothing that points at the repo may enter the sandbox: no spec sources, no `verify.ts` (it contains the specs path), no repo paths in file contents or environment variables. A new strategy must not need to re-implement any of this.
@@ -128,29 +131,29 @@ Invariants to preserve when changing this:
 - The agent sees the IR only. The binding's meaning functions are the oracle and must never be emitted into the IR or the request; interpreting the natural-language conditions is the LLM's job, and PBT judges it.
 - Test cases are never LLM-written. Expected values come from interpreting the binding's structure with its meaning functions (`runtime.ts`).
 - Generated files are a pure function of the IR (no timestamps, no versions); `check.ts` relies on byte-equality with a regeneration. The PBT seed is derived from the spec hash so verification is deterministic.
-- `--out` must sit where `@aac/cli/runtime` resolves (a workspace package like `examples/*`, or under `packages/cli/` as the tests do).
+- `--out` must sit where `@clp/cli/runtime` resolves (a workspace package like `examples/*`, or under `packages/cli/` as the tests do).
 - Agent-facing text (`REQUEST.md`, check violations) is English; user-facing diagnostics are Japanese.
 
 Types vanish at runtime, so anything the IR or PBT needs must be declared as a value (the component) with the type derived from it — never the other way round.
 
 ## Decision-table cells that are never used
 
-A table cannot say "no value": a row that grants no coupon must still fill the `coupon` column. An implementation that copies such a filler faithfully holds a value whose mutation changes nothing, so the mutation gate rejects it once (the agent then drops it). This is a known cost of the spec format, not a bug in the gate; do not weaken `judge` to hide it.
+A cell a row does not use is written as `null`, never filled with a placeholder value. A filler copied faithfully by the implementation is a value whose mutation changes nothing, so the mutation gate rejects it (this cost one implementation round on every run before `null` existed). A reference that actually reaches a `null` cell is a spec error: `runtime.ts` throws while resolving it, so `selfCheck` reports it before any agent runs. Do not weaken `judge` to tolerate fillers.
 
 ## Decided constraints for implementation
 
 From `DISTRIBUTION.md`; these are settled decisions, not suggestions:
 
 - **Node is the only allowed runtime dependency.** No Bun, Deno, single binaries, or Docker. No npm publishing for now — the git repo is the distribution channel.
-- **No build step.** `.ts` files run directly via Node type stripping; `packages/cli/package.json` `bin` will point straight at `./bin/aac.ts`, shared through a pnpm workspace (`"@aac/cli": "workspace:*"`).
-- **Node >= 22.18** (`.node-version` is to be `24`), enforced via `engines`, `engine-strict=true` in `.npmrc`, and a version guard at the top of `bin/aac.ts`.
+- **No build step.** `.ts` files run directly via Node type stripping; `packages/cli/package.json` `bin` will point straight at `./bin/clp.ts`, shared through a pnpm workspace (`"@clp/cli": "workspace:*"`).
+- **Node >= 22.18** (`.node-version` is to be `24`), enforced via `engines`, `engine-strict=true` in `.npmrc`, and a version guard at the top of `bin/clp.ts`.
 - Because of type stripping: no `enum`, no `namespace`, and relative imports must include the `.ts` extension. Use `as const` + unions instead of `enum`.
 - Node refuses to type-strip `.ts` whose real path is inside `node_modules`. A workspace link is fine; a git dependency or tarball install is not. This is why specs live in this repo (`specs/`) for now, and it — not npm publishing — is the trigger for ever adding a build.
-- **Keep third-party dependencies minimal** (`packages/core` must stay pure TS with none; `fast-check` in `@aac/cli` is the one accepted exception). Use `util.parseArgs` for CLI arguments.
+- **Keep third-party dependencies minimal** (`packages/core` must stay pure TS with none; `fast-check` in `@clp/cli` is the one accepted exception). Use `util.parseArgs` for CLI arguments.
 - Resolve paths against `process.cwd()`, never the script location (the `.bin` shim runs with the caller's cwd).
 - Keep all spec loading behind a single `SpecLoader` (`packages/cli/src/loader.ts`).
 - **Output must be deterministic**: sorted JSON keys, fixed indentation and line endings. Generated file headers carry only `ir-version` and `spec-hash` — never timestamps or the CLI version. The integer, monotonically increasing IR version is the sole compatibility contract.
 
 ## Planned CLI (not yet available)
 
-`pnpm aac compile` / `generate` / `test --seed 123` / `implement`, per `DISTRIBUTION.md` §6 and `PACKAGE.md` §3.
+`pnpm clp compile` / `generate` / `test --seed 123` / `implement`, per `DISTRIBUTION.md` §6 and `PACKAGE.md` §3.

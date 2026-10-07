@@ -24,7 +24,7 @@ aac-engine-monorepo/
 │   ├── compiler/              # (2) TS(AST) -> Universal IR に変換する中核エンジン
 │   ├── typia-transformer/     # (3) 【不採用】Typia はビルド時の変換が必要で、ビルドなし方針と衝突する。
 │   │                          #     代わりに値として書くドメインモデルから型を導出する (SPEC.md §3.1)
-│   └── cli/                   # (4) ユーザーが叩くCLIツール (npx aac build 等)
+│   └── cli/                   # (4) ユーザーが叩くCLIツール (npx clp build 等)
 │
 ├── plugins/                   # 各言語・ツール向けのジェネレータ (IR -> Layer 3)。生成するのはテスト側のみ
 │   ├── gen-typescript/        # TS向けPBT(fast-check)のグルーとアダプター契約
@@ -34,8 +34,8 @@ aac-engine-monorepo/
 │
 └── examples/                  # テスト兼デモ用プロジェクト（本番コードは LLM エージェントが書いた成果物）
     ├── e-commerce-spec/       # (Layer 1/2) 共通の仕様定義パッケージ（TSのみ）。現在はルートの specs/
-    ├── e-commerce-go-backend/ # Goの本番コード(src)とテスト側(aac)
-    └── e-commerce-ts-backend/ # TSの本番コード(src)とテスト側(aac)。現在は examples/checkout-ts
+    ├── e-commerce-go-backend/ # Goの本番コード(src)とテスト側(clp)
+    └── e-commerce-ts-backend/ # TSの本番コード(src)とテスト側(clp)。現在は examples/checkout-ts
 
 ```
 
@@ -72,12 +72,12 @@ aac-engine-monorepo/
 ユーザーがプロジェクトのルートで叩くコマンドラインツールです。
 
 * **責務:**
-* `aac.config.ts` を読み込み、対象の仕様ファイルと出力先（プラグイン）を解決。
+* `clp.config.ts` を読み込み、対象の仕様ファイルと出力先（プラグイン）を解決。
 * コマンドの実行:
-* `npx aac compile` (TS -> IR)
-* `npx aac generate` (IR -> Plugin経由で各言語のコード出力)
-* `npx aac test --seed 123` (PBTランナーのキック、Shrinkのログ制御)
-* `npx aac implement --agent "<command>"` (LLM エージェントに本番コードを書かせ、検査と PBT を合格するまで差し戻す)
+* `npx clp compile` (TS -> IR)
+* `npx clp generate` (IR -> Plugin経由で各言語のコード出力)
+* `npx clp test --seed 123` (PBTランナーのキック、Shrinkのログ制御)
+* `npx clp implement --agent "<command>"` (LLM エージェントに本番コードを書かせ、検査と PBT を合格するまで差し戻す)
 
 
 
@@ -96,30 +96,30 @@ Compilerが出力した Universal IR（JSON）を入力として受け取り、�
 
 ---
 
-## 4. `aac.config.ts` (ユーザーのプロジェクト設定例)
+## 4. `clp.config.ts` (ユーザーのプロジェクト設定例)
 
 ユーザー（例えば `examples/e-commerce-go-backend`）は、このツールを導入する際に以下のような設定ファイルを書きます。これにより、パイプラインが繋がります。
 
 ```typescript
-// aac.config.ts
-import { defineConfig } from "@aac/cli";
+// clp.config.ts
+import { defineConfig } from "@clp/cli";
 
 export default defineConfig({
   // 1. 仕様書の場所 (Layer 1, 2)
   specs: ["../e-commerce-spec/**/*.spec.ts"],
   
   // 2. 出力する Universal IR の保存先 (Layer 1.5)
-  irOutput: "./generated/aac-ir.json",
+  irOutput: "./generated/clp-ir.json",
   
   // 3. 連携するジェネレータプラグインと出力先 (Layer 3)
   plugins: [
     // Go言語向けのコード生成（TargetSystemAdapter と gopter 用テストコード）
-    "@aac/gen-golang": {
+    "@clp/gen-golang": {
       outDir: "./internal/generated/",
       packageName: "generated",
     },
     // ドキュメントの自動生成
-    "@aac/gen-mermaid": {
+    "@clp/gen-mermaid": {
       outDir: "./docs/diagrams/",
       format: "markdown"
     }
@@ -138,7 +138,7 @@ export default defineConfig({
 * `packages/core` (ドメインモデル、多重度DSL、DMNの型) の実装。
 * `packages/compiler` は作らず、**TypeScript (Node.js) 上での動的評価**と `fast-check` だけを使って、TS の例を完成させる。（他言語展開はいったん後回し）。
 * 本番コードを LLM エージェントに書かせるループ（生成 → エージェント → 余計なもの検査 → PBT → 差し戻し）を通す。
-* 残り: 複数ステップの経路探索、値オブジェクトと制約、多重度の値レベル化、`aac` コマンド。
+* 残り: 複数ステップの経路探索、値オブジェクトと制約、多重度の値レベル化、`clp` コマンド。
 
 
 * **Phase 2 (Universal IR の抽出):**

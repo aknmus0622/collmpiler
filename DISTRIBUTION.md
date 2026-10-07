@@ -1,6 +1,6 @@
 # CLI 提供形態の設計 (Distribution Design)
 
-`SPEC.md` / `PACKAGE.md` / `SELF_HOSTING.md` を踏まえ、`aac` CLI を**どう作り、どう開発陣で共有するか**を整理する。
+`SPEC.md` / `PACKAGE.md` / `SELF_HOSTING.md` を踏まえ、`clp` CLI を**どう作り、どう開発陣で共有するか**を整理する。
 本書内の「実測」は全て本環境（Node v24.13.0 / pnpm 11.8.0）で検証した結果。
 
 ---
@@ -25,27 +25,27 @@
 ```jsonc
 // packages/cli/package.json
 {
-  "name": "@aac/cli",
+  "name": "@clp/cli",
   "type": "module",
-  "bin": { "aac": "./bin/aac.ts" },     // ← .ts を直接指してよい（実測）
+  "bin": { "clp": "./bin/clp.ts" },     // ← .ts を直接指してよい（実測）
   "engines": { "node": ">=22.18" }
 }
 ```
 
 ```jsonc
 // ルートの package.json
-{ "private": true, "devDependencies": { "@aac/cli": "workspace:*" } }
+{ "private": true, "devDependencies": { "@clp/cli": "workspace:*" } }
 ```
 
-`pnpm install` すると `node_modules/.bin/aac` が生成され、**リポジトリを clone した全員が同じコマンドを叩ける**。
+`pnpm install` すると `node_modules/.bin/clp` が生成され、**リポジトリを clone した全員が同じコマンドを叩ける**。
 
 ### 実測結果
 
 | 検証 | 結果 |
 | --- | --- |
-| `bin` が `.ts` を指した状態で `pnpm install` | ✅ `node_modules/.bin/aac` が生成される |
-| `pnpm aac compile foo.spec.ts`（ルートから） | ✅ 動作 |
-| `pnpm exec aac ...`（サブディレクトリから） | ✅ 動作。**cwd は呼び出し元ディレクトリ** |
+| `bin` が `.ts` を指した状態で `pnpm install` | ✅ `node_modules/.bin/clp` が生成される |
+| `pnpm clp compile foo.spec.ts`（ルートから） | ✅ 動作 |
+| `pnpm exec clp ...`（サブディレクトリから） | ✅ 動作。**cwd は呼び出し元ディレクトリ** |
 | `node_modules/.bin` を PATH に通して `/tmp` から実行 | ✅ 動作。cwd=`/tmp` |
 | 依存パッケージ数 | **0**（`node_modules` にサードパーティが1つも入らない） |
 | `pnpm install` 所要時間 | **0.8秒** |
@@ -53,9 +53,9 @@
 ### なぜこれが最善か
 
 1. **npm 公開が要らない。** `workspace:*` はレジストリを一切見ない。決定2と矛盾しない
-2. **Windows 対応が無料で付く。** pnpm が生成する `.bin/aac` は手書き相当の sh シムで、
+2. **Windows 対応が無料で付く。** pnpm が生成する `.bin/clp` は手書き相当の sh シムで、
    Cygwin / MSYS / WSL2 のパス変換まで含む。Windows では `.cmd` / `.ps1` も自動生成される
-   → 前案で必要だった「`bin/aac` + `bin/aac.cmd` + `bin/aac.ts` の3点セット」は**手書き不要**
+   → 前案で必要だった「`bin/clp` + `bin/clp.cmd` + `bin/clp.ts` の3点セット」は**手書き不要**
 3. **将来 npm 公開する時、`bin` フィールドがそのまま効く。** 移行コストが実質ゼロ
 4. **PATH を各自が手作業で通す必要がない。** セットアップ手順が `pnpm install` の1行に収まる
 
@@ -63,8 +63,8 @@
 
 | 用途 | 方法 |
 | --- | --- |
-| リポジトリ内で使う（既定） | `pnpm aac ...` / サブディレクトリからは `pnpm exec aac ...` |
-| どこからでも `aac` と打ちたい | `PATH="$REPO/node_modules/.bin:$PATH"`（direnv / mise / 各自の rc） |
+| リポジトリ内で使う（既定） | `pnpm clp ...` / サブディレクトリからは `pnpm exec clp ...` |
+| どこからでも `clp` と打ちたい | `PATH="$REPO/node_modules/.bin:$PATH"`（direnv / mise / 各自の rc） |
 | 別リポジトリの specs に使いたい | §2 を参照。**ここだけ話が変わる** |
 
 ---
@@ -79,9 +79,9 @@ Node の型ストリップには**`node_modules` 内の `.ts` を実行しない
 | 配置 | `.ts` の実行 |
 | --- | --- |
 | `node_modules` の**外**（リポジトリ内の通常のパス） | ✅ |
-| pnpm workspace のリンク（`node_modules/@aac/cli` → 実体は `packages/cli`） | ✅ |
+| pnpm workspace のリンク（`node_modules/@clp/cli` → 実体は `packages/cli`） | ✅ |
 | `node_modules` 内の symlink（実体が外） | ✅ |
-| `~/.local/bin/aac` → 実体 `.ts` への symlink | ✅ |
+| `~/.local/bin/clp` → 実体 `.ts` への symlink | ✅ |
 | **`node_modules` 内の実体**（git 依存 / npm install / tarball 展開） | ❌ `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING` |
 
 最後の行は `import` された時だけでなく、**エントリポイントとして直接実行した場合も落ちる**（実測）。
@@ -102,7 +102,7 @@ Node の型ストリップには**`node_modules` 内の `.ts` を実行しない
 | 案 | 手順 | 評価 |
 | --- | --- | --- |
 | **A. specs を同じモノレポに置く** | `specs/` を本リポジトリに追加 | 最も安い。当面はこれで足りるはず |
-| **B. 各自 clone して symlink** | `ln -s <repo>/packages/cli/bin/aac.ts ~/.local/bin/aac`（実測✅） | 動くが**各自の手作業**が発生し、全員のバージョン統一が崩れやすい |
+| **B. 各自 clone して symlink** | `ln -s <repo>/packages/cli/bin/clp.ts ~/.local/bin/clp`（実測✅） | 動くが**各自の手作業**が発生し、全員のバージョン統一が崩れやすい |
 | C. ビルドして `.js` を配る | tsc で型を落とすだけ（バンドル不要） | 必要になったら。§6 |
 
 **当面は案A を推奨。**「別リポジトリから使いたい」が現実になった時が、初めてビルドを入れる時。
@@ -128,10 +128,10 @@ Node の型ストリップには**`node_modules` 内の `.ts` を実行しない
 ```
 
 ```ts
-// packages/cli/bin/aac.ts の先頭 — 実行時の最終防衛線
+// packages/cli/bin/clp.ts の先頭 — 実行時の最終防衛線
 const [maj, min] = process.versions.node.split(".").map(Number);
 if (maj < 22 || (maj === 22 && min < 18)) {
-  console.error(`aac: Node >=22.18 が必要です (現在 ${process.versions.node})`);
+  console.error(`clp: Node >=22.18 が必要です (現在 ${process.versions.node})`);
   console.error(`     .node-version に従い、mise / nvm 等で切り替えてください`);
   process.exit(1);
 }
@@ -190,7 +190,7 @@ co-llm-piler/
 ├── .node-version              # 24
 ├── .npmrc                     # engine-strict=true
 ├── pnpm-workspace.yaml
-├── package.json               # private, devDeps: { "@aac/cli": "workspace:*" }
+├── package.json               # private, devDeps: { "@clp/cli": "workspace:*" }
 ├── packages/
 │   ├── core/                  # 型 + 極薄ヘルパ（依存ゼロ）
 │   │   └── index.ts
@@ -220,7 +220,7 @@ co-llm-piler/
 │           └── compile.ts / implement.ts / draft-binding.ts   # 暫定エントリ
 ├── specs/                     # 当面はここに置く（§2 案A）
 └── examples/
-    └── checkout-ts/           # src/ = LLM が書いた本番コード、aac/ = 生成されたテスト側
+    └── checkout-ts/           # src/ = LLM が書いた本番コード、clp/ = 生成されたテスト側
 ```
 
 `PACKAGE.md` の `plugins/` 分割は**まだ作らない**。
@@ -231,7 +231,7 @@ co-llm-piler/
 
 ```bash
 pnpm install
-pnpm aac --help
+pnpm clp --help
 ```
 
 ---
@@ -245,11 +245,11 @@ CLI をどう配るかとは独立に、**生成された PBT コードの互換
 * 生成ファイルのヘッダには `ir-version` と `spec-hash` のみ書き、**日時と CLI バージョンは埋めない**
   （埋めると CLI を更新するたび全生成物に無意味な差分が出る。保険5と同じ理由）
 * 多言語対応（将来）では、Shrinking / State Diff / リプレイのロジックを
-  各言語の runtime ライブラリ（`aac-go/runtime` 等）に置き、生成物は薄いグルーに留める
+  各言語の runtime ライブラリ（`clp-go/runtime` 等）に置き、生成物は薄いグルーに留める
   ── 全生成物にロジックをコピーすると、バグ修正を配布できなくなるため
 
 ```go
-// Code generated by aac. DO NOT EDIT.
+// Code generated by clp. DO NOT EDIT.
 // ir-version: 1
 // spec-hash:  sha256:9f2a...
 ```
@@ -264,8 +264,8 @@ CLI をどう配るかとは独立に、**生成された PBT コードの互換
 検証したいのは「コンパイラ出力の決定性」なので、比較対象を **IR と生成ソース**に置き換える。
 
 ```bash
-pnpm aac compile platform-specs/ -o stage1.ir.json
-pnpm aac generate --out stage1-src/
+pnpm clp compile platform-specs/ -o stage1.ir.json
+pnpm clp generate --out stage1-src/
 
 node stage1-src/cli.ts compile platform-specs/ -o stage2.ir.json
 node stage1-src/cli.ts generate --out stage2-src/
@@ -372,6 +372,24 @@ diff -r stage1-src/ stage2-src/
     設計 → 配線 → 実装が各1回で通り、本番コードの差分は21行、アダプターの差分は3行だった。
     既存コード（書き換え不可）と、複数コンポーネントは今後の課題。
 
+24. **決定表のセルに「値なし」(`null`) を書けるようにした。** 使われない列を埋めた値が、実装に写されて
+    ミューテーションのゲートに差し戻される、ということが例の再生成のたびに起きていた。`null` にしたところ、
+    `claude` は3段階とも1回目で通った。値の無いセルが実際に使われる仕様は、事前検査が見つける。
+25. **テストを並列に走るようにした。** ループのテストを話題ごとのファイルに分けた（同じ機械の負荷のもとで、
+    約 128 秒 → 約 60〜70 秒）。
+26. **本物の `claude` で、代役でしか通していなかった組み合わせを試した。** 分離した配置（`--src app/src --tests test/clp`）は
+    3段階とも1回目で通った。同じ場所に並べる配置も通ったが、1周目に、配線の段階が雛形のまま何も書かなくても
+    赤の確認を通ってしまう不具合が見つかった（雛形と本番コードの「未実装」の文言が同じだった）。文言を分けて直した。
+    結び付けの下書きの差分対応は、条件の追加と構造の変更を1回で直し、変えた所に `// REVIEW:` を付けた。
+27. **複数のコンポーネント。** 仕様に複数のコンポーネントを書け、本番コードを共有する。テスト側のファイル名に
+    コンポーネント名を付け、実装の段階の採点で、ほかのコンポーネントの検証も回す（回帰）。
+    `claude` で、例の注文の実装に2つ目のコンポーネント（ランプ）を足した。設計と配線は1回目、実装は2回目で通り、
+    注文のコードは追加だけで、既存の行は変わらなかった。この試行で2つの不具合が見つかり、直した:
+    回帰の確認が、出力先に残っていた古いテストの入口をそのまま使っていた。また、決定表を持たないコンポーネントが、
+    共有の本番コードに対するミューテーションで「1つも検出されない」として差し戻された（実装の1回目）。
+28. **名前を `aac` から `clp` に変えた。** コマンド名（まだ作っていない）、パッケージのスコープ (`@clp/*`)、
+    テスト側の既定のディレクトリと作業場所の依頼文の置き場所 (`clp/`)、環境変数 (`CLP_*`) のすべて。
+
 ### 未検証
 
 1. **ミューテーションの判定の精度。** リテラルの一致に基づくヒューリスティックで、文字列の値の肩代わりや
@@ -401,7 +419,7 @@ diff -r stage1-src/ stage2-src/
 
 > **単体JS化しても、Node 22.18+ という要件は下がらない。**
 
-理由は、CLI 自身の形式ではなく**入力側**にある。`aac` の仕事は
+理由は、CLI 自身の形式ではなく**入力側**にある。`clp` の仕事は
 ユーザーの `.spec.ts` を実行時に `import()` することであり、これには型ストリップが要る。
 CLI を `.js` に固めても、読み込む対象が `.ts` である限り Node の要件は変わらない。
 
@@ -414,7 +432,7 @@ CLI を `.js` に固めても、読み込む対象が `.ts` である限り Node
 | --- | --- |
 | **`node_modules` 制限の解除**（本命） | §2 の唯一のブロッカーが消え、**git 依存・npm 公開・1ファイルコピー**が全て解禁される |
 | **起動が速くなる** | 実測 140ms → **85ms**（約1.6倍）。型ストリップのコストが消える |
-| 1ファイルで完結 | 他リポジトリの `scripts/aac.js` に置くだけで動く。`pnpm install` すら不要 |
+| 1ファイルで完結 | 他リポジトリの `scripts/clp.js` に置くだけで動く。`pnpm install` すら不要 |
 
 **実測（本環境）:** `node_modules` 内に置いた `.js` エントリから、
 外部（`node_modules` の外）の `.spec.ts` を動的 `import()` できることを確認済み。
@@ -508,7 +526,7 @@ for (const f of readdirSync("src").filter(f => f.endsWith(".ts"))) {
 
 第三者がジェネレータを書き始めたら、`protoc` 方式（IR を stdin で渡し、
 生成ファイル一覧を stdout で受け取る独立実行ファイル）が最も素直。
-ジェネレータを任意の言語で書けるため、Go チームが Go で `aac-gen-golang` を書ける。
+ジェネレータを任意の言語で書けるため、Go チームが Go で `clp-gen-golang` を書ける。
 「Universal IR = 言語非依存の契約」という `SPEC.md` の主張とも配布形態が一致する。
 
 ただし**バイナリを採らない現状では、npm パッケージを動的ロードする従来案も選択肢に戻る**（保険2の撤回）。

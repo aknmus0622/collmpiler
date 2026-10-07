@@ -128,14 +128,30 @@ PBT の実行中に同じ種類の問題が見つかった場合も、実装の�
 | 書くもの | 書き手 | 置き場所 | 決定的か |
 | --- | --- | --- | --- |
 | 仕様 | 人 | `specs/` | はい |
-| IR、PBT のグルー、アダプターの型と雛形 | プラットフォーム | テスト側（`aac/`） | はい |
+| IR、PBT のグルー、アダプターの型と雛形 | プラットフォーム | テスト側（`clp/`） | はい |
 | 本番コードの骨組み | LLM（設計の段階） | 本番側（`src/`。構成もAPIも自由） | いいえ |
-| アダプターの中身 | LLM（配線の段階） | テスト側（`aac/adapter.ts`） | いいえ |
+| アダプターの中身 | LLM（配線の段階） | テスト側（`clp/order.adapter.ts`） | いいえ |
 | 本番コードの中身 | LLM（実装の段階） | 本番側（`src/`） | いいえ |
 
 * **テストケースは LLM に書かせません。** 採点基準を LLM に書かせると、実装とテストが同じ誤解をして合格してしまいます。
 * **仕様について LLM に見せるのは IR だけです。** 仕様の TypeScript（特に Layer 2 の評価関数）は見せません。自然言語の条件（「The customer is a Gold member and it is month-end」）をデータ定義に照らして解釈し実装するのが LLM の仕事であり、その解釈が正しいかを Layer 2 を正解として PBT が判定します。これは「IR が実装に十分な情報を持っているか」の検証も兼ねます。
 * **決定性は検証側で保ちます。** LLM の出力は毎回変わるので、合格した本番コードを成果物として保存します。出口ゲートは決定的で、PBT のシードは仕様のハッシュから決めます。
+
+#### 複数のコンポーネント
+
+仕様のディレクトリには、コンポーネントをいくつでも置けます。**本番コードは共有し、テスト側のファイルはコンポーネントごとに持ちます。**
+
+* **名前**: コンポーネントの名前は、export 名を小文字とハイフンにしたものです（`Order` → `order`、`CheckoutButton` → `checkout-button`）。テスト側のファイル名に付き（`clp/order.adapter.ts`、`clp/order.ir.json` など）、`--component <名前>` の指定にも使います。コンポーネントが1つでも、ファイル名には名前が付きます（2つ目を足したときに、名前が変わらないようにするためです）。
+* **実行**: 既定では、仕様にあるすべてのコンポーネントを、名前順に1つずつ一致させます。`--component` で1つを選べます。本番コードは共有なので、2つ目以降は「すでにある本番コードを直す」流れになります（「繰り返し使う」と同じ）。
+* **見せるもの**: 設計と実装の段階には、ほかのコンポーネントの IR も渡します。本番コードは、すべての仕様を満たし続けなければならないためです。配線の段階には、どの IR も、ほかのコンポーネントのテスト側のファイルも渡しません。
+* **回帰**: 実装の段階の採点では、このコンポーネントの PBT に合格したあと、配線まで済んでいるほかのコンポーネントの PBT も実行します。通らなくなっていたら、「ほかのコンポーネントを壊した」として、反例を添えて実装の段階に差し戻します。
+* **公開している形**: 設計と実装の段階の静的検査には、ほかのコンポーネントのアダプターも含めます。すでにある名前やシグネチャを変えると、そこが型エラーになり、「公開している名前かシグネチャが変わった」として差し戻されます。
+* 「配線まで済んでいる」とは、出力先の IR がいまの仕様と同じで、アダプターがあることです。仕様を変えてまだ一致させていないコンポーネントは、そのコンポーネントの番で直すので、回帰の対象にしません。
+
+今後の課題:
+
+* エージェントが書いてよい範囲は、本番コードの全体です。コンポーネントごとに絞ることはできません。ミューテーションも本番コードの全体を壊すので、ほかのコンポーネントのコードの生き残りが報告に混ざります（合否には影響しません）。このため、本番コードを共有しているときは「壊しても1つも検出されなければ不合格」の基準を使いません（決定表の値についての基準は、そのまま使います）。決定表を持たないコンポーネントでは、アダプターによる肩代わりを見つける力が弱くなります。
+* あるコンポーネントの設計が、ほかのコンポーネントのアダプターが使っているシグネチャを変える必要がある場合、いまは差し戻すだけです（ほかのコンポーネントの配線をやり直す流れはありません）。
 
 #### 配置（本番コードとテスト側の置き場所）
 
@@ -145,20 +161,20 @@ PBT の実行中に同じ種類の問題が見つかった場合も、実装の�
 | --- | --- | --- |
 | `--out <dir>` | 出力先。本番コードとテスト側を、この下の既定の場所に置く | なし |
 | `--src <dir>` | 本番コードのディレクトリ | `<out>/src` |
-| `--tests <path>` | テスト側のファイル（IR・契約・テストの入口・アダプター）の場所。ファイル名の前に付けるパスで、`.` で終われば最後の部分がファイル名の接頭辞になる | `<out>/aac` |
+| `--tests <path>` | テスト側のファイル（IR・契約・テストの入口・アダプター）の場所。ファイル名の前に付けるパスで、`.` で終われば最後の部分がファイル名の接頭辞になる | `<out>/clp` |
 
 `--src` と `--tests` の両方を指定すれば、`--out` は要りません。
 
 | 流儀 | 指定 | できあがり |
 | --- | --- | --- |
-| まとめて置く（既定） | `--out app` | `app/src/order.ts`、`app/aac/adapter.ts` |
-| `src/` と `test/` を分ける | `--src app/src --tests test/aac` | `app/src/order.ts`、`test/aac/adapter.ts` |
-| 同じ場所に並べる | `--src src/order --tests src/order/order.aac.` | `src/order/order.ts`、`src/order/order.aac.adapter.ts`、`order.aac.ir.json` … |
+| まとめて置く（既定） | `--out app` | `app/src/order.ts`、`app/clp/order.adapter.ts` |
+| `src/` と `test/` を分ける | `--src app/src --tests test/clp` | `app/src/order.ts`、`test/clp/order.adapter.ts` |
+| 同じ場所に並べる | `--src src/order --tests src/order/clp.` | `src/order/order.ts`、`src/order/clp.order.adapter.ts`、`clp.order.ir.json` … |
 
-* **作業場所は、出力先の相対位置をそのまま写します。** 本番コードとテスト側の両方を含むいちばん深いディレクトリを起点にするので、アダプターから本番コードへの相対 import は、作業場所でも出力先でも同じ形になります。依頼文と添付資料だけは、配置によらず作業場所の `aac/` に置きます。
+* **作業場所は、出力先の相対位置をそのまま写します。** 本番コードとテスト側の両方を含むいちばん深いディレクトリを起点にするので、アダプターから本番コードへの相対 import は、作業場所でも出力先でも同じ形になります。依頼文と添付資料だけは、配置によらず作業場所の `clp/` に置きます。
 * **本番コードのディレクトリは、エージェントが中身を書き直す場所です。** やり直しのたびに、その中の本番コードは置き換えられます。`package.json`・`node_modules`・`.git` を含むディレクトリ（プロジェクトのルート）は指定できません。
-* **同じ場所に並べるときは、接頭辞が必須です。** `--tests src/order/order.aac.` のように、末尾を `.` にして接頭辞まで書きます（`.` で終わらなければ、全体をディレクトリとして扱います）。 テスト側のファイルは名前で見分け、本番コードとしては扱いません（検査・ミューテーション・やり直しのときの削除の対象から外れます）。接頭辞で始まる名前を本番コードが使うと、差し戻します。
-* 以降の説明では、既定の配置（`src/` と `aac/`）で書きます。
+* **同じ場所に並べるときは、接頭辞が必須です。** `--tests src/order/clp.` のように、末尾を `.` にして接頭辞まで書きます（`.` で終わらなければ、全体をディレクトリとして扱います）。 テスト側のファイルは名前で見分け、本番コードとしては扱いません（検査・ミューテーション・やり直しのときの削除の対象から外れます）。接頭辞で始まる名前を本番コードが使うと、差し戻します。
+* 以降の説明では、既定の配置（`src/` と `clp/`）で書きます。
 
 今後の課題: 既存の本番コード（レガシーコード）に仕様を書いて当てる使い方は、まだできません。本番コードがすでにある場合は設計と実装の段階が要らず、配線と検証だけになりますが、次の点が今の流れと違います。配線の段階が既存のコードを読む必要があること、既存のコードは外部のパッケージを使うこと、不一致の原因（仕様の誤り・既存コードの不具合・配線の誤り）を機械的に区別できないので、エージェントに差し戻さず人に報告すべきこと。また、別のリポジトリの製品に当てるにはビルドが要ります（`DISTRIBUTION.md`）。
 
@@ -188,7 +204,7 @@ PBT の実行中に同じ種類の問題が見つかった場合も、実装の�
 * **添付資料**として、任意のファイルや文言を依頼に添えられます。アーキテクチャの決まり、命名規約、用語集などを想定しています。コンポーネントの `assets` に、`file` / `dir` / `text` で包んで並べます。
 
   ```typescript
-  import { component, dir, file, text } from "@aac/core";
+  import { component, dir, file, text } from "@clp/core";
 
   export const Order = component({
     assets: [
@@ -204,7 +220,7 @@ PBT の実行中に同じ種類の問題が見つかった場合も、実装の�
 
   | 書き方 | 渡り方 |
   | --- | --- |
-  | `file(path)` | 作業場所の `aac/assets/` に、相対パスの構造を保って置く。依頼文がその場所を案内する |
+  | `file(path)` | 作業場所の `clp/assets/` に、相対パスの構造を保って置く。依頼文がその場所を案内する |
   | `dir(path)` | 中のファイルすべてを、同じように置く（ドットファイルは除く） |
   | `text(content)` | 依頼文の中に直接載せる |
 
@@ -222,8 +238,8 @@ PBT の実行中に同じ種類の問題が見つかった場合も、実装の�
 `run({ dir, phase, attempt, env })` だけを持つインターフェースです。標準の実装は外部コマンドを起動するもので、claude / codex / 自作スクリプトなどを差し替えられます。プラットフォーム自体の依存は増えません。
 
 * 作業場所をカレントディレクトリとして起動します。段階ごと・試行ごとに別のプロセスなので、記憶は引き継がれません。
-* 依頼は `aac/REQUEST.md` に書かれています（環境変数 `AAC_REQUEST`）。段階は `AAC_PHASE`、試行回数は `AAC_ATTEMPT` で渡します。
-* エージェントは、その段階で許可された場所（設計と実装は `src/`、配線は `aac/adapter.ts`）だけを書いて終了します。
+* 依頼は `clp/REQUEST.md` に書かれています（環境変数 `CLP_REQUEST`）。段階は `CLP_PHASE`、試行回数は `CLP_ATTEMPT` で渡します。
+* エージェントは、その段階で許可された場所（設計と実装は `src/`、配線は `clp/order.adapter.ts`）だけを書いて終了します。
 
 #### 出口ゲート（取り出しと採点）
 
@@ -342,13 +358,13 @@ PBT は別プロセスで実行します。LLM が書いたコードが実行さ
 
 ```typescript
 // --- specs/order.decisions.ts ---
-import { decisionTable } from "@aac/core";
+import { decisionTable } from "@clp/core";
 
 // 割引率は整数のパーセントで持つ（小数だと金額の計算に誤差が出る）
 export const Campaign = decisionTable({
   "The customer is a Gold member and it is month-end": { discountPercent: 20, grantsCoupon: true, coupon: "Premium" },
-  "The customer is a Silver member": { discountPercent: 5, grantsCoupon: false, coupon: "Standard" },
-  otherwise: { discountPercent: 0, grantsCoupon: false, coupon: "Standard" },
+  "The customer is a Silver member": { discountPercent: 5, grantsCoupon: false, coupon: null },
+  otherwise: { discountPercent: 0, grantsCoupon: false, coupon: null },
 });
 
 export const Shipping = decisionTable({
@@ -359,6 +375,7 @@ export const Shipping = decisionTable({
 
 * どの条件にも当たらないときの `otherwise` が必須で、全行が同じ列を持ちます（どちらも型エラーになります）。
 * **セルに書けるのは値だけです。** 表が決めるのは率や区分といったパラメータで、副作用や計算は書きません。「副作用を起こすかどうか」は真偽値の列にし、結び付けの構造の側で条件として使います（§3.2）。
+* **その行では使われない列には、`null` を書きます**（上の例の、クーポンを出さない行の `coupon`）。使われない値を埋めると、実装がそれを忠実に写したときに「変えても結果が変わらない値」になり、ミューテーションのゲートが差し戻すためです。値の無いセルが実際に使われる仕様（`when` で守らずに参照している、など）は誤りで、仕様の事前検査が見つけます。IR には `null` のまま出ます。
 * 同時に成り立つ条件は1つまでです（Hit Policy: Unique）。
 
 #### コンポーネント
@@ -393,7 +410,7 @@ export const Shipping = decisionTable({
 
 ```typescript
 // --- specs/order.component.ts ---
-import { component } from "@aac/core";
+import { component } from "@clp/core";
 import { Campaign, Shipping } from "./order.decisions.ts";
 
 const Rank = ["Gold", "Silver", "Bronze"] as const;   // 配列は列挙
@@ -474,8 +491,7 @@ export const Order = component({
 
 * 多重度（`One<T>` / `Lone<T>` / `Some<T>` / `Many<T>`）は型としてのみ提供しています。値として宣言できる形への拡張が必要です。
 * 戻り値を持つ操作（値オブジェクトの演算など）は書けません。コマンドの結果は「次の状態」と「副作用」だけです。
-* 決定表のセルに「値が無い」ことは書けません。副作用を起こさない行にも、列の値を埋める必要があります（上の例の `coupon: "Standard"`）。この値は使われないので、実装が忠実に写すと「変えても結果が変わらない値」になり、ミューテーションのゲートが差し戻します（1回の差し戻しで直りますが、仕様の側の埋め草が原因です）。
-* 読み込めるコンポーネントは1つだけです。複数のコンポーネントと、その組み合わせ（ある部品の依存を、代役ではなく別の本物の部品につなぐ）は未実装です。
+* コンポーネントは複数書けますが（§2.3「複数のコンポーネント」）、互いに独立に検証されます。コンポーネントの組み合わせ（ある部品の依存を、代役ではなく別の本物の部品につなぐ）は未実装です。
 
 #### 自然言語で書くもの
 
@@ -502,7 +518,7 @@ Layer 1 では、次のものを自然言語で書きます。意味や構造は
 
 ```typescript
 // --- specs/order.binding.ts ---
-import { bind, decide, ref } from "@aac/core";
+import { bind, decide, ref } from "@clp/core";
 import { Order } from "./order.component.ts";
 
 export const Binding = bind(Order, {
@@ -605,7 +621,7 @@ pnpm -s run draft-binding --agent '<エージェントのコマンド>'
 プラットフォームは、コンポーネントの骨組みと文に、決定表と、結び付けの構造を重ねて、フラットな JSON (Universal IR) を出力します。どれも関数を含まない宣言なので、並べ直すだけで作れます。結び付けの意味（関数）は含めません。キーはソートされ、同じ仕様からは常にバイト一致する出力が得られます。
 
 ```json
-// --- aac/ir.json（抜粋） ---
+// --- clp/order.ir.json（抜粋） ---
 {
   "irVersion": 3,
   "model": {
@@ -622,8 +638,8 @@ pnpm -s run draft-binding --agent '<エージェントのコマンド>'
     "campaign": {
       "rows": {
         "The customer is a Gold member and it is month-end": { "discountPercent": 20, "grantsCoupon": true, "coupon": "Premium" },
-        "The customer is a Silver member": { "discountPercent": 5, "grantsCoupon": false, "coupon": "Standard" },
-        "otherwise": { "discountPercent": 0, "grantsCoupon": false, "coupon": "Standard" }
+        "The customer is a Silver member": { "discountPercent": 5, "grantsCoupon": false, "coupon": null },
+        "otherwise": { "discountPercent": 0, "grantsCoupon": false, "coupon": null }
       }
     },
     "shipping": { ... }
@@ -667,18 +683,18 @@ pnpm -s run draft-binding --agent '<エージェントのコマンド>'
 
 ### 3.4. Layer 3: PBT Verification Engine
 
-Universal IR から、テスト側のファイルだけを生成します。生成物は薄いグルーに留め、PBT のロジックはランタイムライブラリ（`@aac/cli/runtime`）に置きます。
+Universal IR から、テスト側のファイルだけを生成します。生成物は薄いグルーに留め、PBT のロジックはランタイムライブラリ（`@clp/cli/runtime`）に置きます。
 
 | 生成物 | 内容 | 書き換え |
 | --- | --- | --- |
-| `aac/ir.json` | Universal IR | 不可 |
-| `aac/adapter.contract.ts` | 状態名・コマンド・副作用の型と、`TargetSystemAdapter` インターフェース | 不可 |
-| `aac/verify.ts` | アダプターと仕様を PBT ランタイムに渡すだけのグルー | 不可 |
-| `aac/adapter.ts` | アダプターの雛形（全メソッドが未実装） | 実装エージェントが埋める |
+| `clp/order.ir.json` | Universal IR | 不可 |
+| `clp/order.adapter.contract.ts` | 状態名・コマンド・副作用の型と、`TargetSystemAdapter` インターフェース | 不可 |
+| `clp/order.verify.ts` | アダプターと仕様を PBT ランタイムに渡すだけのグルー | 不可 |
+| `clp/order.adapter.ts` | アダプターの雛形（全メソッドが未実装） | 実装エージェントが埋める |
 
 生成ファイルのヘッダには `ir-version` と `spec-hash` のみを書き、日時やCLIのバージョンは埋めません。
 
-`aac/verify.ts` は出力先にのみ生成され、エージェントの作業場所には置かれません（§2.3）。
+`clp/order.verify.ts` は出力先にのみ生成され、エージェントの作業場所には置かれません（§2.3）。
 
 現在の PBT は TypeScript（fast-check）向けで、期待値は仕様を Node 上で具体実行して得ています。他言語（Go の `rapid`、Rust の `proptest` など）向けには、IR から同じ構成のテスト側コードを生成する計画です。
 
@@ -689,7 +705,7 @@ PBTエンジン（Layer 3）と本番システムを安全に接続し、決定�
 本番システムが外部に頼るものは、フレームワークが用意する代役（`Ports`）に置き換えます。代役は問い合わせに対して生成した答えを返し、受けた副作用を記録します。本番システムに状態を外から流し込む口はありません。任意の状態には、初期状態からコマンドを積み重ねて到達します。
 
 ```typescript
-// --- aac/adapter.contract.ts（生成物。コメントはエージェント向けに英語） ---
+// --- clp/order.adapter.contract.ts（生成物。コメントはエージェント向けに英語） ---
 export type StateName = "DRAFT" | "PENDING" | "PAID" | "SHIPPED" | "CANCELLED";
 
 /** 実行するコマンド1つ。名前と、それに対応する入力。 */
@@ -749,7 +765,7 @@ export interface TargetSystemAdapter {
 
 覚えているデータは、本番システムから直接は読みません。後のコマンドの振る舞いを通してだけ確かめます（例えば、注文時の会員ランクを正しく覚えているかは、決済時の割引と出荷時の優先扱いで分かります）。
 
-不一致が見つかると fast-check がコマンド列を最小化し、シード・パス・**最短のコマンド列**・期待値と実際の値を報告します。例えば「決済後のキャンセルで返金されない」という不具合は、「注文 → 決済成功 → キャンセル」の3手として報告され、各手の時点で覚えているはずのデータと、成り立った条件も併せて示されます。`node aac/verify.ts --seed X --path Y` で同じ反例を再現できます。
+不一致が見つかると fast-check がコマンド列を最小化し、シード・パス・**最短のコマンド列**・期待値と実際の値を報告します。例えば「決済後のキャンセルで返金されない」という不具合は、「注文 → 決済成功 → キャンセル」の3手として報告され、各手の時点で覚えているはずのデータと、成り立った条件も併せて示されます。`node clp/order.verify.ts --seed X --path Y` で同じ反例を再現できます。
 
 ## 4. イベントストーミング＆DFDの自動生成
 
