@@ -16,7 +16,7 @@ Phase 1 spike. The design documents (written in Japanese) are still the bulk of 
   - `strategy.ts` — how an agent session is launched (an external command). `gates.ts` — per-phase entry gate (isolated sandbox with allowlisted inputs) and exit gate (collect allowlisted outputs, checks, PBT). `request.ts` — the three phase-specific request texts. `loop.ts` — the design → wiring → implementation pipeline with feedback and restarts.
   - `check.ts` + `scan.ts` — mechanical checks on what the LLM wrote (imports and generated files only; adapter contents are unrestricted).
   - `typecheck.ts` — runs `tsc`; `typecheckSpecs` is the fixed, always-on check of the specs. `static-check.ts` — the swappable `StaticCheckStrategy` for what the agent wrote (the TypeScript one is `tsc`; `--static-check off` disables it). `assets.ts` — resolves asset declarations (files keep their relative path under `aac/assets/`; text goes inline into the request) from the component's `assets` (relative to the component file) and from `--asset`.
-  - `draft.ts` — has an agent draft the Layer 2 binding into `<name>.binding.draft.ts` (entry point `draft-binding.ts`). Separate from the implementation pipeline.
+  - `draft.ts` — has an agent draft the Layer 2 binding into `<name>.binding.draft.ts` (entry point `draft-binding.ts`). Separate from the implementation pipeline. With no binding it starts from a generated skeleton; with a binding that no longer fits the component it starts from that binding and asks for the minimal update; with one that fits it does nothing.
   - `mutation.ts` — the mutation gate: a swappable `MutationStrategy` (built-in literal mutation) plus `judge`, the pass rule owned by the gate. `guide.ts` — default design guidance embedded in the request.
 - `specs/` — the example: `order.decisions.ts` and `order.component.ts` (Layer 1) and `order.binding.ts` (Layer 2). Only one component can be loaded at present.
 - `examples/checkout-ts/` — `src/` is production code written by an LLM agent from the IR; `aac/` is the generated test side. Do not hand-edit `src/` to make verification pass; rerun the loop.
@@ -41,8 +41,10 @@ pnpm --filter example-checkout-ts verify              # PBT against examples/che
 pnpm -s run draft-binding --agent 'claude -p "Read aac/REQUEST.md and carry out the request." --permission-mode acceptEdits'
 
 # Have an agent (re)write an implementation in three sessions (design, wiring, implementation).
-# Any command works; each session runs in an isolated temp directory. --from <phase> starts later in the pipeline.
-# --fresh discards the existing src/ and adapter; --transcripts <dir> saves the agent's stdout per attempt;
+# Any command works; each session runs in an isolated temp directory. Run it again after changing the spec: which
+# phases run is decided from the state of the output (nothing there: all three; boundary unchanged: verify, then
+# implementation only if it fails). --from <phase> overrides that.
+# --fresh discards the existing production code and adapter; --transcripts <dir> saves the agent's stdout per attempt;
 # --asset [<phases>=]<file> attaches a file to the requests (repeatable); --drafts uses unreviewed draft bindings
 # as the oracle; --mutation auto|builtin|off and --static-check auto|tsc|off select those strategies (auto = the target's own);
 # --target typescript selects the target language (the only one so far).
@@ -73,6 +75,7 @@ The same thing goes by several names across the docs: `co-llm-piler` (repo), `aa
 | `PACKAGE.md` | Long-term monorepo layout and the Phase 1–4 roadmap |
 | `SELF_HOSTING.md` | Stage 0/1/2 bootstrap and fixed-point verification of the compiler |
 | `DISTRIBUTION.md` | How the `aac` CLI is built and shared; the most recent and most concrete doc |
+| `INCREMENTAL.md` | Using the framework repeatedly: new code, changed specs and legacy code as one flow; what is implemented and the design of what is not |
 
 `DISTRIBUTION.md` is the most concrete on layout and distribution and **overrides `PACKAGE.md` and `SELF_HOSTING.md` where they conflict**; `SPEC.md` has been updated to match the code and is authoritative for the layers, the IR, and the LLM loop:
 
@@ -102,12 +105,16 @@ The framework generates **test-side code only**; it never places types, signatur
 | `wiring` | adapter contract, skeleton — **not the IR** | `aac/adapter.ts` | type-checks; PBT must fail for the "not implemented" reason (red) |
 | `implementation` | IR, skeleton, guide, assets — **not the adapter or contract** | `src/` bodies | type-checks together with the adapter (catches changed signatures); PBT passes (green); mutation gate |
 
-A failed check goes into the same phase's next `REQUEST.md`; when a phase exhausts its attempts the whole pipeline restarts from `design` (the failing phase cannot be attributed mechanically). If `--out` already holds `src/` and an adapter, the run starts at `implementation`.
+A failed check goes into the same phase's next `REQUEST.md`; when a phase exhausts its attempts the whole pipeline restarts from `design` (the failing phase cannot be attributed mechanically).
+
+The same pipeline serves new code and changed specs (`INCREMENTAL.md`); "new" is only the case where no production code exists yet. `planOf` in `loop.ts` decides which phases run from the state of the output: no production code, or a boundary (`init`, `states`, `commands`, `queries`, `effects`) that differs from the previous `ir.json` → all three; only the adapter missing → wiring, implementation; otherwise implementation alone. When production code already exists (`ctx.incremental`): the implementation phase first grades the code as it is (`verifyGate`, recorded as `attempt: 0`) and is skipped if that passes, otherwise the result goes into the first request; the requests ask to keep what exists; a restart from `design` does not delete the code. The wiring red check is "while any unimplemented marker remains in production code, the tests must not pass".
 
 Invariants to preserve when changing this:
 
 - What each phase may see is the mechanism, not a detail: the wiring phase never sees the IR (so the adapter cannot encode business decisions) and the design/implementation phases never see the adapter contract (so production code is not shaped by the harness). Do not add an input to a phase, and do not mention `ports` or the harness in the design/implementation requests or the default guide, without re-examining these two properties. The skeleton is the one channel between them; `gates.ts` rejects skeletons that quote spec sentences.
 - The layout is data, not convention. Nothing outside `layout.ts` may assume `src/` or `aac/`: ask the `Workspace` for `paths.*` and use `sourceFiles` / `isSource` for production code. The sandbox mirrors the output's relative layout (so relative imports are identical in both); only `REQUEST.md` and assets always live in the sandbox's `aac/`, because agent commands point there. Production code is removed file by file, never by deleting the directory — test-side files may sit next to it — and `resolveLayout` refuses a `--src` that looks like a project root.
+- Do not add a mode for "new" versus "changed": express differences as state (what exists, what changed) read in `planOf`, so that every scenario stays one flow. The one axis that is not state — whether the agent may write production code at all (legacy code) — is not implemented; when it is, it belongs in `planOf` too (drop design and implementation, send mismatches to a person, never to the wiring phase).
+- On repeated runs the wiring phase reads fully implemented production code, so the mutation gate is the only guard against decisions copied into the adapter. Do not weaken it for incremental runs.
 - Isolation belongs to the gates, not to strategies. Nothing that points at the repo may enter the sandbox: no spec sources, no `verify.ts` (it contains the specs path), no repo paths in file contents or environment variables. A new strategy must not need to re-implement any of this.
 - Production code carries zero constraints: no framework imports or types, no required naming, no required DI, no shared vocabulary with the spec. The adapter always adapts to the production code, so never restrict what the adapter may contain; whether business decisions really live in `src/` is established by mutation, not by inspecting the adapter.
 - Anything you want the implementer to do about design goes into the default guide (`guide.ts`) or an attached asset (the component's `assets`, or `--asset` for a single run), which is advice and never a pass/fail rule. Neither may mention business rules. Assets go to the design and implementation phases unless phases are named; sending one to the wiring phase can undo that phase's blindness to the spec.

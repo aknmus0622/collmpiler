@@ -4,43 +4,16 @@
 
 Phase 1 spike. TypeScript targets only.
 
-**What works today**
-
-- **Write a spec as TypeScript data.** Decision tables, plus a component: its vocabulary (states, remembered
+- **Write a spec as TypeScript data. (Spec Driven Development)** Decision tables, plus a component: its vocabulary (states, remembered
   data, queries to and effects on dependencies), the skeleton of its state machine, and what each command does
   in prose. No functions. A separate binding says what the prose means: the structure of each command as
   declarations, and the meaning of each condition, calculation, and invariant as functions.
-- **Have an LLM draft the binding.** The draft is kept out of use until a person has reviewed it, and it
-  flags sentences that can be read in more than one way.
-- **Check the spec on its own.** Type errors, conflicting conditions, missing bindings, broken invariants, and
-  values that do not fit their declared type are reported before any implementation exists.
-- **Have an LLM agent write the production code from the spec**, test-first, in three isolated sessions:
+- **Have an LLM agent write the production code from the spec (Harness/Loop Engineering)**, test-first, in three isolated sessions:
   design a skeleton, wire it to the test harness, then implement it. The framework generates test-side code
   only and places nothing in production code.
-- **Put the files where your project wants them.** Production code and the test side can go in separate
-  directories (`src/` and `test/`), or side by side in one directory with a prefix on the test-side files.
-- **Verify the result.** Property-based tests run sequences of commands and shrink failures to the shortest
-  sequence; a mutation gate confirms that the tested behaviour really comes from production code. Failures go
-  back to the agent until it passes.
-
-## Future Scope
-
-- Drafting the component itself from requirements written in natural language
-- Alerts from the review notes an LLM leaves in a draft binding (`// REVIEW:`): collecting them, reporting
-  them, and holding back a run until the ambiguous names they point at have been looked at
-- Stopping after the design step so a person can review the skeleton before it is wired and implemented
-- Applying a spec to existing production code (legacy code): wiring and verification only, with mismatches
-  reported to a person instead of being sent back to the agent
-- Help with triaging surviving mutations: logic the spec cannot exercise versus code that is not needed
-- Operations that return values (value objects), and multiplicity declared as values
-- Composing components, and describing the UI layer
-- Target languages other than TypeScript (Go, Rust, Python). The per-language parts (test-side generation,
-  running the tests, static checks, mutation) already sit behind one interface, but TypeScript is its only
-  implementation
-- A single `aac` command in place of the current scripts
-- Stronger agent isolation (containers)
-- Diagrams generated from the IR, and a trace visualizer
-- Larger specs: how often the agent succeeds, and whether the feedback loop converges
+- **Run it again when the spec changes.** The same command brings the code back into agreement with the spec:
+  only the steps the change calls for are run, existing code is kept, and the agent is first shown where the
+  current code falls short. If nothing changed, it only verifies.
 
 ## Requirements and Setup
 
@@ -52,7 +25,6 @@ pnpm install
 ```
 
 There is no build step. Node runs the `.ts` files directly.
-
 ## Example
 
 The repository contains one example, end to end: the spec of an order that is placed, paid, shipped, or
@@ -366,3 +338,24 @@ PlaceOrder  →  Checkout (The payment succeeded)  →  Cancel
 expected: state CANCELLED, effects [Refund]
 actual:   state CANCELLED, effects []
 ```
+
+## Future Scope
+
+- Drafting the component itself from requirements written in natural language
+- Alerts from the review notes an LLM leaves in a draft binding (`// REVIEW:`): collecting them, reporting
+  them, and holding back a run until the ambiguous names they point at have been looked at
+- Stopping after the design step so a person can review the skeleton before it is wired and implemented
+- Applying a spec to existing production code (legacy code): wiring and verification only, with mismatches
+  reported to a person instead of being sent back to the agent (design notes in `INCREMENTAL.md`)
+- Several components sharing production code: a writable scope narrower than "everything under `--src`", and
+  re-verifying the other components after a change
+- Help with triaging surviving mutations: logic the spec cannot exercise versus code that is not needed
+- Operations that return values (value objects), and multiplicity declared as values
+- Composing components, and describing the UI layer
+- Target languages other than TypeScript (Go, Rust, Python). The per-language parts (test-side generation,
+  running the tests, static checks, mutation) already sit behind one interface, but TypeScript is its only
+  implementation
+- A single `aac` command in place of the current scripts
+- Stronger agent isolation (containers)
+- Diagrams generated from the IR, and a trace visualizer
+- Larger specs: how often the agent succeeds, and whether the feedback loop converges
