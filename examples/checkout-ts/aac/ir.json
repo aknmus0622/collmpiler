@@ -6,13 +6,13 @@
         "PAID"
       ],
       "name": "Cancel",
-      "preconditions": [],
-      "transitions": {
+      "onlyIf": [],
+      "when": {
         "otherwise": {
-          "description": "If the order had been paid, a refund is issued.",
-          "emittedCommands": [
+          "does": "If the order had been paid, a refund is issued.",
+          "effects": [
             {
-              "action": "Refund",
+              "name": "Refund",
               "payload": {},
               "when": {
                 "$was": [
@@ -21,7 +21,7 @@
               }
             }
           ],
-          "nextState": "CANCELLED"
+          "goTo": "CANCELLED"
         }
       }
     },
@@ -30,18 +30,18 @@
         "PENDING"
       ],
       "name": "Checkout",
-      "preconditions": [
+      "onlyIf": [
         "The external payment module is active"
       ],
-      "transitions": {
+      "when": {
         "The payment succeeded": {
-          "description": "A receipt is sent with the campaign's discount percent and the amount charged. Then a coupon is issued if the campaign grants one.",
-          "emittedCommands": [
+          "does": "A receipt is sent with the campaign's discount percent and the amount charged. Then a coupon is issued if the campaign grants one.",
+          "effects": [
             {
-              "action": "SendReceipt",
+              "name": "SendReceipt",
               "payload": {
                 "amount": {
-                  "$ref": "formula:amountCharged"
+                  "$ref": "calculation:amountCharged"
                 },
                 "discountPercent": {
                   "$ref": "decision:campaign.discountPercent"
@@ -49,7 +49,7 @@
               }
             },
             {
-              "action": "IssueCoupon",
+              "name": "IssueCoupon",
               "payload": {
                 "type": {
                   "$ref": "decision:campaign.coupon"
@@ -60,17 +60,17 @@
               }
             }
           ],
-          "nextState": "PAID"
+          "goTo": "PAID"
         },
         "otherwise": {
-          "description": "The customer is notified of the payment failure.",
-          "emittedCommands": [
+          "does": "The customer is notified of the payment failure.",
+          "effects": [
             {
-              "action": "NotifyPaymentFailure",
+              "name": "NotifyPaymentFailure",
               "payload": {}
             }
           ],
-          "nextState": "PENDING"
+          "goTo": "PENDING"
         }
       }
     },
@@ -79,17 +79,17 @@
         "DRAFT"
       ],
       "name": "PlaceOrder",
-      "preconditions": [],
-      "transitions": {
+      "onlyIf": [],
+      "when": {
         "otherwise": {
-          "description": "The order remembers the customer's rank and the list price. An order confirmation is sent.",
-          "emittedCommands": [
+          "does": "The order remembers the customer's rank and the list price. An order confirmation is sent.",
+          "effects": [
             {
-              "action": "SendOrderConfirmation",
+              "name": "SendOrderConfirmation",
               "payload": {}
             }
           ],
-          "nextState": "PENDING",
+          "goTo": "PENDING",
           "set": {
             "price": {
               "$ref": "input:listPrice"
@@ -106,13 +106,13 @@
         "PAID"
       ],
       "name": "Ship",
-      "preconditions": [],
-      "transitions": {
+      "onlyIf": [],
+      "when": {
         "otherwise": {
-          "description": "A shipping notice is sent, with priority as the shipping decision says.",
-          "emittedCommands": [
+          "does": "A shipping notice is sent, with priority as the shipping decision says.",
+          "effects": [
             {
-              "action": "SendShippingNotice",
+              "name": "SendShippingNotice",
               "payload": {
                 "priority": {
                   "$ref": "decision:shipping.priority"
@@ -120,7 +120,7 @@
               }
             }
           ],
-          "nextState": "SHIPPED"
+          "goTo": "SHIPPED"
         }
       }
     }
@@ -156,9 +156,15 @@
       }
     }
   },
-  "irVersion": 2,
+  "irVersion": 3,
   "model": {
-    "actions": {
+    "calculations": {
+      "amountCharged": {
+        "is": "price × (100 − discount percent) ÷ 100, rounded down to a whole yen",
+        "type": "integer"
+      }
+    },
+    "commands": {
       "Cancel": {},
       "Checkout": {},
       "PlaceOrder": {
@@ -178,7 +184,22 @@
       },
       "Ship": {}
     },
-    "commands": {
+    "data": {
+      "price": {
+        "around": [
+          10000
+        ],
+        "max": 1000000,
+        "min": 0,
+        "type": "integer"
+      },
+      "rank": [
+        "Gold",
+        "Silver",
+        "Bronze"
+      ]
+    },
+    "effects": {
       "IssueCoupon": {
         "type": [
           "Premium",
@@ -196,28 +217,7 @@
         "priority": "boolean"
       }
     },
-    "data": {
-      "price": {
-        "around": [
-          10000
-        ],
-        "max": 1000000,
-        "min": 0,
-        "type": "integer"
-      },
-      "rank": [
-        "Gold",
-        "Silver",
-        "Bronze"
-      ]
-    },
-    "formulas": {
-      "amountCharged": {
-        "is": "price × (100 − discount percent) ÷ 100, rounded down to a whole yen",
-        "type": "integer"
-      }
-    },
-    "initial": "DRAFT",
+    "init": "DRAFT",
     "invariants": [
       "Every order past the draft state has a member rank and a price"
     ],

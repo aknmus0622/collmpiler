@@ -1,74 +1,68 @@
 /**
- * Lifecycle status of an order. The values are the specification's state names, unchanged:
- *
- * - `"DRAFT"`: the order object exists but has not been placed yet (the starting status).
- * - `"PENDING"`: the order has been placed and awaits a successful payment.
- * - `"PAID"`: the payment has been taken.
- * - `"SHIPPED"`: the order has been handed over for delivery.
- * - `"CANCELLED"`: the order has been cancelled.
+ * Shared value types for the order component.
  */
-export type OrderStatus = "DRAFT" | "PENDING" | "PAID" | "SHIPPED" | "CANCELLED";
 
 /**
- * Membership rank of the customer who places the order. The values are the specification's
- * `customerRank` / `rank` values, unchanged.
+ * Membership rank of the customer who places an order.
+ * Corresponds to the specification's `customerRank` input and `rank` data field.
  */
 export type CustomerRank = "Gold" | "Silver" | "Bronze";
 
 /**
- * Kind of coupon that can be issued. The values are the allowed values of the `type` field of the
- * specification's `IssueCoupon` command, unchanged.
+ * Lifecycle state of an order. The names are the specification's state names, unchanged.
+ *
+ * - `DRAFT`: the order has been created but not yet placed (the starting state).
+ * - `PENDING`: the order has been placed and awaits payment.
+ * - `PAID`: payment has been taken.
+ * - `SHIPPED`: the order has been handed over for shipping.
+ * - `CANCELLED`: the order has been cancelled.
+ */
+export type OrderState = "DRAFT" | "PENDING" | "PAID" | "SHIPPED" | "CANCELLED";
+
+/**
+ * Kind of coupon that can be issued to a customer.
+ * Corresponds to the `type` payload of the specification's `IssueCoupon` effect.
  */
 export type CouponType = "Premium" | "Standard";
 
 /**
- * Result of one payment attempt, as reported by the {@link PaymentGateway}. The values are the
- * allowed answers of the specification's `paymentResult` query, unchanged.
+ * Outcome of a charge attempt reported by the payment gateway.
+ * Corresponds to the specification's `paymentResult` query.
  */
-export type PaymentOutcome = "succeeded" | "failed";
+export type PaymentResult = "succeeded" | "failed";
 
 /**
- * A calendar day in the shop's business calendar, free of time-of-day and time zone.
- * Used as the answer of {@link BusinessCalendar.today}.
+ * A calendar date without time or time zone.
  */
 export interface CalendarDate {
-  /** Four-digit year, e.g. `2026`. */
-  year: number;
-  /** Month of the year, `1` (January) to `12` (December). */
-  month: number;
-  /** Day of the month, starting at `1`. */
-  day: number;
+  /** Full year, e.g. 2026. */
+  readonly year: number;
+  /** Month of the year, 1 (January) to 12 (December). */
+  readonly month: number;
+  /** Day of the month, starting at 1. */
+  readonly day: number;
 }
 
 /**
- * What the customer is told on the receipt. Corresponds to the payload of the specification's
- * `SendReceipt` command, field for field.
+ * The campaign terms that apply to one checkout.
+ * Corresponds to one row of the specification's `campaign` decision table.
+ */
+export interface CampaignTerms {
+  /** Discount in whole percent (specification column `discountPercent`). */
+  readonly discountPercent: number;
+  /** Whether a coupon is issued at all (specification column `grantsCoupon`). */
+  readonly grantsCoupon: boolean;
+  /** The coupon type the campaign names (specification column `coupon`). */
+  readonly coupon: CouponType;
+}
+
+/**
+ * Contents of the receipt sent to the customer after a successful payment.
+ * Corresponds to the payload of the specification's `SendReceipt` effect.
  */
 export interface Receipt {
-  /** Amount charged, in whole yen (specification: `SendReceipt.amount`). */
-  amount: number;
-  /** Discount applied, as a whole percentage (specification: `SendReceipt.discountPercent`). */
-  discountPercent: number;
+  /** Amount charged, in whole yen (specification payload field `amount`). */
+  readonly amountYen: number;
+  /** Discount applied, in whole percent (specification payload field `discountPercent`). */
+  readonly discountPercent: number;
 }
-
-/**
- * The terms the current campaign gives one order. Corresponds to one row of the specification's
- * `campaign` decision table: `discountPercent` and `grantsCoupon` column for column, and the
- * `coupon` column for the rows that grant a coupon. A row that grants none has no `coupon`: the
- * specification never issues that row's coupon, so its kind is not a decision of this code.
- */
-export type CampaignTerms =
-  | {
-      /** Discount as a whole percentage (specification column `discountPercent`). */
-      discountPercent: number;
-      /** A coupon is issued (specification column `grantsCoupon`). */
-      grantsCoupon: true;
-      /** Kind of coupon that is issued (specification column `coupon`). */
-      coupon: CouponType;
-    }
-  | {
-      /** Discount as a whole percentage (specification column `discountPercent`). */
-      discountPercent: number;
-      /** No coupon is issued (specification column `grantsCoupon`). */
-      grantsCoupon: false;
-    };

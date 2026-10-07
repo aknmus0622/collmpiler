@@ -1,59 +1,54 @@
-import type { Ports, TargetSystemAdapter } from "./adapter.contract.ts";
-import { Order, OrderActionNotAllowedError } from "../src/index.ts";
-import type { CalendarDate, OrderDependencies } from "../src/index.ts";
+import type { TargetSystemAdapter } from "./adapter.contract.ts";
+import { Order, OrderCommandRejected } from "../src/index.ts";
 
-// Dates handed to the production code in place of the harness's `isMonthEnd` flag, as prescribed by
-// the doc comment of `BusinessCalendar` in ../src/ports.ts.
-const MONTH_END_DAY: CalendarDate = { year: 2026, month: 1, day: 31 };
-const ORDINARY_DAY: CalendarDate = { year: 2026, month: 1, day: 15 };
-
-function dependenciesFor(ports: Ports): OrderDependencies {
-  return {
-    calendar: {
-      today: () => (ports.queries.isMonthEnd() ? { ...MONTH_END_DAY } : { ...ORDINARY_DAY }),
-    },
-    payments: {
-      isActive: () => ports.queries.paymentModuleActive(),
-      // `charge` is the `paymentResult` query itself; the amount has no counterpart in `ports`.
-      charge: (_amountYen) => ports.queries.paymentResult(),
-      refund: () => ports.commands.Refund({}),
-    },
-    notifier: {
-      sendOrderConfirmation: () => ports.commands.SendOrderConfirmation({}),
-      sendReceipt: (receipt) =>
-        ports.commands.SendReceipt({ amount: receipt.amount, discountPercent: receipt.discountPercent }),
-      notifyPaymentFailure: () => ports.commands.NotifyPaymentFailure({}),
-      sendShippingNotice: (priority) => ports.commands.SendShippingNotice({ priority }),
-    },
-    coupons: {
-      issue: (type) => ports.commands.IssueCoupon({ type }),
-    },
-  };
-}
-
+// Import the production code from ../src/ and forward each call to it. No business logic here.
 let order: Order | undefined;
 
-function currentOrder(): Order {
-  if (order === undefined) {
-    throw new Error("adapter: no system under test; setupIsolation has not been called");
-  }
+function current(): Order {
+  if (order === undefined) throw new Error("adapter: setupIsolation has not been called");
   return order;
 }
 
-// Import the production code from ../src/ and forward each call to it. No business logic here.
 export const adapter: TargetSystemAdapter = {
   async setupIsolation(ports) {
-    order = new Order(dependenciesFor(ports));
+    order = new Order({
+      clock: {
+        // The production code derives `isMonthEnd` from a date: a last day of a month for true,
+        // a mid-month day for false (see Clock.today in src/ports.ts).
+        today: () =>
+          ports.queries.isMonthEnd()
+            ? { year: 2026, month: 1, day: 31 }
+            : { year: 2026, month: 1, day: 15 },
+      },
+      paymentGateway: {
+        isActive: () => ports.queries.paymentModuleActive(),
+        charge: () => ports.queries.paymentResult(),
+        refund: () => ports.effects.Refund({}),
+      },
+      notifier: {
+        sendOrderConfirmation: () => ports.effects.SendOrderConfirmation({}),
+        sendReceipt: (receipt) =>
+          ports.effects.SendReceipt({
+            amount: receipt.amountYen,
+            discountPercent: receipt.discountPercent,
+          }),
+        notifyPaymentFailure: () => ports.effects.NotifyPaymentFailure({}),
+        sendShippingNotice: (priority) => ports.effects.SendShippingNotice({ priority }),
+      },
+      couponIssuer: {
+        issueCoupon: (type) => ports.effects.IssueCoupon({ type }),
+      },
+    });
   },
   async teardownIsolation() {
     order = undefined;
   },
-  async executeAction(action) {
-    const target = currentOrder();
+  async executeCommand(command) {
+    const target = current();
     try {
-      switch (action.name) {
+      switch (command.name) {
         case "PlaceOrder":
-          target.place(action.input.customerRank, action.input.listPrice);
+          target.place(command.input.customerRank, command.input.listPrice);
           break;
         case "Checkout":
           target.checkout();
@@ -65,19 +60,19 @@ export const adapter: TargetSystemAdapter = {
           target.cancel();
           break;
         default: {
-          const unknown: never = action;
-          throw new Error(`adapter: unknown action ${JSON.stringify(unknown)}`);
+          const unknown: never = command;
+          throw new Error(`adapter: unknown command ${JSON.stringify(unknown)}`);
         }
       }
     } catch (error) {
-      // The production code reports a refused action by throwing; the contract has no result for
-      // that, so a refusal is simply an action that changed nothing. Any other error propagates.
-      if (error instanceof OrderActionNotAllowedError) return;
+      // A rejected command leaves the order unchanged and performs no effect; the harness
+      // observes that through the state and the recorded effects. Anything else propagates.
+      if (error instanceof OrderCommandRejected) return;
       throw error;
     }
   },
   async getCurrentState() {
-    // `OrderStatus` uses the specification's state names unchanged.
-    return currentOrder().status();
+    // The production state names are the contract's StateName values, unchanged.
+    return current().state;
   },
 };
