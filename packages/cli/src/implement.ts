@@ -2,6 +2,7 @@ import { readAssets } from "./assets.ts";
 import { parseArgs } from "node:util";
 import { implement } from "./loop.ts";
 import { selectMutation } from "./mutation.ts";
+import { selectStaticCheck } from "./static-check.ts";
 import { PHASES } from "./request.ts";
 import type { Phase } from "./request.ts";
 import { commandStrategy } from "./strategy.ts";
@@ -10,7 +11,7 @@ import { commandStrategy } from "./strategy.ts";
 //   node packages/cli/src/implement.ts --out <dir> --agent "<command>"
 //     [--specs specs] [--max-attempts 3] [--max-rounds 2] [--from design|wiring|implementation]
 //     [--fresh] [--keep-sandbox] [--transcripts <dir>]
-//     [--asset [<phases>=]<file>]... [--drafts] [--mutation auto|builtin|off]
+//     [--asset [<phases>=]<file>]... [--drafts] [--mutation auto|builtin|off] [--static-check auto|tsc|off]
 //
 // --asset: 依頼に添付する資料（設計方針、用語集など）。何度でも指定できる。既定では設計と実装の段階に渡す。
 //          "wiring,design=docs/x.md" のように段階を指定できる
@@ -29,6 +30,8 @@ const { values } = parseArgs({
     asset: { type: "string", multiple: true },
     drafts: { type: "boolean", default: false },
     mutation: { type: "string", default: "auto" },
+    // 実装の静的検査 (仕様の型チェックとは別。そちらは常に行う)
+    "static-check": { type: "string", default: "auto" },
   },
 });
 if (values.from !== undefined && !PHASES.includes(values.from as Phase)) {
@@ -36,7 +39,7 @@ if (values.from !== undefined && !PHASES.includes(values.from as Phase)) {
   process.exit(2);
 }
 if (!values.out || !values.agent) {
-  console.error('usage: implement --out <dir> --agent "<command>" [--specs specs] [--max-attempts 3] [--max-rounds 2] [--from design|wiring|implementation] [--fresh] [--keep-sandbox] [--transcripts <dir>] [--asset [<phases>=]<file>]... [--drafts] [--mutation auto|builtin|off]');
+  console.error('usage: implement --out <dir> --agent "<command>" [--specs specs] [--max-attempts 3] [--max-rounds 2] [--from design|wiring|implementation] [--fresh] [--keep-sandbox] [--transcripts <dir>] [--asset [<phases>=]<file>]... [--drafts] [--mutation auto|builtin|off] [--static-check auto|tsc|off]');
   process.exit(2);
 }
 
@@ -52,6 +55,7 @@ const result = await implement({
   assets: readAssets(values.asset ?? []),
   drafts: values.drafts,
   mutation: selectMutation(values.mutation) ?? null,
+  staticCheck: selectStaticCheck(values["static-check"]) ?? null,
   log: (line) => console.error(line),
 });
 console.log(JSON.stringify(result, null, 2));

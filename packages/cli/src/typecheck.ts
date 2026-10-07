@@ -5,9 +5,10 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 import type { Violation } from "./check.ts";
 import { DRAFT_SUFFIX } from "./loader.ts";
 
-// 型チェック。仕様 (人または LLM が書く) と、LLM が書いたコードの両方にかける。
-// Node がそのまま実行できる構文だけを許す設定 (erasableSyntaxOnly) なので、
-// 「型は通るが実行できない」コードもここで弾ける。
+// TypeScript の型チェック。2つの用途がある:
+//   typecheckSpecs … 仕様の検査。仕様は常に TypeScript で書くので、フレームワークに固定で組み込む
+//   typecheck      … TypeScript を対象言語とする実装の静的検査 (static-check.ts の tsc Strategy) が使う
+// Node がそのまま実行できる構文だけを許す設定 (erasableSyntaxOnly) にしている。
 
 const FLAGS = [
   // ファイルを直接渡すので、近くの tsconfig.json は使わない

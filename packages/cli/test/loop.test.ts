@@ -13,6 +13,7 @@ import { implement } from "../src/loop.ts";
 import type { ImplementOptions } from "../src/loop.ts";
 import { judge } from "../src/mutation.ts";
 import type { MutationStrategy } from "../src/mutation.ts";
+import type { StaticCheckStrategy } from "../src/static-check.ts";
 import { commandStrategy } from "../src/strategy.ts";
 import type { Assignment, ImplementationStrategy } from "../src/strategy.ts";
 import { write } from "./fixtures/scripted-agent.ts";
@@ -160,7 +161,45 @@ test("実装: 骨組みのシグネチャを変えると、アダプターが型
   assert.ok(feedback?.kind === "check");
   // 実装の段階はアダプターを見られないので、何が起きたかを言葉で伝える
   assert.match(feedback.violations[0].message, /an exported name or signature was changed[\s\S]*ship/);
+  assert.equal(attempts[2].staticCheck, "tsc");
   assert.equal(feedback.violations[0].file, "src");
+});
+
+test("静的検査: Strategy として差し替えられ、使ったものが結果に残る。誤りの伝え方はゲートが決める", async () => {
+  // アダプターに誤りがある、と報告するだけの Strategy
+  const stub: StaticCheckStrategy = {
+    name: "stub",
+    check: ({ files }) => (files.includes("aac/adapter.ts") ? [{ file: "aac/adapter.ts", rule: "type-error", message: "line 1: boom" }] : []),
+  };
+  const { trail, attempts } = await run({}, { maxAttempts: 1, mutation: null, staticCheck: stub });
+  // 設計の段階はアダプターを対象にしないので通り、配線の段階で止まる
+  assert.deepEqual(trail, ["design:ok", "wiring:check"]);
+  assert.deepEqual(attempts.map((a) => a.staticCheck), ["stub", "stub"]);
+  const feedback = attempts[1].feedback;
+  assert.ok(feedback?.kind === "check");
+  assert.deepEqual(feedback.violations, [{ file: "aac/adapter.ts", rule: "type-error", message: "line 1: boom" }]);
+
+  // 既定は TypeScript の型チェック
+  const standard = await run({}, { mutation: null });
+  assert.deepEqual(standard.attempts.map((a) => a.staticCheck), ["tsc", "tsc", "tsc"]);
+});
+
+test("静的検査: 無しにしても、誤りは PBT の段階で見つかる (動的型の言語を想定)", async () => {
+  // 骨組みに無いメンバーを呼ぶアダプター。型チェックが無ければ、赤の検査で実行時の誤りとして見つかる
+  const wiring = await run({ wiring: ["mistyped", "correct"] }, { mutation: null, staticCheck: null });
+  assert.deepEqual(wiring.trail, ["design:ok", "wiring:red", "wiring:ok", "implementation:ok"]);
+  assert.deepEqual(wiring.attempts.map((a) => a.staticCheck), [undefined, undefined, undefined, undefined]);
+
+  // 実装の段階がメソッド名を変えた場合も、PBT の失敗として見つかる
+  const renamed = await run({}, { maxAttempts: 1, mutation: null, staticCheck: null }, ({ dir, phase }) => {
+    if (phase !== "implementation") return;
+    const file = join(dir, "src/order-service.ts");
+    writeFileSync(file, readFileSync(file, "utf8").replace("  ship() {", "  dispatch() {"));
+  });
+  assert.deepEqual(renamed.trail, ["design:ok", "wiring:ok", "implementation:pbt"]);
+  const feedback = renamed.attempts[2].feedback;
+  assert.ok(feedback?.kind === "pbt" && feedback.result.status === "fail");
+  assert.match(JSON.stringify(feedback.result.actual), /ship is not a function/);
 });
 
 test("配線: 本番コード (骨組み) を書き換えたら不合格", async () => {

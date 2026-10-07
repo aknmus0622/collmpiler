@@ -16,7 +16,7 @@ import { ASSETS_DIR, NOT_IMPLEMENTED, renderRequest } from "./request.ts";
 import type { Phase } from "./request.ts";
 import { RESULT_PREFIX } from "./runtime.ts";
 import type { PbtResult } from "./runtime.ts";
-import { typecheck } from "./typecheck.ts";
+import type { StaticCheckStrategy } from "./static-check.ts";
 
 // Strategy の前後に置くゲート。エージェントの隔離はここで成立させる。
 //   入口ゲート: リポジトリの外に作業場所を作り、その段階に許可した入力だけを置く
@@ -44,6 +44,8 @@ export type GateContext = {
   drafts: boolean;
   // undefined ならミューテーションのゲートを省く
   mutation: MutationStrategy | undefined;
+  // 実装の静的検査。undefined なら省く（動的型の言語など）
+  staticCheck: StaticCheckStrategy | undefined;
 };
 
 // どの Strategy で何個壊し、何個検出したか（毎回結果に記録する）
@@ -197,7 +199,14 @@ function specSentencesIn(ctx: GateContext, files: string[]): Violation[] {
   return violations;
 }
 
-export async function exitGate(ctx: GateContext, sandbox: Sandbox): Promise<{ feedback?: Feedback; mutation?: MutationSummary }> {
+export type GateResult = {
+  feedback?: Feedback;
+  mutation?: MutationSummary;
+  // 実行した静的検査の Strategy の名前（結果に記録する）
+  staticCheck?: string;
+};
+
+export async function exitGate(ctx: GateContext, sandbox: Sandbox): Promise<GateResult> {
   const { phase } = sandbox;
   const testDir = join(ctx.outDir, TEST_DIR);
   const violations: Violation[] = [];
@@ -245,35 +254,39 @@ export async function exitGate(ctx: GateContext, sandbox: Sandbox): Promise<{ fe
   violations.push(...checkWorkspace(ctx.outDir, ctx.ir, ctx.specsDir, phase === "design" ? "source" : "all"));
   if (violations.length > 0) return { feedback: { kind: "check", violations } };
 
-  // 5. 型チェック。設計の段階は本番コードだけ、以降はアダプターと契約も含める。
-  //    実装の段階が骨組みのシグネチャを変えると、アダプターが型エラーになってここで見つかる
-  const sources = filesUnder(join(ctx.outDir, SOURCE_DIR))
-    .filter(({ rel }) => rel.endsWith(".ts"))
-    .map(({ rel }) => `${SOURCE_DIR}/${rel}`);
-  const typeErrors = typecheck(ctx.outDir, phase === "design" ? sources : [...sources, ADAPTER, CONTRACT]).map(
-    (violation) =>
+  // 5. 静的検査 (Strategy)。設計の段階は本番コードだけ、以降はアダプターと契約も含める。
+  //    何を対象にし、誤りをどう伝えるかはここで決める。Strategy は誤りの一覧を返すだけ
+  // これ以降の結果には、実行した静的検査の名前を載せる
+  const ran = ctx.staticCheck ? { staticCheck: ctx.staticCheck.name } : {};
+  if (ctx.staticCheck) {
+    const sources = filesUnder(join(ctx.outDir, SOURCE_DIR)).map(({ rel }) => `${SOURCE_DIR}/${rel}`);
+    const files = phase === "design" ? sources : [...sources, ADAPTER, CONTRACT];
+    const found = (await ctx.staticCheck.check({ dir: ctx.outDir, files })).map((violation) =>
+      // 実装の段階はアダプターを見られない。アダプター側の誤りは、
+      // 「公開している名前かシグネチャを変えた」ことの現れなので、そう伝える
       phase === "implementation" && violation.file === ADAPTER
         ? {
             ...violation,
             file: SOURCE_DIR,
-            message: `The test harness no longer type-checks against your code, which means an exported name or signature was changed. Restore it. (${violation.message})`,
+            message: `The test harness no longer fits your code, which means an exported name or signature was changed. Restore it. (${violation.message})`,
           }
         : violation,
-  );
-  if (typeErrors.length > 0) return { feedback: { kind: "check", violations: typeErrors } };
+    );
+    if (found.length > 0) return { ...ran, feedback: { kind: "check", violations: found } };
+  }
 
   // 6. 段階ごとの検査
   if (phase === "design") {
     // 骨組みは配線の段階に渡る。仕様の文がそのまま書かれていると、IR を見せない意味が薄れる
     const leaked = specSentencesIn(ctx, outputs);
-    if (leaked.length > 0) return { feedback: { kind: "check", violations: leaked } };
+    if (leaked.length > 0) return { ...ran, feedback: { kind: "check", violations: leaked } };
     const failure = loadSource(ctx);
-    return failure === undefined ? {} : { feedback: { kind: "crash", output: failure } };
+    return failure === undefined ? { ...ran } : { ...ran, feedback: { kind: "crash", output: failure } };
   }
 
   // PBT (別プロセス)
   const { result, crash } = runVerify(ctx);
-  if (!result) return { feedback: { kind: "crash", output: crash ?? "" } };
+  if (!result) return { ...ran, feedback: { kind: "crash", output: crash ?? "" } };
   // 仕様やハーネス側の問題は実装の誤りではないので、エージェントに差し戻さずに止める
   if (result.status === "error") throw new Error(`PBT を実行できませんでした: ${result.message}`);
 
@@ -297,14 +310,14 @@ export async function exitGate(ctx: GateContext, sandbox: Sandbox): Promise<{ fe
         },
       };
     }
-    return {};
+    return { ...ran };
   }
 
   // 緑: 合格しなければならない
-  if (result.status !== "pass") return { feedback: { kind: "pbt", result } };
+  if (result.status !== "pass") return { ...ran, feedback: { kind: "pbt", result } };
 
   // ミューテーション: 本番コードを壊して PBT が落ちることを確かめる。合否の基準はゲート (judge) が持つ
-  if (!ctx.mutation) return {};
+  if (!ctx.mutation) return { ...ran };
   const values = decisionValues(ctx.ir);
   const report = await ctx.mutation.run({
     sourceDir: join(ctx.outDir, SOURCE_DIR),
@@ -320,5 +333,7 @@ export async function exitGate(ctx: GateContext, sandbox: Sandbox): Promise<{ fe
       .map(({ file, line, original }) => ({ file, line, original })),
   };
   const survived = judge(report, values, readFileSync(join(ctx.outDir, ADAPTER), "utf8"));
-  return survived.length > 0 ? { feedback: { kind: "mutation", violations: survived }, mutation } : { mutation };
+  return survived.length > 0
+    ? { ...ran, feedback: { kind: "mutation", violations: survived }, mutation }
+    : { ...ran, mutation };
 }

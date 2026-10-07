@@ -14,6 +14,8 @@ import type { MutationStrategy } from "./mutation.ts";
 import { PHASES } from "./request.ts";
 import type { Phase } from "./request.ts";
 import { selfCheck } from "./runtime.ts";
+import { tscStaticCheck } from "./static-check.ts";
+import type { StaticCheckStrategy } from "./static-check.ts";
 import type { ImplementationStrategy } from "./strategy.ts";
 import { formatTypeErrors, typecheckSpecs } from "./typecheck.ts";
 
@@ -39,6 +41,9 @@ export type ImplementOptions = {
   drafts?: boolean;
   // ミューテーションのゲートの Strategy。省略時は自前、null で無効
   mutation?: MutationStrategy | null;
+  // 実装の静的検査の Strategy。省略時は TypeScript の型チェック、null で無効。
+  // 仕様の型チェックはこれとは別で、常に行う
+  staticCheck?: StaticCheckStrategy | null;
   // どの段階から始めるか。省略時は、出力先に本番コードとアダプターが無ければ設計から、あれば実装から。
   // 仕様を少し変えただけなら、骨組みと配線はそのままで実装だけやり直せる
   from?: Phase;
@@ -57,6 +62,8 @@ export type Attempt = {
   // エージェントに渡したファイルの一覧 (隔離の証跡)
   inputs: string[];
   sandbox?: string;
+  // 実行した静的検査の Strategy の名前
+  staticCheck?: string;
   mutation?: MutationSummary;
   feedback?: Feedback;
 };
@@ -97,6 +104,7 @@ export async function implement(options: ImplementOptions) {
     assets: mergeAssets(spec.assets ?? [], options.assets ?? []),
     drafts,
     mutation: options.mutation === null ? undefined : (options.mutation ?? builtinMutation),
+    staticCheck: options.staticCheck === null ? undefined : (options.staticCheck ?? tscStaticCheck),
   };
 
   const clear = () => {
@@ -126,10 +134,11 @@ export async function implement(options: ImplementOptions) {
       for (let attempt = 1; attempt <= maxAttempts && !passed; attempt++) {
         const sandbox = entryGate(ctx, phase, attempt, feedback);
         let mutation: MutationSummary | undefined;
+        let staticCheck: string | undefined;
         try {
           log(`[${round}] ${phase} #${attempt}: ${options.strategy.name} (in ${sandbox.dir})`);
           await options.strategy.run({ dir: sandbox.dir, phase, attempt, env: sandbox.env });
-          ({ feedback, mutation } = await exitGate(ctx, sandbox));
+          ({ feedback, mutation, staticCheck } = await exitGate(ctx, sandbox));
         } finally {
           if (!options.keepSandbox) rmSync(sandbox.dir, { recursive: true, force: true });
         }
@@ -142,6 +151,7 @@ export async function implement(options: ImplementOptions) {
           ok: passed,
           inputs: Object.keys(sandbox.inputs).sort(),
           ...(options.keepSandbox ? { sandbox: sandbox.dir } : {}),
+          ...(staticCheck ? { staticCheck } : {}),
           ...(mutation ? { mutation } : {}),
           ...(feedback ? { feedback } : {}),
         });
