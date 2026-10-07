@@ -2,7 +2,7 @@ import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { resolveLayout, sourceFiles, workspaceOf } from "./layout.ts";
 import type { Workspace } from "./layout.ts";
-import { extract, stableStringify } from "./extract.ts";
+import { boundaryOf, extract, stableStringify } from "./extract.ts";
 import { mergeAssets } from "./assets.ts";
 import type { Asset } from "./assets.ts";
 import { entryGate, exitGate, verifyGate } from "./gates.ts";
@@ -51,7 +51,7 @@ export type ImplementOptions = {
   // 依頼に添付する資料（設計方針、用語集など）。コンポーネントの assets に宣言したものに追加される。
   // 既定では設計と実装の段階に渡す
   assets?: Asset[];
-  // true なら、人がまだ確認していない結び付けの下書き (*.draft.ts) を正解として使う。
+  // true なら、人がまだ確認していない解釈の下書き (*.draft.ts) を正解として使う。
   // 下書きから実装までを人手を挟まずに流すためのもの。結果には oracle: "draft" と記録される
   drafts?: boolean;
   // 対象言語。省略時は TypeScript
@@ -133,10 +133,10 @@ export async function implement(options: ImplementOptions) {
     }
   }
 
-  // 正解 (結び付け) が人の確認を経たものか、下書きのままか
+  // 正解 (解釈) が人の確認を経たものか、下書きのままか
   const usesDraft = drafts && (readdirSync(specsDir, { recursive: true }) as string[]).some((file) => file.endsWith(DRAFT_SUFFIX));
   const oracle = usesDraft ? ("draft" as const) : ("reviewed" as const);
-  if (usesDraft) log("注意: 人が確認していない結び付けの下書きを、正解として使っています");
+  if (usesDraft) log("注意: 人が確認していない解釈の下書きを、正解として使っています");
 
   // コンポーネントを1つずつ、名前順に一致させる。本番コードは共有なので、2つ目以降は「すでにある本番コードを直す」になる
   const attempts: Attempt[] = [];
@@ -261,11 +261,6 @@ async function reconcile(ctx: GateContext, options: ImplementOptions, attempts: 
 //   アダプターだけが無い                 … 配線 → 実装
 //   それ以外                             … 実装だけ（その前にいまのコードを採点し、合格なら何もしない）
 // 前回の境界は、出力先に生成してある IR から読む
-const boundaryOf = (ir: Ir) => {
-  const { init, states, commands, queries, effects } = ir.model ?? ({} as Partial<NonNullable<Ir["model"]>>);
-  return stableStringify({ init, states, commands, queries, effects });
-};
-
 function planOf(ctx: GateContext, from: Phase | undefined): { phases: readonly Phase[]; incremental: boolean; reason: string } {
   const { ws } = ctx;
   const read = (rel: string) => (existsSync(join(ws.root, rel)) ? readFileSync(join(ws.root, rel), "utf8") : undefined);

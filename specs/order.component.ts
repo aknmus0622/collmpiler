@@ -1,13 +1,17 @@
-import { component } from "@clp/core";
+import { component, compose, description, does, from, goTo, input, onlyIf, otherwise, when } from "@clp/core";
 import { Campaign, Shipping } from "./order.decisions.ts";
 
 const Rank = ["Gold", "Silver", "Bronze"] as const;
 // Money is a whole number of yen. `around` lists thresholds the property-based test probes closely.
 const Yen = { type: "integer", min: 0, max: 1_000_000, around: [10_000] } as const;
 
-// The "order" component: its vocabulary, the skeleton of its state machine, and what each command does, in prose.
-// There are no functions here. What the sentences mean is written in order.binding.ts.
+// Layer 1 of the "order" component, written by a person. Each part is either prose (`description`) or structure,
+// whichever the author wants to pin down. What the prose means — the rest of the structure, and the meaning of every
+// sentence — is derived by an LLM into order.interpretation.ts. To make something more precise, write more
+// structure here; the interpretation cannot override what is written as structure.
 export const Order = component({
+  description: "An order: placed by a customer, paid through an external payment module, then shipped or cancelled.",
+
   // ── Vocabulary ──────────────────────────────────────────────
   states: ["DRAFT", "PENDING", "PAID", "SHIPPED", "CANCELLED"],
   init: "DRAFT",
@@ -47,46 +51,33 @@ export const Order = component({
 
   // ── Commands ────────────────────────────────────────────────
   commands: {
-    PlaceOrder: {
-      input: { customerRank: Rank, listPrice: Yen },
-      from: ["DRAFT"],
-      then: {
-        goTo: "PENDING",
-        does: "The order remembers the customer's rank and the list price. An order confirmation is sent.",
-      },
-    },
+    // Fully structured: input, where it applies, where it leads
+    PlaceOrder: compose(
+      input({ customerRank: Rank, listPrice: Yen }),
+      from("DRAFT"),
+      goTo("PENDING"),
+      does("The order remembers the customer's rank and the list price. An order confirmation is sent."),
+    ),
 
-    Checkout: {
-      from: ["PENDING"],
-      onlyIf: ["The external payment module is active"],
-      when: {
-        "The payment succeeded": {
-          goTo: "PAID",
-          does:
-            "A receipt is sent with the campaign's discount percent and the amount charged. " +
+    Checkout: compose(
+      from("PENDING"),
+      onlyIf("The external payment module is active"),
+      when(
+        "The payment succeeded",
+        goTo("PAID"),
+        does(
+          "A receipt is sent with the campaign's discount percent and the amount charged. " +
             "Then a coupon is issued if the campaign grants one.",
-        },
-        otherwise: {
-          goTo: "PENDING",
-          does: "The customer is notified of the payment failure.",
-        },
-      },
-    },
+        ),
+      ),
+      // No goTo: the order stays where it is
+      otherwise(does("The customer is notified of the payment failure.")),
+    ),
 
-    Ship: {
-      from: ["PAID"],
-      then: {
-        goTo: "SHIPPED",
-        does: "A shipping notice is sent, with priority as the shipping decision says.",
-      },
-    },
+    // Partly structured: the resulting state is left to the prose
+    Ship: compose(from("PAID"), does("The order becomes shipped. A shipping notice is sent, with priority as the shipping decision says.")),
 
-    Cancel: {
-      from: ["PENDING", "PAID"],
-      then: {
-        goTo: "CANCELLED",
-        does: "If the order had been paid, a refund is issued.",
-      },
-    },
+    // Prose only
+    Cancel: description("A pending or paid order can be cancelled. If the order had been paid, a refund is issued."),
   },
 });

@@ -2,14 +2,14 @@ import type { BoundSpecification, Constant, Declaration, FieldSchema, Fields, Ta
 import type { Asset } from "./assets.ts";
 import { compatible, conforms, describe } from "./schema.ts";
 
-// 仕様 (コンポーネント + 決定表 + 結び付けの構造) から IR を作る。
-// コンポーネントにも結び付けの構造にも関数は無いので、IR は宣言をほぼそのまま並べ直したものになる。
-// 結び付けの意味 (条件・計算・不変条件の関数) は IR に含めない。採点の正解だからである。
+// 仕様 (Layer 1 のコンポーネント + 決定表 + 解釈の構造) から IR を作る。
+// どれにも関数は無いので、IR は宣言をほぼそのまま並べ直したものになる。
+// 解釈の意味 (条件・計算・不変条件の関数) は IR に含めない。採点の正解だからである。
 //
 // IR のキーは、仕様を書くときの語と同じにしている。
 // あわせて、型チェックをすり抜けた誤りを、分かりやすい文面で報告する。
 
-export const IR_VERSION = 3;
+export const IR_VERSION = 4;
 
 // --- 読み込んだ仕様を、扱いやすい形に正規化したもの (loader が作る) ---
 export type SpecModel = {
@@ -26,25 +26,31 @@ export type SpecModel = {
   invariants?: readonly string[];
 };
 
-// 結び付けの構造の中の値: 定数か、参照
+// 構造の中の値: 定数か、参照
 export type Reference = { $ref: "decision" | "calculation" | "input" | "data" | "query" | "was"; path: unknown };
 export type SpecValue = Constant | Reference;
 export type SpecEffect = { name: string; payload: Record<string, SpecValue>; when?: string | Reference };
-export type SpecOutcome = { goTo: string; does: string; effects: SpecEffect[]; set: Record<string, SpecValue> };
+// goTo が無ければ、状態は変わらない
+export type SpecOutcome = { goTo?: string; does?: string; effects: SpecEffect[]; set: Record<string, SpecValue> };
 
 export type SpecInput = {
   // コンポーネントの名前 (order など)
   name?: string;
   model?: SpecModel;
   // コマンド名 → 実行できる状態、事前条件、条件ごとの結果（分かれないコマンドは otherwise だけ）
-  behaviors: Record<string, { from?: readonly string[]; onlyIf?: readonly string[]; when: Record<string, SpecOutcome> }>;
+  behaviors: Record<string, { description?: string; from?: readonly string[]; onlyIf?: readonly string[]; when: Record<string, SpecOutcome> }>;
   decisions: Record<string, Table>;
-  // コンポーネントと、その結び付け（意味の関数を含む）
+  // Layer 1 のコンポーネント（書かれたまま）、解釈を重ねたもの、解釈（意味の関数を含む）
+  layer1?: object;
   component?: Declaration;
   binding?: BoundSpecification;
+  // Layer 1 と解釈が合わない点
+  problems?: string[];
+  // 解釈を導いたあとで、Layer 1 が変わっている
+  stale?: boolean;
   // コンポーネントの assets に宣言された添付資料（ファイルは内容を読み込んだもの）。IR には含めない
   assets?: Asset[];
-  // どのファイルのどの export か（結び付けの下書きを書くときに使う）
+  // どのファイルのどの export か（解釈の下書きを書くときに使う）
   sources?: { component?: { file: string; exportName: string }; binding?: string; otherBindings?: string[]; decisions: Record<string, { file: string; exportName: string } | undefined> };
 };
 
@@ -110,17 +116,21 @@ function serialize(value: SpecValue): unknown {
 
 export function extract(input: SpecInput) {
   const diagnostics: Diagnostic[] = [];
-  const model = input.model;
-  if (!model) return { ir: { irVersion: IR_VERSION, behaviors: [], decisions: {} }, diagnostics };
-
   const report = (code: string, behavior: string, caseName: string, message: string) =>
     diagnostics.push({ severity: "error", code, behavior, case: caseName, message });
+  const model = input.model;
   const binding = input.binding;
-  if (!binding) report("unbound-specification", "", "", "このコンポーネントの結び付け (bind) がありません");
+  // 解釈が無い、または Layer 1 と合わない: 語彙が定まらないので、IR は作れない
+  if (input.layer1 && !binding) report("unbound-specification", "", "", "このコンポーネントの解釈 (interpretation) がありません");
+  for (const problem of input.problems ?? []) report("bad-interpretation", "", "", problem);
+  if (input.stale) {
+    report("stale-interpretation", "", "", "解釈を導いたあとで、Layer 1 が変わっています。interpret で導き直すか、解釈がいまも正しいことを確かめて interpret --accept を実行してください");
+  }
+  if (!model) return { ir: { irVersion: IR_VERSION, behaviors: [], decisions: {} }, diagnostics };
 
   const condition = (behavior: string, caseName: string, name: string) => {
     if (binding && name !== "otherwise" && typeof binding.conditions?.[name] !== "function") {
-      report("unbound-condition", behavior, caseName, `条件 "${name}" の意味が、結び付けの conditions に書かれていません`);
+      report("unbound-condition", behavior, caseName, `条件 "${name}" の意味が、解釈の conditions に書かれていません`);
     }
   };
 
@@ -136,7 +146,7 @@ export function extract(input: SpecInput) {
     for (const caseName of Object.keys(behavior.when).sort()) {
       const outcome = behavior.when[caseName];
       condition(name, caseName, caseName);
-      if (!model.states.includes(outcome.goTo)) {
+      if (outcome.goTo !== undefined && !model.states.includes(outcome.goTo)) {
         report("unknown-state", name, caseName, `goTo の "${outcome.goTo}" は states にありません`);
       }
 
@@ -171,8 +181,8 @@ export function extract(input: SpecInput) {
       }
 
       when[caseName] = {
-        goTo: outcome.goTo,
-        does: outcome.does,
+        ...(outcome.goTo === undefined ? {} : { goTo: outcome.goTo }),
+        ...(outcome.does === undefined ? {} : { does: outcome.does }),
         effects,
         ...(Object.keys(outcome.set).length > 0
           ? { set: Object.fromEntries(Object.entries(outcome.set).map(([field, value]) => [field, serialize(value)])) }
@@ -181,6 +191,7 @@ export function extract(input: SpecInput) {
     }
     behaviors.push({
       name,
+      ...(behavior.description === undefined ? {} : { description: behavior.description }),
       from: [...(behavior.from ?? model.states)],
       onlyIf: [...(behavior.onlyIf ?? [])],
       when,
@@ -194,17 +205,28 @@ export function extract(input: SpecInput) {
   }
   for (const name of Object.keys(model.calculations ?? {})) {
     if (binding && typeof binding.calculations?.[name] !== "function") {
-      report("unbound-calculation", "", "", `計算 "${name}" の中身が、結び付けの calculations に書かれていません`);
+      report("unbound-calculation", "", "", `計算 "${name}" の中身が、解釈の calculations に書かれていません`);
     }
   }
   for (const name of model.invariants ?? []) {
     if (binding && typeof binding.invariants?.[name] !== "function") {
-      report("unbound-invariant", "", "", `不変条件 "${name}" の判定が、結び付けの invariants に書かれていません`);
+      report("unbound-invariant", "", "", `不変条件 "${name}" の判定が、解釈の invariants に書かれていません`);
     }
   }
 
-  return { ir: { irVersion: IR_VERSION, model, decisions, behaviors }, diagnostics };
+  // Layer 1 が文で書いた説明（全体と、項目ごと）。構造が正確な形で、こちらは意図を伝える
+  const descriptions = input.component?.descriptions ?? {};
+  return {
+    ir: { irVersion: IR_VERSION, ...(Object.keys(descriptions).length > 0 ? { descriptions } : {}), model, decisions, behaviors },
+    diagnostics,
+  };
 }
+
+// 境界: アダプターの契約を決める部分（状態・コマンドと入力・問い合わせ・副作用）
+export const boundaryOf = (ir: { model?: Partial<SpecModel> }) => {
+  const { init, states, commands, queries, effects } = ir.model ?? {};
+  return stableStringify({ init, states, commands, queries, effects });
+};
 
 // キーをソートし、インデントと改行を固定する（出力の決定性）
 export function stableStringify(value: unknown): string {

@@ -63,11 +63,14 @@ The IR describes one component by its boundary.
   most one holds; \`otherwise\` applies when none does.
 - \`decisions\`: decision tables. \`rows\` maps each condition to the values chosen when it holds. A \`null\`
   cell means that row gives no value for that column; the value is never needed when that row applies.
-- \`behaviors\`: what each command does. \`from\` lists the states in which the command can be executed, and
-  the conditions in \`onlyIf\` must also hold; behaviour outside them is not tested. \`when\` maps each
-  condition to what happens when it holds:
-  - \`goTo\`: the resulting state.
-  - \`does\`: what happens, in prose. It explains the intent; the fields below are the precise form.
+- \`descriptions\` (if present): prose about the component as a whole (\`component\`) and about parts of
+  its vocabulary. It explains the intent; the structured fields are the precise form.
+- \`behaviors\`: what each command does. \`description\` (if present) describes the command in prose.
+  \`from\` lists the states in which the command can be executed, and the conditions in \`onlyIf\` must also
+  hold; behaviour outside them is not tested. \`when\` maps each condition to what happens when it holds
+  (a command that does not branch has only \`otherwise\`):
+  - \`goTo\`: the resulting state. If it is absent, the state does not change.
+  - \`does\` (if present): what happens, in prose. It explains the intent; the fields below are the precise form.
   - \`effects\`: the effects to perform, in this order, each with its \`name\` and \`payload\`. An effect with
     \`when\` is performed only if that holds; \`when\` is either a condition sentence or a reference to a
     boolean value.

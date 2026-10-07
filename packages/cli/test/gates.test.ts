@@ -218,7 +218,7 @@ test("出口ゲート: その段階で許可した出力以外は取り出さず
     writeFileSync(join(dir, "notes.md"), "memo");
     writeFileSync(join(dir, "clp/helper.ts"), "export {};");
     writeFileSync(join(dir, "clp/order.ir.json"), "{}");
-    symlinkSync(join(specsDir, "order.binding.ts"), join(dir, "src/oracle.ts"));
+    symlinkSync(join(specsDir, "order.interpretation.ts"), join(dir, "src/oracle.ts"));
   });
   const feedback = attempts.at(-1)?.feedback;
   assert.ok(feedback?.kind === "check");

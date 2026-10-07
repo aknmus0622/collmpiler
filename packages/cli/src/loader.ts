@@ -1,15 +1,37 @@
-import { readdirSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { BINDING, COMPONENT } from "@clp/core";
-import type { BoundSpecification, Declaration, Outcome, Structure } from "@clp/core";
+import { BINDING, COMPONENT, activate } from "@clp/core";
+import type { AssetDeclaration, BoundSpecification, Structure } from "@clp/core";
 import { resolveAssets } from "./assets.ts";
+import { stableStringify } from "./extract.ts";
 import type { SpecEffect, SpecInput, SpecModel, SpecOutcome, SpecValue } from "./extract.ts";
 
-// 下書き (LLM が書き、人がまだ確定していない結び付け) のファイル名
+// 下書き (LLM が導き、人がまだ確定していない解釈) のファイル名
 export const DRAFT_SUFFIX = ".draft.ts";
 
-type Found = { name: string; declaration: Declaration; file: string; exportName: string };
+// 解釈のファイルの先頭に記す、導いたときの Layer 1 のハッシュ。
+// Layer 1 がそのあとで変わっていれば、解釈は古い（正解として使えない）
+export const STAMP = "// layer1: ";
+export const stampIn = (text: string): string | undefined => new RegExp(`^${STAMP}(sha256:[0-9a-f]+)$`, "m").exec(text)?.[1];
+
+// Layer 1 のハッシュ。解釈に影響し得るものすべてを含める。
+// 決定表のセルの値は含めない（値は解釈を通らずに IR に届く。含めるのは、行と列の名前と、値の型だけ）。添付資料も含めない
+export function layer1Hash(layer1: object): string {
+  const { assets: _assets, decisions, ...rest } = layer1 as { assets?: unknown; decisions?: Record<string, Record<string, Record<string, unknown>>> };
+  const shapes = Object.fromEntries(
+    Object.entries(decisions ?? {}).map(([name, table]) => [
+      name,
+      Object.fromEntries(
+        Object.entries(table).map(([row, cells]) => [row, Object.fromEntries(Object.entries(cells).map(([column, cell]) => [column, cell === null ? "null" : typeof cell]))]),
+      ),
+    ]),
+  );
+  return `sha256:${createHash("sha256").update(stableStringify({ ...rest, decisions: shapes })).digest("hex")}`;
+}
+
+type Found = { name: string; declaration: object; file: string; exportName: string };
 type Scan = { root: string; components: Found[]; bindings: { binding: BoundSpecification; file: string }[]; exported: Map<object, { file: string; exportName: string }> };
 
 // コンポーネントの名前: export 名を小文字とハイフンにしたもの (Order → order、CheckoutButton → checkout-button)。
@@ -17,7 +39,7 @@ type Scan = { root: string; components: Found[]; bindings: { binding: BoundSpeci
 export const componentName = (exportName: string) =>
   exportName.replace(/([a-z0-9])([A-Z])/g, "$1-$2").replace(/([A-Z])([A-Z][a-z])/g, "$1-$2").toLowerCase();
 
-// 仕様のファイルを読み込み、コンポーネントと結び付けを集める。
+// 仕様のファイルを読み込み、コンポーネント (Layer 1) と解釈 (Layer 2) を集める。
 // 下書き (*.draft.ts) は既定では読まない。人が確認して名前を変えるまで、正解として使われないようにするため。
 // drafts: true のときだけ下書きを読み、それが置き換える確定版 (X.draft.ts に対する X.ts) は読まない
 async function scanSpecs(dir: string, options: { drafts?: boolean }): Promise<Scan> {
@@ -43,7 +65,7 @@ async function scanSpecs(dir: string, options: { drafts?: boolean }): Promise<Sc
         const name = componentName(exportName);
         const same = components.find((other) => other.name === name);
         if (same) throw new Error(`コンポーネントの名前 "${name}" が重なっています (${same.file} と ${file})`);
-        components.push({ name, declaration: value as Declaration, file, exportName });
+        components.push({ name, declaration: value, file, exportName });
       } else if ((value as any)[BINDING]) {
         bindings.push({ binding: value as BoundSpecification, file });
       }
@@ -60,8 +82,8 @@ export async function listComponents(dir: string, options: { drafts?: boolean } 
 
 // 仕様の読み込みはここ1箇所に閉じ込める。パスは process.cwd() 基準。
 // component: 読み込むコンポーネントの名前。省略できるのは、コンポーネントが1つのときだけ。
-// bindings: false のときは、結び付けを仕様に重ねない（どのファイルにあるかだけを記録する）。
-// コンポーネントが変わって結び付けが古くなっていても、コンポーネントの側を読めるようにするため
+// bindings: false のときは、解釈を重ねない（どのファイルにあるかだけを記録する）。
+// Layer 1 だけを読むためのもの
 export async function loadSpecs(
   dir: string,
   options: { drafts?: boolean; bindings?: boolean; component?: string } = {},
@@ -76,15 +98,21 @@ export async function loadSpecs(
   if (!found) throw new Error(`コンポーネント "${options.component}" がありません (あるのは: ${names})`);
 
   const { name, declaration, file, exportName } = found;
-  const bound = bindings.find(({ binding }) => binding.component === declaration);
+  const bound = bindings.find(({ binding }) => binding.source === declaration);
+  // 同じコンポーネントの解釈が、このプロセスに2つ読み込まれていることがある（確定版と下書き）。使うほうを選ぶ
+  if (bound && options.bindings !== false) activate(bound.binding);
   const input = normalize(exportName, declaration, options.bindings === false ? undefined : bound?.binding);
   input.name = name;
   // 添付資料のパスは、コンポーネントのファイルがあるディレクトリからの相対
-  input.assets = resolveAssets(declaration.assets ?? [], dirname(join(root, file)));
+  input.assets = resolveAssets((declaration as { assets?: readonly AssetDeclaration[] }).assets ?? [], dirname(join(root, file)));
+  if (bound && options.bindings !== false) {
+    const stamp = stampIn(readFileSync(join(root, bound.file), "utf8"));
+    if (stamp !== undefined && stamp !== layer1Hash(declaration)) input.stale = true;
+  }
   input.sources = {
     component: { file, exportName },
     ...(bound ? { binding: bound.file } : {}),
-    // ほかのコンポーネントの結び付けのファイル（このコンポーネントだけを検査するときに、そこの誤りを除くため）
+    // ほかのコンポーネントの解釈のファイル（このコンポーネントだけを検査するときに、そこの誤りを除くため）
     otherBindings: bindings.filter((other) => other !== bound).map((other) => other.file),
     decisions: Object.fromEntries(Object.entries(input.decisions).map(([table, value]) => [table, exported.get(value)])),
   };
@@ -103,55 +131,43 @@ function effectsOf(component: string, where: string, structure: Structure): Spec
   });
 }
 
-// コンポーネントと結び付けの構造を、抽出と検証が扱う形に正規化する。
-// 省略された宣言は空にし、条件で分かれないコマンドは otherwise だけの表にする
-function normalize(name: string, component: Declaration, binding: BoundSpecification | undefined): SpecInput {
+// Layer 1 に解釈を重ねたコンポーネントを、抽出と検証が扱う形に正規化する。
+// 解釈が無い、または Layer 1 と合わないときは、語彙を作らずに、その旨だけを持たせる（報告は extract が行う）
+function normalize(name: string, layer1: object, binding: BoundSpecification | undefined): SpecInput {
+  if (!binding) return { behaviors: {}, decisions: {}, layer1 };
+  if (binding.problems.length > 0) return { behaviors: {}, decisions: {}, layer1, binding, problems: binding.problems };
+  const component = binding.component;
   const model: SpecModel = {
     init: component.init,
     states: component.states,
-    data: component.data ?? {},
+    data: component.data,
     commands: Object.fromEntries(Object.entries(component.commands).map(([command, decl]) => [command, decl.input ?? {}])),
-    queries: component.queries ?? {},
-    effects: component.effects ?? {},
-    ...(component.calculations ? { calculations: component.calculations } : {}),
-    ...(component.invariants ? { invariants: component.invariants } : {}),
+    queries: component.queries,
+    effects: component.effects,
+    ...(Object.keys(component.calculations).length > 0 ? { calculations: component.calculations } : {}),
+    ...(component.invariants.length > 0 ? { invariants: component.invariants } : {}),
   };
   validateModel(name, model);
 
   const behaviors: SpecInput["behaviors"] = {};
   for (const [command, decl] of Object.entries(component.commands)) {
-    if ((decl.then === undefined) === (decl.when === undefined)) {
-      throw new Error(`コンポーネント "${name}" のコマンド "${command}": then か when の、どちらか一方を書いてください`);
-    }
-    const outcomes: Record<string, Outcome> = decl.when ?? { otherwise: decl.then! };
-    if (!outcomes.otherwise) throw new Error(`コンポーネント "${name}" のコマンド "${command}": when に otherwise がありません`);
-
-    const structure = binding?.commands[command] as Structure | Record<string, Structure> | undefined;
     const when: Record<string, SpecOutcome> = {};
-    for (const [condition, outcome] of Object.entries(outcomes)) {
-      // 結び付けが無い (下書き前) ときは、構造を空として扱う
-      const written = ((decl.when ? (structure as Record<string, Structure> | undefined)?.[condition] : structure) ?? {}) as Structure;
-      if (binding && decl.when && !(structure as Record<string, Structure> | undefined)?.[condition]) {
-        throw new Error(`結び付けの commands.${command} に、条件 "${condition}" の構造がありません`);
-      }
+    for (const [condition, outcome] of Object.entries(decl.when)) {
+      const written = binding.commands[command]?.[condition] ?? {};
       when[condition] = {
-        goTo: outcome.goTo,
-        does: outcome.does,
+        ...(outcome.goTo === undefined ? {} : { goTo: outcome.goTo }),
+        ...(outcome.does === undefined ? {} : { does: outcome.does }),
         effects: effectsOf(name, `commands.${command}`, written),
         set: (written.set ?? {}) as Record<string, SpecValue>,
       };
     }
-    if (binding && !structure) throw new Error(`結び付けの commands に、コマンド "${command}" の構造がありません`);
-    behaviors[command] = { from: decl.from, onlyIf: decl.onlyIf, when };
+    behaviors[command] = { ...(decl.description === undefined ? {} : { description: decl.description }), from: decl.from, onlyIf: decl.onlyIf, when };
   }
-  const extra = Object.keys(binding?.commands ?? {}).find((command) => !(command in component.commands));
-  if (extra !== undefined) throw new Error(`結び付けの commands の "${extra}" に対応するコマンドが、コンポーネントにありません`);
 
-  const decisions = component.decisions ?? {};
-  for (const [decision, table] of Object.entries(decisions)) {
+  for (const [decision, table] of Object.entries(component.decisions)) {
     if (!table.otherwise) throw new Error(`決定表 "${decision}" に otherwise がありません`);
   }
-  return { model, behaviors, decisions, component, ...(binding ? { binding } : {}) };
+  return { model, behaviors, decisions: component.decisions, layer1, component, binding };
 }
 
 function validateModel(name: string, model: SpecModel) {

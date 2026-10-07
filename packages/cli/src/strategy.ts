@@ -11,8 +11,8 @@ export type Assignment = {
   // 入口ゲートが用意した作業場所。依頼は <dir>/clp/REQUEST.md
   dir: string;
   // 実装のどの段階か（設計 / 配線 / 実装）。依頼文はすでにその段階のものになっている。
-  // "binding" は実装の流れとは別の、結び付けの下書き (draft.ts)
-  phase: Phase | "binding";
+  // "interpretation" は実装の流れとは別の、仕様の解釈 (interpret.ts)。"interpretation-2" 以降は、比べるための解釈
+  phase: Phase | "interpretation" | `interpretation-${number}`;
   attempt: number;
   // 入口ゲートがリポジトリのパスを取り除いた環境変数
   env: NodeJS.ProcessEnv;

@@ -21,7 +21,7 @@ import type { Target } from "../src/target.ts";
 import type { Assignment, ImplementationStrategy } from "../src/strategy.ts";
 import { write } from "./fixtures/scripted-agent.ts";
 import type { Phase, Place, Step } from "./fixtures/scripted-agent.ts";
-import { defaultWorkspace, harness, of, repoRoot, specsDir } from "./support.ts";
+import { defaultWorkspace, harness, of, repoRoot, specsDir, unstamped } from "./support.ts";
 
 const { tmpRoot, workdir, scripted, run } = harness("repeat");
 
@@ -47,7 +47,7 @@ function specVariant(file: string, from: string, to: string) {
   for (const name of readdirSync(specsDir)) {
     const text = readFileSync(join(specsDir, name), "utf8");
     if (name === file) assert.ok(text.includes(from), from);
-    writeFileSync(join(dir, name), name === file ? text.replace(from, to) : text);
+    writeFileSync(join(dir, name), unstamped(name === file ? text.replace(from, to) : text));
   }
   return dir;
 }

@@ -24,7 +24,7 @@ import { selectTarget } from "./target-typescript.ts";
 // --component: 一致させるコンポーネントの名前。省略すると、仕様にあるすべてを名前順に一致させる
 // --asset: 依頼に添付する資料（設計方針、用語集など）。何度でも指定できる。既定では設計と実装の段階に渡す。
 //          "wiring,design=docs/x.md" のように段階を指定できる
-// --drafts: 人が確認していない結び付けの下書き (*.draft.ts) を正解として使う
+// --drafts: 人が確認していない解釈の下書き (*.draft.ts) を正解として使う
 const { values } = parseArgs({
   options: {
     specs: { type: "string", default: "specs" },

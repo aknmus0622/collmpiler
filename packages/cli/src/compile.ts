@@ -7,8 +7,8 @@ import { typecheckSpecs } from "./typecheck.ts";
 
 // 暫定エントリ: node packages/cli/src/compile.ts [specs-dir] [--component <name>] [--drafts]  → IR を stdout へ
 // コンポーネントが1つならその IR を、複数なら { 名前: IR } を出力する。--component で1つを選べる
-// （そのときは、ほかのコンポーネントの結び付けにある型エラーは報告しない）。
-// --drafts: 結び付けの下書き (*.draft.ts) を、確定版の代わりに読む（下書きの検査用）
+// （そのときは、ほかのコンポーネントの解釈にある型エラーは報告しない）。
+// --drafts: 解釈の下書き (*.draft.ts) を、確定版の代わりに読む（下書きの検査用）
 const { values, positionals } = parseArgs({
   options: { drafts: { type: "boolean", default: false }, component: { type: "string" } },
   allowPositionals: true,
@@ -40,7 +40,7 @@ for (const name of names) {
   });
 }
 
-// 型チェック: 結び付けの漏れや、条件・フィールド名の typo はここで見つかる
+// 型チェック: 意味の漏れや、条件・フィールド名の typo はここで見つかる
 const typeErrors = typecheckSpecs(dir, { drafts: values.drafts }).filter((e) => !ignored.has(e.file));
 for (const e of typeErrors) console.error(`error[type-error] ${e.file}: ${e.message}`);
 if (typeErrors.length > 0) process.exitCode = 1;

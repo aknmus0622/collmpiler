@@ -8,44 +8,46 @@ import { implement } from "../src/loop.ts";
 import type { Assignment, ImplementationStrategy } from "../src/strategy.ts";
 import { write } from "./fixtures/scripted-agent.ts";
 import type { Phase, Step } from "./fixtures/scripted-agent.ts";
-import { harness, repoRoot, specsDir } from "./support.ts";
+import { harness, repoRoot, specsDir, unstamped } from "./support.ts";
 
 // 複数のコンポーネント: 同じ本番コードを共有し、テスト側のファイルはコンポーネントごとに持つ
 
 const { tmpRoot, workdir } = harness("components");
 
-// 2つ目のコンポーネント（ランプ）。結び付けも同じファイルに書いてある
-const LAMP = `import { bind, component } from "@clp/core";
+// 2つ目のコンポーネント（ランプ）。解釈も同じファイルに書いてある
+const LAMP = `import { component, compose, does, goTo, interpretation, otherwise, when } from "@clp/core";
 
 export const Lamp = component({
   states: ["OFF", "ON"],
   init: "OFF",
   effects: { Notify: { on: "boolean" } },
   commands: {
-    Flip: {
-      when: {
-        "The lamp is on": { goTo: "OFF", does: "The lamp turns off and a notice says so." },
-        otherwise: { goTo: "ON", does: "The lamp turns on and a notice says so." },
-      },
-    },
+    Flip: compose(
+      when("The lamp is on", goTo("OFF"), does("The lamp turns off and a notice says so.")),
+      otherwise(goTo("ON"), does("The lamp turns on and a notice says so.")),
+    ),
   },
 });
 
-export const LampBinding = bind(Lamp, {
-  commands: {
-    Flip: {
-      "The lamp is on": { effects: [{ Notify: { on: false } }] },
-      otherwise: { effects: [{ Notify: { on: true } }] },
+export const LampInterpretation = interpretation(Lamp, {
+  structure: {
+    commands: {
+      Flip: {
+        when: {
+          "The lamp is on": { effects: [{ Notify: { on: false } }] },
+          otherwise: { effects: [{ Notify: { on: true } }] },
+        },
+      },
     },
   },
-  conditions: { "The lamp is on": (state) => state.status === "ON" },
+  meanings: { conditions: { "The lamp is on": (state) => state.status === "ON" } },
 });
 `;
 
 // 例の仕様 (注文) に、ランプを足した仕様。edit で注文の側を書き換えられる
 function specs(edit: (name: string, text: string) => string = (_name, text) => text) {
   const dir = mkdtempSync(join(tmpRoot, "s-"));
-  for (const name of readdirSync(specsDir)) writeFileSync(join(dir, name), edit(name, readFileSync(join(specsDir, name), "utf8")));
+  for (const name of readdirSync(specsDir)) writeFileSync(join(dir, name), unstamped(edit(name, readFileSync(join(specsDir, name), "utf8"))));
   writeFileSync(join(dir, "lamp.component.ts"), LAMP);
   return dir;
 }

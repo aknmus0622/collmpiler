@@ -11,7 +11,8 @@ import type { Workspace } from "./layout.ts";
 
 export type Ir = {
   irVersion: number;
-  behaviors: { name: string; from: string[]; onlyIf: string[]; when: Record<string, { does?: string }> }[];
+  descriptions?: Record<string, string>;
+  behaviors: { name: string; description?: string; from: string[]; onlyIf: string[]; when: Record<string, { goTo?: string; does?: string }> }[];
   decisions: Record<string, { rows: Record<string, Record<string, unknown>> }>;
   model?: SpecModel;
 };

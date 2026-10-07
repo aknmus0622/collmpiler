@@ -45,7 +45,7 @@ export type GateContext = {
   guide: string;
   // プロジェクトが依頼に添付する資料
   assets: Asset[];
-  // true なら、人がまだ確認していない結び付けの下書きを正解として使う
+  // true なら、人がまだ確認していない解釈の下書きを正解として使う
   drafts: boolean;
   // undefined ならミューテーションのゲートを省く
   mutation: MutationStrategy | undefined;
@@ -186,7 +186,9 @@ function specSentencesIn(ctx: GateContext, files: string[]): Violation[] {
   const { ir } = ctx;
   const sentences = new Set<string>([
     ...Object.values(ir.decisions).flatMap((decision) => Object.keys(decision.rows)),
+    ...Object.values(ir.descriptions ?? {}),
     ...ir.behaviors.flatMap((behavior) => [
+      ...(behavior.description ? [behavior.description] : []),
       ...behavior.onlyIf,
       ...Object.keys(behavior.when),
       ...Object.values(behavior.when).flatMap((outcome) => (outcome.does ? [outcome.does] : [])),
