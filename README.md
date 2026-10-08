@@ -36,12 +36,48 @@ pnpm clp --help
 | `clp interpret` | have an LLM derive what the prose means; `--accept` puts it into use |
 | `clp apply` | bring the production code into agreement with the spec, by having an agent write it and verifying it |
 | `clp verify` | verify existing production code against the spec |
+
+`pnpm clp` runs it from the repository root; inside a package, use `pnpm exec clp`. The commands look for the
+spec in `specs/` under the current directory (`--specs <dir>` names another place), so the usual way is to run
+them from the directory of the thing you are building.
+
+## Start your own
+
+A component lives in a directory with its spec, the code written from it, and the test side:
+
+```text
+examples/my-thing/
+├── package.json     { "type": "module", "devDependencies": { "@clp/cli": "workspace:*", "@clp/core": "workspace:*" } }
+├── specs/           what you write (Layer 1), and the interpretation derived from it
+├── src/             production code, written by the agent
+└── clp/             the test side, generated
+```
+
+```bash
+mkdir -p examples/my-thing/specs      # then add the package.json above
+pnpm install
+cd examples/my-thing
+
+# 1. Write specs/<name>.component.ts — as roughly as you like.
+# 2. Have an LLM say what it means. Read the report, make the spec more precise where it was ambiguous, repeat.
+pnpm exec clp interpret --agent 'claude -p "Read clp/REQUEST.md and carry out the request." --permission-mode acceptEdits'
+pnpm exec clp interpret --accept
+# 3. Have an agent write the code, and verify it.
+pnpm exec clp apply --out . --agent 'claude -p "Read clp/REQUEST.md and carry out the request." --permission-mode acceptEdits'
+pnpm exec clp verify --out .
+```
+
+For now the directory has to be a package of this repository's workspace (`examples/*`): Node does not run
+`.ts` files that sit under `node_modules`, so the framework cannot yet be installed into another repository.
 ## Example
 
-The repository contains one example, end to end: the spec of an order that is placed, paid, shipped, or
-cancelled (`specs/`), and the implementation an LLM agent wrote from it (`examples/checkout-ts/`).
-`packages/cli/self/` describes parts of the framework itself in the same way, and the framework runs on one of
-them (`examples/co-llm-piler` is a link to it).
+The walkthrough below uses `examples/checkout-ts/`: the spec of an order that is placed, paid, shipped, or
+cancelled (`specs/`), the implementation an LLM agent wrote from it (`src/`), and the test side (`clp/`).
+Paths and commands are relative to that directory.
+
+Two more examples: `examples/library-ts/` starts from a deliberately rough spec and shows how it was made
+precise (see its `README.md`); `packages/cli/self/` describes parts of the framework itself in the same way,
+and the framework runs on them (`examples/co-llm-piler` is a link to it).
 
 ### 1. Write the spec
 
@@ -142,7 +178,7 @@ commands: {
 ### 2. Have an LLM interpret it
 
 ```bash
-pnpm clp interpret \
+pnpm exec clp interpret \
   --agent 'claude -p "Read clp/REQUEST.md and carry out the request." --permission-mode acceptEdits'
 ```
 
@@ -226,7 +262,7 @@ To resolve them, **make Layer 1 more precise** (add a decision table, a state, a
 again; only what the change affects is redone. When nothing is left to resolve, read the draft and accept it:
 
 ```bash
-pnpm clp interpret --accept
+pnpm exec clp interpret --accept
 ```
 
 The interpretation records the Layer 1 it was derived from. If Layer 1 changes afterwards, the interpretation
@@ -237,7 +273,7 @@ the draft as it is; the result then records that the oracle was not reviewed.
 ### 3. Check the spec
 
 ```bash
-pnpm -s clp compile
+pnpm -s exec clp compile
 ```
 
 This type-checks the spec, checks it on its own, and prints the IR: the spec as language-independent JSON. The
@@ -263,7 +299,7 @@ functions of the interpretation are left out, so the IR says *what* must hold bu
 ### 4. Have an agent implement it
 
 ```bash
-pnpm clp apply --out examples/checkout-ts --fresh \
+pnpm exec clp apply --out . --fresh \
   --agent 'claude -p "Read clp/REQUEST.md and carry out the request." --permission-mode acceptEdits'
 ```
 
@@ -319,10 +355,10 @@ layout, name the two places directly:
 
 ```bash
 # src/ and test/ kept apart
-pnpm clp apply --src app/src --tests test/clp --agent '...'
+pnpm exec clp apply --src app/src --tests test/clp --agent '...'
 
 # side by side: src/order/order.ts next to src/order/clp.order.adapter.ts, clp.order.ir.json, ...
-pnpm clp apply --src src/order --tests src/order/clp. --agent '...'
+pnpm exec clp apply --src src/order --tests src/order/clp. --agent '...'
 ```
 
 `--tests` is the path put in front of the test-side file names: when it ends with a `.`, its last part is a
@@ -333,6 +369,7 @@ must not be a project root.
 
 ```text
 examples/checkout-ts/
+├── specs/                    written by you (Layer 1), plus the accepted interpretation
 ├── src/                      written by the agent; no framework imports, no framework types
 │   ├── types.ts
 │   ├── ports.ts              the dependencies, in the production code's own terms
@@ -395,9 +432,9 @@ function connect(ports: Ports): OrderDependencies {
 ### 6. Verify again at any time
 
 ```bash
-pnpm clp verify --out examples/checkout-ts   # property-based test against the example
-pnpm typecheck                               # type-check the specs and the framework
-pnpm test                                    # the framework's own tests
+pnpm exec clp verify --out .    # property-based test against the example
+pnpm typecheck                  # (from the repository root) type-check the specs and the framework
+pnpm test                       # (from the repository root) the framework's own tests
 ```
 
 When an implementation is wrong, the test reports the shortest sequence of commands that shows it. For an

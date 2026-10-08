@@ -33,7 +33,7 @@ aac-engine-monorepo/
 │   └── gen-mermaid/           # IRからDFDやイベントストーミング図を生成するエクスポーター
 │
 └── examples/                  # テスト兼デモ用プロジェクト（本番コードは LLM エージェントが書いた成果物）
-    ├── e-commerce-spec/       # (Layer 1/2) 共通の仕様定義パッケージ（TSのみ）。現在はルートの specs/
+    ├── e-commerce-spec/       # (Layer 1/2) 共通の仕様定義パッケージ（TSのみ）。現在は examples/<名前>/specs/
     ├── e-commerce-go-backend/ # Goの本番コード(src)とテスト側(clp)
     └── e-commerce-ts-backend/ # TSの本番コード(src)とテスト側(clp)。現在は examples/checkout-ts
 
