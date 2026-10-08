@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { after, test } from "node:test";
@@ -11,10 +11,10 @@ import { implement } from "../src/loop.ts";
 import type { ImplementationStrategy } from "../src/strategy.ts";
 import { staleness } from "../src/verified.ts";
 import type { ImplementOptions } from "../src/loop.ts";
-import { harness, repoRoot, specsDir } from "./support.ts";
+import { harness, repoRoot, specsDir, unstamped } from "./support.ts";
 import type { Script } from "./support.ts";
 
-const { run } = harness("stage-loop");
+const { run, workdir, scripted } = harness("stage-loop");
 
 // セルフホスト: フレームワークの一部（名前の検査）を、フレームワーク自身の仕様から生成したコード (Stage 1) で動かす。
 // 手書きの版 (Stage 0) と、同じ結果になることを確かめる
@@ -404,6 +404,99 @@ test("パイプライン: 上限回数まで直らなければ設計からやり
   assert.deepEqual(failed.stage1, failed.stage0);
   assert.equal(failed.stage1.status, "fail");
   assert.equal(failed.stage1.attempts.length, 8);
+});
+
+// 例の仕様を写して、一部を書き換えた仕様（仕様が変わる前の版として使う）
+function specVariant(file: string, from: string, to: string) {
+  const dir = mkdtempSync(join(tmpRoot, "v-"));
+  for (const name of readdirSync(specsDir)) {
+    const text = readFileSync(join(specsDir, name), "utf8");
+    if (name === file) assert.ok(text.includes(from), from);
+    writeFileSync(join(dir, name), unstamped(name === file ? text.replace(from, to) : text));
+  }
+  return dir;
+}
+// すでにあるコードから始める筋書きを、両方の Stage で実行する。
+// before: 前の版の仕様で、いまの状態を作る（どちらの Stage でも、同じ状態から始める）。after: いまの仕様で、もう一度
+async function bothOnExisting(
+  before: { specs?: () => string; script?: Script; then?: (out: string) => void },
+  after: { script?: Script; options?: Partial<ImplementOptions> },
+) {
+  const once = async () => {
+    const out = workdir();
+    const first = await implement({ specs: before.specs?.() ?? specsDir, out, strategy: scripted(before.script ?? {}).strategy, maxAttempts: 1, mutation: null });
+    assert.equal(first.status, "pass");
+    before.then?.(out);
+    const { strategy, seen } = scripted(after.script ?? {});
+    const result = await implement({ specs: specsDir, out, strategy, maxAttempts: 1, maxRounds: 1, mutation: null, ...after.options });
+    return {
+      trail: {
+        status: result.status,
+        attempts: result.attempts.map((a) => `${a.round}:${a.phase}:${a.attempt}:${a.feedback?.kind ?? "ok"}`),
+        seen: seen.map((s) => s.phase),
+        // 直しきれなくても、すでにあった本番コードは残る
+        kept: existsSync(join(out, "src/order-service.ts")),
+      },
+      stages: result.stages,
+    };
+  };
+  const previous = process.env.CLP_STAGE;
+  try {
+    process.env.CLP_STAGE = "0";
+    const stage0 = await once();
+    delete process.env.CLP_STAGE;
+    const stage1 = await once();
+    assert.deepEqual([stage0.stages, stage1.stages], [{ order: 0 }, { order: 1 }]);
+    assert.deepEqual(stage1.trail, stage0.trail);
+    return stage1.trail;
+  } finally {
+    if (previous === undefined) delete process.env.CLP_STAGE;
+    else process.env.CLP_STAGE = previous;
+  }
+}
+const silverFifty = () => specVariant("order.decisions.ts", '"The customer is a Silver member": { discountPercent: 5,', '"The customer is a Silver member": { discountPercent: 50,');
+const extraEffect = () => specVariant("order.component.ts", "    NotifyPaymentFailure: input({}),", "    NotifyPaymentFailure: input({}),\n    Audit: input({}),");
+
+test("パイプライン: すでにあるコードを直す経路でも、Stage 0 と同じ順に、同じ段階を動かす", async () => {
+  // 何も変わっていない: 採点だけ
+  const unchanged = await bothOnExisting({}, {});
+  assert.deepEqual(unchanged.attempts, ["1:implementation:0:ok"]);
+  assert.deepEqual(unchanged.seen, []);
+
+  // 仕様の値だけが変わった: 採点に落ちて、実装の段階だけが動く
+  const value = await bothOnExisting({ specs: silverFifty, script: { implementation: ["buggy"] } }, {});
+  assert.deepEqual(value.attempts, ["1:implementation:0:pbt", "1:implementation:1:ok"]);
+
+  // アダプターだけが無い: 配線から
+  const noAdapter = await bothOnExisting({ then: (out) => rmSync(join(out, "clp/order.adapter.ts")) }, {});
+  assert.deepEqual(noAdapter.seen, ["wiring"]);
+  assert.deepEqual(noAdapter.attempts, ["1:wiring:1:ok", "1:implementation:0:ok"]);
+
+  // 契約が変わった: 設計から。すでにコードがあるので、実装の前に、いまのコードを採点する
+  const contract = await bothOnExisting({ specs: extraEffect }, {});
+  assert.deepEqual(contract.attempts, ["1:design:1:ok", "1:wiring:1:ok", "1:implementation:0:pbt", "1:implementation:1:ok"]);
+
+  // 契約が変わったが、いまのコードで満たされている: 配線のあとは、採点だけ
+  const kept = await bothOnExisting({ specs: extraEffect }, { script: { design: ["kept"] } });
+  assert.deepEqual(kept.seen, ["design", "wiring"]);
+  assert.deepEqual(kept.attempts, ["1:design:1:ok", "1:wiring:1:ok", "1:implementation:0:ok"]);
+});
+
+test("パイプライン: すでにあるコードを直しきれないときの、やり直しと失敗も、Stage 0 と一致する（コードは捨てない）", async () => {
+  // 新しい仕様 (5%) に対して、50% のままの実装しか書けないエージェント
+  const stuck = await bothOnExisting({ specs: silverFifty, script: { implementation: ["buggy"] } }, { script: { implementation: ["buggy"] }, options: { maxRounds: 2 } });
+  assert.equal(stuck.status, "fail");
+  assert.deepEqual(stuck.seen, ["implementation", "design", "wiring", "implementation"]);
+  assert.deepEqual(stuck.attempts, ["1:implementation:0:pbt", "1:implementation:1:pbt", "2:design:1:ok", "2:wiring:1:ok", "2:implementation:0:pbt", "2:implementation:1:pbt"]);
+  assert.equal(stuck.kept, true);
+
+  // 2周目で直る
+  const recovered = await bothOnExisting(
+    { specs: silverFifty, script: { implementation: ["buggy"] } },
+    { script: { implementation: ["buggy", "correct"] }, options: { maxRounds: 2 } },
+  );
+  assert.equal(recovered.status, "pass");
+  assert.deepEqual(recovered.attempts, ["1:implementation:0:pbt", "1:implementation:1:pbt", "2:design:1:ok", "2:wiring:1:ok", "2:implementation:0:pbt", "2:implementation:1:ok"]);
 });
 
 test("パイプライン: 仕様に無い指定 (--from、範囲の外の回数) は、Stage 0 が決める", async () => {
