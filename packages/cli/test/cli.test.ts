@@ -95,4 +95,26 @@ test("clp apply: エージェントを指定しなくても、検証とテスト
   assert.match(fresh.stderr, /clp apply: design の段階 \(1 回目\) を進めるには、エージェントが要ります。--agent "<command>" を指定してください/);
 });
 
+test("clp apply: エージェントが正常に終わらなければ、差し戻さずに止まる（起動できない、0 以外の終了コード、時間切れ）", () => {
+  // 書いた内容が検査に落ちたのとは別のこと。同じ依頼を繰り返しても直らないので、1回で止めて、理由を伝える
+  const run = (agent: string, extra: string[] = []) => clp(["apply", "--out", mkdtempSync(join(tmpRoot, "agent-")), "--specs", specsDir, "--agent", agent, ...extra]);
+  const sessions = (stderr: string) => stderr.split("\n").filter((line) => /design #\d+: /.test(line) && line.includes("(in ")).length;
+
+  const missing = run("clp-no-such-agent-command");
+  assert.equal(missing.status, 1);
+  assert.match(missing.stderr, /clp apply: design の段階 \(1 回目\) のエージェントを起動できませんでした（終了コード 127/);
+  assert.equal(sessions(missing.stderr), 1);
+  assert.equal(missing.stdout, "");
+
+  const failed = run(`"${process.execPath}" -e "process.exit(3)"`);
+  assert.equal(failed.status, 1);
+  assert.match(failed.stderr, /design の段階 \(1 回目\) のエージェントが、終了コード 3 で終わりました。書いた内容の検査はしていません/);
+  assert.equal(sessions(failed.stderr), 1);
+
+  const slow = run(`"${process.execPath}" -e "setTimeout(() => {}, 30000)"`, ["--agent-timeout", "1"]);
+  assert.equal(slow.status, 1);
+  assert.match(slow.stderr, /design の段階 \(1 回目\) のエージェントが、1 秒で終わりませんでした。--agent-timeout <秒> で延ばせます/);
+  assert.equal(sessions(slow.stderr), 1);
+});
+
 after(() => rmSync(tmpRoot, { recursive: true, force: true }));

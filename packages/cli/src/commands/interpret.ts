@@ -19,7 +19,8 @@ clp interpret --accept [--specs <dir>] [--component <name>]
                        実行して、食い違う所を報告する。1 なら比べない
   --max-attempts <n>   検査に落ちたときに書き直させる回数の上限（既定: 3）
   --asset <file>       依頼に添付する資料（用語集など）。何度でも指定できる
-  --transcripts <dir>  エージェントの出力を、試行ごとに保存する`;
+  --transcripts <dir>  エージェントの出力を、試行ごとに保存する
+  --agent-timeout <秒> エージェントの1回のセッションの制限時間（既定: 600）`;
 
 // 食い違いの観点の表示
 const label = (aspect: string) =>
@@ -39,6 +40,7 @@ const { values } = parseArgs({
     accept: { type: "boolean", default: false },
     "max-attempts": { type: "string", default: "3" },
     transcripts: { type: "string" },
+    "agent-timeout": { type: "string" },
     asset: { type: "string", multiple: true },
   },
 });
@@ -57,7 +59,7 @@ if (values.accept) {
   const result = await interpret({
     specs: values.specs,
     component: values.component,
-    strategy: commandStrategy(values.agent, { transcriptDir: values.transcripts }),
+    strategy: commandStrategy(values.agent, { transcriptDir: values.transcripts, ...(values["agent-timeout"] === undefined ? {} : { timeoutMs: Number(values["agent-timeout"]) * 1000 }) }),
     sessions: Number(values.sessions),
     assets: readAssets(values.asset ?? []),
     maxAttempts: Number(values["max-attempts"]),

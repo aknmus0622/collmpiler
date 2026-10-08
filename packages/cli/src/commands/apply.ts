@@ -37,6 +37,7 @@ export const usage = `clp apply (--out <dir> | --src <dir> --tests <dir | path-p
   --static-check auto|tsc|off      実装の静的検査（既定: auto。仕様の型チェックはこれとは別で、常に行う）
   --target typescript  対象言語（いまは typescript だけ）
   --transcripts <dir>  エージェントの出力を、試行ごとに保存する
+  --agent-timeout <秒> エージェントの1回のセッションの制限時間（既定: 600）
   --keep-sandbox       作業場所を消さずに残す（調査用）`;
 
 // エージェントの指定が無いとき: エージェントが要る場面で、何が要るかを伝えて止まる
@@ -64,6 +65,7 @@ const { values } = parseArgs({
     fresh: { type: "boolean", default: false },
     "keep-sandbox": { type: "boolean", default: false },
     transcripts: { type: "string" },
+    "agent-timeout": { type: "string" },
     asset: { type: "string", multiple: true },
     drafts: { type: "boolean", default: false },
     mutation: { type: "string", default: "auto" },
@@ -88,7 +90,7 @@ const result = await implement({
   src: values.src,
   tests: values.tests,
   component: values.component,
-  strategy: values.agent ? commandStrategy(values.agent, { transcriptDir: values.transcripts }) : noAgent,
+  strategy: values.agent ? commandStrategy(values.agent, { transcriptDir: values.transcripts, ...(values["agent-timeout"] === undefined ? {} : { timeoutMs: Number(values["agent-timeout"]) * 1000 }) }) : noAgent,
   maxAttempts: Number(values["max-attempts"]),
   ...(values.runs === undefined ? {} : { runs: Number(values.runs) }),
   maxRounds: Number(values["max-rounds"]),
