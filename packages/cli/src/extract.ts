@@ -326,7 +326,7 @@ export function extract(
   if (input.layer1 && !binding) report("unbound-specification", "", "", "このコンポーネントの解釈 (interpretation) がありません");
   for (const problem of input.problems ?? []) report("bad-interpretation", "", "", problem);
   if (input.stale) {
-    report("stale-interpretation", "", "", "解釈を導いたあとで、Layer 1 が変わっています。interpret で導き直すか、解釈がいまも正しいことを確かめて interpret --accept を実行してください");
+    report("stale-interpretation", "", "", "解釈を導いたあとで、Layer 1 が変わっています。clp interpret で導き直すか、解釈がいまも正しいことを確かめて clp interpret --accept を実行してください");
   }
   if (!model) return { ir: { irVersion: IR_VERSION, behaviors: [], decisions: {} }, diagnostics };
 

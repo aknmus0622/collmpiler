@@ -65,6 +65,8 @@ export type InterpretResult =
 
 export type Comparison = { session: number; status: "compared" | "failed"; differences: Difference[] };
 
+// 検査と比較は、別プロセスの clp で行う
+const CLP = join(import.meta.dirname, "../bin/clp.ts");
 const SPEC_DIR = "spec";
 const REQUEST = `${TEST_DIR}/${FILES.request}`;
 const INTERPRETATION = ".interpretation";
@@ -324,7 +326,7 @@ ${renderAssets(assets)}${problems ? `\n## ${update && attempt === 1 ? "Problems 
 // drafts が true なら、下書きを使って検査する。見るのは指定したコンポーネントだけ。通れば IR を返す
 type CheckedIr = { model?: SpecModel; behaviors?: { name: string }[] };
 function check(specsDir: string, drafts: boolean, component: string): { ir?: CheckedIr; problems?: string } {
-  const run = spawnSync(process.execPath, [join(import.meta.dirname, "compile.ts"), specsDir, "--component", component, ...(drafts ? ["--drafts"] : [])], {
+  const run = spawnSync(process.execPath, [CLP, "compile", specsDir, "--component", component, ...(drafts ? ["--drafts"] : [])], {
     encoding: "utf8",
     timeout: 120_000,
   });
@@ -542,7 +544,7 @@ export async function interpret(options: InterpretOptions): Promise<InterpretRes
         index,
       });
       const compared = other.ok
-        ? spawnSync(process.execPath, [join(import.meta.dirname, "compare.ts"), specsDir, copy, "--component", name], { encoding: "utf8", timeout: 300_000 })
+        ? spawnSync(process.execPath, [CLP, "__compare", specsDir, copy, "--component", name], { encoding: "utf8", timeout: 300_000 })
         : undefined;
       if (compared && compared.status !== 0) log(`[compare ${index}] failed: ${(compared.stderr ?? "").trim().slice(-500)}`);
       comparisons.push(
@@ -572,7 +574,7 @@ export async function accept(options: { specs: string; component?: string }): Pr
     const draft = final.replace(/\.ts$/, DRAFT_SUFFIX);
     const hasDraft = existsSync(join(specsDir, draft));
     if (!hasDraft && !existsSync(join(specsDir, final))) {
-      problems.push(`${name}: 解釈がありません（先に interpret で導いてください）`);
+      problems.push(`${name}: 解釈がありません（先に clp interpret で導いてください）`);
       continue;
     }
     const source = join(specsDir, hasDraft ? draft : final);
@@ -584,7 +586,7 @@ export async function accept(options: { specs: string; component?: string }): Pr
     const failed = check(specsDir, hasDraft, name).problems;
     if (failed !== undefined) {
       writeFileSync(source, text);
-      problems.push(`${name}: 解釈が、いまの Layer 1 に合いません。interpret で導き直してください\n${failed}`);
+      problems.push(`${name}: 解釈が、いまの Layer 1 に合いません。clp interpret で導き直してください\n${failed}`);
       continue;
     }
     if (hasDraft) renameSync(source, join(specsDir, final));

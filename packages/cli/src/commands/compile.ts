@@ -1,16 +1,24 @@
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { extract, stableStringify } from "./extract.ts";
-import { listComponents, loadSpecs } from "./loader.ts";
-import { selfCheck } from "./runtime.ts";
-import { references } from "./stage1.ts";
-import { typecheckSpecs } from "./typecheck.ts";
+import { extract, stableStringify } from "../extract.ts";
+import { listComponents, loadSpecs } from "../loader.ts";
+import { selfCheck } from "../runtime.ts";
+import { references } from "../stage1.ts";
+import { typecheckSpecs } from "../typecheck.ts";
 
-// 暫定エントリ: node packages/cli/src/compile.ts [specs-dir] [--component <name>] [--drafts]  → IR を stdout へ
-// コンポーネントが1つならその IR を、複数なら { 名前: IR } を出力する。--component で1つを選べる
-// （そのときは、ほかのコンポーネントの解釈にある型エラーは報告しない）。
-// --drafts: 解釈の下書き (*.draft.ts) を、確定版の代わりに読む（下書きの検査用）
+export const summary = "仕様を検査して、IR を標準出力に出す";
+export const usage = `clp compile [<specs-dir>] [--component <name>] [--drafts]
+
+  仕様を型チェックし、仕様だけで検査して、IR (JSON) を標準出力に出します。診断は標準エラーに出ます。
+  コンポーネントが1つならその IR を、複数なら { 名前: IR } を出力します。
+
+  <specs-dir>          仕様のディレクトリ（既定: specs）
+  --component <name>   1つのコンポーネントだけを対象にする（ほかのコンポーネントの解釈にある型エラーは報告しない）
+  --drafts             解釈の下書き (*.draft.ts) を、確定版の代わりに読む`;
+
+export async function main(args: string[]): Promise<void> {
 const { values, positionals } = parseArgs({
+  args,
   options: { drafts: { type: "boolean", default: false }, component: { type: "string" } },
   allowPositionals: true,
 });
@@ -50,3 +58,4 @@ if (typeErrors.length > 0) process.exitCode = 1;
 // コンポーネントが無いときは、空の IR（従来どおり）
 process.stdout.write(stableStringify(names.length === 1 ? irs[names[0]] : all.length === 0 ? extract({ behaviors: {}, decisions: {} }).ir : irs));
 if (process.exitCode !== 1) for (const check of checks) await check();
+}

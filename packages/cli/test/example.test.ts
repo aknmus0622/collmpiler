@@ -41,7 +41,7 @@ test("Layer 1 と解釈の構造には関数が無い (そのまま IR にでき
 });
 
 test("specs/ の IR 出力は実行ごとにバイト一致する", () => {
-  const compile = () => execFileSync(process.execPath, ["packages/cli/src/compile.ts", "specs"], { encoding: "utf8" });
+  const compile = () => execFileSync(process.execPath, ["packages/cli/bin/clp.ts", "compile", "specs"], { encoding: "utf8" });
   const first = compile();
   assert.equal(first, compile());
   const ir = JSON.parse(first);

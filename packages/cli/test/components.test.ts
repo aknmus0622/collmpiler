@@ -241,7 +241,7 @@ test("複数: 1つだけを選んで一致させられる。読み込みは名�
   await assert.rejects(implement({ specs: dir, out, strategy, component: "stock" }), /コンポーネント "stock" がありません/);
 
   // IR の出力: 複数あれば名前ごと、--component で1つ
-  const compile = (...args: string[]) => JSON.parse(execFileSync(process.execPath, [join(repoRoot, "packages/cli/src/compile.ts"), dir, ...args], { encoding: "utf8" }));
+  const compile = (...args: string[]) => JSON.parse(execFileSync(process.execPath, [join(repoRoot, "packages/cli/bin/clp.ts"), "compile", dir, ...args], { encoding: "utf8" }));
   assert.deepEqual(Object.keys(compile()), ["lamp", "order"]);
   assert.deepEqual(compile("--component", "lamp").model.states, ["OFF", "ON"]);
 });

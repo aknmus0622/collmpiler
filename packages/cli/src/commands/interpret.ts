@@ -1,19 +1,33 @@
 import { parseArgs } from "node:util";
-import { readAssets } from "./assets.ts";
-import { accept, interpret } from "./interpret.ts";
-import { commandStrategy } from "./strategy.ts";
+import { readAssets } from "../assets.ts";
+import { accept, interpret } from "../interpret.ts";
+import { commandStrategy } from "../strategy.ts";
 
-// 暫定エントリ:
-//   node packages/cli/src/interpret-cli.ts --agent "<command>" [--specs specs] [--component <name>] [--sessions <n>]
-//     [--max-attempts 3] [--transcripts <dir>] [--asset <file>]...
-//   node packages/cli/src/interpret-cli.ts --accept [--specs specs] [--component <name>]
-// 解釈 (Layer 2) を LLM に導かせ、<名前>.interpretation.draft.ts に書き出す。
-// 下書きは、人が確定する (--accept) まで使われない。
+export const summary = "解釈 (Layer 2) を LLM に導かせる。--accept で確定する";
+export const usage = `clp interpret --agent "<command>" [--specs <dir>] [--component <name>] [--sessions <n>] [options]
+clp interpret --accept [--specs <dir>] [--component <name>]
+
+  人が書くのは Layer 1（決定表とコンポーネント）だけです。Layer 1 が文のままにした所の構造と、文の意味を、
+  LLM が解釈として導きます。導いたものは <名前>.interpretation.draft.ts に書き出され、確定するまで使われません。
+  解釈が無いか、Layer 1 のあとで古くなっているコンポーネントが対象です（どれも新しければ、何もしません）。
+
+  --agent "<command>"  エージェントを起動するコマンド
+  --accept             下書きを確定する（下書きが無ければ、いまの解釈が Layer 1 に合うことを確かめて、確定し直す）
+  --specs <dir>        仕様のディレクトリ（既定: specs）
+  --component <name>   対象のコンポーネント（既定: 解釈が要る最初のもの。--accept では、すべて）
+  --sessions <n>       独立に解釈させるセッションの数（既定: 2）。2 以上なら、1つ目とほかのそれぞれを同じコマンド列で
+                       実行して、食い違う所を報告する。1 なら比べない
+  --max-attempts <n>   検査に落ちたときに書き直させる回数の上限（既定: 3）
+  --asset <file>       依頼に添付する資料（用語集など）。何度でも指定できる
+  --transcripts <dir>  エージェントの出力を、試行ごとに保存する`;
+
 // 食い違いの観点の表示
 const label = (aspect: string) =>
   aspect === "runs" ? "実行できるかどうか" : aspect === "state" ? "遷移先" : aspect === "order" ? "副作用の順序" : `副作用 ${aspect.slice("effect:".length)}`;
 
+export async function main(args: string[]): Promise<void> {
 const { values } = parseArgs({
+  args,
   options: {
     specs: { type: "string", default: "specs" },
     // 解釈するコンポーネント。省略時は、解釈が要る最初のもの
@@ -37,7 +51,7 @@ if (values.accept) {
   if (problems.length > 0) process.exitCode = 1;
 } else {
   if (!values.agent) {
-    console.error('usage: interpret --agent "<command>" [--specs specs] [--component <name>] [--sessions <n>] [--max-attempts 3] [--transcripts <dir>] [--asset <file>]...\n       interpret --accept [--specs specs] [--component <name>]');
+    console.error(`エージェントを指定してください (--agent)。確定するなら --accept です\n\n${usage}`);
     process.exit(2);
   }
   const result = await interpret({
@@ -66,9 +80,10 @@ if (values.accept) {
     for (const question of result.questions) console.error(`疑問点 (${question.line} 行目): ${question.text}`);
     console.error(
       (result.comparisons ?? []).reduce((count, comparison) => count + comparison.differences.length, 0) + result.questions.length > 0
-        ? "\n食い違いと疑問点は、Layer 1 の記述があいまいな所です。Layer 1 を詳しくして、もう一度 interpret を実行してください。"
-        : "\n解釈を読んで確かめ、interpret --accept で確定してください。",
+        ? "\n食い違いと疑問点は、Layer 1 の記述があいまいな所です。Layer 1 を詳しくして、もう一度 clp interpret を実行してください。"
+        : "\n解釈を読んで確かめ、clp interpret --accept で確定してください。",
     );
   }
   if (result.status === "failed") process.exitCode = 1;
+}
 }

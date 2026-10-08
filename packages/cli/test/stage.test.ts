@@ -256,7 +256,7 @@ test("Stage 1: 読み込めない・実行できないときは、Stage 0 に落
   // 入口 (compile) の出力は、どちらの Stage でも同じ
   const dirOf = broken();
   const run = (env: NodeJS.ProcessEnv) =>
-    spawnSync(process.execPath, [join(repoRoot, "packages/cli/src/compile.ts"), dirOf], { encoding: "utf8", env: { ...process.env, ...env } });
+    spawnSync(process.execPath, [join(repoRoot, "packages/cli/bin/clp.ts"), "compile", dirOf], { encoding: "utf8", env: { ...process.env, ...env } });
   const stage1 = run({ CLP_STAGE: "" });
   const stage0 = run({ CLP_STAGE: "0" });
   const errors = (text: string) => text.split("\n").filter((line) => line.startsWith("error["));

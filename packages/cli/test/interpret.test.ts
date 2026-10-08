@@ -64,7 +64,7 @@ function scripted(drafts: string[], options: { file?: string; extra?: (assignmen
 }
 
 const compile = (dir: string, ...flags: string[]) =>
-  spawnSync(process.execPath, [join(repoRoot, "packages/cli/src/compile.ts"), dir, ...flags], { encoding: "utf8" });
+  spawnSync(process.execPath, [join(repoRoot, "packages/cli/bin/clp.ts"), "compile", dir, ...flags], { encoding: "utf8" });
 
 test("解釈: Layer 1 が名前を挙げたものを並べた雛形から始め、検査に通ったら下書きとして書き出す", async () => {
   const dir = specDir();

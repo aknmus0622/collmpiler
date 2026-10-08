@@ -417,7 +417,7 @@ export async function check(
   const model = input.model;
   if (input.problems?.length) return { status: "error", message: `解釈が Layer 1 と合いません: ${input.problems.join(" / ")}` };
   if (!model && input.layer1) return { status: "error", message: "コンポーネントの解釈 (interpretation) がありません" };
-  if (input.stale) return { status: "error", message: "解釈を導いたあとで、Layer 1 が変わっています (interpret を実行してください)" };
+  if (input.stale) return { status: "error", message: "解釈を導いたあとで、Layer 1 が変わっています (clp interpret を実行してください)" };
   if (!model) return { status: "error", message: "仕様にコンポーネントがありません" };
   if (!input.binding) return { status: "error", message: "コンポーネントの解釈 (interpretation) がありません" };
   const sim = simulator(input, model, input.binding);

@@ -7,9 +7,6 @@
   },
   "scripts": {
     "test": "node --test \"packages/**/*.test.ts\"",
-    "ir": "node packages/cli/src/compile.ts specs",
-    "implement": "node packages/cli/src/implement.ts",
-    "interpret": "node packages/cli/src/interpret-cli.ts",
     "typecheck": "tsc -p ."
   },
   "devDependencies": {

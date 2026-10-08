@@ -3,6 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "bin": {
+    "clp": "./bin/clp.ts"
+  },
   "exports": {
     "./runtime": "./src/runtime.ts"
   },
