@@ -80,6 +80,7 @@ The same thing goes by several names across the docs: `co-llm-piler` (repo), `cl
 | `SELF_HOSTING.md` | Stage 0/1/2 bootstrap and fixed-point verification of the compiler |
 | `DISTRIBUTION.md` | How the `clp` CLI is built and shared; the most recent and most concrete doc |
 | `INCREMENTAL.md` | Using the framework repeatedly: new code, changed specs and legacy code as one flow; what is implemented and the design of what is not |
+| `OWNERSHIP.md` | Whose code is whose when components share production code: ownership is not recorded but decided by which component's tests execute the code; the writable scope and the mutation scope that follow |
 
 `DISTRIBUTION.md` is the most concrete on layout and distribution and **overrides `PACKAGE.md` and `SELF_HOSTING.md` where they conflict**; `SPEC.md` has been updated to match the code and is authoritative for the layers, the IR, and the LLM loop:
 
