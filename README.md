@@ -406,9 +406,9 @@ actual:   state CANCELLED, effects []
   commands, queries and effects)
 - Shorthand for entries that are only a type (`isMonthEnd: "boolean"` instead of `output("boolean")`)
 - Using the answer of one query as the input of the next
-- Describing more of the framework in the framework (`packages/cli/self`): so far its pipeline and two of its
-  checks are specified and run on the generated code, with the hand-written versions kept as the fallback they
-  are compared against (`SELF_HOSTING.md`)
+- Describing the remaining checks of the framework in the framework (`packages/cli/self`): its pipeline, two of
+  its checks and its value serialization already run on generated code, with the hand-written versions kept as
+  the fallback they are compared against (`SELF_HOSTING.md`)
 - Stopping after the design step so a person can review the skeleton before it is wired and implemented
 - Applying a spec to existing production code (legacy code): wiring and verification only, with mismatches
   reported to a person instead of being sent back to the agent (design notes in `INCREMENTAL.md`)
