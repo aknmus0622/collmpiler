@@ -301,10 +301,10 @@ export const Interpretation = interpretation(Gate, {
 });
 
 test("比較: 1つのコマンドに食い違いが複数あれば、観点ごとに報告する。ほかのコマンドの食い違いに隠れない", async () => {
-  // もう一方は、支払いの成功で: 領収書の割引率を常に 0 にし、クーポンを出さない。出荷では優先扱いを常に付ける
+  // もう一方は、支払いの成功で: 領収書の割引率を常に 0 にし、失敗の通知も出す。出荷では優先扱いを常に付ける
   const other = reviewed
     .replace('discountPercent: ref.decision("campaign", "discountPercent"),', "discountPercent: 0,")
-    .replace('{ IssueCoupon: { type: ref.decision("campaign", "coupon") }, when: ref.decision("campaign", "grantsCoupon") },', "")
+    .replace('when: ref.decision("campaign", "grantsCoupon") },', 'when: ref.decision("campaign", "grantsCoupon") },\n              { NotifyPaymentFailure: {} },')
     .replace('{ SendShippingNotice: { priority: ref.decision("shipping", "priority") } }', "{ SendShippingNotice: { priority: true } }")
     .replace('Cancel: { from: ["PENDING", "PAID"], goTo: "CANCELLED", effects: [{ Refund: {}, when: ref.was("PAID") }] }', 'Cancel: { from: ["PENDING"], goTo: "CANCELLED" }');
   const log: string[] = [];
@@ -314,14 +314,14 @@ test("比較: 1つのコマンドに食い違いが複数あれば、観点ご�
   assert.deepEqual(result.comparisons![0].differences.map((d) => `${d.command}:${d.aspect}`), [
     // 支払い済みの注文をキャンセルできるかどうか
     "Cancel:runs",
-    // 領収書とクーポンは、別々に報告される
-    "Checkout:effect:IssueCoupon",
+    // 失敗の通知と領収書は、別々に報告される
+    "Checkout:effect:NotifyPaymentFailure",
     "Checkout:effect:SendReceipt",
     // 支払いの食い違いの先にある、出荷の食い違いも見つかる
     "Ship:effect:SendShippingNotice",
   ]);
-  const coupon = result.comparisons![0].differences[1];
-  assert.deepEqual(coupon.steps.map((step) => step.command), ["PlaceOrder", "Checkout"]);
+  const notice = result.comparisons![0].differences[1];
+  assert.deepEqual(notice.steps.map((step) => step.command), ["PlaceOrder", "Checkout"]);
 });
 
 // 文だけのコンポーネント。構造は、すべて解釈が決める

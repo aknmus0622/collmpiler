@@ -2,7 +2,9 @@ import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { extract, stableStringify, whereOf } from "../extract.ts";
 import { listComponents, loadSpecs } from "../loader.ts";
-import { selfCheck } from "../runtime.ts";
+import { seedOf } from "../generate.ts";
+import type { Ir } from "../generate.ts";
+import { describeUnobservable, observability, selfCheck } from "../runtime.ts";
 import { references } from "../stage1.ts";
 import { typecheckSpecs } from "../typecheck.ts";
 
@@ -47,6 +49,14 @@ for (const name of names) {
     console.error(`error[spec-check] ${tag}${checked.message}`);
     console.error(`  再現するコマンド列: ${JSON.stringify(checked.steps)}`);
     process.exitCode = 1;
+  });
+  // 仕様のミューテーション: 決定表の値が、検証に現れるか（事前検査に通ったあとで）
+  checks.push(async () => {
+    if (!spec.model || process.exitCode === 1) return;
+    for (const found of await observability(spec, { seed: seedOf(ir as Ir) })) {
+      console.error(`${found.severity}[unobservable-value] ${tag}${describeUnobservable(found)}`);
+      if (found.severity === "error") process.exitCode = 1;
+    }
   });
 }
 

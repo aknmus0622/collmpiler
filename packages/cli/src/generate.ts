@@ -131,6 +131,9 @@ await runPbt({ specs: fileURLToPath(new URL(${JSON.stringify(specs + "/")}, impo
 `;
 }
 
+// 検証のシード。仕様のハッシュから決める（検証を決定的にするため）
+export const seedOf = (ir: Ir): number => Number.parseInt(specHash(ir).slice("sha256:".length, "sha256:".length + 7), 16);
+
 export function requireModel(ir: Ir): SpecModel {
   if (!ir.model) throw new Error("仕様にコンポーネントがありません（component(...) を export してください）");
   return ir.model;

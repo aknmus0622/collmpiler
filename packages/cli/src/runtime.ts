@@ -187,7 +187,8 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
   };
 
   // 1手進める。実行できるコマンドが無ければ undefined。仕様の評価に失敗したら SpecError
-  const next = (state: { status: string; data: Values }, raw: RawStep, steps: Step[]) => {
+  // force: そのコマンドを、実行できるかどうか (from / onlyIf) を見ずに実行する（仕様のミューテーションで使う）
+  const next = (state: { status: string; data: Values }, raw: RawStep, steps: Step[], force?: string) => {
     try {
       // 意味の関数の中の decide / calculate が、この解釈を引くようにする
       activate(binding);
@@ -219,9 +220,9 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
           })
         );
       });
-      if (enabled.length === 0) return undefined;
+      if (force === undefined && enabled.length === 0) return undefined;
 
-      const command = enabled[raw.pick % enabled.length];
+      const command = force ?? enabled[raw.pick % enabled.length];
       const context = contextOf(command);
       const cases = input.behaviors[command].when;
       const matched = matchCondition(binding, Object.keys(cases), context);
@@ -390,6 +391,100 @@ export async function compareSpecs(first: SpecInput, second: SpecInput, params: 
     }
   }
   return differences;
+}
+
+// 仕様のミューテーション: 決定表のセルを1つずつ変えて、仕様が期待する結果が変わるかを確かめる。
+// 変わらない値は、検証に現れない。正しく実装しても、ミューテーションのゲートが差し戻すことになる
+// （あるいは、その値を使う確認が、本番コードから消える）。エージェントを呼ぶ前に、仕様の側で見つける。
+//   observable   … 実行したコマンドの結果（遷移先、副作用）が変わる。検証に現れる
+//   precondition … 変わるのは、コマンドを実行できるかどうかだけ。検証は実行できるコマンドしか実行しないので、現れない
+//   unobserved   … どのシードでも、何も変わらない。使われていないか、生成される入力が届かない
+//   rare         … 検証のシードでは何も変わらないが、ほかのシードでは結果が変わる。その値の検証は薄い
+// 「何も変わらない」には、本当に使われていない場合と、その乱数では届かなかった場合が混ざる。
+// 1つのシードで決めると、しきい値の境目のような届きにくい値を、誤って止めてしまう（貸出の例で、30 シード中 3 回）。
+// そこで、検証のシードで現れなかった値は、ほかのシードでも確かめてから決める
+export type Unobservable = {
+  table: string;
+  row: string;
+  column: string;
+  value: string | number | boolean;
+  verdict: "precondition" | "unobserved" | "rare";
+  // 数値と文字列は、ミューテーションのゲートが合否に使う。真偽値は使わないので、ここでも止めない
+  severity: "error" | "warning";
+};
+export const mutateCell = (cell: string | number | boolean): string | number | boolean =>
+  typeof cell === "number" ? cell + 1 : typeof cell === "boolean" ? !cell : `${cell}~`;
+// 検証のシードのほかに確かめるシードの数
+const EXTRA_SEEDS = 2;
+
+export async function observability(input: SpecInput, params: { seed?: number; numRuns?: number } = {}): Promise<Unobservable[]> {
+  const { model, binding } = input;
+  if (!model || !binding) return [];
+  const original = simulator(input, model, binding);
+  const found: Unobservable[] = [];
+  for (const [table, rows] of Object.entries(input.decisions)) {
+    for (const [row, cells] of Object.entries(rows)) {
+      for (const [column, cell] of Object.entries(cells)) {
+        if (cell === null) continue;
+        // 値を1つ変えた仕様。解釈の関数はそのままで、決定表だけが違う
+        const decisions = { ...input.decisions, [table]: { ...rows, [row]: { ...cells, [column]: mutateCell(cell) } } };
+        const mutatedBinding = { ...binding, component: { ...binding.component, decisions } };
+        const mutated = simulator({ ...input, decisions, binding: mutatedBinding }, model, mutatedBinding, literalsIn(binding));
+        let enablementDiffers = false;
+        const outcomeDiffers = (raw: RawStep[]): boolean => {
+          let left = original.start();
+          let right = mutated.start();
+          for (const rawStep of raw) {
+            const expected = original.next(left, rawStep, []);
+            // 変えた仕様が、同じ場面で選ぶコマンド（実行できるかどうかの違いを見る）
+            let chosen: string | undefined;
+            try {
+              chosen = mutated.next(right, rawStep, [])?.step.command;
+            } catch (error) {
+              if (!(error instanceof SpecError)) throw error;
+            }
+            if (chosen !== expected?.step.command) enablementDiffers = true;
+            if (!expected) continue;
+            // 元の仕様が実行するコマンドを、変えた仕様でも実行して、結果を比べる
+            let changed: ReturnType<typeof mutated.next>;
+            try {
+              changed = mutated.next(right, rawStep, [], expected.step.command);
+            } catch (error) {
+              // 変えた値が型に合わなくなるなど。値が結果に届いている
+              if (error instanceof SpecError) return true;
+              throw error;
+            }
+            if (!changed || !isDeepStrictEqual(expected.expected, changed.expected)) return true;
+            left = expected.after;
+            right = changed.after;
+          }
+          return false;
+        };
+        const seenWith = async (seed: number | undefined) =>
+          (await fc.check(fc.property(original.sequences, (raw) => !outcomeDiffers(raw)), { numRuns: DEFAULT_RUNS, ...params, ...(seed === undefined ? {} : { seed }) })).failed;
+        // 検証と同じシードで現れれば、それでよい
+        if (await seenWith(params.seed)) continue;
+        // 現れなかった: ほかのシードでも確かめる
+        let elsewhere = false;
+        for (let extra = 1; extra <= EXTRA_SEEDS && !elsewhere; extra++) elsewhere = await seenWith((params.seed ?? 0) + extra);
+        const verdict = elsewhere ? "rare" : enablementDiffers ? "precondition" : "unobserved";
+        found.push({ table, row, column, value: cell, verdict, severity: verdict === "rare" || typeof cell === "boolean" ? "warning" : "error" });
+      }
+    }
+  }
+  return found;
+}
+
+// 検証に現れない値についての、利用者向けの説明
+export function describeUnobservable(found: Unobservable): string {
+  const where = `決定表 ${found.table} の行 "${found.row}" の ${found.column} (${JSON.stringify(found.value)})`;
+  if (found.verdict === "precondition") {
+    return `${where}: この値を変えても、変わるのは「コマンドを実行できるかどうか」だけです。実行できない場面は検証されないので、この値は実装で確かめられません。断ることは、from / onlyIf ではなく、結果の1つ (when の場合。遷移先も副作用も無い) として書いてください`;
+  }
+  if (found.verdict === "unobserved") {
+    return `${where}: この値を変えても、仕様が期待する結果は変わりません。どこからも使われていないなら、列を消すか null にしてください。しきい値なら、生成される入力がそこに届いていません`;
+  }
+  return `${where}: この値は、検証に使うシードでは結果に現れません（ほかのシードでは現れます）。この値についての検証は薄く、ミューテーションのゲートが差し戻すことがあります`;
 }
 
 export async function runPbt(options: { specs: string; adapter: Adapter; component?: string; args?: string[] }): Promise<PbtResult> {

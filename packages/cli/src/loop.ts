@@ -7,14 +7,14 @@ import { mergeAssets } from "./assets.ts";
 import type { Asset } from "./assets.ts";
 import { entryGate, exitGate, verifyGate } from "./gates.ts";
 import type { Feedback, GateContext, MutationSummary } from "./gates.ts";
-import { requireModel, specHash } from "./generate.ts";
+import { requireModel, seedOf } from "./generate.ts";
 import type { Ir } from "./generate.ts";
 import { DEFAULT_GUIDE } from "./guide.ts";
 import { DRAFT_SUFFIX, listComponents, loadSpecs } from "./loader.ts";
 import type { MutationStrategy } from "./mutation.ts";
 import { PHASES } from "./request.ts";
 import type { Phase } from "./request.ts";
-import { selfCheck } from "./runtime.ts";
+import { describeUnobservable, observability, selfCheck } from "./runtime.ts";
 import { references, stage1Adapter, stage1Unavailable } from "./stage1.ts";
 import type { StaticCheckStrategy } from "./static-check.ts";
 import type { ImplementationStrategy } from "./strategy.ts";
@@ -117,12 +117,19 @@ export async function implement(options: ImplementOptions) {
     if (!checked.ok) {
       throw new Error(`仕様 (${name}) に誤りがあります: ${checked.message}\n  再現するコマンド列: ${JSON.stringify(checked.steps)}`);
     }
+    // 決定表の値が、検証に現れるか。現れない値があると、正しい実装がミューテーションのゲートで差し戻される
+    // （あるいは、その値を使う確認が本番コードから消える）ので、エージェントを呼ぶ前に止める
+    const unobservable = await observability(spec, { seed: seedOf(ir), numRuns: options.runs ?? DEFAULT_RUNS });
+    for (const found of unobservable.filter((entry) => entry.severity === "warning")) log(`注意 (${name}): ${describeUnobservable(found)}`);
+    const blocking = unobservable.filter((entry) => entry.severity === "error");
+    if (blocking.length > 0) {
+      throw new Error(`仕様 (${name}) に、検証に現れない値があります:\n${blocking.map((found) => `  ${describeUnobservable(found)}`).join("\n")}`);
+    }
     units.push({
       name,
       ir,
       ws: workspaceOf(layout, target.files, name, names),
-      // 検証を決定的にするため、シードは仕様のハッシュから決める
-      seed: Number.parseInt(specHash(ir).slice("sha256:".length, "sha256:".length + 7), 16),
+      seed: seedOf(ir),
       assets: spec.assets ?? [],
     });
   }
