@@ -298,7 +298,9 @@ agent's own month-end calendar logic, which the spec's month-end flag cannot exe
 The specs directory may hold several components. They share the production code, and each gets its own
 test-side files, named after it (`clp/order.adapter.ts`). All of them are brought into agreement in turn
 (`--component <name>` picks one); after a change for one component the others are verified again, and a change
-that breaks one of them is sent back.
+that breaks one of them is sent back. Whose code is whose is decided by which component's tests execute it: a
+component may change code it uses, shared or not, but a change to code only other components use is undone,
+and its mutation gate breaks only the code it is responsible for.
 
 By default the production code goes to `<out>/src` and the test side to `<out>/clp`. To follow another
 layout, name the two places directly:
@@ -408,7 +410,6 @@ actual:   state CANCELLED, effects []
 - Stopping after the design step so a person can review the skeleton before it is wired and implemented
 - Applying a spec to existing production code (legacy code): wiring and verification only, with mismatches
   reported to a person instead of being sent back to the agent (design notes in `INCREMENTAL.md`)
-- A writable scope narrower than "everything under `--src`" when several components share production code
 - Help with triaging surviving mutations: logic the spec cannot exercise versus code that is not needed
 - Operations that return values (value objects), and multiplicity declared as values
 - Composing components (connecting one component's dependency to another real component instead of a stand-in),
