@@ -86,11 +86,11 @@ test("生成される入力が届かないしきい値は、エラー。null の
   assert.deepEqual(await found(unreachable), ["limit:unobserved:error"]);
 });
 
-test("例の仕様と、フレームワーク自身の仕様に、エラーになる値は無い", async () => {
+test("例の仕様と、フレームワーク自身の仕様に、検証に現れない値は無い（既定の試行回数で、警告も出ない）", async () => {
+  // 1000 回では、payload-check の決定表の行が、検証に一度も現れないシードがあった
   for (const dir of [specsDir, join(repoRoot, "examples/library-ts/specs"), join(repoRoot, "packages/cli/self/specs")]) {
     for (const component of await listComponents(dir)) {
-      const errors = (await observability(await loadSpecs(dir, { component }), { seed: 1 })).filter((v) => v.severity === "error");
-      assert.deepEqual(errors, [], `${dir} ${component}`);
+      assert.deepEqual(await observability(await loadSpecs(dir, { component }), { seed: 1 }), [], `${dir} ${component}`);
     }
   }
 });

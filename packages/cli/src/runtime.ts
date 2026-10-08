@@ -51,7 +51,10 @@ export type PbtResult =
 export const RESULT_PREFIX = "CLP_RESULT ";
 const MAX_STEPS = 8;
 // 既定の試行回数（verify.ts を直接実行したとき。ループから呼ぶときは loop.ts が回数を渡す）
-const DEFAULT_RUNS = 1000;
+// 既定の試行回数。1000 回では、いくつもの偶然が重ならないと届かない判断（問い合わせの答えを何段も経た先）が、
+// シードによっては一度も検証されなかった。壊れた実装の検証は最初の失敗で止まるので、回数に比例して遅くなるのは、
+// 合格する検証だけ
+export const DEFAULT_RUNS = 5000;
 
 // 仕様の評価中に起きた問題（条件の衝突、意味の漏れ、不変条件の破れ、型に合わない値）
 class SpecError extends Error {
@@ -484,7 +487,7 @@ export function describeUnobservable(found: Unobservable): string {
   if (found.verdict === "unobserved") {
     return `${where}: この値を変えても、仕様が期待する結果は変わりません。どこからも使われていないなら、列を消すか null にしてください。しきい値なら、生成される入力がそこに届いていません`;
   }
-  return `${where}: この値は、検証に使うシードでは結果に現れません（ほかのシードでは現れます）。この値についての検証は薄く、ミューテーションのゲートが差し戻すことがあります`;
+  return `${where}: この値は、検証に使うシードでは結果に現れません（ほかのシードでは現れます）。この値についての検証は薄く、ミューテーションのゲートが差し戻すことがあります。試行の回数を増やすと届きます (--runs)`;
 }
 
 export async function runPbt(options: { specs: string; adapter: Adapter; component?: string; args?: string[] }): Promise<PbtResult> {

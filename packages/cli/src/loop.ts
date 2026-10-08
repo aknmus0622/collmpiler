@@ -14,7 +14,7 @@ import { DRAFT_SUFFIX, listComponents, loadSpecs } from "./loader.ts";
 import type { MutationStrategy } from "./mutation.ts";
 import { PHASES } from "./request.ts";
 import type { Phase } from "./request.ts";
-import { describeUnobservable, observability, selfCheck } from "./runtime.ts";
+import { DEFAULT_RUNS, describeUnobservable, observability, selfCheck } from "./runtime.ts";
 import { references, stage1Adapter, stage1Unavailable } from "./stage1.ts";
 import type { StaticCheckStrategy } from "./static-check.ts";
 import type { ImplementationStrategy } from "./strategy.ts";
@@ -31,7 +31,6 @@ import { formatTypeErrors, typecheckSpecs } from "./typecheck.ts";
 
 // 既定の試行回数。しきい値にちょうど当たる値で特定の状態まで進む、といった狭い場合を、
 // シードによらず踏めるだけの回数にしている（200回では、例の仕様のしきい値を踏まないシードが2割ほどあった）
-const DEFAULT_RUNS = 1000;
 
 export type ImplementOptions = {
   specs: string;

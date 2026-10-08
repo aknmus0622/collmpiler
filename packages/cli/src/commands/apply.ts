@@ -26,6 +26,7 @@ export const usage = `clp apply (--out <dir> | --src <dir> --tests <dir | path-p
   --specs <dir>        仕様のディレクトリ（既定: specs）
   --component <name>   1つのコンポーネントだけを一致させる（既定: 仕様にあるすべてを、名前順に）
   --max-attempts <n>   1つの段階の中で差し戻す回数の上限（既定: 3）
+  --runs <n>           検証の試行の回数（既定: 5000）
   --max-rounds <n>     設計からやり直す回数の上限。最初の1周を含む（既定: 2）
   --from <phase>       始める段階を明示する (design / wiring / implementation)
   --fresh              すでにある本番コードとアダプターを捨てて、設計から始める
@@ -57,6 +58,7 @@ const { values } = parseArgs({
     component: { type: "string" },
     agent: { type: "string" },
     "max-attempts": { type: "string", default: "3" },
+    runs: { type: "string" },
     "max-rounds": { type: "string", default: "2" },
     from: { type: "string" },
     fresh: { type: "boolean", default: false },
@@ -88,6 +90,7 @@ const result = await implement({
   component: values.component,
   strategy: values.agent ? commandStrategy(values.agent, { transcriptDir: values.transcripts }) : noAgent,
   maxAttempts: Number(values["max-attempts"]),
+  ...(values.runs === undefined ? {} : { runs: Number(values.runs) }),
   maxRounds: Number(values["max-rounds"]),
   from: values.from as Phase | undefined,
   fresh: values.fresh,

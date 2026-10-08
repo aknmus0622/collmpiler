@@ -17,7 +17,7 @@ export const usage = `clp verify (--out <dir> | --src <dir> --tests <dir | path-
   --component <name>   1つのコンポーネントだけを検証する（既定: すべて）
   --seed <n>           乱数のシード。不一致を再現するときに、報告された値を指定する
   --path <p>           反例への経路。不一致を再現するときに、報告された値を指定する
-  --runs <n>           試行の回数（既定: 1000）
+  --runs <n>           試行の回数（既定: 5000）
   --drafts             人が確定していない解釈の下書きを、正解として使う
   --target typescript  対象言語（いまは typescript だけ）`;
 
