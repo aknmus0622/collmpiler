@@ -276,7 +276,9 @@ the draft as it is; the result then records that the oracle was not reviewed.
 pnpm -s exec clp compile
 ```
 
-This type-checks the spec, checks it on its own, and prints the IR: the spec as language-independent JSON. The
+This type-checks the spec, runs it on its own (conflicting conditions, broken invariants), changes each value
+of the decision tables to see that it matters to what the spec expects (a value that never does cannot be
+verified in an implementation either), and prints the IR: the spec as language-independent JSON. The
 prose and the structure are both there, under the same keys as in the spec, wherever they were written; the
 functions of the interpretation are left out, so the IR says *what* must hold but not *how* to decide it.
 

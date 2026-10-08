@@ -140,6 +140,9 @@ is one the prose allows is for the author to judge; "no disagreements" is not th
   where the spec could really be read two ways.
 - Numbers belong in a decision table, not in prose and not in the interpretation.
 - When prose cannot settle a point, write that point as structure. Nothing else has to become structure.
+- Since then, `clp` checks for this before any agent runs: it changes each value of a decision table and looks
+  whether anything the spec expects changes. With the precondition version of `Borrow` it now stops at once:
+  `決定表 policy の行 "otherwise" の maxBooks (3): この値を変えても、変わるのは「コマンドを実行できるかどうか」だけです…`.
 - Use `onlyIf` only for what cannot happen. What the code must refuse is an outcome (`when`), or it is not
   verified — and the mutation gate will push the check out of the code.
 - Nobody wrote `loan.interpretation.ts` by hand at any point.
