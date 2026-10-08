@@ -1,0 +1,13 @@
+{
+  "specs": "sha256:a01f4874300b92c6fd3653a2b97c6fb1ab216c287cf8f4f0fcddb4bdeb6e18ba",
+  "code": "sha256:87e31a812e900dfc42582296884791e49f4b393263f4e260aef090e715378bfe",
+  "files": [
+    "../src/index.ts",
+    "../src/loan.ts",
+    "../src/policy.ts",
+    "../src/ports.ts",
+    "../src/rules.ts",
+    "../src/state.ts",
+    "loan.adapter.ts"
+  ]
+}

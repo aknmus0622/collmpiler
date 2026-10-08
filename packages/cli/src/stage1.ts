@@ -2,6 +2,8 @@ import { effectOccurrences, isReference, kindOf, payloadEvents, referenceEvents,
 import type { PayloadDiagnostic, ReferenceDiagnostic, SpecInput } from "./extract.ts";
 import { isEnum, isNumberSchema } from "./schema.ts";
 import type { Adapter } from "./runtime.ts";
+import { fileURLToPath } from "node:url";
+import { staleness } from "./verified.ts";
 
 // Stage 1: フレームワーク自身の仕様 (packages/cli/self/specs) から生成したコードで、フレームワークの一部を動かす。
 //
@@ -29,6 +31,11 @@ function fallback(component: string, error: unknown): undefined {
 // Stage 1 のコンポーネントを、生成された契約 (アダプター) として読み込む。使えなければ undefined
 export async function stage1Adapter(component: string, url = adapterUrl(component)): Promise<Adapter | undefined> {
   if (process.env.CLP_STAGE === "0") return undefined;
+  // 使うのは、検証に合格した、いまの仕様の版だけ。作りかけのコードや、合格のあとで書き換えられたコードは使わない
+  if (url === adapterUrl(component)) {
+    const stale = staleness(fileURLToPath(new URL(`../self/clp/${component}.verified.json`, import.meta.url)), fileURLToPath(new URL("../self/specs", import.meta.url)));
+    if (stale !== undefined) return fallback(component, new Error(stale));
+  }
   try {
     return ((await import(url)) as { adapter: Adapter }).adapter;
   } catch (error) {

@@ -28,7 +28,8 @@ export type Layout = {
 
 // 1つのコンポーネントの、テスト側のファイル (root からの相対パス)。
 // ファイル名にはコンポーネントの名前が付く (clp/order.adapter.ts など)
-export type TestPaths = { ir: string; contract: string; adapter: string; verify: string };
+// verified は、合格の記録 (verified.ts)
+export type TestPaths = { ir: string; contract: string; adapter: string; verify: string; verified: string };
 export type Workspace = Layout & {
   // このコンポーネントの名前と、そのテスト側のファイル
   component: string;
@@ -42,6 +43,7 @@ export const CONTROL_DIR = "clp";
 export const DEFAULT_SOURCE_DIR = "src";
 export const DEFAULT_TESTS_DIR = "clp";
 const IR_FILE = "ir.json";
+const VERIFIED_FILE = "verified.json";
 
 const toPosix = (path: string) => path.split(sep).join("/");
 export const under = (dir: string, name: string) => (dir === "" ? name : `${dir}/${name}`);
@@ -99,7 +101,7 @@ export function workspaceOf(
 ): Workspace {
   const pathsOf = (name: string): TestPaths => {
     const at = (file: string) => under(layout.tests, `${layout.prefix}${name}.${file}`);
-    return { ir: at(IR_FILE), contract: at(files.contract), adapter: at(files.adapter), verify: at(files.verify) };
+    return { ir: at(IR_FILE), contract: at(files.contract), adapter: at(files.adapter), verify: at(files.verify), verified: at(VERIFIED_FILE) };
   };
   const reserved = [...new Set([component, ...all])].flatMap((name) => Object.values(pathsOf(name)));
   return { ...layout, component, paths: pathsOf(component), reserved };

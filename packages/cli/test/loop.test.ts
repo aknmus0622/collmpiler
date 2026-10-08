@@ -36,7 +36,7 @@ test("3段階: 設計 → 配線 (赤) → 実装 (緑) の順に、別々の依
   assert.match(of(seen, "implementation")[0].files["clp/REQUEST.md"], /^# Step 3 of 3/);
 
   // 合格した実装と採点基準は出力先に揃う。ミューテーションは実装の段階でだけ走る
-  assert.deepEqual(readdirSync(join(out, "clp")).sort(), ["order.adapter.contract.ts", "order.adapter.ts", "order.ir.json", "order.verify.ts"]);
+  assert.deepEqual(readdirSync(join(out, "clp")).sort(), ["order.adapter.contract.ts", "order.adapter.ts", "order.ir.json", "order.verified.json", "order.verify.ts"]);
   assert.deepEqual(readdirSync(join(out, "src")), ["order-service.ts"]);
   assert.deepEqual(attempts.map((a) => a.mutation?.strategy), [undefined, undefined, "builtin"]);
 });

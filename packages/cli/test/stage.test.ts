@@ -9,6 +9,7 @@ import { listComponents, loadSpecs } from "../src/loader.ts";
 import { references, stage1Payloads, stage1References, stage1Values } from "../src/stage1.ts";
 import { implement } from "../src/loop.ts";
 import type { ImplementationStrategy } from "../src/strategy.ts";
+import { staleness } from "../src/verified.ts";
 import type { ImplementOptions } from "../src/loop.ts";
 import { harness, repoRoot, specsDir } from "./support.ts";
 import type { Script } from "./support.ts";
@@ -298,6 +299,61 @@ test("自分自身の検証: 自分の生成物の上で動くフレームワー
     // 本番コードの置き方（平らか、ディレクトリに分けるか）は、書いたエージェントが決める
     for (const name of readdirSync(join(self, dir), { recursive: true, encoding: "utf8" }).filter((file) => file.endsWith(".ts") || file.endsWith(".json"))) assert.equal(readFileSync(join(copy, dir, name), "utf8"), readFileSync(join(self, dir, name), "utf8"), name);
   }
+});
+
+test("合格の記録: Stage 1 が使うのは、検証に合格した、いまの仕様の版だけ", async () => {
+  // 置いてある生成物は、合格済みで、いまの仕様のもの
+  const self = join(repoRoot, "packages/cli/self");
+  for (const name of await listComponents(selfSpecs)) assert.equal(staleness(join(self, "clp", `${name}.verified.json`), selfSpecs), undefined, name);
+
+  // 写しで、記録が合わなくなる場合を確かめる
+  const copy = mkdtempSync(join(tmpRoot, "verified-"));
+  cpSync(self, copy, { recursive: true });
+  const record = join(copy, "clp/pipeline.verified.json");
+  const specs = join(copy, "specs");
+  assert.equal(staleness(record, specs), undefined);
+  // コードが変わった（手で書き換えた、作りかけ、ミューテーションの途中で止まった）
+  const { files } = JSON.parse(readFileSync(record, "utf8")) as { files: string[] };
+  const source = join(copy, "clp", files.find((file) => file.endsWith("pipeline.ts"))!);
+  const original = readFileSync(source, "utf8");
+  writeFileSync(source, `${original}// changed\n`);
+  assert.equal(staleness(record, specs), "合格したあとで、コードが変わっています");
+  writeFileSync(source, original);
+  assert.equal(staleness(record, specs), undefined);
+  // アダプターも、コードのうち
+  assert.ok(files.includes("pipeline.adapter.ts"));
+  // 仕様が変わった（ほかのコンポーネントの仕様でも: 仕様のディレクトリ全体を見る）
+  writeFileSync(join(specs, "value-writer.decisions.ts"), `${readFileSync(join(specs, "value-writer.decisions.ts"), "utf8")}// changed\n`);
+  assert.equal(staleness(record, specs), "合格したあとで、仕様が変わっています");
+  // 下書きは、仕様に数えない
+  cpSync(join(self, "specs"), specs, { recursive: true });
+  writeFileSync(join(specs, "pipeline.interpretation.draft.ts"), "// draft\n");
+  assert.equal(staleness(record, specs), undefined);
+  // 記録が無い
+  rmSync(record);
+  assert.equal(staleness(record, specs), "検証に合格した記録がありません");
+});
+
+test("合格の記録: 合格したときにだけ書かれる。合格しなければ、前の記録は残らない", async () => {
+  const out = mkdtempSync(join(tmpRoot, "record-"));
+  cpSync(join(repoRoot, "examples/checkout-ts/src"), join(out, "src"), { recursive: true });
+  cpSync(join(repoRoot, "examples/checkout-ts/clp"), join(out, "clp"), { recursive: true });
+  const record = join(out, "clp/order.verified.json");
+  rmSync(record, { force: true });
+  const nobody: ImplementationStrategy = { name: "nobody", run: () => { throw new Error("no agent"); } };
+
+  assert.equal((await implement({ specs: specsDir, out, strategy: nobody, runs: 200, mutation: null })).status, "pass");
+  assert.equal(staleness(record, specsDir), undefined);
+  // 同じものを採点し直せば、同じ記録になる（時刻も回数も入らない）
+  const first = readFileSync(record, "utf8");
+  await implement({ specs: specsDir, out, strategy: nobody, runs: 300, mutation: null });
+  assert.equal(readFileSync(record, "utf8"), first);
+
+  // 本番コードを壊すと、採点に落ちて、エージェントが要る。前の記録は消えている
+  const policy = readdirSync(join(out, "src"), { recursive: true, encoding: "utf8" }).find((file) => file.endsWith("policy.ts"))!;
+  writeFileSync(join(out, "src", policy), readFileSync(join(out, "src", policy), "utf8").replace("20", "21"));
+  await assert.rejects(implement({ specs: specsDir, out, strategy: nobody, runs: 200, mutation: null }), /no agent/);
+  assert.equal(staleness(record, specsDir), "検証に合格した記録がありません");
 });
 
 // --- パイプライン: 段階の進め方を、生成した状態機械 (Stage 1) が決める ---

@@ -17,6 +17,7 @@ import type { Phase } from "./request.ts";
 import { DEFAULT_RUNS, describeUnobservable, observability, selfCheck } from "./runtime.ts";
 import { references, stage1Adapter, stage1Unavailable } from "./stage1.ts";
 import type { StaticCheckStrategy } from "./static-check.ts";
+import { clearVerified, writeVerified } from "./verified.ts";
 import type { ImplementationStrategy } from "./strategy.ts";
 import { typescriptTarget } from "./target-typescript.ts";
 import type { Target } from "./target.ts";
@@ -150,7 +151,10 @@ export async function implement(options: ImplementOptions) {
   // コンポーネントごとに、段階の進め方をどちらが決めたか（1: 生成した状態機械、0: 手書きの手続き）
   const stages: Record<string, 0 | 1> = {};
   let status: "pass" | "fail" = "pass";
-  for (const unit of units.filter((candidate) => options.component === undefined || candidate.name === options.component)) {
+  const chosen = units.filter((candidate) => options.component === undefined || candidate.name === options.component);
+  // 合格の記録は、これから確かめ直すので、いったん消す（途中で止まったときに、前の記録が残らないように）
+  for (const unit of chosen) clearVerified(unit.ws);
+  for (const unit of chosen) {
     const ctx: GateContext = {
       target,
       ir: unit.ir,
@@ -175,6 +179,10 @@ export async function implement(options: ImplementOptions) {
       break;
     }
   }
+  // 合格の記録を残す。本番コードは共有なので、最後のコンポーネントまで合格してから、まとめて書く
+  // （あとのコンポーネントがコードを変えると、前のコンポーネントの記録は合わなくなる）。
+  // 確認していない下書きを正解にしたときは、合格済みとは扱わない
+  if (status === "pass" && oracle === "reviewed") for (const unit of chosen) writeVerified(unit.ws, specsDir);
   // seed は、最初のコンポーネントのもの（コンポーネントが1つのときの、従来の形）
   return { status, oracle, attempts, stages, seed: units[0].seed, seeds: Object.fromEntries(units.map((unit) => [unit.name, unit.seed])) };
 }

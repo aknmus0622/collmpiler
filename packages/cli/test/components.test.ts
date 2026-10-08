@@ -142,8 +142,8 @@ test("複数: 仕様にあるコンポーネントを名前順に一致させる
   ]);
   assert.deepEqual(readdirSync(join(out, "src")).sort(), ["lamp.ts", "order-service.ts"]);
   assert.deepEqual(readdirSync(join(out, "clp")).sort(), [
-    "lamp.adapter.contract.ts", "lamp.adapter.ts", "lamp.ir.json", "lamp.verify.ts",
-    "order.adapter.contract.ts", "order.adapter.ts", "order.ir.json", "order.verify.ts",
+    "lamp.adapter.contract.ts", "lamp.adapter.ts", "lamp.ir.json", "lamp.verified.json", "lamp.verify.ts",
+    "order.adapter.contract.ts", "order.adapter.ts", "order.ir.json", "order.verified.json", "order.verify.ts",
   ]);
   assert.deepEqual(Object.keys(result.seeds).sort(), ["lamp", "order"]);
 

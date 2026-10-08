@@ -61,6 +61,7 @@ test("配置: 本番コードと同じ場所に並べられる (テスト側は�
     "clp.order.adapter.contract.ts",
     "clp.order.adapter.ts",
     "clp.order.ir.json",
+    "clp.order.verified.json",
     "clp.order.verify.ts",
     "order-service.ts",
   ]);
