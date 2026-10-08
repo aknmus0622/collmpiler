@@ -1,0 +1,234 @@
+{
+  "behaviors": [
+    {
+      "from": [
+        "AVAILABLE"
+      ],
+      "name": "Borrow",
+      "onlyIf": [],
+      "when": {
+        "The member already holds at least the policy's maximum number of books, or someone else has reserved the book": {
+          "does": "The borrowing is refused; nothing changes.",
+          "effects": []
+        },
+        "otherwise": {
+          "does": "The book is due in the policy's loan days. The member is told the due date.",
+          "effects": [
+            {
+              "name": "DueDateNotice",
+              "payload": {
+                "daysUntilDue": {
+                  "$ref": "decision:policy.loanDays"
+                }
+              }
+            }
+          ],
+          "goTo": "ON_LOAN",
+          "set": {
+            "daysUntilDue": {
+              "$ref": "decision:policy.loanDays"
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "The given number of days passes. A loan is past its due date when fewer than zero days remain; on the due day itself it is not. A loan past its due date becomes overdue. A book past its due date by more than the policy's lost-after days is considered lost, and the member is charged for a replacement; that happens once, when the book becomes lost.",
+      "from": [
+        "ON_LOAN",
+        "OVERDUE"
+      ],
+      "name": "DayPasses",
+      "onlyIf": [],
+      "when": {
+        "The book is then past its due date by more than the policy's lost-after days": {
+          "effects": [
+            {
+              "name": "ReplacementCharge",
+              "payload": {}
+            }
+          ],
+          "goTo": "LOST",
+          "set": {
+            "daysUntilDue": {
+              "$ref": "calculation:daysUntilDueAfterDaysPass"
+            }
+          }
+        },
+        "The loan is then past its due date, but not by more than the policy's lost-after days": {
+          "effects": [],
+          "goTo": "OVERDUE",
+          "set": {
+            "daysUntilDue": {
+              "$ref": "calculation:daysUntilDueAfterDaysPass"
+            }
+          }
+        },
+        "otherwise": {
+          "effects": [],
+          "set": {
+            "daysUntilDue": {
+              "$ref": "calculation:daysUntilDueAfterDaysPass"
+            }
+          }
+        }
+      }
+    },
+    {
+      "from": [
+        "ON_LOAN"
+      ],
+      "name": "Extend",
+      "onlyIf": [],
+      "when": {
+        "The book is reserved by someone else": {
+          "does": "The extension is refused; nothing changes.",
+          "effects": []
+        },
+        "otherwise": {
+          "does": "The due date moves later by the policy's extension days, counted from the current due date. The member is told the new due date. A loan can be extended any number of times.",
+          "effects": [
+            {
+              "name": "DueDateNotice",
+              "payload": {
+                "daysUntilDue": {
+                  "$ref": "calculation:daysUntilDueAfterExtension"
+                }
+              }
+            }
+          ],
+          "set": {
+            "daysUntilDue": {
+              "$ref": "calculation:daysUntilDueAfterExtension"
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "A book on loan or overdue can be returned; a lost book cannot. The book becomes available. Returning an overdue book is charged the late fee. Then, if someone else has reserved the book, the next member waiting is notified.",
+      "from": [
+        "ON_LOAN",
+        "OVERDUE"
+      ],
+      "name": "Return",
+      "onlyIf": [],
+      "when": {
+        "otherwise": {
+          "does": "The book is returned and becomes available again.",
+          "effects": [
+            {
+              "name": "LateFeeCharge",
+              "payload": {
+                "amount": {
+                  "$ref": "calculation:lateFee"
+                }
+              },
+              "when": {
+                "$was": [
+                  "OVERDUE"
+                ]
+              }
+            },
+            {
+              "name": "NextMemberNotice",
+              "payload": {},
+              "when": {
+                "$ref": "query:reservedBySomeoneElse"
+              }
+            }
+          ],
+          "goTo": "AVAILABLE"
+        }
+      }
+    }
+  ],
+  "decisions": {
+    "policy": {
+      "rows": {
+        "otherwise": {
+          "extensionDays": 7,
+          "feeCap": 1000,
+          "feePerDay": 100,
+          "loanDays": 14,
+          "lostAfterDays": 30,
+          "maxBooks": 3
+        }
+      }
+    }
+  },
+  "descriptions": {
+    "component": "The loan of one book to a library member. The member is not identified here. There is no clock: time is counted only by the days that the DayPasses command reports, and the loan remembers how many days remain until the book is due (negative once it is past due). The numbers (how many books, how many days, the fees) are in the policy table.",
+    "effects": "A due-date notice to the member, carrying the number of days until the book is due; a late-fee charge, carrying the amount in yen; a notice to the next member waiting, carrying nothing; and a replacement charge, carrying nothing.",
+    "queries": "How many books the member currently has on loan, and whether someone else has reserved the book."
+  },
+  "irVersion": 5,
+  "model": {
+    "calculations": {
+      "daysUntilDueAfterDaysPass": {
+        "is": "The days until the loan is due, minus the days that pass",
+        "type": "integer"
+      },
+      "daysUntilDueAfterExtension": {
+        "is": "The days until the loan is due, plus the policy's extension days",
+        "type": "integer"
+      },
+      "lateFee": {
+        "is": "The number of days the book is past its due date, times the fee per day, but at most the fee cap.",
+        "type": "integer"
+      }
+    },
+    "commands": {
+      "Borrow": {},
+      "DayPasses": {
+        "days": {
+          "max": 30,
+          "min": 1,
+          "type": "integer"
+        }
+      },
+      "Extend": {},
+      "Return": {}
+    },
+    "data": {
+      "daysUntilDue": "integer"
+    },
+    "effects": {
+      "DueDateNotice": {
+        "daysUntilDue": "integer"
+      },
+      "LateFeeCharge": {
+        "amount": "integer"
+      },
+      "NextMemberNotice": {},
+      "ReplacementCharge": {}
+    },
+    "init": "AVAILABLE",
+    "invariants": [
+      "A loan is overdue exactly when it is past its due date"
+    ],
+    "queries": {
+      "booksOnLoan": {
+        "input": {},
+        "output": {
+          "around": [
+            3
+          ],
+          "max": 10,
+          "min": 0,
+          "type": "integer"
+        }
+      },
+      "reservedBySomeoneElse": {
+        "input": {},
+        "output": "boolean"
+      }
+    },
+    "states": [
+      "AVAILABLE",
+      "ON_LOAN",
+      "OVERDUE",
+      "LOST"
+    ]
+  }
+}

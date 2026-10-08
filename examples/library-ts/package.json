@@ -1,0 +1,12 @@
+{
+  "name": "example-library-ts",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "verify": "clp verify --out ."
+  },
+  "devDependencies": {
+    "@clp/cli": "workspace:*",
+    "@clp/core": "workspace:*"
+  }
+}
