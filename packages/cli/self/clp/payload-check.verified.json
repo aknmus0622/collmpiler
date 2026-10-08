@@ -1,6 +1,6 @@
 {
-  "specs": "sha256:28e1ea4098008c106f88181cded4b7b6b785106e0cf0b0997ba775fe4fa2dcc3",
-  "code": "sha256:05e8139f9e15885951229e266b9a5820ec2d10bffc296223209757b745e1962a",
+  "specs": "sha256:0d19440e15913a9668099d24bd833356f916ffb252320bc22c8ca2ad59ab8c6e",
+  "code": "sha256:4c13b015c2f602a316b21009dd8d85beaf92116f9c386746062f4a6ea42f80b0",
   "files": [
     "../src/payload-check/fit.ts",
     "../src/payload-check/payload-check.ts",
@@ -9,8 +9,8 @@
     "../src/pipeline/plan.ts",
     "../src/pipeline/types.ts",
     "../src/reference-check/reference-check.ts",
-    "../src/reference-check/tally.ts",
     "../src/reference-check/types.ts",
+    "../src/reference-check/verdict.ts",
     "../src/value-writer/reference-text.ts",
     "../src/value-writer/types.ts",
     "../src/value-writer/value-writer.ts",

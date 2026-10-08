@@ -22,6 +22,11 @@ export type ReferenceCheckState =
   | "rejected";
 
 /**
+ * How a finished walk ends. Each value is also the `ReferenceCheckState` of the same spelling.
+ */
+export type ReferenceCheckVerdict = "accepted" | "rejected";
+
+/**
  * Classification of a diagnostic. Corresponds to the `code` of the specification's `ReportDiagnostic`
  * effect, with the same spellings.
  */
@@ -35,15 +40,15 @@ export interface ReferenceDiagnostic {
   readonly code: ReferenceDiagnosticCode;
   /** Command name the diagnostic is attached to. */
   readonly command: string;
-  /** Case name the diagnostic is attached to; may be the empty string. */
+  /** Case name the diagnostic is attached to. */
   readonly caseName: string;
-  /** The state name or effect name the diagnostic is about. */
+  /** The name the diagnostic is about. */
   readonly subject: string;
 }
 
 /**
- * Dependency: the names declared by the specification under check. The check consults it each time it
- * needs an answer and keeps no copy of the answers, so they may differ from one call to the next.
+ * Dependency: the names the specification under check declares. The check consults it each time it needs
+ * an answer and keeps no copy of the answers, so they may differ from one call to the next.
  */
 export interface DeclaredNames {
   /**

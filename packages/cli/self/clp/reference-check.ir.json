@@ -18,7 +18,7 @@
       "onlyIf": [],
       "when": {
         "The named state is not declared": {
-          "does": "An unknown-state diagnostic is reported for the remembered command, with an empty case name and the state as the subject. The error count goes up by one.",
+          "does": "An unknown-state diagnostic is reported for the remembered command, with an empty case name and the state as the subject. The walk remembers that something was reported.",
           "effects": [
             {
               "name": "ReportDiagnostic",
@@ -35,9 +35,7 @@
             }
           ],
           "set": {
-            "errors": {
-              "$ref": "calculation:nextErrors"
-            }
+            "reported": true
           }
         },
         "otherwise": {
@@ -53,11 +51,11 @@
       "onlyIf": [],
       "when": {
         "otherwise": {
-          "does": "The error count starts at 0.",
+          "does": "Nothing has been reported yet.",
           "effects": [],
           "goTo": "BETWEEN_COMMANDS",
           "set": {
-            "errors": 0
+            "reported": false
           }
         }
       }
@@ -103,14 +101,14 @@
       }
     },
     {
-      "description": "Between commands, the walk can be finished: it is accepted if no error was counted, rejected otherwise.",
+      "description": "Between commands, the walk can be finished: it is accepted if nothing was reported, rejected otherwise.",
       "from": [
         "BETWEEN_COMMANDS"
       ],
       "name": "Finish",
       "onlyIf": [],
       "when": {
-        "No error was counted": {
+        "Nothing was reported": {
           "effects": [],
           "goTo": "ACCEPTED"
         },
@@ -138,7 +136,7 @@
       "onlyIf": [],
       "when": {
         "The named state is not declared": {
-          "does": "An unknown-state diagnostic is reported for the remembered command and case, with the state as the subject. The error count goes up by one.",
+          "does": "An unknown-state diagnostic is reported for the remembered command and case, with the state as the subject. The walk remembers that something was reported.",
           "effects": [
             {
               "name": "ReportDiagnostic",
@@ -157,9 +155,7 @@
             }
           ],
           "set": {
-            "errors": {
-              "$ref": "calculation:nextErrors"
-            }
+            "reported": true
           }
         },
         "otherwise": {
@@ -199,7 +195,7 @@
       "onlyIf": [],
       "when": {
         "The named effect is not declared": {
-          "does": "An unknown-effect diagnostic is reported for the remembered command and case, with the effect as the subject. The error count goes up by one.",
+          "does": "An unknown-effect diagnostic is reported for the remembered command and case, with the effect as the subject. The walk remembers that something was reported.",
           "effects": [
             {
               "name": "ReportDiagnostic",
@@ -218,9 +214,7 @@
             }
           ],
           "set": {
-            "errors": {
-              "$ref": "calculation:nextErrors"
-            }
+            "reported": true
           }
         },
         "otherwise": {
@@ -237,12 +231,6 @@
   },
   "irVersion": 5,
   "model": {
-    "calculations": {
-      "nextErrors": {
-        "is": "the number of errors so far plus one",
-        "type": "integer"
-      }
-    },
     "commands": {
       "AllowFrom": {
         "state": "string"
@@ -266,11 +254,7 @@
     "data": {
       "caseName": "string",
       "command": "string",
-      "errors": {
-        "max": 8,
-        "min": 0,
-        "type": "integer"
-      }
+      "reported": "boolean"
     },
     "effects": {
       "ReportDiagnostic": {
@@ -285,7 +269,7 @@
     },
     "init": "IDLE",
     "invariants": [
-      "A walk that has started has an error count"
+      "A walk that has started remembers whether something was reported"
     ],
     "queries": {
       "effectDeclared": {

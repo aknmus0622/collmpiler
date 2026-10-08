@@ -27,7 +27,7 @@ export const ReferenceCheck = component({
   },
 
   commands: {
-    Begin: compose(from("IDLE"), goTo("BETWEEN_COMMANDS"), does("The error count starts at 0.")),
+    Begin: compose(from("IDLE"), goTo("BETWEEN_COMMANDS"), does("Nothing has been reported yet.")),
 
     EnterCommand: compose(
       input({ name: "string" }),
@@ -45,7 +45,7 @@ export const ReferenceCheck = component({
         "The named state is not declared",
         does(
           "An unknown-state diagnostic is reported for the remembered command, with an empty case name and the state as the subject. " +
-            "The error count goes up by one.",
+            "The walk remembers that something was reported.",
         ),
       ),
       otherwise(),
@@ -61,7 +61,7 @@ export const ReferenceCheck = component({
         "The named state is not declared",
         does(
           "An unknown-state diagnostic is reported for the remembered command and case, with the state as the subject. " +
-            "The error count goes up by one.",
+            "The walk remembers that something was reported.",
         ),
       ),
       otherwise(),
@@ -75,7 +75,7 @@ export const ReferenceCheck = component({
         "The named effect is not declared",
         does(
           "An unknown-effect diagnostic is reported for the remembered command and case, with the effect as the subject. " +
-            "The error count goes up by one.",
+            "The walk remembers that something was reported.",
         ),
       ),
       otherwise(),
@@ -83,6 +83,6 @@ export const ReferenceCheck = component({
 
     LeaveCommand: compose(from("IN_COMMAND", "IN_CASE"), goTo("BETWEEN_COMMANDS")),
 
-    Finish: description("Between commands, the walk can be finished: it is accepted if no error was counted, rejected otherwise."),
+    Finish: description("Between commands, the walk can be finished: it is accepted if nothing was reported, rejected otherwise."),
   },
 });
