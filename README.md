@@ -102,21 +102,21 @@ export const Order = component(description("An order: placed by a customer, paid
 ```
 
 From there, write as structure only what you want to pin down. Every entry — a data field, a query, an
-effect, a calculation, a command — is prose (`description`), parts, or both merged by `compose`:
+effect, a calculation, a command — is prose (`description`), parts, or both bundled by `component`:
 
 ```ts
 const Rank = ["Gold", "Silver", "Bronze"] as const;
-const Yen = { type: "integer", min: 0, max: 1_000_000, around: [10_000] } as const;
+const Yen = integer({ min: 0, max: 1_000_000, around: [10_000] });
 
 export const Order = component({
   description: "An order: placed by a customer, paid through an external payment module, then shipped or cancelled.",
   states: ["DRAFT", "PENDING", "PAID", "SHIPPED", "CANCELLED"],
   init: "DRAFT",
-  data: { rank: typed(Rank), price: typed(Yen) },         // what the order remembers
+  data: { rank: Rank, price: Yen },                       // what the order remembers: a type is written as it is
   queries: {                                              // what it asks its dependencies
-    isMonthEnd: compose(description("Whether today is the last day of the month."), output("boolean")),
-    paymentModuleActive: output("boolean"),
-    paymentResult: output(["succeeded", "failed"]),
+    isMonthEnd: component(description("Whether today is the last day of the month."), output("boolean")),
+    paymentModuleActive: "boolean",                       // a bare type is the type of the answer
+    paymentResult: ["succeeded", "failed"],
   },
   effects: {                                              // what it does to its dependencies
     SendReceipt: input({ discountPercent: "integer", amount: "integer" }),
@@ -126,19 +126,19 @@ export const Order = component({
   },
   decisions: { campaign: Campaign, shipping: Shipping },
   calculations: {
-    amountCharged: compose(description("price × (100 − discount percent) ÷ 100, rounded down to a whole yen"), output("integer")),
+    amountCharged: component(description("price × (100 − discount percent) ÷ 100, rounded down to a whole yen"), output("integer")),
   },
   invariants: ["Every order past the draft state has a member rank and a price"],
 
   commands: {                                             // what drives it from outside
     // fully structured: input, where it applies, where it leads
-    PlaceOrder: compose(
+    PlaceOrder: component(
       input({ customerRank: Rank, listPrice: Yen }),
       from("DRAFT"),
       goTo("PENDING"),
       does("The order remembers the customer's rank and the list price. An order confirmation is sent."),
     ),
-    Checkout: compose(
+    Checkout: component(
       from("PENDING"),
       onlyIf("The external payment module is active"),
       when(
@@ -149,26 +149,30 @@ export const Order = component({
       otherwise(does("The customer is notified of the payment failure.")),   // no goTo: the state stays
     ),
     // partly structured: the resulting state is left to the prose
-    Ship: compose(from("PAID"), does("The order becomes shipped. A shipping notice is sent, with priority as the shipping decision says.")),
+    Ship: component(from("PAID"), does("The order becomes shipped. A shipping notice is sent, with priority as the shipping decision says.")),
     // prose only
     Cancel: description("A pending or paid order can be cancelled. If the order had been paid, a refund is issued."),
   },
 });
 ```
 
-Parts are values, so a fragment shared by several commands is written once (`const rejected = compose(when(...), otherwise(...))`).
+Parts are values, so a fragment shared by several commands is written once
+(`const rejected = component(when(...), otherwise(...))`): a `component(...)` without a name dissolves into
+wherever it is placed. `{ ... }` is always shorthand for a list of named things, and the word that receives it
+says what they are: fields with their types in `input({ ... })`, settings in `integer({ ... })`, entries by
+name under `commands`. A bare `{ ... }` is never a type.
 
 A query can take an input, when it is a question *about something*. The command then says what it asks about,
 and names the answer; the implementation is tested against that, and fails if it asks about anything else:
 
 ```ts
 queries: {
-  stateDeclared: compose(input({ name: "string" }), output("boolean")),
+  stateDeclared: component(input({ name: "string" }), output("boolean")),
 },
 commands: {
-  GoTo: compose(
+  GoTo: component(
     input({ state: "string" }),
-    asks({ declared: { stateDeclared: { name: ref.input("state") } } }),   // read as `state.declared`
+    asks("declared", "stateDeclared", { name: ref.input("state") }),       // read as `state.declared`
     when("The named state is not declared", does("An unknown-state diagnostic is reported.")),
     otherwise(),
   ),
@@ -188,27 +192,19 @@ sentence as a function. You do not write this file.
 ```ts
 // specs/order.interpretation.ts — generated
 export const Interpretation = interpretation(Order, {
-  // structure: declarations and references, no functions. It goes into the IR.
-  structure: {
-    commands: {
-      PlaceOrder: {
-        set: { rank: ref.input("customerRank"), price: ref.input("listPrice") },
-        effects: [{ SendOrderConfirmation: {} }],
-      },
-      Checkout: {
-        when: {
-          "The payment succeeded": {
-            effects: [
-              { SendReceipt: { discountPercent: ref.decision("campaign", "discountPercent"), amount: ref.calculation("amountCharged") } },
-              { IssueCoupon: { type: ref.decision("campaign", "coupon") }, when: ref.decision("campaign", "grantsCoupon") },
-            ],
-          },
-          otherwise: { effects: [{ NotifyPaymentFailure: {} }] },
-        },
-      },
-      Ship: { goTo: "SHIPPED", effects: [{ SendShippingNotice: { priority: ref.decision("shipping", "priority") } }] },
-      Cancel: { from: ["PENDING", "PAID"], goTo: "CANCELLED", effects: [{ Refund: {}, when: ref.was("PAID") }] },
-    },
+  // Structure: declarations and references, no functions, in the same words as Layer 1. It goes into the IR.
+  commands: {
+    PlaceOrder: component(emits("SendOrderConfirmation"), set({ rank: ref.input("customerRank"), price: ref.input("listPrice") })),
+    Checkout: component(
+      when(
+        "The payment succeeded",
+        emits("SendReceipt", { discountPercent: ref.decision("campaign", "discountPercent"), amount: ref.calculation("amountCharged") }),
+        emits("IssueCoupon", { type: ref.decision("campaign", "coupon") }, onlyWhen(ref.decision("campaign", "grantsCoupon"))),
+      ),
+      otherwise(emits("NotifyPaymentFailure")),
+    ),
+    Ship: component(goTo("SHIPPED"), emits("SendShippingNotice", { priority: ref.decision("shipping", "priority") })),
+    Cancel: component(from("PENDING", "PAID"), goTo("CANCELLED"), emits("Refund", onlyWhen(ref.was("PAID")))),
   },
 
   // meanings: functions. The oracle for the tests; never shown to the implementing agent.
@@ -228,8 +224,9 @@ export const Interpretation = interpretation(Order, {
 ```
 
 The interpretation **cannot override structure written in Layer 1**: where you gave states, an input, `from`,
-a `goTo`, or the cases of a `when`, it may only add what is missing. It is type-checked against Layer 1, and
-run on its own over random command sequences, before it is written out.
+a `goTo`, or the cases of a `when`, it may only add what is missing. It is checked against the grammar (what
+may be written inside what) and against Layer 1, and run on its own over random command sequences, before it
+is written out.
 
 Because the interpretation is what the implementation is judged against, it is not used until you accept it.
 It goes to `specs/order.interpretation.draft.ts`, and you are told where the prose was ambiguous, in two ways:
@@ -276,7 +273,8 @@ the draft as it is; the result then records that the oracle was not reviewed.
 pnpm -s exec clp compile
 ```
 
-This type-checks the spec, runs it on its own (conflicting conditions, broken invariants), changes each value
+This checks the spec against the grammar (a part written where it does not belong is reported with its file
+and line), runs it on its own (conflicting conditions, broken invariants), changes each value
 of the decision tables to see that it matters to what the spec expects (a value that never does cannot be
 verified in an implementation either), and prints the IR: the spec as language-independent JSON. The
 prose and the structure are both there, under the same keys as in the spec, wherever they were written; the

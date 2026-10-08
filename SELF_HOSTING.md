@@ -244,7 +244,7 @@ export const ReferenceForm = decisionTable({
 });
 
 calculations: {
-  referenceText: compose(
+  referenceText: component(
     description("The prefix the reference form gives, followed by what is referred to: the name, or, for a column of a decision table, the table, a dot, and the column. Nothing else is added and nothing is trimmed."),
     output("string"),
   ),
@@ -297,12 +297,12 @@ calculations: {
 
 ```typescript
 queries: {
-  stateDeclared: compose(description("Whether the specification declares a state of this name."), input({ name: "string" }), output("boolean")),
+  stateDeclared: component(description("Whether the specification declares a state of this name."), input({ name: "string" }), output("boolean")),
 },
 commands: {
-  GoTo: compose(
+  GoTo: component(
     input({ state: "string" }),
-    asks({ declared: { stateDeclared: { name: ref.input("state") } } }),   // 何について尋ねるかを、仕様に書く
+    asks("declared", "stateDeclared", { name: ref.input("state") }),       // 何について尋ねるかを、仕様に書く
     when("The named state is not declared", does("An unknown-state diagnostic is reported ...")),
     otherwise(),
   ),
