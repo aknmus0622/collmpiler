@@ -74,10 +74,10 @@ aac-engine-monorepo/
 * **責務:**
 * `clp.config.ts` を読み込み、対象の仕様ファイルと出力先（プラグイン）を解決。
 * コマンドの実行:
-* `npx clp compile` (TS -> IR)
-* `npx clp generate` (IR -> Plugin経由で各言語のコード出力)
-* `npx clp test --seed 123` (PBTランナーのキック、Shrinkのログ制御)
-* `npx clp implement --agent "<command>"` (LLM エージェントに本番コードを書かせ、検査と PBT を合格するまで差し戻す)
+* `clp compile`（仕様の検査と、IR の出力）
+* `clp interpret`（解釈を LLM に導かせる。`--accept` で確定する）
+* `clp verify --seed 123`（すでにある本番コードを検証する。PBT の実行と、反例の再現）
+* `clp apply --agent "<command>"` (LLM エージェントに本番コードを書かせ、検査と PBT を合格するまで差し戻す)
 
 
 

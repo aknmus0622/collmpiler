@@ -195,7 +195,8 @@ co-llm-piler/
 │   ├── core/                  # 型 + 極薄ヘルパ（依存ゼロ）
 │   │   └── index.ts
 │   └── cli/
-│       ├── package.json       # exports: { "./runtime": ... }（bin と engines ガードは未作成）
+│       ├── bin/clp.ts         # clp コマンド（Node のバージョンを確かめてから、サブコマンドを読み込む）
+│       ├── package.json       # bin: { "clp": "./bin/clp.ts" }, exports: { "./runtime": ... }（旧: bin と engines ガードは未作成）
 │       └── src/
 │           ├── loader.ts      # SpecLoader（保険3）
 │           ├── extract.ts     # Layer 1 + 決定表 + 解釈の構造 → IR（実行はしない）
@@ -218,7 +219,7 @@ co-llm-piler/
 │           ├── interpret.ts   # 解釈 (Layer 2) を LLM に導かせる。2つの解釈の比較、確定（実装の流れとは別）
 │           ├── stage1.ts      # フレームワーク自身の仕様から生成したコード (self/) で、検査の一部を動かす
 │           ├── loop.ts        # 3段階 (設計 → 配線 → 実装) × [入口ゲート → Strategy → 出口ゲート] のループ
-│           └── compile.ts / implement.ts / interpret-cli.ts   # 暫定エントリ（compare.ts は内部用）
+│           └── commands/      # clp のサブコマンド（compile / interpret / apply / verify と、内部用の compare）
 ├── specs/                     # 当面はここに置く（§2 案A）
 └── examples/
     └── checkout-ts/           # src/ = LLM が書いた本番コード、clp/ = 生成されたテスト側
@@ -494,6 +495,14 @@ CLI をどう配るかとは独立に、**生成された PBT コードの互換
     これで、フレームワークの中の判断（どの段階を動かすか、何を報告するか、値をどう書くか）は、すべて自分の仕様から
     生成したコードで動く。IR の並べ直しの残り（写す、たどる、既定で埋める、省く）は判断を持たないので、
     コンポーネントにはせず、核に残すことにした。
+40. **`clp` コマンドにまとめた。** 3つの暫定スクリプトを、`packages/cli/bin/clp.ts` の4つのサブコマンドにした:
+    `compile`（仕様の検査と IR）、`interpret`（解釈を導く・確定する）、`apply`（仕様に実物を合わせる。旧 `implement`）、
+    `verify`（すでにある本番コードを検証する。新設）。`pnpm clp <コマンド>` で呼べる（サブディレクトリからは `pnpm exec clp`）。
+    先頭で Node のバージョンを確かめ、選ばれたサブコマンドだけを読み込む。`--help` で使い方を表示し、
+    引数の誤りは、何が違うかと使い方を伝えて終了コード 2 で終わる。
+    `apply` は `--agent` を省略できる。そのときは、検証とテスト側の生成だけを行い、エージェントが要る場面では、
+    そう伝えて止まる。以前の計画にあった `generate` と `test` は作らなかった（生成は `apply` の一部で、
+    テストの実行は `verify`）。別プロセスでの検査は、`clp` 自身を呼ぶ形にそろえた。
 
 ### 未検証
 

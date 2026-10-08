@@ -699,8 +699,8 @@ export const Interpretation = interpretation(Order, {
 #### 解釈を導く
 
 ```bash
-pnpm -s run interpret --agent '<エージェントのコマンド>' [--sessions <数>]   # 導く（既定は 2 セッション）
-pnpm -s run interpret --accept                                            # 確定する
+pnpm clp interpret --agent '<エージェントのコマンド>' [--sessions <数>]   # 導く（既定は 2 セッション）
+pnpm clp interpret --accept                                            # 確定する
 ```
 
 **解釈は採点の正解なので、LLM が導いたものをそのまま正解にはしません。** 実装と正解の両方を LLM が同じ文から書くと、同じ読み違いをしたまま合格するためです。
@@ -741,7 +741,7 @@ pnpm -s run interpret --accept                                            # 確�
 
 解釈のファイルの先頭には、導いたときの Layer 1 のハッシュが記されます（`// layer1: sha256:…`）。
 
-* **Layer 1 がそのあとで変わっていれば、解釈は古いものとして扱い、正解には使いません**（`stale-interpretation`。`compile` も `implement` も、生成済みの `verify.ts` も止まります）。
+* **Layer 1 がそのあとで変わっていれば、解釈は古いものとして扱い、正解には使いません**（`stale-interpretation`。`clp compile` も `clp apply` も、生成済みの `verify.ts` も止まります）。
 * **決定表の値だけの変更は、解釈を古くしません。** 値は解釈を通らずに IR に届くからです（ハッシュに含めるのは、行と列の名前と、値の型だけです）。
 * `interpret` は、いまの解釈を出発点にして、**合わなくなった所だけ**を直させます。確定版は書き換えず、下書きとして書き出します。構造が変わったコマンドと語彙の項目を報告するので（意味の関数の変更は含みません）、人は差分を読んで確定します。
 * 文の言い回しだけを直して、解釈はそのままでよいと判断したときは、`interpret --accept` だけを実行します。いまの Layer 1 のもとで検査に通ることを確かめたうえで、ハッシュを記し直します。
@@ -749,7 +749,7 @@ pnpm -s run interpret --accept                                            # 確�
 
 #### 人の確認を待たずに流す
 
-`implement --drafts` は、下書きを正解としてそのまま使います。Layer 1 から実装までを CI で自動的に流すためのものです。この場合、実装と正解の両方が LLM の解釈に基づくので、同じ読み違いは検出できません。結果には `oracle: "draft"` と記録され、実行時にも警告が出ます。
+`clp apply --drafts` は、下書きを正解としてそのまま使います。Layer 1 から実装までを CI で自動的に流すためのものです。この場合、実装と正解の両方が LLM の解釈に基づくので、同じ読み違いは検出できません。結果には `oracle: "draft"` と記録され、実行時にも警告が出ます。
 
 #### 文と構造・意味の一致
 

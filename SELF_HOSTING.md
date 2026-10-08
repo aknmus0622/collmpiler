@@ -215,7 +215,7 @@ calculations: {
 | 読み込めない、または実行中に落ちる | 警告を出して、Stage 0 で続ける |
 | 環境変数 `CLP_STAGE=0` | Stage 0 に固定する |
 
-`extract` そのものは同期の関数のままで、既定は Stage 0 です。Stage 1 は、入口（`compile.ts`、`loop.ts`）が
+`extract` そのものは同期の関数のままで、既定は Stage 0 です。Stage 1 は、入口（`clp compile`、`clp apply`）が
 先に実行して、結果を渡します。
 
 ## 5. 部品への分け方
@@ -289,7 +289,7 @@ commands: {
 1. **Layer 1 を書く**（`packages/cli/self/specs/<名前>.component.ts`）。語彙は部品で、中身は文で書く。
    集まりは、引数つきの問い合わせにする。
 2. **解釈を導く**（`interpret`）。食い違いと疑問点を見て、Layer 1 を詳しくする。解釈は手で書かない。
-3. **確定して、実装させる**（`interpret --accept`、`implement`）。ほかのコンポーネントが壊れていないことも、
+3. **確定して、実装させる**（`clp interpret --accept`、`clp apply`）。ほかのコンポーネントが壊れていないことも、
    ここで確かめられる。
 4. **手書きの判断を、Stage 0 として切り出す。** 判断の結果を、だれが判断しても同じ形で受け取れるようにする。
 5. **たどる部分を、両方の Stage で共有する形にする**（コマンドの列を作る関数）。
@@ -298,23 +298,23 @@ commands: {
 
 ```bash
 # 解釈を導く（解釈が無いか、古くなっているコンポーネントが対象）
-pnpm -s run interpret --specs packages/cli/self/specs --agent '<エージェントのコマンド>'
-pnpm -s run interpret --specs packages/cli/self/specs --accept
+pnpm clp interpret --specs packages/cli/self/specs --agent '<エージェントのコマンド>'
+pnpm clp interpret --specs packages/cli/self/specs --accept
 
 # 実装させる（すでにあれば、採点だけで終わる）
-pnpm -s run implement --specs packages/cli/self/specs --out packages/cli/self --agent '<エージェントのコマンド>'
+pnpm clp apply --specs packages/cli/self/specs --out packages/cli/self --agent '<エージェントのコマンド>'
 ```
 
 ### 確かめ方
 
 ```bash
 pnpm test                                                   # Stage 0 と Stage 1 の一致を含む
-node packages/cli/self/clp/reference-check.verify.ts        # コンポーネントごとの検証（pipeline、payload-check も同様）
-CLP_STAGE=0 pnpm -s run ir                                  # Stage 0 に固定して、出力を比べる
-pnpm -s run ir
+pnpm clp verify --specs packages/cli/self/specs --out packages/cli/self   # 4つのコンポーネントの検証
+CLP_STAGE=0 pnpm -s clp compile                                  # Stage 0 に固定して、出力を比べる
+pnpm -s clp compile
 
 # 自分自身の検証: Stage 1 の上で動くフレームワークが、自分のコンポーネントを採点し直す
-pnpm -s run implement --specs packages/cli/self/specs --out packages/cli/self --agent false
+pnpm clp apply --specs packages/cli/self/specs --out packages/cli/self
 ```
 
 最後のコマンドは、何も変わっていなければ、エージェントを呼ばずに採点だけで終わります。

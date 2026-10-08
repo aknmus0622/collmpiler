@@ -24,7 +24,18 @@ Phase 1 spike. TypeScript targets only.
 pnpm install
 ```
 
-There is no build step. Node runs the `.ts` files directly.
+There is no build step. Node runs the `.ts` files directly. Everything goes through one command:
+
+```bash
+pnpm clp --help
+```
+
+| Command | What it does |
+| --- | --- |
+| `clp compile` | check the spec and print its IR |
+| `clp interpret` | have an LLM derive what the prose means; `--accept` puts it into use |
+| `clp apply` | bring the production code into agreement with the spec, by having an agent write it and verifying it |
+| `clp verify` | verify existing production code against the spec |
 ## Example
 
 The repository contains one example, end to end: the spec of an order that is placed, paid, shipped, or
@@ -131,7 +142,7 @@ commands: {
 ### 2. Have an LLM interpret it
 
 ```bash
-pnpm -s run interpret \
+pnpm clp interpret \
   --agent 'claude -p "Read clp/REQUEST.md and carry out the request." --permission-mode acceptEdits'
 ```
 
@@ -215,18 +226,18 @@ To resolve them, **make Layer 1 more precise** (add a decision table, a state, a
 again; only what the change affects is redone. When nothing is left to resolve, read the draft and accept it:
 
 ```bash
-pnpm -s run interpret --accept
+pnpm clp interpret --accept
 ```
 
 The interpretation records the Layer 1 it was derived from. If Layer 1 changes afterwards, the interpretation
 is stale and nothing runs until it is derived again (or accepted again, when you only reworded a sentence).
-Changing a value in a decision table does not make it stale. For unattended runs, `implement --drafts` uses
+Changing a value in a decision table does not make it stale. For unattended runs, `clp apply --drafts` uses
 the draft as it is; the result then records that the oracle was not reviewed.
 
 ### 3. Check the spec
 
 ```bash
-pnpm -s run ir
+pnpm -s clp compile
 ```
 
 This type-checks the spec, checks it on its own, and prints the IR: the spec as language-independent JSON. The
@@ -252,7 +263,7 @@ functions of the interpretation are left out, so the IR says *what* must hold bu
 ### 4. Have an agent implement it
 
 ```bash
-pnpm -s run implement --out examples/checkout-ts --fresh \
+pnpm clp apply --out examples/checkout-ts --fresh \
   --agent 'claude -p "Read clp/REQUEST.md and carry out the request." --permission-mode acceptEdits'
 ```
 
@@ -308,10 +319,10 @@ layout, name the two places directly:
 
 ```bash
 # src/ and test/ kept apart
-pnpm -s run implement --src app/src --tests test/clp --agent '...'
+pnpm clp apply --src app/src --tests test/clp --agent '...'
 
 # side by side: src/order/order.ts next to src/order/clp.order.adapter.ts, clp.order.ir.json, ...
-pnpm -s run implement --src src/order --tests src/order/clp. --agent '...'
+pnpm clp apply --src src/order --tests src/order/clp. --agent '...'
 ```
 
 `--tests` is the path put in front of the test-side file names: when it ends with a `.`, its last part is a
@@ -384,7 +395,7 @@ function connect(ports: Ports): OrderDependencies {
 ### 6. Verify again at any time
 
 ```bash
-pnpm --filter example-checkout-ts verify     # property-based test against the example
+pnpm clp verify --out examples/checkout-ts   # property-based test against the example
 pnpm typecheck                               # type-check the specs and the framework
 pnpm test                                    # the framework's own tests
 ```
@@ -419,7 +430,6 @@ actual:   state CANCELLED, effects []
 - Target languages other than TypeScript (Go, Rust, Python). The per-language parts (test-side generation,
   running the tests, static checks, mutation) already sit behind one interface, but TypeScript is its only
   implementation
-- A single `clp` command in place of the current scripts
 - Stronger agent isolation (containers)
 - Diagrams generated from the IR, and a trace visualizer
 - Larger specs: how often the agent succeeds, and whether the feedback loop converges
