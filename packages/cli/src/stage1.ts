@@ -1,5 +1,6 @@
-import { referenceEvents } from "./extract.ts";
-import type { ReferenceDiagnostic, SpecInput } from "./extract.ts";
+import { effectOccurrences, kindOf, payloadEvents, referenceEvents } from "./extract.ts";
+import type { PayloadDiagnostic, ReferenceDiagnostic, SpecInput } from "./extract.ts";
+import { isEnum, isNumberSchema } from "./schema.ts";
 import type { Adapter } from "./runtime.ts";
 
 // Stage 1: フレームワーク自身の仕様 (packages/cli/self/specs) から生成したコードで、フレームワークの一部を動かす。
@@ -12,27 +13,37 @@ import type { Adapter } from "./runtime.ts";
 // そこで、読み込めない・実行できないときは、手書きの Stage 0 (extract.ts の referenceDiagnostics) に落とす。
 // 環境変数 CLP_STAGE=0 で、Stage 0 に固定できる。
 
-export const STAGE1_ADAPTER = new URL("../self/clp/reference-check.adapter.ts", import.meta.url).href;
+const adapterUrl = (component: string) => new URL(`../self/clp/${component}.adapter.ts`, import.meta.url).href;
+export const STAGE1_ADAPTER = adapterUrl("reference-check");
 
 const warned = new Set<string>();
-function fallback(reason: string): undefined {
-  if (!warned.has(reason)) {
-    warned.add(reason);
-    console.error(`注意: Stage 1 (生成したコード) で名前の検査を実行できないので、Stage 0 (手書き) で続けます: ${reason}`);
+function fallback(component: string, error: unknown): undefined {
+  const reason = error instanceof Error ? error.message.split("\n")[0] : String(error);
+  if (!warned.has(`${component}: ${reason}`)) {
+    warned.add(`${component}: ${reason}`);
+    console.error(`注意: Stage 1 (生成したコード) の ${component} を実行できないので、Stage 0 (手書き) で続けます: ${reason}`);
   }
   return undefined;
 }
 
+// Stage 1 のコンポーネントを、生成された契約 (アダプター) として読み込む。使えなければ undefined
+export async function stage1Adapter(component: string, url = adapterUrl(component)): Promise<Adapter | undefined> {
+  if (process.env.CLP_STAGE === "0") return undefined;
+  try {
+    return ((await import(url)) as { adapter: Adapter }).adapter;
+  } catch (error) {
+    return fallback(component, error);
+  }
+}
+// 読み込めたが、動かし始められなかったとき
+export const stage1Unavailable = (error: unknown) => void fallback("pipeline", error);
+
 // 名前の検査を Stage 1 で実行する。実行できなければ undefined（呼び出し側は Stage 0 で判断する）
 export async function stage1References(input: SpecInput, adapterUrl = STAGE1_ADAPTER): Promise<ReferenceDiagnostic[] | undefined> {
   const model = input.model;
-  if (!model || process.env.CLP_STAGE === "0") return undefined;
-  let adapter: Adapter;
-  try {
-    adapter = ((await import(adapterUrl)) as { adapter: Adapter }).adapter;
-  } catch (error) {
-    return fallback(error instanceof Error ? error.message.split("\n")[0] : String(error));
-  }
+  if (!model) return undefined;
+  const adapter = await stage1Adapter("reference-check", adapterUrl);
+  if (!adapter) return undefined;
   const found: ReferenceDiagnostic[] = [];
   try {
     // 依存: 宣言されているかは、この仕様の語彙に尋ねる。報告は、ここに集める
@@ -49,13 +60,58 @@ export async function stage1References(input: SpecInput, adapterUrl = STAGE1_ADA
       await adapter.teardownIsolation();
     }
   } catch (error) {
-    return fallback(error instanceof Error ? error.message.split("\n")[0] : String(error));
+    return fallback("reference-check", error);
   }
   return found;
 }
 
-// 名前の検査を、使える中でいちばん新しい Stage で実行した結果を、extract に渡す形で返す
+// ペイロードの検査を Stage 1 で実行する。実行できなければ undefined
+export async function stage1Payloads(input: SpecInput, url?: string): Promise<PayloadDiagnostic[] | undefined> {
+  const model = input.model;
+  if (!model) return undefined;
+  const adapter = await stage1Adapter("payload-check", url);
+  if (!adapter) return undefined;
+  const found: PayloadDiagnostic[] = [];
+  try {
+    for (const { occurrence, command, effect } of effectOccurrences(input)) {
+      // 依存: 宣言と、与えられたフィールドについて、名前で尋ねられる。答えるのは、この仕様の語彙と、いまたどっている副作用
+      type At = { effect: string; field: string };
+      const schema = ({ effect: name, field }: At) => model.effects[name]?.[field];
+      const bounds = (at: At): { min?: number; max?: number } => {
+        const declared = schema(at);
+        return declared !== undefined && isNumberSchema(declared) ? declared : {};
+      };
+      await adapter.setupIsolation({
+        queries: {
+          effectDeclared: ({ name }: { name: string }) => name in model.effects,
+          fieldDeclared: (at: At) => schema(at) !== undefined,
+          fieldGiven: ({ field }: At) => field in effect.payload,
+          fieldKind: (at: At) => (schema(at) === undefined ? "string" : kindOf(schema(at)!)),
+          memberOf: ({ value, ...at }: At & { value: string }) => {
+            const declared = schema(at);
+            return declared !== undefined && isEnum(declared) && declared.includes(value);
+          },
+          hasMinimum: (at: At) => bounds(at).min !== undefined,
+          minimum: (at: At) => bounds(at).min ?? 0,
+          hasMaximum: (at: At) => bounds(at).max !== undefined,
+          maximum: (at: At) => bounds(at).max ?? 0,
+        },
+        effects: { ReportDiagnostic: ({ code, field }: { code: PayloadDiagnostic["code"]; field: string }) => void found.push({ code, occurrence, field }) },
+      });
+      try {
+        for (const event of payloadEvents(input, command, effect)) await adapter.executeCommand(event);
+      } finally {
+        await adapter.teardownIsolation();
+      }
+    }
+  } catch (error) {
+    return fallback("payload-check", error);
+  }
+  return found;
+}
+
+// 検査を、使える中でいちばん新しい Stage で実行した結果を、extract に渡す形で返す
 export const references = async (input: SpecInput) => {
-  const found = await stage1References(input);
-  return found ? { references: found } : {};
+  const [found, payloads] = [await stage1References(input), await stage1Payloads(input)];
+  return { ...(found ? { references: found } : {}), ...(payloads ? { payloads } : {}) };
 };

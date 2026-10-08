@@ -1,6 +1,6 @@
 import type { BoundSpecification, Constant, Declaration, FieldSchema, Fields, Table } from "@clp/core";
 import type { Asset } from "./assets.ts";
-import { compatible, conforms, describe } from "./schema.ts";
+import { compatible, conforms, describe, isEnum, isNumberSchema } from "./schema.ts";
 
 // 仕様 (Layer 1 のコンポーネント + 決定表 + 解釈の構造) から IR を作る。
 // どれにも関数は無いので、IR は宣言をほぼそのまま並べ直したものになる。
@@ -174,9 +174,95 @@ export function referenceDiagnostics(input: SpecInput): ReferenceDiagnostic[] {
   return found;
 }
 
-// references: 名前の検査の結果。省略時は Stage 0 で判断する。
+// --- 副作用のペイロードの検査（与えられていないフィールド、宣言されていないフィールド、合わない値） ---
+// これも、フレームワーク自身の仕様 (packages/cli/self/specs/payload-check.*) から生成したコード (Stage 1) で置き換えられる。
+// occurrence は、仕様の中で副作用が現れる順番（0 から）。同じ副作用が何度も現れるので、名前では区別できない
+export type PayloadDiagnostic = { code: "missing-field" | "bad-value"; occurrence: number; field: string };
+
+// 副作用が現れる順に、場所と一緒に並べる（コマンド名順、場合の名前順、書かれた順）
+export function* effectOccurrences(input: SpecInput): Generator<{ occurrence: number; command: string; caseName: string; effect: SpecEffect }> {
+  let occurrence = 0;
+  for (const command of Object.keys(input.behaviors).sort()) {
+    const behavior = input.behaviors[command];
+    for (const caseName of Object.keys(behavior.when).sort()) {
+      for (const effect of behavior.when[caseName].effects) yield { occurrence: occurrence++, command, caseName, effect };
+    }
+  }
+}
+
+// 値について分かっていることを、検査に渡すコマンドの列にする。
+//   Constant   … 具体的な値（書かれた定数、決定表の列のセル1つ、列挙の要素1つ）
+//   Typed      … 型だけが分かっている値（入力、覚えているデータ、問い合わせの答えなどへの参照）
+//   Unresolved … どこも指していない参照
+export type ValueEvent =
+  | { name: "Constant"; input: { kind: "boolean" | "integer" | "number" | "string"; text: string; number: number } }
+  | { name: "Typed"; input: { type: "boolean" | "integer" | "number" | "string" } }
+  | { name: "Unresolved"; input: {} };
+export type PayloadEvent =
+  | { name: "EnterEffect" | "DeclaredField" | "GivenField"; input: { name: string } }
+  | { name: "LeaveEffect"; input: {} }
+  | ValueEvent;
+
+const constantEvent = (value: Constant): ValueEvent =>
+  typeof value === "string"
+    ? { name: "Constant", input: { kind: "string", text: value, number: 0 } }
+    : typeof value === "boolean"
+      ? { name: "Constant", input: { kind: "boolean", text: "", number: 0 } }
+      : // 数でない数値 (NaN、無限大) は、値として扱わない
+        Number.isFinite(value)
+        ? { name: "Constant", input: { kind: Number.isInteger(value) ? "integer" : "number", text: "", number: value } }
+        : { name: "Unresolved", input: {} };
+// フィールドの型の種類。"enum" は、決まった文字列のどれか
+export const kindOf = (schema: FieldSchema): "boolean" | "integer" | "number" | "string" | "enum" =>
+  isEnum(schema) ? "enum" : isNumberSchema(schema) ? schema.type : schema;
+
+export function* valueEvents(input: SpecInput, command: string, value: SpecValue): Generator<ValueEvent> {
+  if (!isReference(value)) return void (yield constantEvent(value));
+  const found = typeOf(input, command, value);
+  if (found.problem) yield { name: "Unresolved", input: {} };
+  // was(...) は真偽値
+  else if (found.boolean) yield { name: "Typed", input: { type: "boolean" } };
+  // 決定表の列: 値のあるセルを1つずつ（null は「この行では値が無い」）
+  else if (found.values) for (const cell of found.values) cell === null || (yield constantEvent(cell));
+  // 列挙の型の値: 取り得る要素を1つずつ
+  else if (isEnum(found.schema!)) for (const member of found.schema) yield constantEvent(member);
+  else yield { name: "Typed", input: { type: kindOf(found.schema!) as "boolean" | "integer" | "number" | "string" } };
+}
+
+// 副作用1つをたどって、検査に渡すコマンドの列にする。コマンドの名前と入力は、payload-check の仕様のもの。
+// 宣言されたフィールドを先に、続けて、与えられたフィールドと、その値について分かっていること
+export function* payloadEvents(input: SpecInput, command: string, effect: SpecEffect): Generator<PayloadEvent> {
+  yield { name: "EnterEffect", input: { name: effect.name } };
+  for (const field of Object.keys(input.model?.effects[effect.name] ?? {})) yield { name: "DeclaredField", input: { name: field } };
+  for (const [field, value] of Object.entries(effect.payload)) {
+    yield { name: "GivenField", input: { name: field } };
+    yield* valueEvents(input, command, value);
+  }
+  yield { name: "LeaveEffect", input: {} };
+}
+
+// Stage 0: 手書きの判断。フィールド1つにつき、報告は1つまで
+export function payloadDiagnostics(input: SpecInput): PayloadDiagnostic[] {
+  const model = input.model;
+  if (!model) return [];
+  const found: PayloadDiagnostic[] = [];
+  for (const { occurrence, command, effect } of effectOccurrences(input)) {
+    const fields = model.effects[effect.name];
+    // 宣言されていない副作用は、名前の検査が報告する。フィールドは見ない
+    if (!fields) continue;
+    for (const field of Object.keys(fields)) {
+      if (!(field in effect.payload)) found.push({ code: "missing-field", occurrence, field });
+    }
+    for (const [field, value] of Object.entries(effect.payload)) {
+      if (!fields[field] || mismatch(input, command, value, fields[field]) !== undefined) found.push({ code: "bad-value", occurrence, field });
+    }
+  }
+  return found;
+}
+
+// references / payloads: 名前の検査と、ペイロードの検査の結果。省略時は Stage 0 で判断する。
 // 入口 (compile / implement) は、Stage 1 の結果を渡す (stage1.ts)
-export function extract(input: SpecInput, options: { references?: ReferenceDiagnostic[] } = {}) {
+export function extract(input: SpecInput, options: { references?: ReferenceDiagnostic[]; payloads?: PayloadDiagnostic[] } = {}) {
   const diagnostics: Diagnostic[] = [];
   const report = (code: string, behavior: string, caseName: string, message: string) =>
     diagnostics.push({ severity: "error", code, behavior, case: caseName, message });
@@ -200,6 +286,12 @@ export function extract(input: SpecInput, options: { references?: ReferenceDiagn
   const references = options.references ?? referenceDiagnostics(input);
   const reported = (code: ReferenceDiagnostic["code"], command: string, caseName: string, subject: string) =>
     references.some((found) => found.code === code && found.command === command && found.caseName === caseName && found.subject === subject);
+
+  // ペイロードの検査も、判断を受け取るだけ。「なぜ合わないか」の文面は、ここで付ける
+  const payloads = options.payloads ?? payloadDiagnostics(input);
+  const flagged = (code: PayloadDiagnostic["code"], occurrence: number, field: string) =>
+    payloads.some((found) => found.code === code && found.occurrence === occurrence && found.field === field);
+  let occurrence = 0;
 
   const behaviors = [];
   for (const name of Object.keys(input.behaviors).sort()) {
@@ -242,14 +334,17 @@ export function extract(input: SpecInput, options: { references?: ReferenceDiagn
       const effects = outcome.effects.map((effect) => {
         const fields = model.effects[effect.name];
         if (reported("unknown-effect", name, caseName, effect.name)) report("unknown-effect", name, caseName, `副作用 "${effect.name}" は effects にありません`);
-        if (fields) {
-          for (const field of Object.keys(fields)) {
-            if (!(field in effect.payload)) report("missing-field", name, caseName, `副作用 ${effect.name} に、フィールド "${field}" がありません`);
-          }
-          for (const [field, value] of Object.entries(effect.payload)) {
-            const problem = fields[field] ? mismatch(input, name, value, fields[field]) : `副作用 ${effect.name} に、フィールド "${field}" はありません`;
-            if (problem) report("bad-value", name, caseName, `${effect.name}.${field}: ${problem}`);
-          }
+        const at = occurrence++;
+        for (const field of Object.keys(fields ?? {})) {
+          if (flagged("missing-field", at, field)) report("missing-field", name, caseName, `副作用 ${effect.name} に、フィールド "${field}" がありません`);
+        }
+        for (const [field, value] of Object.entries(effect.payload)) {
+          if (!flagged("bad-value", at, field)) continue;
+          // 合わないと判断したのは検査。ここでは、その理由を言葉にするだけ
+          const why = fields?.[field]
+            ? (mismatch(input, name, value, fields[field]) ?? `この値は ${describe(fields[field])} に入りません`)
+            : `副作用 ${effect.name} に、フィールド "${field}" はありません`;
+          report("bad-value", name, caseName, `${effect.name}.${field}: ${why}`);
         }
         if (typeof effect.when === "string") condition(name, caseName, effect.when);
         else if (effect.when) {

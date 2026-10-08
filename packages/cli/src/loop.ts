@@ -15,7 +15,7 @@ import type { MutationStrategy } from "./mutation.ts";
 import { PHASES } from "./request.ts";
 import type { Phase } from "./request.ts";
 import { selfCheck } from "./runtime.ts";
-import { references } from "./stage1.ts";
+import { references, stage1Adapter, stage1Unavailable } from "./stage1.ts";
 import type { StaticCheckStrategy } from "./static-check.ts";
 import type { ImplementationStrategy } from "./strategy.ts";
 import { typescriptTarget } from "./target-typescript.ts";
@@ -141,6 +141,8 @@ export async function implement(options: ImplementOptions) {
 
   // コンポーネントを1つずつ、名前順に一致させる。本番コードは共有なので、2つ目以降は「すでにある本番コードを直す」になる
   const attempts: Attempt[] = [];
+  // コンポーネントごとに、段階の進め方をどちらが決めたか（1: 生成した状態機械、0: 手書きの手続き）
+  const stages: Record<string, 0 | 1> = {};
   let status: "pass" | "fail" = "pass";
   for (const unit of units.filter((candidate) => options.component === undefined || candidate.name === options.component)) {
     const ctx: GateContext = {
@@ -161,29 +163,178 @@ export async function implement(options: ImplementOptions) {
       others: units.filter((other) => other !== unit).map(({ name, ir, ws, seed }) => ({ name, ir, ws, seed })),
     };
     const tag = units.length > 1 ? `${unit.name} ` : "";
-    const passed = await reconcile(ctx, options, attempts, (line) => log(`${tag}${line}`));
+    const passed = await reconcile(ctx, options, attempts, (line) => log(`${tag}${line}`), stages);
     if (!passed) {
       status = "fail";
       break;
     }
   }
   // seed は、最初のコンポーネントのもの（コンポーネントが1つのときの、従来の形）
-  return { status, oracle, attempts, seed: units[0].seed, seeds: Object.fromEntries(units.map((unit) => [unit.name, unit.seed])) };
+  return { status, oracle, attempts, stages, seed: units[0].seed, seeds: Object.fromEntries(units.map((unit) => [unit.name, unit.seed])) };
 }
 
 type Unit = { name: string; ir: Ir; ws: Workspace; seed: number; assets: Asset[] };
 
-// 1つのコンポーネントについて、仕様・本番コード・アダプターを一致させる
-async function reconcile(ctx: GateContext, options: ImplementOptions, attempts: Attempt[], log: (line: string) => void): Promise<boolean> {
+// 1つのコンポーネントについて、仕様・本番コード・アダプターを一致させる。
+// 段階の進め方（どの段階から始めるか、差し戻すか、やり直すか）の判断は、2通りある:
+//   Stage 1 … フレームワーク自身の仕様 (packages/cli/self/specs/pipeline.*) から生成した状態機械。
+//              ここは、それが頼んだこと（セッションの開始、採点、コードの破棄）を実行し、結果をコマンドで返す
+//   Stage 0 … 手書きの手続き (reconcileStage0)。Stage 1 を使えないときの備えで、結果を突き合わせる相手
+async function reconcile(
+  ctx: GateContext,
+  options: ImplementOptions,
+  attempts: Attempt[],
+  log: (line: string) => void,
+  stages: Record<string, 0 | 1>,
+): Promise<boolean> {
+  // 始める前の本番コードを覚えておく（ほかのコンポーネントだけが使うコードを書き換えていないかを、あとで確かめる）
+  ctx.before = Object.fromEntries(sourceFiles(ctx.ws).map((rel) => [rel, readFileSync(join(ctx.ws.root, rel), "utf8")]));
+  const viaStage1 = await reconcileStage1(ctx, options, attempts, log);
+  stages[ctx.ws.component] = viaStage1 === undefined ? 0 : 1;
+  return viaStage1 ?? reconcileStage0(ctx, options, attempts, log);
+}
+
+const clearOutput = (ws: Workspace) => {
+  for (const rel of [...sourceFiles(ws), ws.paths.adapter]) rmSync(join(ws.root, rel), { force: true });
+};
+
+// すでにある本番コードを、エージェントを呼ぶ前に、そのまま採点する。不合格なら、その内容を返す（実装の段階の最初の依頼に載る）
+async function grade(ctx: GateContext, round: number, attempts: Attempt[], log: (line: string) => void): Promise<Feedback | undefined> {
+  const before = await verifyGate(ctx);
+  const feedback = before.feedback;
+  log(`[${round}] verify: ${feedback === undefined ? "pass (nothing to implement)" : describe("implementation", feedback)}`);
+  attempts.push({
+    component: ctx.ws.component,
+    round,
+    phase: "implementation",
+    attempt: 0,
+    ok: feedback === undefined,
+    inputs: [],
+    ...(before.staticCheck ? { staticCheck: before.staticCheck } : {}),
+    ...(before.mutation ? { mutation: before.mutation } : {}),
+    ...(feedback ? { feedback } : {}),
+  });
+  return feedback;
+}
+
+// 1回のセッション: 入口ゲート → エージェント → 出口ゲート。出口ゲートで落ちたら、その内容を返す
+async function session(
+  ctx: GateContext,
+  options: ImplementOptions,
+  at: { phase: Phase; round: number; attempt: number },
+  previous: Feedback | undefined,
+  attempts: Attempt[],
+  log: (line: string) => void,
+): Promise<Feedback | undefined> {
+  const { phase, round, attempt } = at;
+  const sandbox = entryGate(ctx, phase, attempt, previous);
+  let feedback: Feedback | undefined;
+  let mutation: MutationSummary | undefined;
+  let staticCheck: string | undefined;
+  try {
+    log(`[${round}] ${phase} #${attempt}: ${options.strategy.name} (in ${sandbox.dir})`);
+    await options.strategy.run({ dir: sandbox.dir, phase, attempt, env: sandbox.env });
+    ({ feedback, mutation, staticCheck } = await exitGate(ctx, sandbox));
+  } finally {
+    if (!options.keepSandbox) rmSync(sandbox.dir, { recursive: true, force: true });
+  }
+  log(`[${round}] ${phase} #${attempt}: ${describe(phase, feedback)}${mutation ? ` (mutation: ${mutation.strategy}, ${mutation.killed}/${mutation.mutants} killed)` : ""}`);
+  attempts.push({
+    component: ctx.ws.component,
+    round,
+    phase,
+    attempt,
+    ok: feedback === undefined,
+    inputs: Object.keys(sandbox.inputs).sort(),
+    ...(options.keepSandbox ? { sandbox: sandbox.dir } : {}),
+    ...(staticCheck ? { staticCheck } : {}),
+    ...(mutation ? { mutation } : {}),
+    ...(feedback ? { feedback } : {}),
+  });
+  return feedback;
+}
+
+// 設計の段階を始める前からあった文（仕様の文の書き写しの検査の対象外にする）
+const baselineOf = (ctx: GateContext) =>
+  ctx.incremental ? sourceFiles(ctx.ws).map((rel) => readFileSync(join(ctx.ws.root, rel), "utf8")).join("\n") : "";
+
+// Stage 1: 段階の進め方を、生成した状態機械 (pipeline) に任せる。
+// 状態機械は、頼みたいことを副作用として出す。ここはそれを実行し、結果をコマンドで返す（手続きを、イベントに裏返した形）。
+// 使えないとき（読み込めない、仕様の範囲の外の指定）は undefined を返す。そのときは、まだ何も実行していない
+type Requested = { kind: "session"; phase: Phase; round: number; attempt: number } | { kind: "grade"; round: number } | { kind: "discard" };
+const CHECKED: Record<Phase, string> = { design: "DesignChecked", wiring: "WiringChecked", implementation: "ImplementationChecked" };
+async function reconcileStage1(ctx: GateContext, options: ImplementOptions, attempts: Attempt[], log: (line: string) => void): Promise<boolean | undefined> {
+  const maxAttempts = options.maxAttempts ?? 3;
+  const maxRounds = options.maxRounds ?? 2;
+  // 仕様に無い指定: 始める段階の明示 (--from) と、仕様が扱う範囲 (1〜3) の外の回数
+  const inRange = (limit: number) => Number.isInteger(limit) && limit >= 1 && limit <= 3;
+  if (options.from !== undefined || !inRange(maxAttempts) || !inRange(maxRounds)) return undefined;
+  const adapter = await stage1Adapter("pipeline");
+  if (!adapter) return undefined;
+
   const { ws } = ctx;
-  const component = ws.component;
-  const clear = () => {
-    for (const rel of [...sourceFiles(ws), ws.paths.adapter]) rmSync(join(ws.root, rel), { force: true });
+  // 状態機械が尋ねること: 出力先の状態
+  const plan = planOf(ctx, undefined);
+  const facts = {
+    hasProductionCode: plan.incremental,
+    boundaryChanged: plan.incremental && plan.phases.length === PHASES.length,
+    hasAdapter: existsSync(join(ws.root, ws.paths.adapter)),
   };
+  const requested: Requested[] = [];
+  try {
+    await adapter.setupIsolation({
+      queries: { hasProductionCode: () => facts.hasProductionCode, boundaryChanged: () => facts.boundaryChanged, hasAdapter: () => facts.hasAdapter },
+      effects: {
+        StartSession: (payload: { phase: Phase; round: number; attempt: number }) => void requested.push({ kind: "session", ...payload }),
+        GradeCurrentCode: (payload: { round: number }) => void requested.push({ kind: "grade", ...payload }),
+        DiscardCode: () => void requested.push({ kind: "discard" }),
+      },
+    });
+    await adapter.executeCommand({ name: "Start", input: { attemptsPerPhase: maxAttempts, rounds: maxRounds } });
+  } catch (error) {
+    stage1Unavailable(error);
+    return undefined;
+  }
+
+  try {
+    ctx.incremental = plan.incremental;
+    log(`plan: ${plan.phases.join(" → ")} (${plan.reason})`);
+    // 差し戻しの内容は、同じ段階の次の依頼に載せる。採点の結果は、続く実装の段階の最初の依頼に載せる
+    let feedback: Feedback | undefined;
+    let graded = false;
+    while (requested.length > 0) {
+      const request = requested.shift()!;
+      if (request.kind === "discard") {
+        clearOutput(ws);
+      } else if (request.kind === "grade") {
+        feedback = await grade(ctx, request.round, attempts, log);
+        graded = true;
+        await adapter.executeCommand({ name: "CurrentCodeGraded", input: { passed: feedback === undefined } });
+      } else {
+        const { phase, round, attempt } = request;
+        if (attempt === 1) {
+          if (!(phase === "implementation" && graded)) feedback = undefined;
+          if (phase === "design") ctx.baseline = baselineOf(ctx);
+        }
+        graded = false;
+        feedback = await session(ctx, options, { phase, round, attempt }, feedback, attempts, log);
+        if (feedback !== undefined && attempt >= maxAttempts) log(`[${round}] ${phase}: 上限回数まで直りませんでした`);
+        await adapter.executeCommand({ name: CHECKED[phase], input: { passed: feedback === undefined } });
+      }
+    }
+    const state = await adapter.getCurrentState();
+    if (state !== "DONE" && state !== "FAILED") throw new Error(`Stage 1 のパイプラインが、途中の状態 (${String(state)}) で止まりました`);
+    return state === "DONE";
+  } finally {
+    await adapter.teardownIsolation();
+  }
+}
+
+// Stage 0: 手書きの手続き
+async function reconcileStage0(ctx: GateContext, options: ImplementOptions, attempts: Attempt[], log: (line: string) => void): Promise<boolean> {
+  const { ws } = ctx;
 
   // 何が変わったかを見て、動かす段階を決める。新規は「本番コードが無い」場合にすぎない
-  // 始める前の本番コードを覚えておく（ほかのコンポーネントだけが使うコードを書き換えていないかを、あとで確かめる）
-  ctx.before = Object.fromEntries(sourceFiles(ws).map((rel) => [rel, readFileSync(join(ws.root, rel), "utf8")]));
   const plan = planOf(ctx, options.from);
   ctx.incremental = plan.incremental;
   log(`plan: ${plan.phases.join(" → ")} (${plan.reason})`);
@@ -193,61 +344,24 @@ async function reconcile(ctx: GateContext, options: ImplementOptions, attempts: 
   rounds: for (let round = 1; round <= (options.maxRounds ?? 2); round++) {
     // やり直しの周は設計から始める。何も無いところから作ったものは、前の周の成果を捨てる。
     // すでにあった本番コードを直しているときは捨てない（仕様の変更のたびに、全部を書き直すことになるため）
-    if (round > 1 && !ctx.incremental) clear();
+    if (round > 1 && !ctx.incremental) clearOutput(ws);
     const phases = round === 1 ? plan.phases : PHASES;
 
     for (const phase of phases) {
       let feedback: Feedback | undefined;
       let passed = false;
-      if (phase === "design") {
-        ctx.baseline = ctx.incremental ? sourceFiles(ws).map((rel) => readFileSync(join(ws.root, rel), "utf8")).join("\n") : "";
-      }
+      if (phase === "design") ctx.baseline = baselineOf(ctx);
 
       // すでにある本番コードを直すときは、エージェントを呼ぶ前に、いまのコードをそのまま採点する。
       // 合格なら実装の段階は要らない。不合格なら、その内容を最初の依頼に載せる
       if (phase === "implementation" && ctx.incremental) {
-        const before = await verifyGate(ctx);
-        feedback = before.feedback;
+        feedback = await grade(ctx, round, attempts, log);
         passed = feedback === undefined;
-        log(`[${round}] verify: ${passed ? "pass (nothing to implement)" : describe(phase, feedback)}`);
-        attempts.push({
-          component,
-          round,
-          phase,
-          attempt: 0,
-          ok: passed,
-          inputs: [],
-          ...(before.staticCheck ? { staticCheck: before.staticCheck } : {}),
-          ...(before.mutation ? { mutation: before.mutation } : {}),
-          ...(feedback ? { feedback } : {}),
-        });
       }
 
       for (let attempt = 1; attempt <= maxAttempts && !passed; attempt++) {
-        const sandbox = entryGate(ctx, phase, attempt, feedback);
-        let mutation: MutationSummary | undefined;
-        let staticCheck: string | undefined;
-        try {
-          log(`[${round}] ${phase} #${attempt}: ${options.strategy.name} (in ${sandbox.dir})`);
-          await options.strategy.run({ dir: sandbox.dir, phase, attempt, env: sandbox.env });
-          ({ feedback, mutation, staticCheck } = await exitGate(ctx, sandbox));
-        } finally {
-          if (!options.keepSandbox) rmSync(sandbox.dir, { recursive: true, force: true });
-        }
+        feedback = await session(ctx, options, { phase, round, attempt }, feedback, attempts, log);
         passed = feedback === undefined;
-        log(`[${round}] ${phase} #${attempt}: ${describe(phase, feedback)}${mutation ? ` (mutation: ${mutation.strategy}, ${mutation.killed}/${mutation.mutants} killed)` : ""}`);
-        attempts.push({
-          component,
-          round,
-          phase,
-          attempt,
-          ok: passed,
-          inputs: Object.keys(sandbox.inputs).sort(),
-          ...(options.keepSandbox ? { sandbox: sandbox.dir } : {}),
-          ...(staticCheck ? { staticCheck } : {}),
-          ...(mutation ? { mutation } : {}),
-          ...(feedback ? { feedback } : {}),
-        });
       }
       if (!passed) {
         log(`[${round}] ${phase}: 上限回数まで直りませんでした`);
