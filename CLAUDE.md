@@ -82,6 +82,7 @@ The same thing goes by several names across the docs: `co-llm-piler` (repo), `cl
 | `SELF_HOSTING.md` | Self-hosting as it is done here: what it means when the compiler is an LLM, Stage 0 / Stage 1, the three fixed-point checks, what is in use today, and how to move another part to Stage 1 |
 | `DISTRIBUTION.md` | How the `clp` CLI is built and shared; the most recent and most concrete doc |
 | `INCREMENTAL.md` | Using the framework repeatedly: new code, changed specs and legacy code as one flow; what is implemented and the design of what is not |
+| `ROADMAP.md` | The completion conditions of version 0.1 (self-hosting: rebuildable from nothing — achieved; a simple web application whose entry point a person writes; a refined DSL), the milestones towards it, and the direction for 1.0 (the agent writes the entry point too, checked by a second, scenario-based verification) |
 | `OWNERSHIP.md` | Whose code is whose when components share production code: ownership is not recorded but decided by which component's tests execute the code; the writable scope and the mutation scope that follow |
 
 `DISTRIBUTION.md` is the most concrete on layout and distribution and **overrides `PACKAGE.md` where they conflict**; `SPEC.md` has been updated to match the code and is authoritative for the layers, the IR, and the LLM loop:

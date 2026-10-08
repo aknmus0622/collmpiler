@@ -450,25 +450,5 @@ actual:   state CANCELLED, effects []
 
 ## Future Scope
 
-- Holding back a run until the questions an LLM left in an interpretation (`// REVIEW:`) and the
-  disagreements between two interpretations have been looked at (today they are only reported)
-- Comparing the vocabulary of two interpretations (today the second session is given the first one's states,
-  commands, queries and effects)
-- Shorthand for entries that are only a type (`isMonthEnd: "boolean"` instead of `output("boolean")`)
-- Using the answer of one query as the input of the next
-- Describing the remaining checks of the framework in the framework (`packages/cli/self`): its pipeline, two of
-  its checks and its value serialization already run on generated code, with the hand-written versions kept as
-  the fallback they are compared against (`SELF_HOSTING.md`)
-- Stopping after the design step so a person can review the skeleton before it is wired and implemented
-- Applying a spec to existing production code (legacy code): wiring and verification only, with mismatches
-  reported to a person instead of being sent back to the agent (design notes in `INCREMENTAL.md`)
-- Help with triaging surviving mutations: logic the spec cannot exercise versus code that is not needed
-- Operations that return values (value objects), and multiplicity declared as values
-- Composing components (connecting one component's dependency to another real component instead of a stand-in),
-  and describing the UI layer
-- Target languages other than TypeScript (Go, Rust, Python). The per-language parts (test-side generation,
-  running the tests, static checks, mutation) already sit behind one interface, but TypeScript is its only
-  implementation
-- Stronger agent isolation (containers)
-- Diagrams generated from the IR, and a trace visualizer
-- Larger specs: how often the agent succeeds, and whether the feedback loop converges
+See [`ROADMAP.md`](ROADMAP.md) (in Japanese): what version 0.1 is to complete, the steps towards it, and the
+direction after that.
