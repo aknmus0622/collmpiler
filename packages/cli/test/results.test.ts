@@ -143,7 +143,7 @@ test("検査: 返す値の誤り（返す値が無い、形を宣言していな
   assert.match(await messages(borrow(`responds({ result: "lost", dueInDays: 1 })`)), /bad-value: responds\.result: "lost" は "lent" \| "refused" に入りません/);
   assert.match(await messages(borrow(`responds({ result: "lent", dueInDays: 1, extra: true })`)), /bad-value: responds\.extra: "extra" は、output のフィールドにありません/);
   assert.match(await messages(borrow(`responds("lent")`)), /bad-response: responds: 返すものはフィールドの組です/);
-  assert.match(await messages(SHELF({ peek: `responds({ onLoan: true })` })), /bad-response: responds: 返すものは値1つです/);
+  assert.match(await messages(SHELF({ peek: `responds({ onLoan: true })` })), /bad-value: responds: \{"onLoan":true\} は boolean に入りません/);
   assert.match(await messages(SHELF({ peek: `responds(ref.decision("policy", "loanDays"))` })), /bad-value: responds: 決定表の値 14 は boolean に入りません/);
   // 形を宣言していないコマンドは、返せない
   const undeclared = SHELF({ borrow: `when("The member holds the maximum number of books", responds("refused")),`, added: `Borrow: component(when("The member holds the maximum number of books"), otherwise()),` });

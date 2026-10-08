@@ -82,6 +82,9 @@ function type(value: unknown): Node {
 const settings = (given: Record<string, unknown> = {}) => Object.entries(given).map(([name, value]) => make("setting", { name, value }));
 
 type Bounds = { min?: number; max?: number; around?: readonly number[] };
+// いま覚えている並び (data) の要素から、入力を選ぶ。field があれば、要素のそのフィールドから。型は、選ぶ値の型
+export const among = (data: string, field?: string, of: "string" | "integer" = "string") =>
+  make("type", { value: of, children: [make("setting", { name: "among", value: { data, ...(field === undefined ? {} : { field }) } })] });
 export const integer = (given?: Bounds) => make("type", { value: "integer", children: settings(given) });
 export const number = (given?: Bounds) => make("type", { value: "number", children: settings(given) });
 export const string = (given?: { examples?: readonly string[] }) => make("type", { value: "string", children: settings(given) });
@@ -133,7 +136,7 @@ export const responds = (...given: unknown[]) =>
 
 // --- 性質を言う節 ---
 
-export const initially = (value: unknown) => make("initially", { value });
+export const initially = (value: unknown) => make("initially", { value: value === undefined ? null : value });
 export const fresh = () => make("fresh");
 export const increasing = () => make("increasing");
 export const meaning = (fn: (...args: never[]) => unknown) => make("meaning", { value: fn });
@@ -349,17 +352,31 @@ type Collected = { problems: Diagnostic[] };
 const later = (into: Collected, node: Node, what: string) =>
   void into.problems.push({ code: "not-yet", message: `${what}${NOT_YET}`, ...(node.at ? { at: node.at } : {}) });
 
-// 型の節 → いまのフィールドの型
+// 型の節 → 内部の形の型
 function schemaOf(node: Node, into: Collected): unknown {
-  if (node.kind === "enum") return node.value;
-  if (node.kind === "type") {
-    const given = Object.fromEntries(node.children.map((setting) => [setting.name!, setting.value]));
-    if ("examples" in given) later(into, node, "string の examples ");
-    const { examples: _examples, ...bounds } = given;
-    return Object.keys(bounds).length === 0 ? node.value : { type: node.value, ...bounds };
+  switch (node.kind) {
+    case "enum":
+      return node.value;
+    case "type": {
+      const given = Object.fromEntries(node.children.map((setting) => [setting.name!, setting.value]));
+      return Object.keys(given).length === 0 ? node.value : { type: node.value, ...given };
+    }
+    case "list":
+      return { list: schemaOf(node.children[0], into) };
+    case "optional":
+      return { optional: schemaOf(node.children[0], into) };
+    case "record": {
+      // フィールドを optional(...) にすると、無いことがあるフィールドになる
+      const optional = node.children.filter((item) => item.children[0]?.kind === "optional").map((item) => item.name!);
+      const fields = Object.fromEntries(
+        node.children.map((item) => [item.name!, schemaOf(item.children[0].kind === "optional" ? item.children[0].children[0] : item.children[0], into)]),
+      );
+      return { record: fields, ...(optional.length > 0 ? { optional } : {}) };
+    }
+    default:
+      later(into, node, `型 ${node.kind} `);
+      return "string";
   }
-  later(into, node, `型 ${node.kind} `);
-  return "string";
 }
 const fieldsOf = (node: Node, into: Collected): Shape => {
   const shape = node.children[0];
@@ -372,21 +389,6 @@ const fieldsOf = (node: Node, into: Collected): Shape => {
 const valuesOf = (node: Node): Shape =>
   Object.fromEntries(node.children.filter((item) => item.kind === "field").map((item) => [item.name!, item.children[0]?.value]));
 const join = (a: unknown, b: string) => (a === undefined ? b : `${String(a)} ${b}`);
-
-// コマンドが返すものの形: 値1つの型か、record。record のフィールドは optional(...) にできる
-function outputOf(node: Node, into: Collected): unknown {
-  if (node.kind !== "record") return schemaOf(node, into);
-  const optional: string[] = [];
-  const fields = Object.fromEntries(
-    node.children.map((item) => {
-      const inner = item.children[0];
-      if (inner.kind !== "optional") return [item.name!, schemaOf(inner, into)];
-      optional.push(item.name!);
-      return [item.name!, schemaOf(inner.children[0], into)];
-    }),
-  );
-  return { record: fields, ...(optional.length > 0 ? { optional } : {}) };
-}
 
 // 起きることの節 → いまの形（goTo / does は Layer 1 と解釈の両方、effects / set は解釈だけが持つ）
 function happens(target: Shape, node: Node, into: Collected): boolean {
@@ -436,7 +438,7 @@ function shapeOfEntry(node: Node, into: Collected): Shape {
         shape.input = { ...(shape.input as Shape | undefined), ...fieldsOf(item, into) };
         break;
       case "output":
-        shape.output = node.kind === "command" ? outputOf(item.children[0], into) : schemaOf(item.children[0], into);
+        shape.output = schemaOf(item.children[0], into);
         break;
       case "from":
         shape.from = [...((shape.from as string[] | undefined) ?? []), ...(item.value as string[])];
@@ -457,9 +459,11 @@ function shapeOfEntry(node: Node, into: Collected): Shape {
       case "meaning":
         break;
       case "initially":
+        shape.initially = { value: item.value };
+        break;
       case "fresh":
       case "increasing":
-        later(into, item, `${item.kind} `);
+        shape.promise = item.kind;
         break;
     }
   }

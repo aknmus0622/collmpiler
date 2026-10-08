@@ -43,16 +43,23 @@ The IR describes one component by its boundary.
 
 - \`model.states\` / \`model.init\`: the state names and the starting state.
 - \`model.commands\`: the commands that drive the component from outside, each with the fields of its input.
-- \`model.data\`: what the component remembers between commands. Nothing is set in the initial state; an
+- \`model.data\`: what the component remembers between commands. Nothing is set in the initial state, except
+  the fields listed in \`model.initial\` (if present), which start with the value given there; an
   outcome's \`set\` says which fields it stores, and later commands can depend on them.
+- A component whose only state is \`READY\` has no states of its own: it is always in that one state.
 - \`model.queries\`: what the component asks its environment for (a clock, configuration, the response of an
   external service, ...), each with the type of its answer (\`output\`) and, if it is a question about
   something, the fields of that something (\`input\`). The answers can change from one command to the next, so
-  ask when the value is needed and do not cache it.
+  ask when the value is needed and do not cache it. \`promise\` (if present) is something the environment
+  guarantees about the answers: \`fresh\` means it never answers with the same value twice, \`increasing\`
+  that it never answers with less than before. Rely on it; do not implement it.
 - \`model.effects\`: the side effects the component may perform on its environment, with their payload fields.
 - Field types: an array lists the allowed values; a string is a primitive type (\`integer\` is a whole number);
   an object such as \`{"type": "integer", "min": 0, "max": 1000000}\` is a number with constraints (\`around\`
-  lists thresholds the test will probe closely, including the values just below and above them).
+  lists thresholds the test will probe closely, including the values just below and above them);
+  \`{"type": "string", ...}\` is a string (\`examples\` and \`among\` only say which values the test tries).
+  \`{"list": T}\` is a sequence of \`T\`, compared in order. \`{"record": {...}}\` is a value with those
+  fields; the fields named in its \`optional\` may be \`null\`. \`{"optional": T}\` is a \`T\` or \`null\`.
 - \`model.calculations\`: named computations. \`is\` describes in natural language how the value is computed,
   including rounding; implement exactly what it says. \`type\` is the type of the result.
 - \`model.invariants\`: natural-language properties that always hold for the state and the remembered data.

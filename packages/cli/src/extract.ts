@@ -1,7 +1,7 @@
 import type { BoundSpecification, Constant, Declaration, FieldSchema, Fields, OutputSchema, Table } from "@clp/core";
 import { relative } from "node:path";
 import type { Asset } from "./assets.ts";
-import { compatible, conforms, describe, isEnum, isNumberSchema } from "./schema.ts";
+import { compatible, conforms, describe, isEnum, isNumberSchema, isRecord, isStructured } from "./schema.ts";
 
 // 仕様 (Layer 1 のコンポーネント + 決定表 + 解釈の構造) から IR を作る。
 // どれにも関数は無いので、IR は宣言をほぼそのまま並べ直したものになる。
@@ -20,11 +20,13 @@ export type SpecModel = {
   // コマンド名 → 入力
   commands: Record<string, Fields>;
   // 問い合わせの名前 → 引数と、答えの型。引数の無い問い合わせは、名前でそのまま読める
-  queries: Record<string, { input: Fields; output: FieldSchema }>;
+  queries: Record<string, { input: Fields; output: FieldSchema; promise?: "fresh" | "increasing" }>;
   // 副作用の名前 → フィールド
   effects: Record<string, Fields>;
   // コマンドの名前 → 返すものの形。返すコマンドがあるときだけ持つ
   outputs?: Record<string, OutputSchema>;
+  // 覚えるデータの、はじめの値。宣言したものがあるときだけ持つ
+  initial?: Record<string, unknown>;
   // 計算の名前 → 式を述べる文と、結果の型
   calculations?: Record<string, { is: string; type: FieldSchema }>;
   invariants?: readonly string[];
@@ -177,27 +179,41 @@ const SLOT = {
   when: (command: string, caseName: string, index: number) => `${command}|${caseName}|effects|${index}|when`,
   set: (command: string, caseName: string, field: string) => `${command}|${caseName}|set|${field}`,
 };
-// 返す値を、[フィールド, 値] の並びにする。値1つの結果は、フィールドを "" とする
+// 返す値を、[フィールド, 値] の並びにする。返すものがフィールドの組なら、フィールドごと。そうでなければ、値1つ（フィールドは ""）
 export const isRecordOutput = (schema: OutputSchema | undefined): schema is { record: Fields; optional?: readonly string[] } =>
-  typeof schema === "object" && schema !== null && "record" in schema;
-export function respondedValues(responds: SpecOutcome["responds"]): [string, SpecValue][] {
+  schema !== undefined && isRecord(schema);
+export function respondedValues(responds: SpecOutcome["responds"], output: OutputSchema | undefined): [string, SpecValue][] {
   if (responds === undefined) return [];
-  if (typeof responds === "object" && responds !== null && !("$ref" in responds)) return Object.entries(responds as Record<string, SpecValue>);
-  return [["", responds as SpecValue]];
+  const fields = isRecordOutput(output) && typeof responds === "object" && responds !== null && !Array.isArray(responds) && !("$ref" in responds);
+  return fields ? Object.entries(responds as Record<string, SpecValue>) : [["", responds as SpecValue]];
+}
+// 定数のうち、平らな値（真偽値・数値・文字列）。並びやフィールドの組の定数は、セルフホストした部品には渡さない
+const isFlat = (value: unknown) => typeof value !== "object" || (value !== null && "$ref" in (value as object));
+// 語彙に、構造を持つ型があるか。あれば、ペイロードの検査は手書きの版 (Stage 0) が行う
+// （セルフホストした payload-check の仕様は、平らな値だけを扱う）
+export function structuredVocabulary(model: SpecModel): boolean {
+  const schemas = [
+    ...Object.values(model.data),
+    ...Object.values(model.commands).flatMap((fields) => Object.values(fields)),
+    ...Object.values(model.effects).flatMap((fields) => Object.values(fields)),
+    ...Object.values(model.queries).flatMap((query) => [query.output, ...Object.values(query.input)]),
+    ...Object.values(model.calculations ?? {}).map((calculation) => calculation.type),
+  ];
+  return schemas.some(isStructured);
 }
 
 export function* valuesToWrite(input: SpecInput): Generator<[slot: string, value: SpecValue]> {
   for (const [command, behavior] of Object.entries(input.behaviors)) {
     for (const [alias, asked] of Object.entries(behavior.asks ?? {})) {
-      for (const [field, value] of Object.entries(asked.input)) yield [SLOT.ask(command, alias, field), value];
+      for (const [field, value] of Object.entries(asked.input)) if (isFlat(value)) yield [SLOT.ask(command, alias, field), value];
     }
     for (const [caseName, outcome] of Object.entries(behavior.when)) {
       for (const [index, effect] of outcome.effects.entries()) {
-        for (const [field, value] of Object.entries(effect.payload)) yield [SLOT.payload(command, caseName, index, field), value];
+        for (const [field, value] of Object.entries(effect.payload)) if (isFlat(value)) yield [SLOT.payload(command, caseName, index, field), value];
         if (effect.when !== undefined && typeof effect.when !== "string") yield [SLOT.when(command, caseName, index), effect.when];
       }
-      for (const [field, value] of Object.entries(outcome.set)) yield [SLOT.set(command, caseName, field), value];
-      for (const [field, value] of respondedValues(outcome.responds)) if ((value as unknown) !== null) yield [SLOT.responds(command, caseName, field), value];
+      for (const [field, value] of Object.entries(outcome.set)) if (isFlat(value)) yield [SLOT.set(command, caseName, field), value];
+      for (const [field, value] of respondedValues(outcome.responds, input.model?.outputs?.[command])) if (isFlat(value)) yield [SLOT.responds(command, caseName, field), value];
     }
   }
 }
@@ -289,7 +305,7 @@ const constantEvent = (value: Constant): ValueEvent =>
         : { name: "Unresolved", input: {} };
 // フィールドの型の種類。"enum" は、決まった文字列のどれか
 export const kindOf = (schema: FieldSchema): "boolean" | "integer" | "number" | "string" | "enum" =>
-  isEnum(schema) ? "enum" : isNumberSchema(schema) ? schema.type : schema;
+  isEnum(schema) ? "enum" : isNumberSchema(schema) ? schema.type : typeof schema === "string" ? schema : "string";
 
 export function* valueEvents(input: SpecInput, command: string, value: SpecValue): Generator<ValueEvent> {
   if (!isReference(value)) return void (yield constantEvent(value));
@@ -449,7 +465,7 @@ export function extract(
 
       // 返す値: 返すものの形を宣言したコマンドは、どの場合にも返す値が要る
       const output = model.outputs?.[name];
-      const responded = respondedValues(outcome.responds);
+      const responded = respondedValues(outcome.responds, output);
       if (output === undefined) {
         if (outcome.responds !== undefined) report("bad-response", name, caseName, `コマンド ${name} は、返すものの形 (output) を宣言していないので、responds は書けません`);
       } else if (outcome.responds === undefined) {
@@ -476,7 +492,7 @@ export function extract(
         const problem = mismatch(input, name, responded[0][1], output as FieldSchema);
         if (problem) report("bad-value", name, caseName, `responds: ${problem}`);
       }
-      const written = responded.map(([field, value]) => [field, (value as unknown) === null ? null : write(SLOT.responds(name, caseName, field), value)] as const);
+      const written = responded.map(([field, value]) => [field, isFlat(value) ? write(SLOT.responds(name, caseName, field), value) : value] as const);
 
       when[caseName] = {
         ...(outcome.goTo === undefined ? {} : { goTo: outcome.goTo }),
@@ -496,6 +512,20 @@ export function extract(
       ...(Object.keys(asks).length > 0 ? { asks } : {}),
       when,
     });
+  }
+
+  // 覚えるデータの、はじめの値は、その型に合う
+  for (const [field, value] of Object.entries(model.initial ?? {})) {
+    if (!conforms(model.data[field], value)) report("bad-value", "", "", `data.${field} の initially: ${JSON.stringify(value)} は ${describe(model.data[field])} に入りません`);
+  }
+  // 問い合わせの約束: fresh は文字列か整数、increasing は数に付けられる。引数つきの問い合わせには、まだ付けられない
+  for (const [name, query] of Object.entries(model.queries)) {
+    if (query.promise === undefined) continue;
+    const kind = kindOf(query.output);
+    if (isStructured(query.output) || isEnum(query.output) || kind === "boolean" || (query.promise === "increasing" && kind === "string") || (query.promise === "fresh" && kind === "number")) {
+      report("bad-promise", "", "", `問い合わせ ${name} の ${query.promise}(): ${describe(query.output)} には付けられません（fresh は文字列か整数、increasing は整数か数値）`);
+    }
+    if (Object.keys(query.input).length > 0) report("bad-promise", "", "", `問い合わせ ${name} の ${query.promise}(): 引数つきの問い合わせには、まだ付けられません`);
   }
 
   const decisions: Record<string, unknown> = {};

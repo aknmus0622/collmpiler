@@ -109,10 +109,18 @@ const withoutThresholds = <T>(value: T): T =>
   JSON.parse(JSON.stringify(value, (key, item) => (key === "around" ? undefined : item))) as T;
 
 // 型と、フィールドの並びの書き方
-const typeText = (type: FieldSchema): string =>
-  typeof type === "string" || Array.isArray(type)
-    ? JSON.stringify(type)
-    : `${(type as { type: string }).type}({ ${Object.entries(type).filter(([key]) => key !== "type").map(([key, value]) => `${key}: ${JSON.stringify(value)}`).join(", ")} })`;
+function typeText(type: FieldSchema): string {
+  if (typeof type === "string" || Array.isArray(type)) return JSON.stringify(type);
+  const given = type as Record<string, unknown>;
+  if ("list" in given) return `list(${typeText(given.list as FieldSchema)})`;
+  if ("record" in given) {
+    const optional = (given.optional as string[] | undefined) ?? [];
+    const fields = Object.entries(given.record as Fields).map(([name, inner]) => `${name}: ${optional.includes(name) ? `optional(${typeText(inner)})` : typeText(inner)}`);
+    return `record({ ${fields.join(", ")} })`.replace("{  }", "{}");
+  }
+  if ("optional" in given) return `optional(${typeText(given.optional as FieldSchema)})`;
+  return `${String(given.type)}({ ${Object.entries(given).filter(([key]) => key !== "type").map(([key, value]) => `${key}: ${JSON.stringify(value)}`).join(", ")} })`;
+}
 const fieldsText = (fields: Fields) => `{ ${Object.entries(fields).map(([name, type]) => `${name}: ${typeText(type)}`).join(", ")} }`.replace("{  }", "{}");
 // 部品を並べたもの: 1つならそのまま、複数なら component(...) で束ねる。無ければ component()
 const bundle = (parts: string[]) => (parts.length === 1 ? parts[0] : `component(${parts.join(", ")})`);
@@ -122,7 +130,7 @@ const bundle = (parts: string[]) => (parts.length === 1 ? parts[0] : `component(
 function skeleton(layer1: Layer1, componentFile: string, exportName: string, pinned?: SpecModel): string {
   const groups: string[] = [];
   const todo = (key: string, what: string) => groups.push(`  // TODO: ${key} — ${what}`);
-  if (!structured(layer1.states)) pinned ? groups.push(`  states: ${JSON.stringify(pinned.states)},`) : todo("states", 'the state names, as states: ["A", "B"]');
+  if (!structured(layer1.states)) pinned ? groups.push(`  states: ${JSON.stringify(pinned.states)},`) : todo("states", 'the state names, as states: ["A", "B"] (leave out both states and init if the component has no states)');
   if (layer1.init === undefined) pinned ? groups.push(`  init: ${quote(pinned.init)},`) : todo("init", 'the initial state, as init: "A"');
 
   // 語彙のまとまり: Layer 1 が項目を並べていれば、足りない部品だけを、項目ごとに。並べていなければ、まとまりごと
@@ -185,7 +193,7 @@ function skeleton(layer1: Layer1, componentFile: string, exportName: string, pin
 
   const meaning = (key: string, entries: string[]) => (entries.length === 0 ? "" : `    ${key}: {\n${entries.join("\n")}\n    },\n`);
   const declared = calculations === undefined || isDescription(calculations) ? {} : calculations;
-  return `import { asks, calculate, component, decide, description, does, emits, from, goTo, input, integer, interpretation, number, onlyIf, onlyWhen, optional, otherwise, output, record, ref, responds, set, when } from "@clp/core";
+  return `import { among, asks, calculate, component, decide, description, does, emits, fresh, from, goTo, increasing, initially, input, integer, interpretation, list, number, onlyIf, onlyWhen, optional, otherwise, output, record, ref, responds, set, string, when } from "@clp/core";
 import { ${exportName} } from "./${componentFile}";
 
 export const Interpretation = interpretation(${exportName}, {
@@ -266,9 +274,19 @@ a \`goTo\`, a \`responds\`, an \`output\`, or the cases of a \`when\`, do not re
     to its dependencies): \`input({ field: type })\` for what it carries, or \`component()\`. \`calculations\`:
     \`component(description("<how it is computed>"), output(type))\`; for one Layer 1 describes in prose, only
     \`output(type)\`. You may also add \`invariants: ["<sentence that must hold after every command>", ...]\`.
-- Field types: \`"boolean"\`, \`"integer"\`, \`"number"\`, \`"string"\`, an array of allowed strings, or
-  \`integer({ min, max })\` / \`number({ min, max })\` (with \`around: [thresholds]\` if a threshold matters).
-  A bare \`{ ... }\` is never a type. Use whole numbers for money. The names of \`data\`
+- Field types: \`"boolean"\`, \`"integer"\`, \`"number"\`, \`"string"\`, an array of allowed strings,
+  \`integer({ min, max })\` / \`number({ min, max })\`, \`list(type)\` (a sequence, compared in order),
+  \`record({ field: type })\` (a value with fields), and \`optional(type)\` (the value, or \`null\` when there
+  is none). A bare \`{ ... }\` is never a type. Thresholds and strings that appear in your functions and in
+  the decision tables are tried by the test automatically; do not copy them into \`around\`.
+  A \`data\` field that starts with a value is \`component(type, initially(value))\`; otherwise it is unset
+  (\`undefined\`) until a command stores it. To change a list or a record, describe the new value as a
+  calculation and store its result (\`set({ items: ref.calculation("itemsWithNew") })\`).
+- A query's answers can be promised to be \`fresh()\` (never the same value twice: an identifier) or
+  \`increasing()\` (never less than before: a clock): \`newId: component(output("string"), fresh())\`.
+  An input field whose value should usually be one the component already remembers is
+  \`among("items", "id")\` (one of the \`id\`s of the remembered list \`items\`) instead of \`"string"\`.
+- A component with no states at all has neither \`states\` nor \`init\`. Use whole numbers for money. The names of \`data\`
   fields, queries without input, command inputs, and the names given in \`asks\` share one namespace and must
   not collide (inputs, and \`asks\` names, of different commands may).
 - \`commands\`: one entry for **every** command, even if you add nothing (\`component()\`). An entry may hold,

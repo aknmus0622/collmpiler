@@ -5,7 +5,7 @@ import type { BoundSpecification, FieldSchema } from "@clp/core";
 import { isRecordOutput, isReference, respondedValues } from "./extract.ts";
 import type { Reference, SpecInput, SpecModel, SpecValue } from "./extract.ts";
 import { loadSpecs } from "./loader.ts";
-import { conforms, isEnum, isNumberSchema } from "./schema.ts";
+import { conforms, isEnum, isList, isNumberSchema, isOptional, isRecord, isStringSchema } from "./schema.ts";
 
 // 生成された verify.ts から呼ばれる PBT ランタイム。
 // 1回の試行は「初期状態から始まるコマンド列」。期待値は仕様 (Layer 1/2) を具体値で実行して得る。
@@ -25,7 +25,18 @@ export type Adapter = {
 
 type Values = Record<string, unknown>;
 // answers: 引数つきの問い合わせの答え。問い合わせごとに、引数から答えを決める関数（同じ引数には同じ答え）
-type RawStep = { pick: number; inputs: Record<string, Values>; queries: Values; answers: Record<string, (input: Values) => unknown> };
+// deltas: 約束が increasing の問い合わせの、前の答えからの増え幅。chosen: いま覚えているものから入力を選ぶときの番号（null なら、選ばない）
+type RawStep = {
+  pick: number;
+  inputs: Record<string, Values>;
+  queries: Values;
+  answers: Record<string, (input: Values) => unknown>;
+  deltas: Record<string, number>;
+  chosen: Record<string, Record<string, number | null>>;
+};
+// 依存の約束を守るために、試行の中で覚えておくこと（前の答え、すでに返した値）
+type Env = { last: Record<string, number>; used: Record<string, unknown[]> };
+type State = { status: string; data: Values; env?: Env };
 // output は、返すものの形を宣言したコマンドだけが持つ
 type Observation = { state: unknown; effects: unknown; output?: unknown };
 
@@ -96,14 +107,28 @@ function literalsIn(...bindings: BoundSpecification[]): Hints {
 
 function arbitraryOf(schema: FieldSchema, hints: Hints): fc.Arbitrary<unknown> {
   if (schema === "boolean") return fc.boolean();
-  if (schema === "string") {
-    return hints.strings.length === 0 ? fc.string() : fc.oneof({ weight: 1, arbitrary: fc.string() }, { weight: 1, arbitrary: fc.constantFrom(...hints.strings) });
+  // 構造を持つ値。並びは短く（長さより、中身と場合の組み合わせを試したい）。無いことがある値は、4回に1回は無い
+  if (isOptional(schema)) return fc.option(arbitraryOf(schema.optional, hints), { nil: null, freq: 4 });
+  if (isList(schema)) return fc.array(arbitraryOf(schema.list, hints), { maxLength: 4 });
+  if (isRecord(schema)) {
+    return fc.record(
+      Object.fromEntries(
+        Object.entries(schema.record).map(([field, type]) => [field, schema.optional?.includes(field) ? fc.option(arbitraryOf(type, hints), { nil: null, freq: 4 }) : arbitraryOf(type, hints)]),
+      ),
+    );
+  }
+  if (schema === "string" || isStringSchema(schema)) {
+    // 意味の関数の中の文字列と、宣言した例を混ぜる（形式の決まった文字列は、乱数ではまず出ない）
+    const known = [...new Set([...hints.strings, ...(isStringSchema(schema) ? (schema.examples ?? []) : [])])];
+    return known.length === 0 ? fc.string() : fc.oneof({ weight: 1, arbitrary: fc.string() }, { weight: 1, arbitrary: fc.constantFrom(...known) });
   }
   if (isEnum(schema)) return fc.constantFrom(...schema);
 
-  // しきい値: 宣言 (around) があればそれを使い、無ければ、意味の関数の中の数値を使う
+  // しきい値: 仕様の中の数（意味の関数の中の数値と、決定表の値）は、いつも使う。宣言 (around) は、それに足す。
+  // 以前は、宣言があると、仕様の中の数を使わなかった。そのため around が、狙う値の写しを書く場所になっていた
   const declared = isNumberSchema(schema) ? schema : { type: schema as "integer" | "number" };
-  const { type, min, max, around = hints.numbers } = declared;
+  const { type, min, max } = declared;
+  const around = [...new Set([...hints.numbers, ...(declared.around ?? [])])];
   const base =
     type === "integer"
       ? fc.integer({ min: min ?? -(2 ** 31), max: max ?? 2 ** 31 - 1 })
@@ -134,12 +159,28 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
   const nullary = Object.keys(model.queries).filter((name) => Object.keys(model.queries[name].input).length === 0);
   const parameterized = Object.keys(model.queries).filter((name) => !nullary.includes(name));
 
+  // 約束のある問い合わせ（引数の無いもの）と、いま覚えているものから選ぶ入力
+  const promised = nullary.filter((name) => model.queries[name].promise !== undefined);
+  const increasing = promised.filter((name) => model.queries[name].promise === "increasing");
+  const amongOf = (schema: FieldSchema) => ((isNumberSchema(schema) || isStringSchema(schema)) && schema.among ? schema.among : undefined);
+  const selecting = Object.fromEntries(
+    commands.map((name) => [name, Object.entries(model.commands[name] ?? {}).flatMap(([field, schema]) => (amongOf(schema) ? [[field, amongOf(schema)!] as const] : []))]),
+  );
+  // 増え幅は、0 以上。仕様の中の数の前後を重点的に試すので、「発行から N 秒」のようなしきい値に届く
+  const deltaOf = (name: string) => {
+    const output = model.queries[name].output;
+    return arbitraryOf({ type: isNumberSchema(output) ? output.type : (output as "integer" | "number"), min: 0 }, hints) as fc.Arbitrary<number>;
+  };
+
   const sequences = fc.array(
     fc.record({
       pick: fc.nat(),
       inputs: fc.record(Object.fromEntries(commands.map((name) => [name, recordOf(model.commands[name] ?? {}, hints)]))),
       queries: recordOf(Object.fromEntries(nullary.map((name) => [name, model.queries[name].output])), hints),
       answers: fc.record(Object.fromEntries(parameterized.map((name) => [name, fc.func(arbitraryOf(model.queries[name].output, hints))]))),
+      deltas: fc.record(Object.fromEntries(increasing.map((name) => [name, deltaOf(name)]))),
+      // 4回に3回は、いま覚えているものから選ぶ。残りは、乱数の値のまま（無いものも試す）
+      chosen: fc.record(Object.fromEntries(commands.map((name) => [name, fc.record(Object.fromEntries(selecting[name].map(([field]) => [field, fc.option(fc.nat(), { nil: null, freq: 4 })])))]))),
     }),
     { minLength: 1, maxLength: MAX_STEPS },
   );
@@ -164,13 +205,50 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
       },
     });
 
-  const start = () => ({
+  const start = (): State => ({
     status: model.init,
-    // 未設定のデータも undefined のキーとして持つ
-    data: Object.fromEntries(Object.keys(model.data).map((field) => [field, undefined])) as Values,
+    // はじめの値を宣言したデータは、その値。ほかは未設定（undefined のキーとして持つ）
+    data: Object.fromEntries(Object.keys(model.data).map((field) => [field, model.initial && field in model.initial ? plain(model.initial[field]) : undefined])) as Values,
+    env: { last: {}, used: {} },
   });
 
-  const checkInvariants = (state: { status: string; data: Values }, steps: Step[]) => {
+  // 依存の約束を守った、問い合わせの答え。increasing は、前の答えに増え幅を足す。fresh は、すでに返した値を避ける
+  const answersOf = (state: State, raw: RawStep): { queries: Values; env: Env } => {
+    const env: Env = { last: { ...state.env?.last }, used: { ...state.env?.used } };
+    const queries: Values = { ...raw.queries };
+    for (const name of promised) {
+      const { promise, output } = model.queries[name];
+      if (promise === "increasing") {
+        const previous = env.last[name];
+        const max = isNumberSchema(output) ? output.max : undefined;
+        const value = previous === undefined ? (queries[name] as number) : Math.min(previous + (raw.deltas[name] ?? 0), max ?? Number.POSITIVE_INFINITY);
+        queries[name] = value;
+        env.last[name] = value;
+      } else {
+        const used = env.used[name] ?? [];
+        let value = queries[name];
+        if (used.includes(value)) value = typeof value === "number" ? Math.max(...(used as number[])) + 1 : `${String(value)}#${used.length}`;
+        queries[name] = value;
+        env.used[name] = [...used, value];
+      }
+    }
+    return { queries, env };
+  };
+  // コマンドの入力。among を宣言したフィールドは、いま覚えている並びの要素から選ぶ
+  const inputOf = (state: State, raw: RawStep, name: string): Values => {
+    const given: Values = { ...raw.inputs[name] };
+    for (const [field, among] of selecting[name]) {
+      const pick = raw.chosen[name]?.[field];
+      const remembered = state.data[among.data];
+      const candidates = (Array.isArray(remembered) ? remembered : [])
+        .map((item) => (among.field === undefined ? item : (item as Values | null)?.[among.field]))
+        .filter((value) => value !== undefined && value !== null && conforms(model.commands[name][field], value));
+      if (pick !== null && pick !== undefined && candidates.length > 0) given[field] = candidates[pick % candidates.length];
+    }
+    return given;
+  };
+
+  const checkInvariants = (state: State, steps: Step[]) => {
     for (const name of model.invariants ?? []) {
       const invariant = binding.invariants?.[name];
       if (!invariant) throw new SpecError(`不変条件 "${name}" の判定が、解釈にありません`, steps);
@@ -213,13 +291,16 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
 
   // 1手進める。実行できるコマンドが無ければ undefined。仕様の評価に失敗したら SpecError
   // force: そのコマンドを、実行できるかどうか (from / onlyIf) を見ずに実行する（仕様のミューテーションで使う）
-  const next = (state: { status: string; data: Values }, raw: RawStep, steps: Step[], force?: string) => {
+  const next = (state: State, raw: RawStep, steps: Step[], force?: string) => {
     try {
       // 意味の関数の中の decide / calculate が、この解釈を引くようにする
       activate(binding);
+      // この手の、問い合わせの答えと、コマンドごとの入力（約束と、入力の選び方を反映したもの）
+      const { queries, env } = answersOf(state, raw);
+      const inputs = Object.fromEntries(commands.map((name) => [name, inputOf(state, raw, name)]));
       // そのコマンドが尋ねることを、引数を解決して、答えと一緒に並べる
       const askedBy = (name: string): Asked[] => {
-        const base = { status: state.status, ...state.data, ...raw.queries, ...raw.inputs[name] };
+        const base = { status: state.status, ...state.data, ...queries, ...inputs[name] };
         return Object.entries(input.behaviors[name].asks ?? {}).map(([alias, asked]) => {
           const answer = raw.answers[asked.query];
           if (!answer) throw new Error(`asks.${alias}: 問い合わせ "${asked.query}" は、引数つきの問い合わせとして宣言されていません`);
@@ -231,8 +312,8 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
         guarded({
           status: state.status,
           ...state.data,
-          ...raw.queries,
-          ...raw.inputs[name],
+          ...queries,
+          ...inputs[name],
           ...Object.fromEntries(askedBy(name).map((asked) => [asked.name, asked.answer])),
         });
       const enabled = commands.filter((name) => {
@@ -252,7 +333,7 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
       const context = contextOf(command);
       const cases = input.behaviors[command].when;
       const matched = matchCondition(binding, Object.keys(cases), context);
-      const step: Step = { from: state.status, data: plain(state.data), command, input: raw.inputs[command], queries: raw.queries, asks: plain(askedBy(command)), case: matched };
+      const step: Step = { from: state.status, data: plain(state.data), command, input: inputs[command], queries, asks: plain(askedBy(command)), case: matched };
       steps.push(step);
 
       const outcome = cases[matched];
@@ -295,7 +376,7 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
       const declared = model.outputs?.[command];
       let output: unknown;
       if (declared !== undefined) {
-        const responded = respondedValues(outcome.responds);
+        const responded = respondedValues(outcome.responds, declared);
         if (outcome.responds === undefined) throw new Error(`コマンド ${command} の、この場合に返す値 (responds) がありません`);
         const valueOf = (value: SpecValue) => ((value as unknown) === null ? null : resolve(value, context, command));
         if (isRecordOutput(declared)) {
@@ -311,7 +392,7 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
         }
       }
 
-      const after = { status: target, data: { ...state.data, ...set } as Values };
+      const after: State = { status: target, data: { ...state.data, ...set } as Values, env };
       checkInvariants(after, steps);
       return { step, expected: plain({ state: target, effects, ...(declared === undefined ? {} : { output }) }) as Observation, after };
     } catch (error) {
@@ -379,8 +460,8 @@ export async function compareSpecs(first: SpecInput, second: SpecInput, params: 
   // 入力の生成には、どちらの解釈の定数も混ぜる（片方だけが見ている値で食い違うことがある）
   const a = simulator(first, first.model, first.binding, literalsIn(first.binding, second.binding));
   const b = simulator(second, second.model, second.binding);
-  type Seen = { command?: string; result: Difference["first"]; after?: { status: string; data: Values } };
-  const advance = (sim: typeof a, state: { status: string; data: Values }, raw: RawStep, steps: Step[]): Seen => {
+  type Seen = { command?: string; result: Difference["first"]; after?: State };
+  const advance = (sim: typeof a, state: State, raw: RawStep, steps: Step[]): Seen => {
     try {
       const planned = sim.next(state, raw, steps);
       return planned ? { command: planned.step.command, result: planned.expected, after: planned.after } : { result: { skipped: true } };

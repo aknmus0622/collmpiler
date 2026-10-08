@@ -13,8 +13,24 @@ export type NumberSchema = {
   readonly min?: number;
   readonly max?: number;
   readonly around?: readonly number[];
+  readonly among?: Among;
 };
-export type FieldSchema = "boolean" | "number" | "integer" | "string" | readonly string[] | NumberSchema;
+// 文字列に、生成の手がかりを付けたもの。examples: 試す例（形式の決まった文字列）
+export type StringSchema = { readonly type: "string"; readonly examples?: readonly string[]; readonly among?: Among };
+// 入力の選び方: いま覚えているデータ（並び）の要素から選ぶ。field があれば、要素のそのフィールドから
+export type Among = { readonly data: string; readonly field?: string };
+// 構造を持つ値: 並び、フィールドの組（optional に挙げたフィールドは無いことがある）、無いことがある値。無いときの値は null
+export type FieldSchema =
+  | "boolean"
+  | "number"
+  | "integer"
+  | "string"
+  | readonly string[]
+  | NumberSchema
+  | StringSchema
+  | { readonly list: FieldSchema }
+  | { readonly record: Fields; readonly optional?: readonly string[] }
+  | { readonly optional: FieldSchema };
 export type Fields = Record<string, FieldSchema>;
 
 // --- 型エラーの説明 ---
@@ -92,8 +108,8 @@ export const isDescription = (value: unknown): value is Description =>
 
 // responds: コマンドが返す値。値1つ（定数か参照）か、{ フィールド: 値 }
 export type OutcomeShape = { goTo?: string; does?: string; responds?: unknown };
-// コマンドが返すものの形: 値1つの型か、フィールドの組（optional に挙げたフィールドは、無いことがある。そのときの値は null）
-export type OutputSchema = FieldSchema | { readonly record: Fields; readonly optional?: readonly string[] };
+// コマンドが返すものの形。どの型でも書ける
+export type OutputSchema = FieldSchema;
 // 尋ねること: 答えに付ける名前 → { 問い合わせの名前: 引数 }
 export type Asks = Record<string, Record<string, Record<string, unknown>>>;
 // 部品が決める構造。どの部品をどこに書けるかは、項目の種類で決まる（読み込みのあとで検査する）
@@ -103,6 +119,10 @@ export type CommandShape = {
   // 問い合わせと計算では値1つの型。コマンドでは、フィールドの組も書ける
   output?: OutputSchema;
   type?: FieldSchema;
+  // 覚えるデータの、はじめの値（値を包んで持つ。null も値として書けるように）
+  initially?: { readonly value: unknown };
+  // 問い合わせの約束
+  promise?: "fresh" | "increasing";
   from?: readonly string[];
   onlyIf?: readonly string[];
   asks?: Asks;
@@ -134,6 +154,8 @@ export type Layer1 = {
 };
 
 // 構造として書かれた値（文や省略なら never）
+// 状態を持たない部品の、ただ1つの状態の名前
+export const STATELESS = "READY";
 export const COMPONENT = Symbol.for("clp.component");
 export const BINDING = Symbol.for("clp.binding");
 
@@ -156,7 +178,8 @@ export type CommandDeclaration = {
   // 条件ごとの結果。条件で分かれないコマンドは otherwise だけ
   when: Record<string, Outcome>;
 };
-export type QueryDeclaration = { input: Fields; output: FieldSchema };
+// promise: 依存が守る約束。fresh は「一度返した値は、二度と返さない」、increasing は「前の答えより小さくならない」
+export type QueryDeclaration = { input: Fields; output: FieldSchema; promise?: "fresh" | "increasing" };
 export type Declaration = {
   // 全体と、項目ごとの説明（Layer 1 が文で書いたもの。キーは "component"、"queries"、"queries.isMonthEnd" など）
   descriptions: Record<string, string>;
@@ -164,6 +187,8 @@ export type Declaration = {
   states: readonly string[];
   init: string;
   data: Fields;
+  // 覚えるデータの、はじめの値（宣言したものだけ。無ければ未設定）
+  initial?: Record<string, unknown>;
   queries: Record<string, QueryDeclaration>;
   effects: Record<string, Fields>;
   decisions: Record<string, Table>;
@@ -213,8 +238,8 @@ const COMMAND_KEYS = ["description", "input", "output", "from", "onlyIf", "asks"
 const STRUCTURE_KEYS = ["states", "init", "data", "queries", "effects", "decisions", "calculations", "invariants", "commands"] as const;
 // まとまりごとの、項目に書ける部品。required は、Layer 1 か解釈のどちらかに無ければならないもの
 const ENTRY_PARTS = {
-  data: { parts: ["description", "type"], required: ["type"], additive: false },
-  queries: { parts: ["description", "input", "output"], required: ["output"], additive: false },
+  data: { parts: ["description", "type", "initially"], required: ["type"], additive: false },
+  queries: { parts: ["description", "input", "output", "promise"], required: ["output"], additive: false },
   effects: { parts: ["description", "input"], required: [], additive: false },
   calculations: { parts: ["description", "output"], required: ["description", "output"], additive: true },
 } as const;
@@ -249,9 +274,14 @@ export function resolveComponent(
   }
   if (states !== undefined && structure.states !== undefined) problems.push("states は Layer 1 に構造として書かれているので、解釈では書けません");
   states = states ?? structure.states;
-  if (states === undefined) problems.push("states が、Layer 1 にも解釈にもありません");
   if (base.init !== undefined && structure.init !== undefined) problems.push("init は Layer 1 に書かれているので、解釈では書けません");
-  const init = base.init ?? structure.init;
+  let init = base.init ?? structure.init;
+  // 状態も初期状態も、どこにも書かれていない: 状態を持たない部品。内部では、1つだけの状態を持つものとして扱う
+  if (states === undefined && init === undefined && !isDescription(base.states)) {
+    states = [STATELESS];
+    init = STATELESS;
+  }
+  if (states === undefined) problems.push("states が、Layer 1 にも解釈にもありません");
   if (init === undefined) problems.push("init が、Layer 1 にも解釈にもありません");
 
   // 語彙のまとまり: 項目ごとに、Layer 1 の部品に、解釈の足りない分を重ねる
@@ -289,8 +319,15 @@ export function resolveComponent(
     }
     return result;
   };
-  const data = Object.fromEntries(Object.entries(entries("data")).map(([name, entry]) => [name, entry.type ?? "string"]));
-  const queries = Object.fromEntries(Object.entries(entries("queries")).map(([name, entry]) => [name, { input: entry.input ?? {}, output: (entry.output ?? "boolean") as FieldSchema }]));
+  const remembered = entries("data");
+  const data = Object.fromEntries(Object.entries(remembered).map(([name, entry]) => [name, entry.type ?? "string"]));
+  const initial = Object.fromEntries(Object.entries(remembered).flatMap(([name, entry]) => (entry.initially === undefined ? [] : [[name, entry.initially.value]])));
+  const queries = Object.fromEntries(
+    Object.entries(entries("queries")).map(([name, entry]) => [
+      name,
+      { input: entry.input ?? {}, output: (entry.output ?? "boolean") as FieldSchema, ...(entry.promise === undefined ? {} : { promise: entry.promise }) },
+    ]),
+  );
   const effects = Object.fromEntries(Object.entries(entries("effects")).map(([name, entry]) => [name, entry.input ?? {}]));
   const calculations = Object.fromEntries(
     Object.entries(entries("calculations")).map(([name, entry]) => [name, { is: entry.description ?? "", type: (entry.output ?? "string") as FieldSchema }]),
@@ -399,6 +436,7 @@ export function resolveComponent(
 
   const declaration: Declaration = {
     descriptions,
+    ...(Object.keys(initial).length > 0 ? { initial } : {}),
     ...(base.assets ? { assets: base.assets } : {}),
     states: states ?? [],
     init: init ?? "",

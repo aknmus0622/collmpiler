@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { posix, relative, sep } from "node:path";
 import type { FieldSchema } from "@clp/core";
-import { isRecordOutput, stableStringify } from "./extract.ts";
+import { stableStringify } from "./extract.ts";
+import { isEnum, isList, isNumberSchema, isOptional, isRecord, isStringSchema } from "./schema.ts";
 import type { SpecModel } from "./extract.ts";
 import { CONTROL_DIR, DEFAULT_SOURCE_DIR, dirFrom, importPath, testsDirOf } from "./layout.ts";
 import type { Workspace } from "./layout.ts";
@@ -46,9 +47,19 @@ function header(ir: Ir): string {
 const union = (values: readonly string[]) => values.map((value) => JSON.stringify(value)).join(" | ") || "never";
 
 function fieldType(schema: FieldSchema): string {
-  if (schema === "integer") return "number";
-  if (typeof schema === "string") return schema;
-  return Array.isArray(schema) ? union(schema) : "number";
+  if (isOptional(schema)) return `${fieldType(schema.optional)} | null`;
+  if (isList(schema)) {
+    const item = fieldType(schema.list);
+    return /[ |]/.test(item) && !item.startsWith("{") ? `(${item})[]` : `${item}[]`;
+  }
+  if (isRecord(schema)) {
+    const fields = Object.keys(schema.record).sort().map((field) => `${field}: ${fieldType(schema.record[field])}${schema.optional?.includes(field) ? " | null" : ""}`);
+    return fields.length === 0 ? "{}" : `{ ${fields.join("; ")} }`;
+  }
+  if (isEnum(schema)) return union(schema);
+  if (isStringSchema(schema)) return "string";
+  if (isNumberSchema(schema) || schema === "integer") return "number";
+  return schema as string;
 }
 
 function shape(fields: Record<string, FieldSchema>): string {
@@ -63,16 +74,15 @@ export function generateContract(ir: Ir): string {
   const model = requireModel(ir);
   const behaviors = [...ir.behaviors].sort((a, b) => (a.name < b.name ? -1 : 1));
   const queries = Object.keys(model.queries).sort().map((name) => {
-    const { input, output } = model.queries[name];
-    return `${name}(${Object.keys(input).length > 0 ? `input: ${shape(input)}` : ""}): ${fieldType(output)}`;
+    const { input, output, promise } = model.queries[name];
+    // 依存の約束。代役は、これを守って答える
+    const note = promise === "fresh" ? "/** Never answers with the same value twice. */ " : promise === "increasing" ? "/** Never answers with less than it answered before. */ " : "";
+    return `${note}${name}(${Object.keys(input).length > 0 ? `input: ${shape(input)}` : ""}): ${fieldType(output)}`;
   });
   const effects = Object.keys(model.effects).sort().map((name) => `${name}(payload: ${shape(model.effects[name])}): void`);
   // コマンドが返すもの。返すコマンドが無ければ、契約は以前のまま
   const outputs = Object.keys(model.outputs ?? {}).sort().map((name) => {
-    const output = model.outputs![name];
-    if (!isRecordOutput(output)) return `${name}: ${fieldType(output as FieldSchema)}`;
-    const fields = Object.keys(output.record).sort().map((field) => `${field}: ${fieldType(output.record[field])}${output.optional?.includes(field) ? " | null" : ""}`);
-    return `${name}: { ${fields.join("; ")} }`;
+    return `${name}: ${fieldType(model.outputs![name])}`;
   });
   const results =
     outputs.length === 0

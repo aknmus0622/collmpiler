@@ -202,12 +202,12 @@ export const Interpretation = interpretation(Counter, {
   assert.deepEqual(extract(await loadSpecs(bare)).diagnostics.map((d) => d.code), ["unbound-specification"]);
 });
 
-test("解釈: 足りない構造 (states / init / 項目の型) を報告する", async () => {
+test("解釈: 足りない構造 (init / 項目の型) を報告する。状態も初期状態も無ければ、状態を持たない部品", async () => {
   const dir = mkdtempSync(join(tmpRoot, "s-"));
   writeFileSync(
     join(dir, "x.component.ts"),
     `import { component, description, interpretation } from "@clp/core";
-export const Thing = component({ data: { memo: description("A note.") }, queries: { ready: description("Whether it is ready.") }, calculations: { total: description("the sum") }, commands: description("It can be started.") });
+export const Thing = component({ states: ["A", "B"], data: { memo: description("A note.") }, queries: { ready: description("Whether it is ready.") }, calculations: { total: description("the sum") }, commands: description("It can be started.") });
 export const Interpretation = interpretation(Thing, { commands: { Start: component() }, meanings: { conditions: {} } });
 `,
   );
@@ -216,8 +216,19 @@ export const Interpretation = interpretation(Thing, { commands: { Start: compone
     "data.memo の 型 (type) が、Layer 1 にも解釈にもありません",
     "init が、Layer 1 にも解釈にもありません",
     "queries.ready の 型 (output) が、Layer 1 にも解釈にもありません",
-    "states が、Layer 1 にも解釈にもありません",
   ]);
+  // 状態を持たない部品: states も init も書かない。内部では、1つだけの状態 (READY) を持つ
+  const stateless = mkdtempSync(join(tmpRoot, "s-"));
+  writeFileSync(
+    join(stateless, "x.component.ts"),
+    `import { component, does, interpretation } from "@clp/core";
+export const Thing = component({ commands: { Ping: component(does("Nothing happens.")) } });
+export const Interpretation = interpretation(Thing, { commands: { Ping: component() }, meanings: { conditions: {} } });
+`,
+  );
+  const spec = await loadSpecs(stateless);
+  assert.deepEqual(extract(spec).diagnostics, []);
+  assert.deepEqual([spec.model?.states, spec.model?.init], [["READY"], "READY"]);
 });
 
 test("検査: 解釈が無い、名前の意味が書かれていない", async () => {

@@ -1,4 +1,4 @@
-import { effectOccurrences, isReference, kindOf, payloadEvents, referenceEvents, valuesToWrite, writeEvents } from "./extract.ts";
+import { effectOccurrences, isReference, kindOf, payloadEvents, referenceEvents, structuredVocabulary, valuesToWrite, writeEvents } from "./extract.ts";
 import type { PayloadDiagnostic, ReferenceDiagnostic, SpecInput } from "./extract.ts";
 import { isEnum, isNumberSchema } from "./schema.ts";
 import type { Adapter } from "./runtime.ts";
@@ -76,6 +76,8 @@ export async function stage1References(input: SpecInput, adapterUrl = STAGE1_ADA
 export async function stage1Payloads(input: SpecInput, url?: string): Promise<PayloadDiagnostic[] | undefined> {
   const model = input.model;
   if (!model) return undefined;
+  // 構造を持つ値（並び、フィールドの組、無いことがある値）は、この部品の仕様の範囲の外。手書きの版が判断する
+  if (structuredVocabulary(model)) return undefined;
   const adapter = await stage1Adapter("payload-check", url);
   if (!adapter) return undefined;
   const found: PayloadDiagnostic[] = [];

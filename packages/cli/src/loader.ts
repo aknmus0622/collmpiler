@@ -164,6 +164,7 @@ function normalize(name: string, layer1: object, binding: BoundSpecification | u
   // コマンドが返すものの形（返すコマンドがあるときだけ持つ）
   const outputs = Object.fromEntries(Object.entries(component.commands).flatMap(([command, decl]) => (decl.output === undefined ? [] : [[command, decl.output]])));
   if (Object.keys(outputs).length > 0) model.outputs = outputs;
+  if (component.initial) model.initial = component.initial;
   validateModel(name, model, Object.values(component.commands).flatMap((decl) => Object.keys(decl.asks ?? {})));
 
   const behaviors: SpecInput["behaviors"] = {};
