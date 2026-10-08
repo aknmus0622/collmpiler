@@ -518,7 +518,7 @@ export const Order = component({
 });
 ```
 
-* **部品は値なので、共有できます。** 複数のコマンドに共通する場合分けは、`compose` でまとめて変数に取り出します。`examples/co-llm-piler/specs/pipeline.component.ts` では、「検査に落ちたら、同じ段階をもう一度。回数を使い切ったら設計からやり直す」という場合分け（`rejected`）を、3つのコマンドが共有しています。
+* **部品は値なので、共有できます。** 複数のコマンドに共通する場合分けは、`compose` でまとめて変数に取り出します。`packages/cli/self/specs/pipeline.component.ts` では、「検査に落ちたら、同じ段階をもう一度。回数を使い切ったら設計からやり直す」という場合分け（`rejected`）を、3つのコマンドが共有しています。
 * **型の付け方**: 直接書いた値は、`as const` を付けなくても文字列リテラルや列挙として推論されます。ただし `Rank` のように変数に取り出した配列には `as const` が必要です。忘れると `string[]` に広がって列挙の検査が効かなくなるため、広がった配列は型エラーにしています。
 * **構造の検査**: `states` を構造で書いていれば、`init`・`from`・`goTo` にそこにない名前を書くと型エラーになります。キーの書き間違いや、`when` の中に `goTo` と `does` 以外を書くことも型エラーです。1つのコマンドに遷移先を2つ書くと、読み込みの時点でエラーになります。
 * **名前の重複**: 条件と計算からは、状態名（`status`）、覚えているデータ、引数の無い問い合わせの答え、コマンドの入力、尋ねた答えに付けた名前（`asks`）が同じ階層で見えます。そのため、これらの名前は重複できません（入力どうし、`asks` の名前どうしは、コマンドが違えば同名で構いません）。
@@ -530,7 +530,7 @@ export const Order = component({
 問い合わせには、引数を持たせられます。「月末か」は引数の無い問い合わせ、「この名前の状態は宣言済みか」は引数つきの問い合わせです。
 
 ```typescript
-// --- examples/co-llm-piler/specs/reference-check.component.ts（抜粋） ---
+// --- packages/cli/self/specs/reference-check.component.ts（抜粋） ---
 queries: {
   stateDeclared: compose(description("Whether the specification declares a state of this name."), input({ name: "string" }), output("boolean")),
 },

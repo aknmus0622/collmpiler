@@ -20,7 +20,7 @@ Phase 1 spike. The design documents (written in Japanese) are still the bulk of 
   - `mutation.ts` — the mutation gate: a swappable `MutationStrategy` (built-in literal mutation) plus `judge`, the pass rule owned by the gate. `guide.ts` — default design guidance embedded in the request.
 - `specs/` — the example: `order.decisions.ts` and `order.component.ts` (Layer 1, written by a person) and `order.interpretation.ts` (Layer 2, derived). A specs directory may hold several components; this one has one.
 - `examples/checkout-ts/` — `src/` is production code written by an LLM agent from the IR; `clp/` is the generated test side. Do not hand-edit `src/` to make verification pass; rerun the loop.
-- `examples/co-llm-piler/` — parts of the framework described in the framework (a first step towards self-hosting): `pipeline` (`planOf` and the retry / restart logic of `loop.ts` as a state machine), `reference-check` (the unknown-state / unknown-effect diagnostics of `extract.ts`) and `payload-check` (its checks of an effect's payload, with `compatible` from `schema.ts` as a decision table). The last two are fed one element per command instead of one structured value, and ask a dependency about names through queries with input instead of remembering collections. `payload-check`'s interpretation was derived by `interpret`, not written by hand. Its `specs/` sit inside the example; `src/` was written by an agent and is not used by the framework itself.
+- `packages/cli/self/` — the framework's own specs, and code generated from them (self-hosting; `examples/co-llm-piler` is a relative symlink to it). `specs/` holds three components: `pipeline` (`planOf` and the retry / restart logic of `loop.ts` as a state machine), `reference-check` (the unknown-state / unknown-effect diagnostics of `extract.ts`) and `payload-check` (its checks of an effect's payload, with `compatible` from `schema.ts` as a decision table). The last two are fed one element per command instead of one structured value, and ask a dependency about names through queries with input instead of remembering collections. `src/` was written by an agent; `clp/` is the test side. **`reference-check` is in use**: `stage1.ts` runs it in place of the hand-written check (see "Self-hosting" below). The other two are verified but not used by the framework. Regenerate with `pnpm -s run implement --specs packages/cli/self/specs --out packages/cli/self --agent '...'`; verify with `node packages/cli/self/clp/<name>.verify.ts`.
 - Run tests through `pnpm test` (explicit glob). A bare `node --test` executes every file under any `test/` directory, including fixtures and temporary work directories.
 - Tests: `example.test.ts` covers the example spec, IR output, and the loader / resolution / extraction / self-check diagnostics; `interpret.test.ts` the interpret step; the pipeline tests are split by topic so that `node --test` runs them in parallel — `loop.test.ts` (the three phases and their checks), `gates.test.ts` (target, restarts, mutation, assets, isolation), `repeat.test.ts` (repeated runs after a spec change), `layout.test.ts` (layouts and the workspace checks), `components.test.ts` (several components). They share `test/support.ts` (`harness(name)` gives each file its own work directory; never share one, a file's `after` hook deletes it) and use `test/fixtures/scripted-agent.ts` as a stand-in LLM. Update them when behaviour changes. A test must not edit a spec file and load it again in the same process (the module cache returns the old content): write the changed copy to a new directory.
 
@@ -77,7 +77,7 @@ The same thing goes by several names across the docs: `co-llm-piler` (repo), `cl
 | --- | --- |
 | `SPEC.md` | Concept and layer design, with the intended TypeScript schemas |
 | `PACKAGE.md` | Long-term monorepo layout and the Phase 1–4 roadmap |
-| `SELF_HOSTING.md` | Stage 0/1/2 bootstrap and fixed-point verification of the compiler |
+| `SELF_HOSTING.md` | Stage 0/1/2 bootstrap and fixed-point verification of the compiler (the original plan, written for a deterministic compiler; what exists today is described under "Self-hosting" in this file) |
 | `DISTRIBUTION.md` | How the `clp` CLI is built and shared; the most recent and most concrete doc |
 | `INCREMENTAL.md` | Using the framework repeatedly: new code, changed specs and legacy code as one flow; what is implemented and the design of what is not |
 | `OWNERSHIP.md` | Whose code is whose when components share production code: ownership is not recorded but decided by which component's tests execute the code; the writable scope and the mutation scope that follow |
@@ -141,6 +141,16 @@ Invariants to preserve when changing this:
 - Agent-facing text (`REQUEST.md`, check violations) is English; user-facing diagnostics are Japanese.
 
 Types vanish at runtime, so anything the IR or PBT needs must be declared as a value (the component) with the type derived from it — never the other way round.
+
+## Self-hosting
+
+The framework runs one of its own checks on code generated from its own spec. Keep these properties when extending it:
+
+- **Stage 0 stays.** `referenceDiagnostics` in `extract.ts` is the hand-written check; `extract(input)` uses it by default and stays synchronous. Stage 1 (`stage1References` in `stage1.ts`) is plugged in at the entry points (`compile.ts`, `loop.ts`) as `extract(spec, await references(spec))`. If the generated code cannot be loaded or throws, Stage 1 returns `undefined`, a warning is printed, and Stage 0 decides: the framework must be able to run in order to repair its own generated code. `CLP_STAGE=0` forces Stage 0.
+- **Stage 1 is used through the generated adapter contract** (`self/clp/reference-check.adapter.ts`), never by importing `self/src` directly. The contract follows from the spec, and the loop keeps adapter and production code consistent, so a regeneration that renames classes or methods cannot break the framework.
+- **Both stages receive the same events.** `referenceEvents` walks the spec and yields the component's own commands (`EnterCommand`, `AllowFrom`, `GoTo`, ...). The walk is glue without decisions and is shared; only the decisions differ between stages. User-facing wording (Japanese messages) is added in `extract.ts` from the returned `{ code, command, caseName, subject }`, never by generated code.
+- **`stage.test.ts` is the fixed point in miniature**: Stage 0 and Stage 1 must return the same diagnostics in the same order, for broken and for correct specs, and `compile.ts` must print the same output under both. Extend it whenever another part moves to Stage 1.
+- Before replacing a hand-written part, check that its spec is as precise as the code. `payload-check` is deliberately *not* in use: it compares kinds of values, while the hand-written check compares the values and enum members themselves, so replacing it would lose diagnostics.
 
 ## Decision-table cells that are never used
 

@@ -29,7 +29,8 @@ There is no build step. Node runs the `.ts` files directly.
 
 The repository contains one example, end to end: the spec of an order that is placed, paid, shipped, or
 cancelled (`specs/`), and the implementation an LLM agent wrote from it (`examples/checkout-ts/`).
-`examples/co-llm-piler/` describes parts of the framework itself in the same way.
+`packages/cli/self/` describes parts of the framework itself in the same way, and the framework runs on one of
+them (`examples/co-llm-piler` is a link to it).
 
 ### 1. Write the spec
 
@@ -405,8 +406,9 @@ actual:   state CANCELLED, effects []
   commands, queries and effects)
 - Shorthand for entries that are only a type (`isMonthEnd: "boolean"` instead of `output("boolean")`)
 - Using the answer of one query as the input of the next
-- Describing the framework itself in the framework (`examples/co-llm-piler`): so far its pipeline and two of
-  its checks
+- Describing more of the framework in the framework (`packages/cli/self`): so far its pipeline and two of its
+  checks are specified, and one check (references to undeclared states and effects) runs on the generated code,
+  with the hand-written one kept as the fallback it is compared against
 - Stopping after the design step so a person can review the skeleton before it is wired and implemented
 - Applying a spec to existing production code (legacy code): wiring and verification only, with mismatches
   reported to a person instead of being sent back to the agent (design notes in `INCREMENTAL.md`)
