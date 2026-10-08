@@ -63,7 +63,7 @@ class SpecError extends Error {
   }
 }
 
-// 意味の関数に書かれている定数。入力の生成に混ぜる。
+// 意味の関数に書かれている定数と、決定表の値。入力の生成に混ぜる。
 // 自由な文字列や、しきい値を宣言していない数値は、一様な乱数では関数の中の定数にまず当たらないため
 // （文字列を "Gold" と比べる条件は、"Gold" を生成しなければ一度も成り立たない）
 type Hints = { strings: string[]; numbers: number[] };
@@ -71,6 +71,13 @@ function literalsIn(...bindings: BoundSpecification[]): Hints {
   const strings = new Set<string>();
   const numbers = new Set<number>();
   for (const binding of bindings) {
+    // 決定表の値も混ぜる。意味の関数は表を引くだけで、しきい値（30 日、3 冊など）は関数の中に現れないことが多い
+    for (const table of Object.values(binding.component.decisions)) {
+      for (const cell of Object.values(table).flatMap((row) => Object.values(row))) {
+        if (typeof cell === "number") numbers.add(cell);
+        else if (typeof cell === "string") strings.add(cell);
+      }
+    }
     for (const fn of [binding.conditions, binding.calculations ?? {}, binding.invariants ?? {}].flatMap((group) => Object.values(group))) {
       const source = String(fn);
       for (const match of source.matchAll(/"((?:[^"\\\n]|\\.)*)"|'((?:[^'\\\n]|\\.)*)'/g)) strings.add(match[1] ?? match[2]);

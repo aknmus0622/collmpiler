@@ -68,6 +68,12 @@ export type Diagnostic = {
   message: string;
 };
 
+// 診断の場所の表示: コマンド、またはコマンドと場合。仕様の全体についての診断には、場所が無い
+export const whereOf = (diagnostic: { behavior: string; case: string }) => {
+  const where = [diagnostic.behavior, diagnostic.case].filter((part) => part !== "").join(".");
+  return where === "" ? "" : `${where}: `;
+};
+
 export const isReference = (value: unknown): value is Reference =>
   typeof value === "object" && value !== null && "$ref" in value && "path" in value;
 
@@ -323,7 +329,7 @@ export function extract(
   const model = input.model;
   const binding = input.binding;
   // 解釈が無い、または Layer 1 と合わない: 語彙が定まらないので、IR は作れない
-  if (input.layer1 && !binding) report("unbound-specification", "", "", "このコンポーネントの解釈 (interpretation) がありません");
+  if (input.layer1 && !binding) report("unbound-specification", "", "", "このコンポーネントの解釈 (interpretation) がありません。clp interpret で導いて、確定してください");
   for (const problem of input.problems ?? []) report("bad-interpretation", "", "", problem);
   if (input.stale) {
     report("stale-interpretation", "", "", "解釈を導いたあとで、Layer 1 が変わっています。clp interpret で導き直すか、解釈がいまも正しいことを確かめて clp interpret --accept を実行してください");

@@ -2,7 +2,7 @@ import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { resolveLayout, sourceFiles, workspaceOf } from "./layout.ts";
 import type { Workspace } from "./layout.ts";
-import { boundaryOf, extract, stableStringify } from "./extract.ts";
+import { boundaryOf, extract, stableStringify, whereOf } from "./extract.ts";
 import { mergeAssets } from "./assets.ts";
 import type { Asset } from "./assets.ts";
 import { entryGate, exitGate, verifyGate } from "./gates.ts";
@@ -109,7 +109,7 @@ export async function implement(options: ImplementOptions) {
     const { ir: extracted, diagnostics } = extract(spec, await references(spec));
     const errors = diagnostics.filter((d) => d.severity === "error");
     if (errors.length > 0) {
-      throw new Error(`仕様 (${name}) にエラーがあります:\n${errors.map((d) => `  ${d.behavior}.${d.case}: ${d.message}`).join("\n")}`);
+      throw new Error(`仕様 (${name}) にエラーがあります:\n${errors.map((d) => `  ${whereOf(d)}${d.message}`).join("\n")}`);
     }
     const ir = JSON.parse(stableStringify(extracted)) as Ir;
     requireModel(ir);

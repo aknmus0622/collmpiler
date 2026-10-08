@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { extract, stableStringify } from "../extract.ts";
+import { extract, stableStringify, whereOf } from "../extract.ts";
 import { listComponents, loadSpecs } from "../loader.ts";
 import { selfCheck } from "../runtime.ts";
 import { references } from "../stage1.ts";
@@ -35,7 +35,7 @@ for (const name of names) {
   // 名前の検査は、フレームワーク自身の仕様から生成したコード (Stage 1) で行う。使えなければ手書き (Stage 0)
   const { ir, diagnostics } = extract(spec, await references(spec));
   const tag = names.length > 1 ? `${name}: ` : "";
-  for (const d of diagnostics) console.error(`${d.severity}[${d.code}] ${tag}${d.behavior}.${d.case}: ${d.message}`);
+  for (const d of diagnostics) console.error(`${d.severity}[${d.code}] ${tag}${whereOf(d)}${d.message}`);
   if (diagnostics.some((d) => d.severity === "error")) process.exitCode = 1;
   irs[name] = ir;
 

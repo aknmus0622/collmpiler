@@ -308,6 +308,10 @@ natural language, which you must then also define under \`meanings.conditions\`.
   then make Layer 1 more precise.
 - Conditions that label the rows of the same decision table, or the cases of the same command, must never be
   true at the same time (\`otherwise\` covers "none of them").
+- \`onlyIf\` (and \`from\`) put a situation **outside** the specification: nothing about it is tested, and
+  the production code need not handle it. Use them only for situations that cannot arise or that someone else
+  rules out. When the prose says something is refused, not allowed, or has no effect, write that as an outcome
+  (a case under \`when\` with no \`goTo\` and no effects), so that the refusal itself is verified.
 - Calculations over money use whole numbers; apply the rounding the description states.
 - Do not change any other file, and do not read anything outside this directory.
 
