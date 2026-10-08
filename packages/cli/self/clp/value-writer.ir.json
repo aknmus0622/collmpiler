@@ -1,0 +1,166 @@
+{
+  "behaviors": [
+    {
+      "description": "A constant written in the specification. `kind` says what it is; `text` holds a string, `number` a number, `flag` a boolean. It is written as a constant with exactly the kind, text, number and flag it was given.",
+      "from": [
+        "READY"
+      ],
+      "name": "Constant",
+      "onlyIf": [],
+      "when": {
+        "otherwise": {
+          "effects": [
+            {
+              "name": "WriteConstant",
+              "payload": {
+                "flag": {
+                  "$ref": "input:flag"
+                },
+                "kind": {
+                  "$ref": "input:kind"
+                },
+                "number": {
+                  "$ref": "input:number"
+                },
+                "text": {
+                  "$ref": "input:text"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "description": "A reference to something the specification declares. `target` says what kind of thing. `name` is the thing's name; for a column of a decision table, `table` and `column` name it instead. It is written as a reference whose text is the reference text.",
+      "from": [
+        "READY"
+      ],
+      "name": "Reference",
+      "onlyIf": [],
+      "when": {
+        "otherwise": {
+          "effects": [
+            {
+              "name": "WriteReference",
+              "payload": {
+                "text": {
+                  "$ref": "calculation:referenceText"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "description": "One of the states listed by a reference to the state before the command. It is written as that state.",
+      "from": [
+        "READY"
+      ],
+      "name": "WasState",
+      "onlyIf": [],
+      "when": {
+        "otherwise": {
+          "effects": [
+            {
+              "name": "WriteWasState",
+              "payload": {
+                "state": {
+                  "$ref": "input:state"
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "decisions": {
+    "form": {
+      "rows": {
+        "The reference is to a calculation": {
+          "prefix": "calculation:"
+        },
+        "The reference is to a query answer": {
+          "prefix": "query:"
+        },
+        "The reference is to an input of the command": {
+          "prefix": "input:"
+        },
+        "The reference is to remembered data": {
+          "prefix": "data:"
+        },
+        "otherwise": {
+          "prefix": "decision:"
+        }
+      }
+    }
+  },
+  "descriptions": {
+    "component": "Writes the values of a specification into its intermediate representation, one value at a time. A constant is written as it is. A reference is written as one text. A reference to the state before a command lists states; they are handed over, and written, one at a time.",
+    "effects.WriteConstant": "A constant, as it was given.",
+    "effects.WriteReference": "A reference, as one text.",
+    "effects.WriteWasState": "One state of a reference to the state before the command."
+  },
+  "irVersion": 5,
+  "model": {
+    "calculations": {
+      "referenceText": {
+        "is": "The prefix the reference form gives, followed by what is referred to: the name, or, for a column of a decision table, the table, a dot, and the column. Nothing else is added and nothing is trimmed.",
+        "type": "string"
+      }
+    },
+    "commands": {
+      "Constant": {
+        "flag": "boolean",
+        "kind": [
+          "string",
+          "number",
+          "boolean"
+        ],
+        "number": "number",
+        "text": "string"
+      },
+      "Reference": {
+        "column": "string",
+        "name": "string",
+        "table": "string",
+        "target": [
+          "input",
+          "data",
+          "query",
+          "calculation",
+          "decision"
+        ]
+      },
+      "WasState": {
+        "state": "string"
+      }
+    },
+    "data": {},
+    "effects": {
+      "WriteConstant": {
+        "flag": "boolean",
+        "kind": [
+          "string",
+          "number",
+          "boolean"
+        ],
+        "number": "number",
+        "text": "string"
+      },
+      "WriteReference": {
+        "text": "string"
+      },
+      "WriteWasState": {
+        "state": "string"
+      }
+    },
+    "init": "READY",
+    "queries": {},
+    "states": [
+      "READY"
+    ]
+  }
+}

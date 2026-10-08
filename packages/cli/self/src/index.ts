@@ -44,3 +44,14 @@ export {
   kindFits,
 } from "./payload-check-decisions.ts";
 export { PayloadCheck } from "./payload-check.ts";
+export type {
+  Constant,
+  ConstantKind,
+  NamedTarget,
+  Reference,
+  ReferenceTarget,
+  ValueWriterState,
+} from "./value-writer-types.ts";
+export type { ValueOutput, ValueWriterDependencies } from "./value-writer-ports.ts";
+export { referencePrefix, referenceText } from "./value-writer-decisions.ts";
+export { ValueWriter } from "./value-writer.ts";
