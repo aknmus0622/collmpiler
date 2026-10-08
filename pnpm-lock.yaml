@@ -27,15 +27,6 @@ importers:
         specifier: workspace:*
         version: link:../../packages/cli
 
-  examples/co-llm-piler:
-    devDependencies:
-      '@clp/cli':
-        specifier: workspace:*
-        version: link:../../packages/cli
-      '@clp/core':
-        specifier: workspace:*
-        version: link:../../packages/core
-
   packages/cli:
     dependencies:
       '@clp/core':
