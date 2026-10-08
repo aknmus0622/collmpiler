@@ -77,15 +77,15 @@ The same thing goes by several names across the docs: `co-llm-piler` (repo), `cl
 | --- | --- |
 | `SPEC.md` | Concept and layer design, with the intended TypeScript schemas |
 | `PACKAGE.md` | Long-term monorepo layout and the Phase 1–4 roadmap |
-| `SELF_HOSTING.md` | Stage 0/1/2 bootstrap and fixed-point verification of the compiler (the original plan, written for a deterministic compiler; what exists today is described under "Self-hosting" in this file) |
+| `SELF_HOSTING.md` | Self-hosting as it is done here: what it means when the compiler is an LLM, Stage 0 / Stage 1, the three fixed-point checks, what is in use today, and how to move another part to Stage 1 |
 | `DISTRIBUTION.md` | How the `clp` CLI is built and shared; the most recent and most concrete doc |
 | `INCREMENTAL.md` | Using the framework repeatedly: new code, changed specs and legacy code as one flow; what is implemented and the design of what is not |
 | `OWNERSHIP.md` | Whose code is whose when components share production code: ownership is not recorded but decided by which component's tests execute the code; the writable scope and the mutation scope that follow |
 
-`DISTRIBUTION.md` is the most concrete on layout and distribution and **overrides `PACKAGE.md` and `SELF_HOSTING.md` where they conflict**; `SPEC.md` has been updated to match the code and is authoritative for the layers, the IR, and the LLM loop:
+`DISTRIBUTION.md` is the most concrete on layout and distribution and **overrides `PACKAGE.md` where they conflict**; `SPEC.md` has been updated to match the code and is authoritative for the layers, the IR, and the LLM loop:
 
 - Near-term layout is `DISTRIBUTION.md` §6, not the full `PACKAGE.md` tree. `plugins/` and `packages/compiler` are not to be created yet.
-- The self-hosting fixed-point check compares **IR and generated sources** (`DISTRIBUTION.md` §8), not `stage1.js` vs `stage2.js` as in `SELF_HOSTING.md`, because no `.js` is built.
+- The self-hosting fixed point is not a byte comparison of generated code (an LLM never writes the same code twice, and no `.js` is built). It is three checks (`SELF_HOSTING.md` §2): Stage 0 and Stage 1 make the same decisions; the deterministic artifacts (IR, generated test-side files) are byte-identical under either stage; and the framework, running on Stage 1, re-grades its own components and passes.
 - Open questions are tracked in `DISTRIBUTION.md` §9 (multi-step path exploration, value objects and constraints, how strict the thin-adapter check should be, agent isolation).
 
 ## Architecture

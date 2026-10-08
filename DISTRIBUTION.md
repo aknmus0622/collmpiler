@@ -257,25 +257,19 @@ CLI をどう配るかとは独立に、**生成された PBT コードの互換
 
 ---
 
-## 8. `SELF_HOSTING.md` への修正提案（前案から維持）
+## 8. セルフホストの不動点（`SELF_HOSTING.md` に反映済み）
 
-`SELF_HOSTING.md` は `diff ./stage1.js ./stage2.js` で不動点を検証する設計だが、
-そもそも**当面 `.js` をビルドしない**ため、この比較対象は存在しない。
+以前の `SELF_HOSTING.md` は `diff ./stage1.js ./stage2.js` で不動点を検証する設計だったが、
+**`.js` をビルドしない**ので、この比較対象は存在しない。さらに、本番コードを書くのは LLM なので、
+生成したコードそのもののバイト一致も成り立たない。
 
-検証したいのは「コンパイラ出力の決定性」なので、比較対象を **IR と生成ソース**に置き換える。
+そこで、不動点を次の3つに置き換えた（`SELF_HOSTING.md` §2 に書いてある）。
 
-```bash
-pnpm clp compile platform-specs/ -o stage1.ir.json
-pnpm clp generate --out stage1-src/
+* **判断の一致**: 同じ入力に対して、手書きの版 (Stage 0) と、自分の仕様から生成した版 (Stage 1) が、同じ判断を返す。
+* **決定的な生成物の一致**: IR と、生成するテスト側のファイルが、どちらの Stage で動かしてもバイト一致する。
+* **自分自身の検証**: Stage 1 の上で動くフレームワークが、自分のコンポーネントを採点し直して、合格する。
 
-node stage1-src/cli.ts compile platform-specs/ -o stage2.ir.json
-node stage1-src/cli.ts generate --out stage2-src/
-
-diff stage1.ir.json stage2.ir.json
-diff -r stage1-src/ stage2-src/
-```
-
-前提として、IR の JSON はキーをソートし、インデントと改行コードを固定すること（保険5）。
+決定的な生成物の一致の前提として、IR の JSON はキーをソートし、インデントと改行コードを固定すること（保険5）。
 
 ---
 
