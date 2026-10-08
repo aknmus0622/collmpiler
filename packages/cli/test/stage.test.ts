@@ -29,26 +29,24 @@ function broken() {
   const dir = mkdtempSync(join(tmpRoot, "s-"));
   writeFileSync(
     join(dir, "x.component.ts"),
-    `import { component, compose, from, goTo, input, interpretation, otherwise, when } from "@clp/core";
+    `import { component, emits, from, goTo, input, interpretation, otherwise, when } from "@clp/core";
 export const Thing = component({
   states: ["A", "B"],
   init: "A",
   effects: { Notify: input({}) },
   commands: {
-    Place: compose(from("A", "Z"), when("It is big", goTo("Y")), otherwise(goTo("B"))),
-    Back: compose(from("Q"), goTo("A")),
-    Stay: compose(from("B")),
+    Place: component(from("A", "Z"), when("It is big", goTo("Y")), otherwise(goTo("B"))),
+    Back: component(from("Q"), goTo("A")),
+    Stay: component(from("B")),
   },
 });
 export const Interpretation = interpretation(Thing, {
-  structure: {
-    commands: {
-      Place: { when: { "It is big": { effects: [{ Notify: {} }, { Refund: {} }] }, otherwise: { effects: [{ Audit: {} }] } } },
-      Back: { effects: [{ Refund: {} }] },
-      Stay: {},
-    },
-  } as any,
-  meanings: { conditions: { "It is big": () => true } } as any,
+  commands: {
+    Place: component(when("It is big", emits("Notify"), emits("Refund")), otherwise(emits("Audit"))),
+    Back: component(emits("Refund")),
+    Stay: component(),
+  },
+  meanings: { conditions: { "It is big": () => true } },
 });
 `,
   );
@@ -102,34 +100,31 @@ test("Stage 1: 値の直列化は、手書きの版 (Stage 0) と同じものを
   const dir = mkdtempSync(join(tmpRoot, "v-"));
   writeFileSync(
     join(dir, "x.component.ts"),
-    `import { asks, component, compose, decisionTable, description, goTo, input, interpretation, output, ref, typed } from "@clp/core";
+    `import { asks, component, decisionTable, description, emits, goTo, input, interpretation, onlyWhen, output, ref, set } from "@clp/core";
 const Size = decisionTable({ "It is big": { "count.max": 10, urgent: true }, otherwise: { "count.max": 1, urgent: false } });
 export const Thing = component({
   states: ["A", "B", "C D"],
   init: "A",
-  data: { memo: typed("string"), total: typed("number"), on: typed("boolean") },
-  queries: { flag: output("boolean"), lookUp: compose(input({ key: "string", depth: "integer" }), output("string")) },
+  data: { memo: "string", total: "number", on: "boolean" },
+  queries: { flag: "boolean", lookUp: component(input({ key: "string", depth: "integer" }), output("string")) },
   effects: { Notify: input({ text: "string", count: "integer", ratio: "number", sure: "boolean" }), Ping: input({}) },
   decisions: { "the size": Size },
-  calculations: { "sum:all": compose(description("the total"), output("integer")) },
-  commands: { Place: compose(input({ note: "string", n: "integer" }), goTo("B")), Back: compose(goTo("A")) },
+  calculations: { "sum:all": component(description("the total"), output("integer")) },
+  commands: { Place: component(input({ note: "string", n: "integer" }), goTo("B")), Back: component(goTo("A")) },
 });
 export const Interpretation = interpretation(Thing, {
-  structure: {
-    commands: {
-      Place: {
-        asks: { found: { lookUp: { key: ref.input("note"), depth: 3 } }, again: { lookUp: { key: "a:b.c", depth: ref.input("n") } } },
-        set: { memo: ref.query("found"), total: -0.5, on: false },
-        effects: [
-          { Notify: { text: "", count: ref.decision("the size", "count.max"), ratio: 1e21, sure: ref.decision("the size", "urgent") }, when: ref.was("A", "C D") },
-          { Notify: { text: ref.data("memo"), count: ref.calculation("sum:all"), ratio: ref.data("total"), sure: true }, when: ref.query("flag") },
-          { Ping: {}, when: "It is big" },
-        ],
-      },
-      Back: { effects: [{ Ping: {}, when: ref.was() }], set: { memo: " spaced  text " } },
-    },
-  } as any,
-  meanings: { conditions: { "It is big": () => true }, calculations: { "sum:all": () => 1 } } as any,
+  commands: {
+    Place: component(
+      asks("found", "lookUp", { key: ref.input("note"), depth: 3 }),
+      asks("again", "lookUp", { key: "a:b.c", depth: ref.input("n") }),
+      set({ memo: ref.query("found"), total: -0.5, on: false }),
+      emits("Notify", { text: "", count: ref.decision("the size", "count.max"), ratio: 1e21, sure: ref.decision("the size", "urgent") }, onlyWhen(ref.was("A", "C D"))),
+      emits("Notify", { text: ref.data("memo"), count: ref.calculation("sum:all"), ratio: ref.data("total"), sure: true }, onlyWhen(ref.query("flag"))),
+      emits("Ping", onlyWhen("It is big")),
+    ),
+    Back: component(emits("Ping", onlyWhen(ref.was())), set({ memo: " spaced  text " })),
+  },
+  meanings: { conditions: { "It is big": () => true }, calculations: { "sum:all": () => 1 } },
 });
 `,
   );
@@ -149,27 +144,27 @@ function payloads(effects: string) {
   const dir = mkdtempSync(join(tmpRoot, "p-"));
   writeFileSync(
     join(dir, "x.component.ts"),
-    `import { component, compose, decisionTable, description, goTo, input, interpretation, output, ref, typed } from "@clp/core";
+    `import { component, decisionTable, description, emits, goTo, input, integer, interpretation, number, output, ref } from "@clp/core";
 const Size = decisionTable({ "It is big": { count: 10, urgent: true, label: "big", gap: null }, otherwise: { count: 1, urgent: false, label: "small", gap: 99 } });
 export const Thing = component({
   states: ["A", "B"],
   init: "A",
-  data: { memo: typed("string"), level: typed(["low", "high"]), wide: typed(["low", "high", "top"]), amount: typed("integer"), ratio: typed("number") },
-  queries: { flag: output("boolean"), mode: output(["x", "y"]) },
+  data: { memo: "string", level: ["low", "high"], wide: ["low", "high", "top"], amount: "integer", ratio: "number" },
+  queries: { flag: "boolean", mode: ["x", "y"] },
   effects: {
     Notify: input({ text: "string", count: "integer" }),
     Grade: input({ level: ["low", "high"] }),
-    Weigh: input({ grams: { type: "integer", min: 0, max: 10 }, ratio: { type: "number", min: 0.5 } }),
+    Weigh: input({ grams: integer({ min: 0, max: 10 }), ratio: number({ min: 0.5 }) }),
     Mark: input({ done: "boolean" }),
     Ping: input({}),
   },
   decisions: { size: Size },
-  calculations: { title: compose(description("the memo, upper-cased"), output("string")) },
-  commands: { Place: compose(input({ note: "string", n: "integer" }), goTo("B")) },
+  calculations: { title: component(description("the memo, upper-cased"), output("string")) },
+  commands: { Place: component(input({ note: "string", n: "integer" }), goTo("B")) },
 });
 export const Interpretation = interpretation(Thing, {
-  structure: { commands: { Place: { effects: [${effects}] } } } as any,
-  meanings: { conditions: { "It is big": () => true }, calculations: { title: () => "t" } } as any,
+  commands: { Place: component(${effects}) },
+  meanings: { conditions: { "It is big": () => true }, calculations: { title: () => "t" } },
 });
 `,
   );
@@ -180,37 +175,37 @@ test("Stage 1: ペイロードの検査は、手書きの版 (Stage 0) と同じ
   // [副作用, Stage 0 が報告するはずのもの]。1つずつ、別の仕様として確かめる
   const cases: [string, string[]][] = [
     // 合っているもの
-    [`{ Notify: { text: ref.input("note"), count: ref.decision("size", "count") } }`, []],
-    [`{ Notify: { text: ref.data("level"), count: ref.input("n") } }`, []],                 // 列挙は文字列に入る
-    [`{ Grade: { level: "low" } }, { Grade: { level: ref.data("level") } }, { Ping: {} }`, []],
-    [`{ Weigh: { grams: 0, ratio: 0.5 } }, { Weigh: { grams: 10, ratio: 7 } }`, []],        // 範囲の端。整数は数値に入る
-    [`{ Weigh: { grams: ref.data("amount"), ratio: ref.data("amount") } }`, []],            // 型だけの値は、範囲を見ない
-    [`{ Mark: { done: ref.was("A") } }, { Mark: { done: ref.decision("size", "urgent") } }, { Mark: { done: ref.query("flag") } }`, []],
-    [`{ Notify: { text: "x", count: ref.decision("size", "gap") } }`, []],                 // null のセルは見ない
+    [`emits("Notify", { text: ref.input("note"), count: ref.decision("size", "count") })`, []],
+    [`emits("Notify", { text: ref.data("level"), count: ref.input("n") })`, []],                 // 列挙は文字列に入る
+    [`emits("Grade", { level: "low" }), emits("Grade", { level: ref.data("level") }), emits("Ping", {})`, []],
+    [`emits("Weigh", { grams: 0, ratio: 0.5 }), emits("Weigh", { grams: 10, ratio: 7 })`, []],        // 範囲の端。整数は数値に入る
+    [`emits("Weigh", { grams: ref.data("amount"), ratio: ref.data("amount") })`, []],            // 型だけの値は、範囲を見ない
+    [`emits("Mark", { done: ref.was("A") }), emits("Mark", { done: ref.decision("size", "urgent") }), emits("Mark", { done: ref.query("flag") })`, []],
+    [`emits("Notify", { text: "x", count: ref.decision("size", "gap") })`, []],                 // null のセルは見ない
     // 与えられていない、宣言されていない
-    [`{ Notify: { text: "x" } }`, ["missing-field:0:count"]],
-    [`{ Notify: {} }, { Ping: { extra: 1 } }`, ["missing-field:0:text", "missing-field:0:count", "bad-value:1:extra"]],
+    [`emits("Notify", { text: "x" })`, ["missing-field:0:count"]],
+    [`emits("Notify", {}), emits("Ping", { extra: 1 })`, ["missing-field:0:text", "missing-field:0:count", "bad-value:1:extra"]],
     // 値そのものが合わない
-    [`{ Notify: { text: "x", count: 1.5 } }`, ["bad-value:0:count"]],
-    [`{ Notify: { text: 1, count: "1" } }`, ["bad-value:0:text", "bad-value:0:count"]],
-    [`{ Grade: { level: "top" } }`, ["bad-value:0:level"]],
-    [`{ Mark: { done: "true" } }`, ["bad-value:0:done"]],
+    [`emits("Notify", { text: "x", count: 1.5 })`, ["bad-value:0:count"]],
+    [`emits("Notify", { text: 1, count: "1" })`, ["bad-value:0:text", "bad-value:0:count"]],
+    [`emits("Grade", { level: "top" })`, ["bad-value:0:level"]],
+    [`emits("Mark", { done: "true" })`, ["bad-value:0:done"]],
     // 範囲の外
-    [`{ Weigh: { grams: 11, ratio: 1 } }, { Weigh: { grams: -1, ratio: 0.25 } }`, ["bad-value:0:grams", "bad-value:1:grams", "bad-value:1:ratio"]],
+    [`emits("Weigh", { grams: 11, ratio: 1 }), emits("Weigh", { grams: -1, ratio: 0.25 })`, ["bad-value:0:grams", "bad-value:1:grams", "bad-value:1:ratio"]],
     // 決定表の列: 1つでも合わないセルがあれば、1回だけ報告する
-    [`{ Notify: { text: "x", count: ref.decision("size", "urgent") } }`, ["bad-value:0:count"]],
-    [`{ Grade: { level: ref.decision("size", "label") } }`, ["bad-value:0:level"]],
-    [`{ Weigh: { grams: ref.decision("size", "count"), ratio: 1 } }`, []],
-    [`{ Weigh: { grams: ref.decision("size", "gap"), ratio: 1 } }`, ["bad-value:0:grams"]],  // 99 は範囲の外
+    [`emits("Notify", { text: "x", count: ref.decision("size", "urgent") })`, ["bad-value:0:count"]],
+    [`emits("Grade", { level: ref.decision("size", "label") })`, ["bad-value:0:level"]],
+    [`emits("Weigh", { grams: ref.decision("size", "count"), ratio: 1 })`, []],
+    [`emits("Weigh", { grams: ref.decision("size", "gap"), ratio: 1 })`, ["bad-value:0:grams"]],  // 99 は範囲の外
     // 参照の型が合わない
-    [`{ Notify: { text: "x", count: ref.calculation("title") } }`, ["bad-value:0:count"]],
-    [`{ Notify: { text: ref.input("n"), count: ref.data("ratio") } }`, ["bad-value:0:text", "bad-value:0:count"]],
-    [`{ Grade: { level: ref.query("mode") } }, { Grade: { level: ref.data("wide") } }, { Grade: { level: ref.data("memo") } }`, ["bad-value:0:level", "bad-value:1:level", "bad-value:2:level"]],
-    [`{ Mark: { done: ref.data("amount") } }, { Notify: { text: "x", count: ref.was("A") } }`, ["bad-value:0:done", "bad-value:1:count"]],
+    [`emits("Notify", { text: "x", count: ref.calculation("title") })`, ["bad-value:0:count"]],
+    [`emits("Notify", { text: ref.input("n"), count: ref.data("ratio") })`, ["bad-value:0:text", "bad-value:0:count"]],
+    [`emits("Grade", { level: ref.query("mode") }), emits("Grade", { level: ref.data("wide") }), emits("Grade", { level: ref.data("memo") })`, ["bad-value:0:level", "bad-value:1:level", "bad-value:2:level"]],
+    [`emits("Mark", { done: ref.data("amount") }), emits("Notify", { text: "x", count: ref.was("A") })`, ["bad-value:0:done", "bad-value:1:count"]],
     // どこも指していない参照
-    [`{ Notify: { text: ref.input("nota"), count: ref.decision("weight", "count") } }`, ["bad-value:0:text", "bad-value:0:count"]],
+    [`emits("Notify", { text: ref.input("nota"), count: ref.decision("weight", "count") })`, ["bad-value:0:text", "bad-value:0:count"]],
     // 宣言されていない副作用は、ここでは見ない（名前の検査が報告する）
-    [`{ Refund: { amount: "lots" } }, { Notify: { text: "x" } }`, ["missing-field:1:count"]],
+    [`emits("Refund", { amount: "lots" }), emits("Notify", { text: "x" })`, ["missing-field:1:count"]],
   ];
   for (const [effects, expected] of cases) {
     const spec = await loadSpecs(payloads(effects));

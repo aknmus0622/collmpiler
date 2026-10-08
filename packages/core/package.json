@@ -4,5 +4,7 @@
   "private": true,
   "type": "module",
   "exports": "./index.ts",
-  "engines": { "node": ">=22.18" }
+  "engines": {
+    "node": ">=22.18"
+  }
 }

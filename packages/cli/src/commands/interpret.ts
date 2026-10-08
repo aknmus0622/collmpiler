@@ -24,7 +24,7 @@ clp interpret --accept [--specs <dir>] [--component <name>]
 
 // 食い違いの観点の表示
 const label = (aspect: string) =>
-  aspect === "runs" ? "実行できるかどうか" : aspect === "state" ? "遷移先" : aspect === "order" ? "副作用の順序" : `副作用 ${aspect.slice("effect:".length)}`;
+  aspect === "runs" ? "実行できるかどうか" : aspect === "state" ? "遷移先" : aspect === "output" ? "返す値" : aspect === "order" ? "副作用の順序" : `副作用 ${aspect.slice("effect:".length)}`;
 
 export async function main(args: string[]): Promise<void> {
 const { values } = parseArgs({

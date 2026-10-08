@@ -1,4 +1,4 @@
-import { asks, component, compose, description, does, from, goTo, input, otherwise, output, ref, typed, when } from "@clp/core";
+import { asks, component, description, does, from, goTo, input, otherwise, output, ref, when } from "@clp/core";
 import { ConstantFit, TypeFit } from "./payload-check.decisions.ts";
 
 const FieldKind = ["boolean", "integer", "number", "string", "enum"] as const;
@@ -33,24 +33,24 @@ export const PayloadCheck = component({
   init: "OUTSIDE",
 
   data: {
-    effect: compose(description("The name of the effect being walked."), typed("string")),
-    field: compose(description("The name of the given field being walked."), typed("string")),
+    effect: component(description("The name of the effect being walked."), "string"),
+    field: component(description("The name of the given field being walked."), "string"),
   },
 
   queries: {
-    effectDeclared: compose(description("Whether the specification declares an effect of this name."), input({ name: "string" }), output("boolean")),
-    fieldDeclared: compose(description("Whether that effect declares a field of this name."), input({ effect: "string", field: "string" }), output("boolean")),
-    fieldGiven: compose(description("Whether the specification gives a value for that field of that effect."), input({ effect: "string", field: "string" }), output("boolean")),
-    fieldKind: compose(description("What that field takes. \"enum\" means one of a fixed set of strings."), input({ effect: "string", field: "string" }), output(FieldKind)),
-    memberOf: compose(description("Whether this string is in the fixed set that field takes."), input({ effect: "string", field: "string", value: "string" }), output("boolean")),
-    hasMinimum: compose(description("Whether that field has a minimum."), input({ effect: "string", field: "string" }), output("boolean")),
-    minimum: compose(description("That field's minimum. Meaningful only if it has one."), input({ effect: "string", field: "string" }), output("number")),
-    hasMaximum: compose(description("Whether that field has a maximum."), input({ effect: "string", field: "string" }), output("boolean")),
-    maximum: compose(description("That field's maximum. Meaningful only if it has one."), input({ effect: "string", field: "string" }), output("number")),
+    effectDeclared: component(description("Whether the specification declares an effect of this name."), input({ name: "string" }), output("boolean")),
+    fieldDeclared: component(description("Whether that effect declares a field of this name."), input({ effect: "string", field: "string" }), output("boolean")),
+    fieldGiven: component(description("Whether the specification gives a value for that field of that effect."), input({ effect: "string", field: "string" }), output("boolean")),
+    fieldKind: component(description("What that field takes. \"enum\" means one of a fixed set of strings."), input({ effect: "string", field: "string" }), output(FieldKind)),
+    memberOf: component(description("Whether this string is in the fixed set that field takes."), input({ effect: "string", field: "string", value: "string" }), output("boolean")),
+    hasMinimum: component(description("Whether that field has a minimum."), input({ effect: "string", field: "string" }), output("boolean")),
+    minimum: component(description("That field's minimum. Meaningful only if it has one."), input({ effect: "string", field: "string" }), output("number")),
+    hasMaximum: component(description("Whether that field has a maximum."), input({ effect: "string", field: "string" }), output("boolean")),
+    maximum: component(description("That field's maximum. Meaningful only if it has one."), input({ effect: "string", field: "string" }), output("number")),
   },
 
   effects: {
-    ReportDiagnostic: compose(
+    ReportDiagnostic: component(
       description("A mismatch found in the effect being walked, for the named field."),
       input({ code: ["missing-field", "bad-value"], effect: "string", field: "string" }),
     ),
@@ -59,29 +59,29 @@ export const PayloadCheck = component({
   decisions: { constantFit: ConstantFit, typeFit: TypeFit },
 
   commands: {
-    EnterEffect: compose(
+    EnterEffect: component(
       description("The walk enters an effect and remembers its name."),
       input({ name: "string" }),
       from("OUTSIDE"),
-      asks({ declared: { effectDeclared: { name: ref.input("name") } } }),
+      asks("declared", "effectDeclared", { name: ref.input("name") }),
       when("The entered effect is not declared", goTo("IN_UNKNOWN_EFFECT")),
       otherwise(goTo("IN_EFFECT")),
     ),
 
-    DeclaredField: compose(
+    DeclaredField: component(
       description("A field the effect being walked declares. The walk stays where it is."),
       input({ name: "string" }),
       from("IN_EFFECT", "IN_UNKNOWN_EFFECT"),
-      asks({ given: { fieldGiven: { effect: ref.data("effect"), field: ref.input("name") } } }),
+      asks("given", "fieldGiven", { effect: ref.data("effect"), field: ref.input("name") }),
       when("The effect is declared, and the specification gives no value for the declared field", does("A missing-field diagnostic is reported for the effect and that field.")),
       otherwise(),
     ),
 
-    GivenField: compose(
+    GivenField: component(
       description("A field the specification gives to the effect being walked. What is known about its value follows."),
       input({ name: "string" }),
       from("IN_EFFECT", "IN_FIELD", "IN_SETTLED_FIELD", "IN_UNKNOWN_EFFECT"),
-      asks({ declared: { fieldDeclared: { effect: ref.data("effect"), field: ref.input("name") } } }),
+      asks("declared", "fieldDeclared", { effect: ref.data("effect"), field: ref.input("name") }),
       when(
         "The effect is declared but does not declare the given field",
         goTo("IN_SETTLED_FIELD"),
@@ -92,21 +92,19 @@ export const PayloadCheck = component({
       otherwise(),
     ),
 
-    Constant: compose(
+    Constant: component(
       description(
         "A concrete value for the field being walked. `kind` says what it is. `text` is the value when it is a string, " +
           "and `number` is the value when it is an integer or a number; otherwise they carry nothing.",
       ),
       input({ kind: ConstantKind, text: "string", number: "number" }),
       from("IN_FIELD", "IN_SETTLED_FIELD", "IN_UNKNOWN_EFFECT"),
-      asks({
-        takes: { fieldKind: here },
-        inSet: { memberOf: { ...here, value: ref.input("text") } },
-        bounded: { hasMinimum: here },
-        lowest: { minimum: here },
-        capped: { hasMaximum: here },
-        highest: { maximum: here },
-      }),
+      asks("takes", "fieldKind", here),
+      asks("inSet", "memberOf", { ...here, value: ref.input("text") }),
+      asks("bounded", "hasMinimum", here),
+      asks("lowest", "minimum", here),
+      asks("capped", "hasMaximum", here),
+      asks("highest", "maximum", here),
       when(
         "The field's value is still being checked, and the constant does not fit the field",
         goTo("IN_SETTLED_FIELD"),
@@ -115,11 +113,11 @@ export const PayloadCheck = component({
       otherwise(),
     ),
 
-    Typed: compose(
+    Typed: component(
       description("A value for the field being walked that is known only by its type."),
       input({ type: ConstantKind }),
       from("IN_FIELD", "IN_SETTLED_FIELD", "IN_UNKNOWN_EFFECT"),
-      asks({ takes: { fieldKind: here } }),
+      asks("takes", "fieldKind", here),
       when(
         "The field's value is still being checked, and a value of that type does not fit the field",
         goTo("IN_SETTLED_FIELD"),
@@ -128,7 +126,7 @@ export const PayloadCheck = component({
       otherwise(),
     ),
 
-    Unresolved: compose(
+    Unresolved: component(
       description("The value given for the field being walked is a reference that points at nothing."),
       from("IN_FIELD", "IN_SETTLED_FIELD", "IN_UNKNOWN_EFFECT"),
       when(
@@ -139,6 +137,6 @@ export const PayloadCheck = component({
       otherwise(),
     ),
 
-    LeaveEffect: compose(from("IN_EFFECT", "IN_FIELD", "IN_SETTLED_FIELD", "IN_UNKNOWN_EFFECT"), goTo("OUTSIDE")),
+    LeaveEffect: component(from("IN_EFFECT", "IN_FIELD", "IN_SETTLED_FIELD", "IN_UNKNOWN_EFFECT"), goTo("OUTSIDE")),
   },
 });

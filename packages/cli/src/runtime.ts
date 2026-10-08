@@ -2,7 +2,7 @@ import { isDeepStrictEqual, parseArgs } from "node:util";
 import fc from "fast-check";
 import { activate, matchCondition } from "@clp/core";
 import type { BoundSpecification, FieldSchema } from "@clp/core";
-import { isReference } from "./extract.ts";
+import { isRecordOutput, isReference, respondedValues } from "./extract.ts";
 import type { Reference, SpecInput, SpecModel, SpecValue } from "./extract.ts";
 import { loadSpecs } from "./loader.ts";
 import { conforms, isEnum, isNumberSchema } from "./schema.ts";
@@ -18,14 +18,16 @@ export type Ports = { queries: Record<string, Fn>; effects: Record<string, Fn> }
 export type Adapter = {
   setupIsolation(ports: any): Promise<void>;
   teardownIsolation(): Promise<void>;
-  executeCommand(command: any): Promise<void>;
+  // 返すものの形を宣言したコマンドは、その値を返す
+  executeCommand(command: any): Promise<unknown>;
   getCurrentState(): Promise<unknown>;
 };
 
 type Values = Record<string, unknown>;
 // answers: 引数つきの問い合わせの答え。問い合わせごとに、引数から答えを決める関数（同じ引数には同じ答え）
 type RawStep = { pick: number; inputs: Record<string, Values>; queries: Values; answers: Record<string, (input: Values) => unknown> };
-type Observation = { state: unknown; effects: unknown };
+// output は、返すものの形を宣言したコマンドだけが持つ
+type Observation = { state: unknown; effects: unknown; output?: unknown };
 
 // data は、そのコマンドの実行前に部品が覚えているはずのデータ。case は成立した条件（無ければ "otherwise"）
 // asks: そのコマンドで尋ねること（付けた名前、問い合わせ、引数）と、その答え
@@ -142,6 +144,26 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
     { minLength: 1, maxLength: MAX_STEPS },
   );
 
+  // 意味の関数に渡す状態。仕様に無い名前を読んだら、誤りとして止める。
+  // 以前は、意味の関数の引数に型を付けて、名前の書き間違いを型エラーにしていた。型の検査を軽くした代わりに、ここで確かめる
+  const known = new Set<string>([
+    "status",
+    ...Object.keys(model.data),
+    ...Object.entries(model.queries).filter(([, query]) => Object.keys(query.input).length === 0).map(([name]) => name),
+    ...Object.values(model.commands).flatMap((fields) => Object.keys(fields)),
+    ...Object.values(input.behaviors).flatMap((behavior) => Object.keys(behavior.asks ?? {})),
+  ]);
+  const IGNORED = new Set(["toJSON", "then", "constructor", "valueOf", "toString", "inspect", "nodeType", "asymmetricMatch"]);
+  const guarded = <T extends object>(state: T): T =>
+    new Proxy(state, {
+      get(target, key, receiver) {
+        if (typeof key === "string" && !known.has(key) && !IGNORED.has(key) && !(key in target)) {
+          throw new Error(`意味の関数が、仕様に無い名前 "${key}" を読みました（data、引数の無い問い合わせ、コマンドの入力、asks で付けた名前の、どれでもありません）`);
+        }
+        return Reflect.get(target, key, receiver);
+      },
+    });
+
   const start = () => ({
     status: model.init,
     // 未設定のデータも undefined のキーとして持つ
@@ -152,7 +174,7 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
     for (const name of model.invariants ?? []) {
       const invariant = binding.invariants?.[name];
       if (!invariant) throw new SpecError(`不変条件 "${name}" の判定が、解釈にありません`, steps);
-      if (!invariant({ status: state.status, ...state.data })) {
+      if (!invariant(guarded({ status: state.status, ...state.data }))) {
         throw new SpecError(`不変条件が破れました: "${name}" (状態 ${state.status}, データ ${JSON.stringify(state.data)})`, steps);
       }
     }
@@ -205,13 +227,14 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
           return { name: alias, query: asked.query, input: args, answer: answer(args) };
         });
       };
-      const contextOf = (name: string) => ({
-        status: state.status,
-        ...state.data,
-        ...raw.queries,
-        ...raw.inputs[name],
-        ...Object.fromEntries(askedBy(name).map((asked) => [asked.name, asked.answer])),
-      });
+      const contextOf = (name: string) =>
+        guarded({
+          status: state.status,
+          ...state.data,
+          ...raw.queries,
+          ...raw.inputs[name],
+          ...Object.fromEntries(askedBy(name).map((asked) => [asked.name, asked.answer])),
+        });
       const enabled = commands.filter((name) => {
         const behavior = input.behaviors[name];
         return (
@@ -268,9 +291,29 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
         }
       }
 
+      // 返す値
+      const declared = model.outputs?.[command];
+      let output: unknown;
+      if (declared !== undefined) {
+        const responded = respondedValues(outcome.responds);
+        if (outcome.responds === undefined) throw new Error(`コマンド ${command} の、この場合に返す値 (responds) がありません`);
+        const valueOf = (value: SpecValue) => ((value as unknown) === null ? null : resolve(value, context, command));
+        if (isRecordOutput(declared)) {
+          const fields = Object.fromEntries(responded.map(([field, value]) => [field, valueOf(value)]));
+          for (const [field, schema] of Object.entries(declared.record)) {
+            const fits = fields[field] === null ? declared.optional?.includes(field) === true : conforms(schema, fields[field]);
+            if (!fits) throw new Error(`responds: ${field} = ${JSON.stringify(fields[field])} が宣言した型・範囲に合いません`);
+          }
+          output = fields;
+        } else {
+          output = valueOf(responded[0][1]);
+          if (!conforms(declared as FieldSchema, output)) throw new Error(`responds: ${JSON.stringify(output)} が宣言した型・範囲に合いません`);
+        }
+      }
+
       const after = { status: target, data: { ...state.data, ...set } as Values };
       checkInvariants(after, steps);
-      return { step, expected: plain({ state: target, effects }) as Observation, after };
+      return { step, expected: plain({ state: target, effects, ...(declared === undefined ? {} : { output }) }) as Observation, after };
     } catch (error) {
       throw error instanceof SpecError ? error : new SpecError(messageOf(error), steps);
     }
@@ -314,6 +357,7 @@ export async function selfCheck(
 // コマンドと観点の組ごとに、食い違いが起きる最短のコマンド列を1つ返す。観点は:
 //   runs            … 実行できるかどうか（片方だけが実行できる、片方だけが仕様の誤りになる）
 //   state           … 遷移先
+//   output          … 返す値
 //   effect:<名前>   … その副作用を起こすかどうかと、その値
 //   order           … 副作用の順序（起こす副作用と値は同じで、並びだけが違う）
 // 観点を分けるのは、1つのコマンドにあいまいな所が複数あっても、それぞれを報告するためである
@@ -352,6 +396,7 @@ export async function compareSpecs(first: SpecInput, second: SpecInput, params: 
     }
     const found: string[] = [];
     if (x.result.state !== y.result.state) found.push("state");
+    if (!isDeepStrictEqual(x.result.output, y.result.output)) found.push("output");
     const [left, right] = [x.result.effects as Recorded[], y.result.effects as Recorded[]];
     const of = (effects: Recorded[], name: string) => effects.filter((effect) => effect.name === name);
     for (const name of new Set([...left, ...right].map((effect) => effect.name))) {
@@ -383,7 +428,7 @@ export async function compareSpecs(first: SpecInput, second: SpecInput, params: 
     return undefined;
   };
 
-  const aspects = ["runs", "state", ...Object.keys(first.model.effects).sort().map((name) => `effect:${name}`), "order"];
+  const aspects = ["runs", "state", "output", ...Object.keys(first.model.effects).sort().map((name) => `effect:${name}`), "order"];
   const differences: Difference[] = [];
   for (const command of a.commands) {
     for (const aspect of aspects) {
@@ -579,10 +624,12 @@ export async function check(
           current = planned.step;
           recorded = [];
           misasked = undefined;
-          await adapter.executeCommand({ name: current.command, input: structuredClone(current.input) });
+          const returned = await adapter.executeCommand({ name: current.command, input: structuredClone(current.input) });
           // 本番コードが例外を握りつぶしていても、仕様に無い問い合わせは不合格にする
           if (misasked) return { steps, expected, actual: { error: misasked } };
-          const actual = plain({ state: await adapter.getCurrentState(), effects: recorded });
+          // 返した値を比べるのは、返すものの形を宣言したコマンドだけ
+          const answered = "output" in expected ? { output: returned === undefined ? null : returned } : {};
+          const actual = plain({ state: await adapter.getCurrentState(), effects: recorded, ...answered });
           if (!isDeepStrictEqual(expected, actual)) return { steps, expected, actual };
           state = planned.after;
         }

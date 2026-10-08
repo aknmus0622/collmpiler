@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { posix, relative, sep } from "node:path";
 import type { FieldSchema } from "@clp/core";
-import { stableStringify } from "./extract.ts";
+import { isRecordOutput, stableStringify } from "./extract.ts";
 import type { SpecModel } from "./extract.ts";
 import { CONTROL_DIR, DEFAULT_SOURCE_DIR, dirFrom, importPath, testsDirOf } from "./layout.ts";
 import type { Workspace } from "./layout.ts";
@@ -67,6 +67,25 @@ export function generateContract(ir: Ir): string {
     return `${name}(${Object.keys(input).length > 0 ? `input: ${shape(input)}` : ""}): ${fieldType(output)}`;
   });
   const effects = Object.keys(model.effects).sort().map((name) => `${name}(payload: ${shape(model.effects[name])}): void`);
+  // コマンドが返すもの。返すコマンドが無ければ、契約は以前のまま
+  const outputs = Object.keys(model.outputs ?? {}).sort().map((name) => {
+    const output = model.outputs![name];
+    if (!isRecordOutput(output)) return `${name}: ${fieldType(output as FieldSchema)}`;
+    const fields = Object.keys(output.record).sort().map((field) => `${field}: ${fieldType(output.record[field])}${output.optional?.includes(field) ? " | null" : ""}`);
+    return `${name}: { ${fields.join("; ")} }`;
+  });
+  const results =
+    outputs.length === 0
+      ? ""
+      : `/**
+ * What a command answers with. Return it from \`executeCommand\`; it is compared with the specification.
+ * A field typed \`| null\` is \`null\` when the command has no value for it. Commands not listed here answer nothing.
+ */
+export type CommandOutput = {
+${outputs.map((line) => `  ${line};`).join("\n")}
+};
+
+`;
 
   return `${header(ir)}
 export type StateName = ${union(model.states)};
@@ -75,7 +94,7 @@ export type StateName = ${union(model.states)};
 export type Command =
 ${behaviors.map((b) => `  | { name: ${JSON.stringify(b.name)}; input: ${shape(model.commands[b.name] ?? {})} }`).join("\n")};
 
-/**
+${results}/**
  * Stand-ins for everything the system depends on. The test harness owns them; connect them to
  * whatever seams your production code has.
  */
@@ -98,7 +117,7 @@ export interface TargetSystemAdapter {
   /** Called after each trial, pass or fail. Discard everything the trial created. */
   teardownIsolation(): Promise<void>;
   /** Execute one command. A trial executes several commands in sequence on the same system. */
-  executeCommand(command: Command): Promise<void>;
+  executeCommand(command: Command): Promise<${outputs.length === 0 ? "void" : "CommandOutput[keyof CommandOutput] | void"}>;
   /** The current state of the system. */
   getCurrentState(): Promise<StateName>;
 }

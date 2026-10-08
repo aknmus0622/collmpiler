@@ -1,4 +1,5 @@
-import type { BoundSpecification, Constant, Declaration, FieldSchema, Fields, Table } from "@clp/core";
+import type { BoundSpecification, Constant, Declaration, FieldSchema, Fields, OutputSchema, Table } from "@clp/core";
+import { relative } from "node:path";
 import type { Asset } from "./assets.ts";
 import { compatible, conforms, describe, isEnum, isNumberSchema } from "./schema.ts";
 
@@ -22,6 +23,8 @@ export type SpecModel = {
   queries: Record<string, { input: Fields; output: FieldSchema }>;
   // 副作用の名前 → フィールド
   effects: Record<string, Fields>;
+  // コマンドの名前 → 返すものの形。返すコマンドがあるときだけ持つ
+  outputs?: Record<string, OutputSchema>;
   // 計算の名前 → 式を述べる文と、結果の型
   calculations?: Record<string, { is: string; type: FieldSchema }>;
   invariants?: readonly string[];
@@ -34,7 +37,8 @@ export type SpecEffect = { name: string; payload: Record<string, SpecValue>; whe
 // goTo が無ければ、状態は変わらない
 // 尋ねること: どの問い合わせを、どの引数で。答えは、付けた名前で読む
 export type SpecAsk = { query: string; input: Record<string, SpecValue> };
-export type SpecOutcome = { goTo?: string; does?: string; effects: SpecEffect[]; set: Record<string, SpecValue> };
+// responds: コマンドが返す値。値1つか、{ フィールド: 値 }
+export type SpecOutcome = { goTo?: string; does?: string; responds?: SpecValue | Record<string, SpecValue>; effects: SpecEffect[]; set: Record<string, SpecValue> };
 
 export type SpecInput = {
   // コンポーネントの名前 (order など)
@@ -52,6 +56,8 @@ export type SpecInput = {
   binding?: BoundSpecification;
   // Layer 1 と解釈が合わない点
   problems?: string[];
+  // 木の検査で見つかったこと（次の書き方で書かれた仕様）。at は、その節を書いた場所
+  grammar?: { code: string; message: string; at?: { file: string; line: number } }[];
   // 解釈を導いたあとで、Layer 1 が変わっている
   stale?: boolean;
   // コンポーネントの assets に宣言された添付資料（ファイルは内容を読み込んだもの）。IR には含めない
@@ -165,10 +171,21 @@ export function* writeEvents(value: SpecValue): Generator<WriteEvent> {
 // IR に書く値を、置き場所の名前と一緒に並べる（尋ねることの引数、副作用のペイロードと when、覚えるデータ）
 const SLOT = {
   ask: (command: string, alias: string, field: string) => `${command}|asks|${alias}|${field}`,
+  // field が "" なら、値1つの結果
+  responds: (command: string, caseName: string, field: string) => `${command}|${caseName}|responds|${field}`,
   payload: (command: string, caseName: string, index: number, field: string) => `${command}|${caseName}|effects|${index}|${field}`,
   when: (command: string, caseName: string, index: number) => `${command}|${caseName}|effects|${index}|when`,
   set: (command: string, caseName: string, field: string) => `${command}|${caseName}|set|${field}`,
 };
+// 返す値を、[フィールド, 値] の並びにする。値1つの結果は、フィールドを "" とする
+export const isRecordOutput = (schema: OutputSchema | undefined): schema is { record: Fields; optional?: readonly string[] } =>
+  typeof schema === "object" && schema !== null && "record" in schema;
+export function respondedValues(responds: SpecOutcome["responds"]): [string, SpecValue][] {
+  if (responds === undefined) return [];
+  if (typeof responds === "object" && responds !== null && !("$ref" in responds)) return Object.entries(responds as Record<string, SpecValue>);
+  return [["", responds as SpecValue]];
+}
+
 export function* valuesToWrite(input: SpecInput): Generator<[slot: string, value: SpecValue]> {
   for (const [command, behavior] of Object.entries(input.behaviors)) {
     for (const [alias, asked] of Object.entries(behavior.asks ?? {})) {
@@ -180,6 +197,7 @@ export function* valuesToWrite(input: SpecInput): Generator<[slot: string, value
         if (effect.when !== undefined && typeof effect.when !== "string") yield [SLOT.when(command, caseName, index), effect.when];
       }
       for (const [field, value] of Object.entries(outcome.set)) yield [SLOT.set(command, caseName, field), value];
+      for (const [field, value] of respondedValues(outcome.responds)) if ((value as unknown) !== null) yield [SLOT.responds(command, caseName, field), value];
     }
   }
 }
@@ -330,6 +348,9 @@ export function extract(
   const binding = input.binding;
   // 解釈が無い、または Layer 1 と合わない: 語彙が定まらないので、IR は作れない
   if (input.layer1 && !binding) report("unbound-specification", "", "", "このコンポーネントの解釈 (interpretation) がありません。clp interpret で導いて、確定してください");
+  for (const found of input.grammar ?? []) {
+    report(found.code, "", "", `${found.at ? `${relative(process.cwd(), found.at.file)}:${found.at.line}: ` : ""}${found.message}`);
+  }
   for (const problem of input.problems ?? []) report("bad-interpretation", "", "", problem);
   if (input.stale) {
     report("stale-interpretation", "", "", "解釈を導いたあとで、Layer 1 が変わっています。clp interpret で導き直すか、解釈がいまも正しいことを確かめて clp interpret --accept を実行してください");
@@ -412,7 +433,7 @@ export function extract(
         if (typeof effect.when === "string") condition(name, caseName, effect.when);
         else if (effect.when) {
           const problem = mismatch(input, name, effect.when, "boolean");
-          if (problem) report("bad-value", name, caseName, `${effect.name} の when: ${problem}`);
+          if (problem) report("bad-value", name, caseName, `${effect.name} の onlyWhen: ${problem}`);
         }
         return {
           name: effect.name,
@@ -426,9 +447,41 @@ export function extract(
         if (problem) report("bad-value", name, caseName, `set.${field}: ${problem}`);
       }
 
+      // 返す値: 返すものの形を宣言したコマンドは、どの場合にも返す値が要る
+      const output = model.outputs?.[name];
+      const responded = respondedValues(outcome.responds);
+      if (output === undefined) {
+        if (outcome.responds !== undefined) report("bad-response", name, caseName, `コマンド ${name} は、返すものの形 (output) を宣言していないので、responds は書けません`);
+      } else if (outcome.responds === undefined) {
+        report("missing-response", name, caseName, `コマンド ${name} は output を宣言していますが、この場合に返す値 (responds) がありません`);
+      } else if (isRecordOutput(output)) {
+        const given = new Map(responded);
+        if (given.has("")) report("bad-response", name, caseName, "responds: 返すものはフィールドの組です。responds({ フィールド: 値 }) と書いてください");
+        for (const [field, schema] of Object.entries(output.record)) {
+          if (given.has("")) break;
+          if (!given.has(field)) report("missing-field", name, caseName, `responds に、フィールド "${field}" がありません`);
+          else if ((given.get(field) as unknown) === null) {
+            if (!output.optional?.includes(field)) report("bad-value", name, caseName, `responds.${field}: null を返せるのは、optional(...) と宣言したフィールドだけです`);
+          } else {
+            const problem = mismatch(input, name, given.get(field)!, schema);
+            if (problem) report("bad-value", name, caseName, `responds.${field}: ${problem}`);
+          }
+        }
+        for (const field of given.keys()) {
+          if (field !== "" && !(field in output.record)) report("bad-value", name, caseName, `responds.${field}: "${field}" は、output のフィールドにありません`);
+        }
+      } else if (responded.length !== 1 || responded[0][0] !== "") {
+        report("bad-response", name, caseName, "responds: 返すものは値1つです。responds(値) と書いてください");
+      } else {
+        const problem = mismatch(input, name, responded[0][1], output as FieldSchema);
+        if (problem) report("bad-value", name, caseName, `responds: ${problem}`);
+      }
+      const written = responded.map(([field, value]) => [field, (value as unknown) === null ? null : write(SLOT.responds(name, caseName, field), value)] as const);
+
       when[caseName] = {
         ...(outcome.goTo === undefined ? {} : { goTo: outcome.goTo }),
         ...(outcome.does === undefined ? {} : { does: outcome.does }),
+        ...(outcome.responds === undefined ? {} : { responds: written.length === 1 && written[0][0] === "" ? written[0][1] : Object.fromEntries(written) }),
         effects,
         ...(Object.keys(outcome.set).length > 0
           ? { set: Object.fromEntries(Object.entries(outcome.set).map(([field, value]) => [field, write(SLOT.set(name, caseName, field), value)])) }
@@ -471,8 +524,8 @@ export function extract(
 
 // 境界: アダプターの契約を決める部分（状態・コマンドと入力・問い合わせ・副作用）
 export const boundaryOf = (ir: { model?: Partial<SpecModel> }) => {
-  const { init, states, commands, queries, effects } = ir.model ?? {};
-  return stableStringify({ init, states, commands, queries, effects });
+  const { init, states, commands, queries, effects, outputs } = ir.model ?? {};
+  return stableStringify({ init, states, commands, queries, effects, ...(outputs ? { outputs } : {}) });
 };
 
 // キーをソートし、インデントと改行を固定する（出力の決定性）

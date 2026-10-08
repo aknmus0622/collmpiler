@@ -79,6 +79,10 @@ The IR describes one component by its boundary.
     \`when\` is performed only if that holds; \`when\` is either a condition sentence or a reference to a
     boolean value.
   - \`set\`: the data to remember.
+  - \`responds\` (if present): what the command answers with, given back to whoever executed it. It is a
+    single value, or one value per field; \`null\` means the command has no value for that field in this
+    case. \`model.outputs\` gives the shape of the answer for each command that has one (\`record\` lists
+    the fields, \`optional\` those that can be \`null\`). A command not listed there answers nothing.
 - Values inside an outcome are constants or references:
   - \`{"$ref": "input:<field>"}\`, \`{"$ref": "data:<field>"}\`, \`{"$ref": "query:<name>"}\`: that command
     input, remembered field, or query answer (\`<name>\` is a query without input, or a name given in \`asks\`).

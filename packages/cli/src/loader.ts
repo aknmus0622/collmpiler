@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { BINDING, COMPONENT, activate } from "@clp/core";
+import { BINDING, COMPONENT, activate, grammarOf, isComponent, layer1Of } from "@clp/core";
 import type { AssetDeclaration, BoundSpecification, Structure } from "@clp/core";
 import { resolveAssets } from "./assets.ts";
 import { stableStringify } from "./extract.ts";
@@ -68,7 +68,8 @@ async function scanSpecs(dir: string, options: { drafts?: boolean }): Promise<Sc
     for (const [exportName, value] of Object.entries(mod)) {
       if (typeof value !== "object" || value === null) continue;
       exported.set(value, { file, exportName });
-      if ((value as any)[COMPONENT]) {
+      // いまの書き方の値か、次の書き方 (@clp/core/next) の部品の木
+      if ((value as any)[COMPONENT] || isComponent(value)) {
         const name = componentName(exportName);
         const same = components.find((other) => other.name === name);
         if (same) throw new Error(`コンポーネントの名前 "${name}" が重なっています (${same.file} と ${file})`);
@@ -104,12 +105,18 @@ export async function loadSpecs(
   const found = options.component === undefined ? components[0] : components.find((other) => other.name === options.component);
   if (!found) throw new Error(`コンポーネント "${options.component}" がありません (あるのは: ${names})`);
 
-  const { name, declaration, file, exportName } = found;
-  const bound = bindings.find(({ binding }) => binding.source === declaration);
+  const { name, file, exportName } = found;
+  // 次の書き方の部品は、いまの Layer 1 の値に変換して扱う。解釈が指す相手は、書かれた値（木）のほう
+  const written = found.declaration;
+  const declaration = isComponent(written) ? layer1Of(written) : written;
+  const bound = bindings.find(({ binding }) => binding.source === written);
   // 同じコンポーネントの解釈が、このプロセスに2つ読み込まれていることがある（確定版と下書き）。使うほうを選ぶ
   if (bound && options.bindings !== false) activate(bound.binding);
   const input = normalize(exportName, declaration, options.bindings === false ? undefined : bound?.binding);
   input.name = name;
+  // 木の検査: 文法に合わない所と、まだ使えない書き方（次の書き方で書かれたものだけ）
+  const grammar = [...(isComponent(written) ? grammarOf(written) : []), ...(bound && options.bindings !== false ? grammarOf(bound.binding) : [])];
+  if (grammar.length > 0) input.grammar = grammar;
   // 添付資料のパスは、コンポーネントのファイルがあるディレクトリからの相対
   input.assets = resolveAssets((declaration as { assets?: readonly AssetDeclaration[] }).assets ?? [], dirname(join(root, file)));
   if (bound && options.bindings !== false) {
@@ -154,6 +161,9 @@ function normalize(name: string, layer1: object, binding: BoundSpecification | u
     ...(Object.keys(component.calculations).length > 0 ? { calculations: component.calculations } : {}),
     ...(component.invariants.length > 0 ? { invariants: component.invariants } : {}),
   };
+  // コマンドが返すものの形（返すコマンドがあるときだけ持つ）
+  const outputs = Object.fromEntries(Object.entries(component.commands).flatMap(([command, decl]) => (decl.output === undefined ? [] : [[command, decl.output]])));
+  if (Object.keys(outputs).length > 0) model.outputs = outputs;
   validateModel(name, model, Object.values(component.commands).flatMap((decl) => Object.keys(decl.asks ?? {})));
 
   const behaviors: SpecInput["behaviors"] = {};
@@ -164,6 +174,7 @@ function normalize(name: string, layer1: object, binding: BoundSpecification | u
       when[condition] = {
         ...(outcome.goTo === undefined ? {} : { goTo: outcome.goTo }),
         ...(outcome.does === undefined ? {} : { does: outcome.does }),
+        ...(outcome.responds === undefined ? {} : { responds: outcome.responds as SpecOutcome["responds"] }),
         effects: effectsOf(name, `commands.${command}`, written),
         set: (written.set ?? {}) as Record<string, SpecValue>,
       };

@@ -15,14 +15,14 @@ import { harness, repoRoot, specsDir, unstamped } from "./support.ts";
 const { tmpRoot, workdir } = harness("components");
 
 // 2つ目のコンポーネント（ランプ）。解釈も同じファイルに書いてある
-const LAMP = `import { component, compose, does, goTo, input, interpretation, otherwise, when } from "@clp/core";
+const LAMP = `import { component, does, emits, goTo, input, interpretation, otherwise, when } from "@clp/core";
 
 export const Lamp = component({
   states: ["OFF", "ON"],
   init: "OFF",
   effects: { Notify: input({ on: "boolean" }) },
   commands: {
-    Flip: compose(
+    Flip: component(
       when("The lamp is on", goTo("OFF"), does("The lamp turns off and a notice says so.")),
       otherwise(goTo("ON"), does("The lamp turns on and a notice says so.")),
     ),
@@ -30,15 +30,8 @@ export const Lamp = component({
 });
 
 export const LampInterpretation = interpretation(Lamp, {
-  structure: {
-    commands: {
-      Flip: {
-        when: {
-          "The lamp is on": { effects: [{ Notify: { on: false } }] },
-          otherwise: { effects: [{ Notify: { on: true } }] },
-        },
-      },
-    },
+  commands: {
+    Flip: component(when("The lamp is on", emits("Notify", { on: false })), otherwise(emits("Notify", { on: true }))),
   },
   meanings: { conditions: { "The lamp is on": (state) => state.status === "ON" } },
 });
@@ -191,7 +184,7 @@ test("複数: あるコンポーネントのための変更が、ほかのコン
 test("範囲: ほかのコンポーネントだけが使っているコードを書き換えたら、元に戻して差し戻す。ミューテーションは、実行した範囲だけ", async () => {
   const out = workdir();
   // ランプが通知しない仕様だった版から始める
-  const silent = LAMP.replace("{ effects: [{ Notify: { on: false } }] }", "{}").replace("{ effects: [{ Notify: { on: true } }] }", "{}");
+  const silent = LAMP.replace('when("The lamp is on", emits("Notify", { on: false }))', 'when("The lamp is on")').replace('otherwise(emits("Notify", { on: true }))', "otherwise()");
   assert.notEqual(silent, LAMP);
   const first = await implement({ specs: specs(undefined, silent), out, strategy: scripted({ silentLamp: true }).strategy, maxAttempts: 1 });
   assert.equal(first.status, "pass");

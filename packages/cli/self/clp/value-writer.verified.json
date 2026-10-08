@@ -1,5 +1,5 @@
 {
-  "specs": "sha256:0d19440e15913a9668099d24bd833356f916ffb252320bc22c8ca2ad59ab8c6e",
+  "specs": "sha256:a5de37223aac63b02fc6a9cab7aff7c5cfdd4c1ab61f8268e977fa32da86c41b",
   "code": "sha256:d062249c6dd78b82a14752bcf29611adb9621e443e36d906d1779585237ad14d",
   "files": [
     "../src/payload-check/fit.ts",

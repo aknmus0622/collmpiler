@@ -1,5 +1,5 @@
 {
-  "specs": "sha256:c617cd839c404f8c7b58f2de989afc5628ccb591af074cf7782f04eb04255fd7",
+  "specs": "sha256:7f7c88d3289c70016c9a3a00881a0c0d229950e1b8e467d38f72bfb431d59946",
   "code": "sha256:1144b91f42e1b9249adad2b4a50c844374c2a6824d4f424fdf860a06feccf66f",
   "files": [
     "../src/index.ts",

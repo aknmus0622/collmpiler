@@ -1,12 +1,12 @@
-import { component, compose, description, does, from, goTo, input, otherwise, output, when } from "@clp/core";
+import { component, description, does, from, goTo, input, integer, otherwise, output, when } from "@clp/core";
 import { Plan } from "./pipeline.decisions.ts";
 
-const Limit = { type: "integer", min: 1, max: 3 } as const;
-const Count = { type: "integer", min: 1, max: 4 } as const;
+const Limit = integer({ min: 1, max: 3 });
+const Count = integer({ min: 1, max: 4 });
 const Phase = ["design", "wiring", "implementation"] as const;
 
 // What happens when a phase's check is rejected. The same for every phase, so it is written once and shared.
-const rejected = compose(
+const rejected = component(
   // No goTo: the pipeline stays in the phase
   when(
     "The check was rejected and attempts remain in this phase",
@@ -38,13 +38,13 @@ export const Pipeline = component({
   // What the output directory holds
   queries: {
     hasProductionCode: output("boolean"),
-    boundaryChanged: compose(description("Whether the component's boundary differs from the one the previous run worked from."), output("boolean")),
+    boundaryChanged: component(description("Whether the component's boundary differs from the one the previous run worked from."), output("boolean")),
     hasAdapter: output("boolean"),
   },
 
   effects: {
     StartSession: input({ phase: Phase, round: Count, attempt: Count }),
-    GradeCurrentCode: compose(description("Grade the production code as it is, without an agent."), input({ round: Count })),
+    GradeCurrentCode: component(description("Grade the production code as it is, without an agent."), input({ round: Count })),
     DiscardCode: input({}),
   },
 
@@ -56,7 +56,7 @@ export const Pipeline = component({
   ],
 
   commands: {
-    Start: compose(
+    Start: component(
       description(
         "The pipeline remembers the two limits and whether the plan is incremental, and that this is round 1, attempt 1. " +
           "Then a session of the plan's phase is started; where the plan has no phase, the current code is graded instead.",
@@ -69,14 +69,14 @@ export const Pipeline = component({
       otherwise(goTo("GRADING")),
     ),
 
-    DesignChecked: compose(
+    DesignChecked: component(
       checked,
       from("DESIGN"),
       when("The check passed", goTo("WIRING"), does("The attempt number goes back to 1. A wiring session is started.")),
       rejected,
     ),
 
-    WiringChecked: compose(
+    WiringChecked: component(
       checked,
       from("WIRING"),
       when(
@@ -93,13 +93,13 @@ export const Pipeline = component({
     ),
 
     // The grade of the code as it was before any implementation session of this round
-    CurrentCodeGraded: compose(
+    CurrentCodeGraded: component(
       checked,
       from("GRADING"),
       when("The check passed", goTo("DONE"), does("Nothing: there is nothing to implement.")),
       otherwise(goTo("IMPLEMENTATION"), does("An implementation session is started (attempt 1).")),
     ),
 
-    ImplementationChecked: compose(checked, from("IMPLEMENTATION"), when("The check passed", goTo("DONE")), rejected),
+    ImplementationChecked: component(checked, from("IMPLEMENTATION"), when("The check passed", goTo("DONE")), rejected),
   },
 });
