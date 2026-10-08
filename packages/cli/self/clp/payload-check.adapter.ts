@@ -1,18 +1,18 @@
-import type { Command, TargetSystemAdapter } from "./payload-check.adapter.contract.ts";
-import { PayloadCheck } from "../src/payload-check.ts";
-import type { ConstantValue } from "../src/payload-check-types.ts";
+import type { Command, StateName, TargetSystemAdapter } from "./payload-check.adapter.contract.ts";
+import { PayloadCheck } from "../src/payload-check/payload-check.ts";
+import type { ConstantValue, PayloadCheckState } from "../src/payload-check/types.ts";
 
-let check: PayloadCheck | null = null;
+const STATE_NAMES: Record<PayloadCheckState, StateName> = {
+  "outside": "OUTSIDE",
+  "in-effect": "IN_EFFECT",
+  "in-unknown-effect": "IN_UNKNOWN_EFFECT",
+  "in-field": "IN_FIELD",
+  "in-settled-field": "IN_SETTLED_FIELD",
+};
 
-function current(): PayloadCheck {
-  if (check === null) {
-    throw new Error("setupIsolation has not been called");
-  }
-  return check;
-}
+type ConstantInput = Extract<Command, { name: "Constant" }>["input"];
 
-// The production code takes a constant as one value that carries only what goes with its kind.
-function constantValue(input: Extract<Command, { name: "Constant" }>["input"]): ConstantValue {
+function toConstantValue(input: ConstantInput): ConstantValue {
   switch (input.kind) {
     case "boolean":
       return { kind: "boolean" };
@@ -21,72 +21,70 @@ function constantValue(input: Extract<Command, { name: "Constant" }>["input"]): 
     case "number":
       return { kind: "number", value: input.number };
     case "string":
-      return { kind: "string", value: input.text };
+      return { kind: "string", text: input.text };
   }
+}
+
+let system: PayloadCheck | undefined;
+
+function current(): PayloadCheck {
+  if (system === undefined) {
+    throw new Error("adapter: setupIsolation has not been called");
+  }
+  return system;
 }
 
 // Import the production code from ../src/ and forward each call to it. No business logic here.
 export const adapter: TargetSystemAdapter = {
   async setupIsolation(ports) {
-    check = new PayloadCheck({
-      declarations: {
-        isEffectDeclared: (name) => ports.queries.effectDeclared({ name }),
-        isFieldDeclared: (effect, field) => ports.queries.fieldDeclared({ effect, field }),
-        fieldKind: (effect, field) => ports.queries.fieldKind({ effect, field }),
-        // The production code asks for the bound itself; `null` stands for "has none".
-        fieldMinimum: (effect, field) =>
-          ports.queries.hasMinimum({ effect, field }) ? ports.queries.minimum({ effect, field }) : null,
-        fieldMaximum: (effect, field) =>
-          ports.queries.hasMaximum({ effect, field }) ? ports.queries.maximum({ effect, field }) : null,
-        isInFieldSet: (effect, field, value) => ports.queries.memberOf({ effect, field, value }),
+    const { queries, effects } = ports;
+    system = new PayloadCheck(
+      {
+        declaresEffect: (effect) => queries.effectDeclared({ name: effect }),
+        declaresField: (effect, field) => queries.fieldDeclared({ effect, field }),
+        fieldType: (effect, field) => queries.fieldKind({ effect, field }),
+        minimum: (effect, field) =>
+          queries.hasMinimum({ effect, field }) ? queries.minimum({ effect, field }) : undefined,
+        maximum: (effect, field) =>
+          queries.hasMaximum({ effect, field }) ? queries.maximum({ effect, field }) : undefined,
+        isMember: (effect, field, value) => queries.memberOf({ effect, field, value }),
       },
-      payloads: {
-        isFieldGiven: (effect, field) => ports.queries.fieldGiven({ effect, field }),
+      {
+        givesField: (effect, field) => queries.fieldGiven({ effect, field }),
       },
-      diagnostics: {
+      {
         report: (diagnostic) =>
-          ports.effects.ReportDiagnostic({
+          effects.ReportDiagnostic({
             code: diagnostic.code,
             effect: diagnostic.effect,
             field: diagnostic.field,
           }),
       },
-    });
+    );
   },
   async teardownIsolation() {
-    check = null;
+    system = undefined;
   },
   async executeCommand(command) {
-    const target = current();
+    const check = current();
     switch (command.name) {
-      case "EnterEffect":
-        target.enterEffect(command.input.name);
-        break;
-      case "GivenField":
-        target.givenField(command.input.name);
-        break;
       case "Constant":
-        target.constant(constantValue(command.input));
-        break;
-      case "Typed":
-        target.typed(command.input.type);
-        break;
-      case "Unresolved":
-        target.unresolved();
-        break;
+        return check.constant(toConstantValue(command.input));
       case "DeclaredField":
-        target.declaredField(command.input.name);
-        break;
+        return check.declaredField(command.input.name);
+      case "EnterEffect":
+        return check.enterEffect(command.input.name);
+      case "GivenField":
+        return check.givenField(command.input.name);
       case "LeaveEffect":
-        target.leaveEffect();
-        break;
-      default: {
-        const unknown: never = command;
-        throw new Error(`unknown command: ${JSON.stringify(unknown)}`);
-      }
+        return check.leaveEffect();
+      case "Typed":
+        return check.typed(command.input.type);
+      case "Unresolved":
+        return check.unresolved();
     }
   },
   async getCurrentState() {
-    return current().state;
+    return STATE_NAMES[current().state];
   },
 };

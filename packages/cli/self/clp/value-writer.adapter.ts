@@ -1,10 +1,15 @@
-import type { TargetSystemAdapter } from "./value-writer.adapter.contract.ts";
-import { ValueWriter } from "../src/value-writer.ts";
+import type { StateName, TargetSystemAdapter } from "./value-writer.adapter.contract.ts";
+import type { ValueWriterState } from "../src/value-writer/types.ts";
+import { ValueWriter } from "../src/value-writer/value-writer.ts";
+
+const STATE_NAMES: Record<ValueWriterState, StateName> = {
+  ready: "READY",
+};
 
 let writer: ValueWriter | undefined;
 
 function current(): ValueWriter {
-  if (writer === undefined) throw new Error("setupIsolation has not been called");
+  if (writer === undefined) throw new Error("adapter: setupIsolation has not been called");
   return writer;
 }
 
@@ -12,17 +17,9 @@ function current(): ValueWriter {
 export const adapter: TargetSystemAdapter = {
   async setupIsolation(ports) {
     writer = new ValueWriter({
-      output: {
-        writeConstant: (constant) =>
-          ports.effects.WriteConstant({
-            flag: constant.flag,
-            kind: constant.kind,
-            number: constant.number,
-            text: constant.text,
-          }),
-        writeReference: (text) => ports.effects.WriteReference({ text }),
-        writeWasState: (state) => ports.effects.WriteWasState({ state }),
-      },
+      writeConstant: ({ kind, text, number, flag }) => ports.effects.WriteConstant({ kind, text, number, flag }),
+      writeReference: (text) => ports.effects.WriteReference({ text }),
+      writeWasState: (state) => ports.effects.WriteWasState({ state }),
     });
   },
   async teardownIsolation() {
@@ -34,20 +31,23 @@ export const adapter: TargetSystemAdapter = {
       case "Constant": {
         const { kind, text, number, flag } = command.input;
         system.constant({ kind, text, number, flag });
-        return;
+        break;
       }
       case "Reference": {
-        // A reference carries only the inputs that belong to its target (see `Reference`).
         const { target, name, table, column } = command.input;
         system.reference(target === "decision" ? { target, table, column } : { target, name });
-        return;
+        break;
       }
       case "WasState":
         system.wasState(command.input.state);
-        return;
+        break;
+      default: {
+        const unknown: never = command;
+        throw new Error(`adapter: unknown command ${JSON.stringify(unknown)}`);
+      }
     }
   },
   async getCurrentState() {
-    return current().state;
+    return STATE_NAMES[current().state];
   },
 };

@@ -295,7 +295,8 @@ test("自分自身の検証: 自分の生成物の上で動くフレームワー
   }
   // 本番コードとアダプターは、採点のあとも変わっていない
   for (const dir of ["src", "clp"]) {
-    for (const name of readdirSync(join(self, dir))) assert.equal(readFileSync(join(copy, dir, name), "utf8"), readFileSync(join(self, dir, name), "utf8"), name);
+    // 本番コードの置き方（平らか、ディレクトリに分けるか）は、書いたエージェントが決める
+    for (const name of readdirSync(join(self, dir), { recursive: true, encoding: "utf8" }).filter((file) => file.endsWith(".ts") || file.endsWith(".json"))) assert.equal(readFileSync(join(copy, dir, name), "utf8"), readFileSync(join(self, dir, name), "utf8"), name);
   }
 });
 

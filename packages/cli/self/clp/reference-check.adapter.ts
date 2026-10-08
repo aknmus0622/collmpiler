@@ -1,24 +1,32 @@
-import type { StateName, TargetSystemAdapter } from "./reference-check.adapter.contract.ts";
-import { ReferenceCheck } from "../src/reference-check.ts";
+import type { Command, StateName, TargetSystemAdapter } from "./reference-check.adapter.contract.ts";
+import { ReferenceCheck } from "../src/reference-check/reference-check.ts";
+import type { ReferenceCheckState } from "../src/reference-check/types.ts";
 
-let check: ReferenceCheck | null = null;
+const STATE_NAMES: Record<ReferenceCheckState, StateName> = {
+  "idle": "IDLE",
+  "between-commands": "BETWEEN_COMMANDS",
+  "in-command": "IN_COMMAND",
+  "in-case": "IN_CASE",
+  "accepted": "ACCEPTED",
+  "rejected": "REJECTED",
+};
+
+let system: ReferenceCheck | undefined;
 
 function current(): ReferenceCheck {
-  if (check === null) {
-    throw new Error("adapter: setupIsolation has not been called");
-  }
-  return check;
+  if (system === undefined) throw new Error("adapter: setupIsolation has not been called");
+  return system;
 }
 
 // Import the production code from ../src/ and forward each call to it. No business logic here.
 export const adapter: TargetSystemAdapter = {
   async setupIsolation(ports) {
-    check = new ReferenceCheck({
-      declarations: {
-        isStateDeclared: (state) => ports.queries.stateDeclared({ name: state }),
-        isEffectDeclared: (name) => ports.queries.effectDeclared({ name }),
+    system = new ReferenceCheck(
+      {
+        declaresState: (state) => ports.queries.stateDeclared({ name: state }),
+        declaresEffect: (effect) => ports.queries.effectDeclared({ name: effect }),
       },
-      diagnostics: {
+      {
         report: (diagnostic) =>
           ports.effects.ReportDiagnostic({
             caseName: diagnostic.caseName,
@@ -27,30 +35,30 @@ export const adapter: TargetSystemAdapter = {
             subject: diagnostic.subject,
           }),
       },
-    });
+    );
   },
   async teardownIsolation() {
-    check = null;
+    system = undefined;
   },
-  async executeCommand(command) {
-    const system = current();
+  async executeCommand(command: Command) {
+    const target = current();
     switch (command.name) {
       case "AllowFrom":
-        return system.allowFrom(command.input.state);
+        return target.allowFrom(command.input.state);
       case "Begin":
-        return system.begin();
+        return target.begin();
       case "EnterCase":
-        return system.enterCase(command.input.name);
+        return target.enterCase(command.input.name);
       case "EnterCommand":
-        return system.enterCommand(command.input.name);
+        return target.enterCommand(command.input.name);
       case "Finish":
-        return system.finish();
+        return target.finish();
       case "GoTo":
-        return system.goTo(command.input.state);
+        return target.goTo(command.input.state);
       case "LeaveCommand":
-        return system.leaveCommand();
+        return target.leaveCommand();
       case "UseEffect":
-        return system.useEffect(command.input.name);
+        return target.useEffect(command.input.name);
       default: {
         const unknown: never = command;
         throw new Error(`adapter: unknown command ${JSON.stringify(unknown)}`);
@@ -58,8 +66,6 @@ export const adapter: TargetSystemAdapter = {
     }
   },
   async getCurrentState() {
-    // The production state names are exactly the contract's state names.
-    const state: StateName = current().state;
-    return state;
+    return STATE_NAMES[current().state];
   },
 };
