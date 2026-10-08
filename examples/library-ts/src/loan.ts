@@ -1,4 +1,5 @@
 import { libraryLoanPolicy } from "./policy.ts";
+import type { BorrowOutcome, ExtendOutcome } from "./outcome.ts";
 import type { LoanPolicy } from "./policy.ts";
 import type { LoanDependencies } from "./ports.ts";
 import {
@@ -16,8 +17,8 @@ import type { LoanState } from "./state.ts";
  * A loan has no clock: time advances only when `daysPass` is called. The four methods `borrow`,
  * `daysPass`, `extend` and `returnBook` are the specification's commands; each runs synchronously, and
  * any question to or call on a dependency happens during that call, effects in the order the
- * specification lists them. The current state is read through `state`, and the remembered data through
- * `daysUntilDue`.
+ * specification lists them. `borrow` and `extend` return the command's answer; the other two return
+ * nothing. The current state is read through `state`, and the remembered data through `daysUntilDue`.
  *
  * A newly constructed loan is in the specification's initial state and remembers nothing. Constructing
  * a loan asks and tells the dependencies nothing.
@@ -58,22 +59,24 @@ export class Loan {
 
   /**
    * The specification command `Borrow` (no input): the member borrows the book.
-   * For a loan in state `"AVAILABLE"`. The borrowing is refused when the member already holds at least
-   * the policy's maximum number of books, or someone else has reserved the book; a request that is
-   * refused changes nothing and is not an error.
+   * For a loan in state `"AVAILABLE"`. A request that is refused changes nothing and is not an error.
    *
-   * Asks `MemberAccount.booksOnLoan` and, unless the member has reached the maximum,
-   * `ReservationDesk.isReservedBySomeoneElse`; may call `MemberNotifier.notifyDueDate`.
+   * May ask `MemberAccount.booksOnLoan` and `ReservationDesk.isReservedBySomeoneElse` (either may be
+   * skipped when its answer cannot matter); may call `MemberNotifier.notifyDueDate`.
+   *
+   * @returns The command's answer: whether the book was lent or the borrowing refused, and, when lent,
+   *   in how many days the book is due. See `BorrowOutcome`.
    */
-  borrow(): void {
-    const { memberAccount, reservationDesk } = this.dependencies;
+  borrow(): BorrowOutcome {
+    const { memberAccount, reservationDesk, memberNotifier } = this.dependencies;
     if (holdsMaxBooks(memberAccount.booksOnLoan(), this.policy) || reservationDesk.isReservedBySomeoneElse()) {
-      return;
+      return { result: "refused", dueInDays: null };
     }
     const daysUntilDue = this.policy.loanDays;
     this.currentState = "ON_LOAN";
     this.remainingDays = daysUntilDue;
-    this.dependencies.memberNotifier.notifyDueDate(daysUntilDue);
+    memberNotifier.notifyDueDate(daysUntilDue);
+    return { result: "lent", dueInDays: daysUntilDue };
   }
 
   /**
@@ -99,15 +102,19 @@ export class Loan {
    * For a loan in state `"ON_LOAN"`. A request that is refused changes nothing and is not an error.
    *
    * Asks `ReservationDesk.isReservedBySomeoneElse`; may call `MemberNotifier.notifyDueDate`.
+   *
+   * @returns The command's answer: whether the loan was extended or the extension refused. See
+   *   `ExtendOutcome`.
    */
-  extend(): void {
+  extend(): ExtendOutcome {
     const { reservationDesk, memberNotifier } = this.dependencies;
     if (reservationDesk.isReservedBySomeoneElse()) {
-      return;
+      return "refused";
     }
     const daysUntilDue = daysUntilDueAfterExtension(this.lentDaysUntilDue(), this.policy);
     this.remainingDays = daysUntilDue;
     memberNotifier.notifyDueDate(daysUntilDue);
+    return "extended";
   }
 
   /**

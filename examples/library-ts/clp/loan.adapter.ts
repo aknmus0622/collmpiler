@@ -42,14 +42,12 @@ export const adapter: TargetSystemAdapter = {
     const target = currentLoan();
     switch (command.name) {
       case "Borrow":
-        target.borrow();
-        return;
+        return target.borrow();
       case "DayPasses":
         target.daysPass(command.input.days);
         return;
       case "Extend":
-        target.extend();
-        return;
+        return target.extend();
       case "Return":
         target.returnBook();
         return;

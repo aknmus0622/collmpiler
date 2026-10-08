@@ -9,10 +9,14 @@
       "when": {
         "The member already holds at least the policy's maximum number of books, or someone else has reserved the book": {
           "does": "The borrowing is refused; nothing changes.",
-          "effects": []
+          "effects": [],
+          "responds": {
+            "dueInDays": null,
+            "result": "refused"
+          }
         },
         "otherwise": {
-          "does": "The book is due in the policy's loan days. The member is told the due date.",
+          "does": "The book is due in the policy's loan days. The member is told the due date. The answer is lent, with the number of days until the book is due.",
           "effects": [
             {
               "name": "DueDateNotice",
@@ -24,6 +28,12 @@
             }
           ],
           "goTo": "ON_LOAN",
+          "responds": {
+            "dueInDays": {
+              "$ref": "decision:policy.loanDays"
+            },
+            "result": "lent"
+          },
           "set": {
             "daysUntilDue": {
               "$ref": "decision:policy.loanDays"
@@ -83,10 +93,11 @@
       "when": {
         "The book is reserved by someone else": {
           "does": "The extension is refused; nothing changes.",
-          "effects": []
+          "effects": [],
+          "responds": "refused"
         },
         "otherwise": {
-          "does": "The due date moves later by the policy's extension days, counted from the current due date. The member is told the new due date. A loan can be extended any number of times.",
+          "does": "The due date moves later by the policy's extension days, counted from the current due date. The member is told the new due date. A loan can be extended any number of times. The answer is extended.",
           "effects": [
             {
               "name": "DueDateNotice",
@@ -97,6 +108,7 @@
               }
             }
           ],
+          "responds": "extended",
           "set": {
             "daysUntilDue": {
               "$ref": "calculation:daysUntilDueAfterExtension"
@@ -207,6 +219,24 @@
     "invariants": [
       "A loan is overdue exactly when it is past its due date"
     ],
+    "outputs": {
+      "Borrow": {
+        "optional": [
+          "dueInDays"
+        ],
+        "record": {
+          "dueInDays": "integer",
+          "result": [
+            "lent",
+            "refused"
+          ]
+        }
+      },
+      "Extend": [
+        "extended",
+        "refused"
+      ]
+    },
     "queries": {
       "booksOnLoan": {
         "input": {},

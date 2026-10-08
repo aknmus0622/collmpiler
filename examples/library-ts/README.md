@@ -80,7 +80,7 @@ Only `Borrow` changed. The disagreement that was left was about form: is a borro
 parts. The first choice was a precondition:
 
 ```ts
-Borrow: compose(
+Borrow: component(
   from("AVAILABLE"),
   onlyIf("The member holds fewer books than the policy's maximum", "Nobody else has reserved the book"),
   goTo("ON_LOAN"),
@@ -105,7 +105,7 @@ asked for, and not what was meant.
 The limit is something the code must decide, so it has to be inside what is verified:
 
 ```ts
-Borrow: compose(
+Borrow: component(
   from("AVAILABLE"),
   when(
     "The member already holds at least the policy's maximum number of books, or someone else has reserved the book",
@@ -143,6 +143,11 @@ is one the prose allows is for the author to judge; "no disagreements" is not th
 - Since then, `clp` checks for this before any agent runs: it changes each value of a decision table and looks
   whether anything the spec expects changes. With the precondition version of `Borrow` it now stops at once:
   `決定表 policy の行 "otherwise" の maxBooks (3): この値を変えても、変わるのは「コマンドを実行できるかどうか」だけです…`.
+- Later, commands became able to answer whoever executed them. `Borrow` and `Extend` now declare what they
+  answer with (`output(...)`) and the refusal case says `responds({ result: "refused", dueInDays: null })`, so an
+  implementation that refuses silently no longer passes. Adding this to the spec took one `clp interpret`
+  (31 seconds; the LLM added the two `responds(...)` the prose implied and nothing else) and one `clp apply`
+  (design, wiring and implementation, each on its first attempt, 134 seconds, 7 of 7 mutants killed).
 - Use `onlyIf` only for what cannot happen. What the code must refuse is an outcome (`when`), or it is not
   verified — and the mutation gate will push the check out of the code.
 - Nobody wrote `loan.interpretation.ts` by hand at any point.

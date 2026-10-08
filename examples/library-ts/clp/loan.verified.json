@@ -1,9 +1,10 @@
 {
-  "specs": "sha256:a01f4874300b92c6fd3653a2b97c6fb1ab216c287cf8f4f0fcddb4bdeb6e18ba",
-  "code": "sha256:87e31a812e900dfc42582296884791e49f4b393263f4e260aef090e715378bfe",
+  "specs": "sha256:c16e66bedaec4046e021c7846c9b0ccdcc06ab53d1d25e159b9796cb24f46dfb",
+  "code": "sha256:10aad5eeec7e86744d3a2bf8211c82213303fb36612a36b6c20c5c850c5addb3",
   "files": [
     "../src/index.ts",
     "../src/loan.ts",
+    "../src/outcome.ts",
     "../src/policy.ts",
     "../src/ports.ts",
     "../src/rules.ts",

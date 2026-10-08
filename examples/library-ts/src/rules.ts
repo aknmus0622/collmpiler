@@ -13,14 +13,13 @@ function daysPastDue(daysUntilDue: number): number {
   return -daysUntilDue;
 }
 
-/** A loan is past its due date when fewer than zero days remain; on the due day itself it is not. */
+/** Whether the book is past its due date. */
 function isPastDue(daysUntilDue: number): boolean {
   return daysUntilDue < 0;
 }
 
 /**
- * Decides whether the specification's `Borrow` command is refused because of the member's other loans:
- * it is when the member already holds at least the policy's maximum number of books.
+ * Decides whether the specification's `Borrow` command is refused because of the member's other loans.
  *
  * @param booksOnLoan How many books the member currently has on loan, a whole number.
  * @param policy The lending policy.
