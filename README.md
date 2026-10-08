@@ -1,4 +1,10 @@
 # co-llm-piler : Use LLM as a Compiler / Compiler Agent
+## Project Goal
+
+```
+    f(document) = software
+```
+              with no code reviews
 
 ## Current Scope
 
