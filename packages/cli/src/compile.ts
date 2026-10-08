@@ -3,6 +3,7 @@ import { parseArgs } from "node:util";
 import { extract, stableStringify } from "./extract.ts";
 import { listComponents, loadSpecs } from "./loader.ts";
 import { selfCheck } from "./runtime.ts";
+import { references } from "./stage1.ts";
 import { typecheckSpecs } from "./typecheck.ts";
 
 // 暫定エントリ: node packages/cli/src/compile.ts [specs-dir] [--component <name>] [--drafts]  → IR を stdout へ
@@ -23,7 +24,8 @@ const checks: (() => Promise<void>)[] = [];
 for (const name of names) {
   const spec = await loadSpecs(dir, { drafts: values.drafts, component: name });
   if (values.component !== undefined) for (const file of spec.sources?.otherBindings ?? []) ignored.add(file);
-  const { ir, diagnostics } = extract(spec);
+  // 名前の検査は、フレームワーク自身の仕様から生成したコード (Stage 1) で行う。使えなければ手書き (Stage 0)
+  const { ir, diagnostics } = extract(spec, await references(spec));
   const tag = names.length > 1 ? `${name}: ` : "";
   for (const d of diagnostics) console.error(`${d.severity}[${d.code}] ${tag}${d.behavior}.${d.case}: ${d.message}`);
   if (diagnostics.some((d) => d.severity === "error")) process.exitCode = 1;

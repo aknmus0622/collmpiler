@@ -127,7 +127,56 @@ function serialize(value: SpecValue): unknown {
   return { $ref: `${value.$ref}:${Array.isArray(value.path) ? value.path.join(".") : value.path}` };
 }
 
-export function extract(input: SpecInput) {
+// --- 名前の検査（宣言されていない状態・副作用への参照） ---
+// この検査は、フレームワーク自身の仕様 (packages/cli/self/specs/reference-check.*) にも書いてあり、
+// そこから生成したコード (Stage 1) で置き換えられる。判断の結果は、だれが判断しても同じ形で受け取る。
+export type ReferenceDiagnostic = { code: "unknown-state" | "unknown-effect"; command: string; caseName: string; subject: string };
+
+// 仕様の木をたどって、検査に渡すコマンドの列にする。コマンドの名前と入力は、reference-check の仕様のもの。
+// Stage 0 も Stage 1 も、同じ列を受け取る（たどり方は、どちらにも共通の、判断を持たない糊）
+export type ReferenceEvent =
+  | { name: "Begin" | "LeaveCommand" | "Finish"; input: {} }
+  | { name: "EnterCommand" | "EnterCase" | "UseEffect"; input: { name: string } }
+  | { name: "AllowFrom" | "GoTo"; input: { state: string } };
+export function* referenceEvents(input: SpecInput): Generator<ReferenceEvent> {
+  yield { name: "Begin", input: {} };
+  for (const name of Object.keys(input.behaviors).sort()) {
+    const behavior = input.behaviors[name];
+    yield { name: "EnterCommand", input: { name } };
+    for (const state of behavior.from ?? []) yield { name: "AllowFrom", input: { state } };
+    for (const caseName of Object.keys(behavior.when).sort()) {
+      const outcome = behavior.when[caseName];
+      yield { name: "EnterCase", input: { name: caseName } };
+      if (outcome.goTo !== undefined) yield { name: "GoTo", input: { state: outcome.goTo } };
+      for (const effect of outcome.effects) yield { name: "UseEffect", input: { name: effect.name } };
+    }
+    yield { name: "LeaveCommand", input: {} };
+  }
+  yield { name: "Finish", input: {} };
+}
+
+// Stage 0: 手書きの判断。Stage 1 を読み込めないときの備えであり、Stage 1 と結果が一致することを確かめる相手でもある
+export function referenceDiagnostics(input: SpecInput): ReferenceDiagnostic[] {
+  const model = input.model;
+  if (!model) return [];
+  const found: ReferenceDiagnostic[] = [];
+  let command = "";
+  let caseName = "";
+  for (const event of referenceEvents(input)) {
+    if (event.name === "EnterCommand") [command, caseName] = [event.input.name, ""];
+    else if (event.name === "EnterCase") caseName = event.input.name;
+    else if ((event.name === "AllowFrom" || event.name === "GoTo") && !model.states.includes(event.input.state)) {
+      found.push({ code: "unknown-state", command, caseName, subject: event.input.state });
+    } else if (event.name === "UseEffect" && !(event.input.name in model.effects)) {
+      found.push({ code: "unknown-effect", command, caseName, subject: event.input.name });
+    }
+  }
+  return found;
+}
+
+// references: 名前の検査の結果。省略時は Stage 0 で判断する。
+// 入口 (compile / implement) は、Stage 1 の結果を渡す (stage1.ts)
+export function extract(input: SpecInput, options: { references?: ReferenceDiagnostic[] } = {}) {
   const diagnostics: Diagnostic[] = [];
   const report = (code: string, behavior: string, caseName: string, message: string) =>
     diagnostics.push({ severity: "error", code, behavior, case: caseName, message });
@@ -147,11 +196,16 @@ export function extract(input: SpecInput) {
     }
   };
 
+  // 名前の検査は、判断を受け取るだけ。文面（利用者向け）は、ここで付ける
+  const references = options.references ?? referenceDiagnostics(input);
+  const reported = (code: ReferenceDiagnostic["code"], command: string, caseName: string, subject: string) =>
+    references.some((found) => found.code === code && found.command === command && found.caseName === caseName && found.subject === subject);
+
   const behaviors = [];
   for (const name of Object.keys(input.behaviors).sort()) {
     const behavior = input.behaviors[name];
     for (const state of behavior.from ?? []) {
-      if (!model.states.includes(state)) report("unknown-state", name, "", `from の "${state}" は states にありません`);
+      if (reported("unknown-state", name, "", state)) report("unknown-state", name, "", `from の "${state}" は states にありません`);
     }
     for (const precondition of behavior.onlyIf ?? []) condition(name, "", precondition);
 
@@ -181,15 +235,14 @@ export function extract(input: SpecInput) {
     for (const caseName of Object.keys(behavior.when).sort()) {
       const outcome = behavior.when[caseName];
       condition(name, caseName, caseName);
-      if (outcome.goTo !== undefined && !model.states.includes(outcome.goTo)) {
+      if (outcome.goTo !== undefined && reported("unknown-state", name, caseName, outcome.goTo)) {
         report("unknown-state", name, caseName, `goTo の "${outcome.goTo}" は states にありません`);
       }
 
       const effects = outcome.effects.map((effect) => {
         const fields = model.effects[effect.name];
-        if (!fields) {
-          report("unknown-effect", name, caseName, `副作用 "${effect.name}" は effects にありません`);
-        } else {
+        if (reported("unknown-effect", name, caseName, effect.name)) report("unknown-effect", name, caseName, `副作用 "${effect.name}" は effects にありません`);
+        if (fields) {
           for (const field of Object.keys(fields)) {
             if (!(field in effect.payload)) report("missing-field", name, caseName, `副作用 ${effect.name} に、フィールド "${field}" がありません`);
           }

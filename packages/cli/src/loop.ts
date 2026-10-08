@@ -15,6 +15,7 @@ import type { MutationStrategy } from "./mutation.ts";
 import { PHASES } from "./request.ts";
 import type { Phase } from "./request.ts";
 import { selfCheck } from "./runtime.ts";
+import { references } from "./stage1.ts";
 import type { StaticCheckStrategy } from "./static-check.ts";
 import type { ImplementationStrategy } from "./strategy.ts";
 import { typescriptTarget } from "./target-typescript.ts";
@@ -105,7 +106,7 @@ export async function implement(options: ImplementOptions) {
   const units: Unit[] = [];
   for (const name of names) {
     const spec = await loadSpecs(specsDir, { drafts, component: name });
-    const { ir: extracted, diagnostics } = extract(spec);
+    const { ir: extracted, diagnostics } = extract(spec, await references(spec));
     const errors = diagnostics.filter((d) => d.severity === "error");
     if (errors.length > 0) {
       throw new Error(`仕様 (${name}) にエラーがあります:\n${errors.map((d) => `  ${d.behavior}.${d.case}: ${d.message}`).join("\n")}`);
