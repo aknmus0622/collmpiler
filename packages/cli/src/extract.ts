@@ -121,10 +121,61 @@ function mismatch(input: SpecInput, command: string, value: SpecValue, target: F
   return compatible(found.schema!, target) ? undefined : `${describe(found.schema!)} は ${describe(target)} に入りません`;
 }
 
-function serialize(value: SpecValue): unknown {
+// --- 値の直列化（仕様に書かれた値を、IR の形にする） ---
+// Stage 0: 手書き。定数はそのまま、参照は短い文字列にする。
+// これも、フレームワーク自身の仕様 (packages/cli/self/specs/value-writer.*) から生成したコード (Stage 1) で置き換えられる
+export function serialize(value: SpecValue): unknown {
   if (!isReference(value)) return value;
   if (value.$ref === "was") return { $was: value.path };
   return { $ref: `${value.$ref}:${Array.isArray(value.path) ? value.path.join(".") : value.path}` };
+}
+
+// 値1つを、直列化に渡すコマンドの列にする。コマンドの名前と入力は、value-writer の仕様のもの
+export type WriteEvent =
+  | { name: "Constant"; input: { kind: "string" | "number" | "boolean"; text: string; number: number; flag: boolean } }
+  | { name: "Reference"; input: { target: "input" | "data" | "query" | "calculation" | "decision"; name: string; table: string; column: string } }
+  | { name: "WasState"; input: { state: string } };
+export function* writeEvents(value: SpecValue): Generator<WriteEvent> {
+  if (!isReference(value)) {
+    yield {
+      name: "Constant",
+      input: {
+        kind: typeof value as "string" | "number" | "boolean",
+        text: typeof value === "string" ? value : "",
+        number: typeof value === "number" ? value : 0,
+        flag: value === true,
+      },
+    };
+  } else if (value.$ref === "was") {
+    for (const state of value.path as string[]) yield { name: "WasState", input: { state } };
+  } else if (value.$ref === "decision") {
+    const [table, column] = value.path as [string, string];
+    yield { name: "Reference", input: { target: "decision", name: "", table, column } };
+  } else {
+    yield { name: "Reference", input: { target: value.$ref, name: String(value.path), table: "", column: "" } };
+  }
+}
+
+// IR に書く値を、置き場所の名前と一緒に並べる（尋ねることの引数、副作用のペイロードと when、覚えるデータ）
+const SLOT = {
+  ask: (command: string, alias: string, field: string) => `${command}|asks|${alias}|${field}`,
+  payload: (command: string, caseName: string, index: number, field: string) => `${command}|${caseName}|effects|${index}|${field}`,
+  when: (command: string, caseName: string, index: number) => `${command}|${caseName}|effects|${index}|when`,
+  set: (command: string, caseName: string, field: string) => `${command}|${caseName}|set|${field}`,
+};
+export function* valuesToWrite(input: SpecInput): Generator<[slot: string, value: SpecValue]> {
+  for (const [command, behavior] of Object.entries(input.behaviors)) {
+    for (const [alias, asked] of Object.entries(behavior.asks ?? {})) {
+      for (const [field, value] of Object.entries(asked.input)) yield [SLOT.ask(command, alias, field), value];
+    }
+    for (const [caseName, outcome] of Object.entries(behavior.when)) {
+      for (const [index, effect] of outcome.effects.entries()) {
+        for (const [field, value] of Object.entries(effect.payload)) yield [SLOT.payload(command, caseName, index, field), value];
+        if (effect.when !== undefined && typeof effect.when !== "string") yield [SLOT.when(command, caseName, index), effect.when];
+      }
+      for (const [field, value] of Object.entries(outcome.set)) yield [SLOT.set(command, caseName, field), value];
+    }
+  }
 }
 
 // --- 名前の検査（宣言されていない状態・副作用への参照） ---
@@ -260,9 +311,12 @@ export function payloadDiagnostics(input: SpecInput): PayloadDiagnostic[] {
   return found;
 }
 
-// references / payloads: 名前の検査と、ペイロードの検査の結果。省略時は Stage 0 で判断する。
-// 入口 (compile / implement) は、Stage 1 の結果を渡す (stage1.ts)
-export function extract(input: SpecInput, options: { references?: ReferenceDiagnostic[]; payloads?: PayloadDiagnostic[] } = {}) {
+// references / payloads: 名前の検査と、ペイロードの検査の結果。values: 直列化した値（置き場所の名前 → IR の形）。
+// 省略時は Stage 0 で判断する。入口 (compile / implement) は、Stage 1 の結果を渡す (stage1.ts)
+export function extract(
+  input: SpecInput,
+  options: { references?: ReferenceDiagnostic[]; payloads?: PayloadDiagnostic[]; values?: Map<string, unknown> } = {},
+) {
   const diagnostics: Diagnostic[] = [];
   const report = (code: string, behavior: string, caseName: string, message: string) =>
     diagnostics.push({ severity: "error", code, behavior, case: caseName, message });
@@ -286,6 +340,9 @@ export function extract(input: SpecInput, options: { references?: ReferenceDiagn
   const references = options.references ?? referenceDiagnostics(input);
   const reported = (code: ReferenceDiagnostic["code"], command: string, caseName: string, subject: string) =>
     references.some((found) => found.code === code && found.command === command && found.caseName === caseName && found.subject === subject);
+
+  // 値の直列化: Stage 1 が書いたものがあれば、それを置く。無ければ手書きで直列化する
+  const write = (slot: string, value: SpecValue) => (options.values?.has(slot) ? options.values.get(slot) : serialize(value));
 
   // ペイロードの検査も、判断を受け取るだけ。「なぜ合わないか」の文面は、ここで付ける
   const payloads = options.payloads ?? payloadDiagnostics(input);
@@ -320,7 +377,7 @@ export function extract(input: SpecInput, options: { references?: ReferenceDiagn
             : mismatch(input, name, value, query.input[field]);
         if (problem) report("bad-value", name, "", `asks.${alias}.${field}: ${problem}`);
       }
-      asks[alias] = { query: asked.query, input: Object.fromEntries(Object.entries(asked.input).map(([field, value]) => [field, serialize(value)])) };
+      asks[alias] = { query: asked.query, input: Object.fromEntries(Object.entries(asked.input).map(([field, value]) => [field, write(SLOT.ask(name, alias, field), value)])) };
     }
 
     const when: Record<string, unknown> = {};
@@ -331,7 +388,7 @@ export function extract(input: SpecInput, options: { references?: ReferenceDiagn
         report("unknown-state", name, caseName, `goTo の "${outcome.goTo}" は states にありません`);
       }
 
-      const effects = outcome.effects.map((effect) => {
+      const effects = outcome.effects.map((effect, index) => {
         const fields = model.effects[effect.name];
         if (reported("unknown-effect", name, caseName, effect.name)) report("unknown-effect", name, caseName, `副作用 "${effect.name}" は effects にありません`);
         const at = occurrence++;
@@ -353,8 +410,8 @@ export function extract(input: SpecInput, options: { references?: ReferenceDiagn
         }
         return {
           name: effect.name,
-          payload: Object.fromEntries(Object.entries(effect.payload).map(([field, value]) => [field, serialize(value)])),
-          ...(effect.when === undefined ? {} : { when: typeof effect.when === "string" ? effect.when : serialize(effect.when) }),
+          payload: Object.fromEntries(Object.entries(effect.payload).map(([field, value]) => [field, write(SLOT.payload(name, caseName, index, field), value)])),
+          ...(effect.when === undefined ? {} : { when: typeof effect.when === "string" ? effect.when : write(SLOT.when(name, caseName, index), effect.when) }),
         };
       });
 
@@ -368,7 +425,7 @@ export function extract(input: SpecInput, options: { references?: ReferenceDiagn
         ...(outcome.does === undefined ? {} : { does: outcome.does }),
         effects,
         ...(Object.keys(outcome.set).length > 0
-          ? { set: Object.fromEntries(Object.entries(outcome.set).map(([field, value]) => [field, serialize(value)])) }
+          ? { set: Object.fromEntries(Object.entries(outcome.set).map(([field, value]) => [field, write(SLOT.set(name, caseName, field), value)])) }
           : {}),
       };
     }

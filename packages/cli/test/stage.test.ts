@@ -4,9 +4,9 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writ
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { after, test } from "node:test";
-import { extract, payloadDiagnostics, referenceDiagnostics, referenceEvents } from "../src/extract.ts";
+import { extract, payloadDiagnostics, referenceDiagnostics, referenceEvents, serialize, stableStringify, valuesToWrite } from "../src/extract.ts";
 import { listComponents, loadSpecs } from "../src/loader.ts";
-import { references, stage1Payloads, stage1References } from "../src/stage1.ts";
+import { references, stage1Payloads, stage1References, stage1Values } from "../src/stage1.ts";
 import { implement } from "../src/loop.ts";
 import type { ImplementationStrategy } from "../src/strategy.ts";
 import type { ImplementOptions } from "../src/loop.ts";
@@ -89,8 +89,58 @@ test("Stage 1: 誤りの無い仕様でも一致する（例の仕様と、フ�
       const payloads = await stage1Payloads(spec);
       assert.deepEqual(payloads, [], `${component}: ペイロードの検査も Stage 1 で実行できること`);
       assert.deepEqual(payloads, payloadDiagnostics(spec));
+      // 値の直列化: IR が、どちらの Stage で作ってもバイト一致する
+      assert.ok(await stage1Values(spec), `${component}: 値の直列化も Stage 1 で実行できること`);
+      assert.equal(stableStringify(extract(spec, await references(spec)).ir), stableStringify(extract(spec).ir));
     }
   }
+});
+
+test("Stage 1: 値の直列化は、手書きの版 (Stage 0) と同じものを書く（定数、参照、決定表の列、実行前の状態）", async () => {
+  // 名前に、区切りに使う文字（コロン、ドット）や空白を含む値も混ぜる
+  const dir = mkdtempSync(join(tmpRoot, "v-"));
+  writeFileSync(
+    join(dir, "x.component.ts"),
+    `import { asks, component, compose, decisionTable, description, goTo, input, interpretation, output, ref, typed } from "@clp/core";
+const Size = decisionTable({ "It is big": { "count.max": 10, urgent: true }, otherwise: { "count.max": 1, urgent: false } });
+export const Thing = component({
+  states: ["A", "B", "C D"],
+  init: "A",
+  data: { memo: typed("string"), total: typed("number"), on: typed("boolean") },
+  queries: { flag: output("boolean"), lookUp: compose(input({ key: "string", depth: "integer" }), output("string")) },
+  effects: { Notify: input({ text: "string", count: "integer", ratio: "number", sure: "boolean" }), Ping: input({}) },
+  decisions: { "the size": Size },
+  calculations: { "sum:all": compose(description("the total"), output("integer")) },
+  commands: { Place: compose(input({ note: "string", n: "integer" }), goTo("B")), Back: compose(goTo("A")) },
+});
+export const Interpretation = interpretation(Thing, {
+  structure: {
+    commands: {
+      Place: {
+        asks: { found: { lookUp: { key: ref.input("note"), depth: 3 } }, again: { lookUp: { key: "a:b.c", depth: ref.input("n") } } },
+        set: { memo: ref.query("found"), total: -0.5, on: false },
+        effects: [
+          { Notify: { text: "", count: ref.decision("the size", "count.max"), ratio: 1e21, sure: ref.decision("the size", "urgent") }, when: ref.was("A", "C D") },
+          { Notify: { text: ref.data("memo"), count: ref.calculation("sum:all"), ratio: ref.data("total"), sure: true }, when: ref.query("flag") },
+          { Ping: {}, when: "It is big" },
+        ],
+      },
+      Back: { effects: [{ Ping: {}, when: ref.was() }], set: { memo: " spaced  text " } },
+    },
+  } as any,
+  meanings: { conditions: { "It is big": () => true }, calculations: { "sum:all": () => 1 } } as any,
+});
+`,
+  );
+  const spec = await loadSpecs(dir);
+  const stage0 = new Map([...valuesToWrite(spec)].map(([slot, value]) => [slot, serialize(value)]));
+  assert.equal(stage0.size, 19);
+  assert.deepEqual(stage0.get("Place|otherwise|effects|0|count"), { $ref: "decision:the size.count.max" });
+  assert.deepEqual(stage0.get("Place|otherwise|effects|0|when"), { $was: ["A", "C D"] });
+  assert.deepEqual(stage0.get("Back|otherwise|effects|0|when"), { $was: [] });
+  assert.deepEqual(await stage1Values(spec), stage0);
+  // IR の全体が、バイト一致する
+  assert.equal(stableStringify(extract(spec, await references(spec)).ir), stableStringify(extract(spec).ir));
 });
 
 // 副作用のペイロードに、いろいろな合い方・合わなさを持つ仕様。effects は Place の副作用の列
@@ -235,6 +285,7 @@ test("自分自身の検証: 自分の生成物の上で動くフレームワー
     "payload-check:implementation:0:ok",
     "pipeline:implementation:0:ok",
     "reference-check:implementation:0:ok",
+    "value-writer:implementation:0:ok",
   ]);
   // ミューテーションのゲートも通っている（壊した範囲は、それぞれが使うコードだけ）
   for (const attempt of result.attempts) assert.ok((attempt.mutation?.killed ?? 0) > 0, `${attempt.component}: ${JSON.stringify(attempt.mutation)}`);

@@ -1,4 +1,4 @@
-import { effectOccurrences, kindOf, payloadEvents, referenceEvents } from "./extract.ts";
+import { effectOccurrences, isReference, kindOf, payloadEvents, referenceEvents, valuesToWrite, writeEvents } from "./extract.ts";
 import type { PayloadDiagnostic, ReferenceDiagnostic, SpecInput } from "./extract.ts";
 import { isEnum, isNumberSchema } from "./schema.ts";
 import type { Adapter } from "./runtime.ts";
@@ -110,8 +110,48 @@ export async function stage1Payloads(input: SpecInput, url?: string): Promise<Pa
   return found;
 }
 
-// 検査を、使える中でいちばん新しい Stage で実行した結果を、extract に渡す形で返す
+// 値の直列化を Stage 1 で実行する。返すのは、置き場所の名前 → IR の形。実行できなければ undefined
+type Written =
+  | { name: "WriteConstant"; payload: { kind: "string" | "number" | "boolean"; text: string; number: number; flag: boolean } }
+  | { name: "WriteReference"; payload: { text: string } }
+  | { name: "WriteWasState"; payload: { state: string } };
+export async function stage1Values(input: SpecInput, url?: string): Promise<Map<string, unknown> | undefined> {
+  if (!input.model) return undefined;
+  const adapter = await stage1Adapter("value-writer", url);
+  if (!adapter) return undefined;
+  const values = new Map<string, unknown>();
+  let written: Written[] = [];
+  const record = (name: Written["name"]) => (payload: unknown) => void written.push({ name, payload: { ...(payload as object) } } as Written);
+  try {
+    await adapter.setupIsolation({
+      queries: {},
+      effects: { WriteConstant: record("WriteConstant"), WriteReference: record("WriteReference"), WriteWasState: record("WriteWasState") },
+    });
+    try {
+      for (const [slot, value] of valuesToWrite(input)) {
+        written = [];
+        for (const event of writeEvents(value)) await adapter.executeCommand(event);
+        // 書かれたものを、置き場所に組み上げる（1要素ずつ出てくるものを、IR の入れ子に戻す。判断は無い）
+        const wasStates = written.flatMap((entry) => (entry.name === "WriteWasState" ? [entry.payload.state] : []));
+        const [first] = written;
+        if (isReference(value) && value.$ref === "was" && wasStates.length === written.length) values.set(slot, { $was: wasStates });
+        else if (written.length === 1 && first.name === "WriteReference") values.set(slot, { $ref: first.payload.text });
+        else if (written.length === 1 && first.name === "WriteConstant") {
+          const { kind, text, number, flag } = first.payload;
+          values.set(slot, kind === "string" ? text : kind === "number" ? number : flag);
+        } else throw new Error(`値 ${slot} に対して、書かれたものが想定と違います: ${JSON.stringify(written)}`);
+      }
+    } finally {
+      await adapter.teardownIsolation();
+    }
+  } catch (error) {
+    return fallback("value-writer", error);
+  }
+  return values;
+}
+
+// 検査と直列化を、使える中でいちばん新しい Stage で実行した結果を、extract に渡す形で返す
 export const references = async (input: SpecInput) => {
-  const [found, payloads] = [await stage1References(input), await stage1Payloads(input)];
-  return { ...(found ? { references: found } : {}), ...(payloads ? { payloads } : {}) };
+  const [found, payloads, values] = [await stage1References(input), await stage1Payloads(input), await stage1Values(input)];
+  return { ...(found ? { references: found } : {}), ...(payloads ? { payloads } : {}), ...(values ? { values } : {}) };
 };
