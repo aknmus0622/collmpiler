@@ -18,10 +18,13 @@ export type { ReferenceOutcome } from "./reference-check-decisions.ts";
 export { decideFinish, decideReference, nextErrors } from "./reference-check-decisions.ts";
 export { ReferenceCheck } from "./reference-check.ts";
 export type {
+  ConstantValue,
+  FieldFacts,
   PayloadCheckState,
   PayloadDiagnostic,
   PayloadDiagnosticCode,
   ValueKind,
+  ValueType,
 } from "./payload-check-types.ts";
 export type {
   EffectDeclarations,
@@ -29,6 +32,15 @@ export type {
   PayloadCheckDependencies,
   PayloadDiagnosticReporter,
 } from "./payload-check-ports.ts";
-export type { EnterEffectOutcome } from "./payload-check-decisions.ts";
-export { decideDeclaredField, decideEnterEffect, decideGivenField, kindFits } from "./payload-check-decisions.ts";
+export type { EnterEffectOutcome, FieldValueOutcome, GivenFieldOutcome } from "./payload-check-decisions.ts";
+export {
+  constantFits,
+  decideConstant,
+  decideDeclaredField,
+  decideEnterEffect,
+  decideGivenField,
+  decideTyped,
+  decideUnresolved,
+  kindFits,
+} from "./payload-check-decisions.ts";
 export { PayloadCheck } from "./payload-check.ts";
