@@ -6,4 +6,4 @@ import { fileURLToPath } from "node:url";
 import { runPbt } from "@clp/cli/runtime";
 import { adapter } from "./order.adapter.ts";
 
-await runPbt({ specs: fileURLToPath(new URL("../../../specs/", import.meta.url)), component: "order", adapter });
+await runPbt({ specs: fileURLToPath(new URL("../specs/", import.meta.url)), component: "order", adapter });

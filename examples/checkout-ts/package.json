@@ -3,9 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "verify": "node clp/order.verify.ts"
+    "verify": "clp verify --out ."
   },
   "devDependencies": {
-    "@clp/cli": "workspace:*"
+    "@clp/cli": "workspace:*",
+    "@clp/core": "workspace:*"
   }
 }

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { BINDING, COMPONENT, activate } from "@clp/core";
@@ -42,8 +42,15 @@ export const componentName = (exportName: string) =>
 // 仕様のファイルを読み込み、コンポーネント (Layer 1) と解釈 (Layer 2) を集める。
 // 下書き (*.draft.ts) は既定では読まない。人が確認して名前を変えるまで、正解として使われないようにするため。
 // drafts: true のときだけ下書きを読み、それが置き換える確定版 (X.draft.ts に対する X.ts) は読まない
+// 仕様のディレクトリが無いときに、どうすればよいかを伝える
+export function requireSpecsDir(root: string): void {
+  if (existsSync(root)) return;
+  throw new Error(`仕様のディレクトリがありません: ${root}\n  場所を指定するか (--specs <dir>。clp compile では引数)、仕様 (specs/) のあるディレクトリで実行してください`);
+}
+
 async function scanSpecs(dir: string, options: { drafts?: boolean }): Promise<Scan> {
   const root = resolve(process.cwd(), dir);
+  requireSpecsDir(root);
   const all = (readdirSync(root, { recursive: true }) as string[])
     .filter((file) => file.endsWith(".ts") && !file.endsWith(".d.ts"))
     .sort();

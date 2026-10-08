@@ -18,12 +18,12 @@ mkdirSync(tmpRoot, { recursive: true });
 after(() => rmSync(tmpRoot, { recursive: true, force: true }));
 
 // 例の解釈の中身（先頭の、生成物であることとハッシュの行を除いたもの）
-const reviewed = unstamped(readFileSync(join(repoRoot, "specs/order.interpretation.ts"), "utf8")).replace(/^\/\/ Code generated[^\n]*\n/, "");
+const reviewed = unstamped(readFileSync(join(repoRoot, "examples/checkout-ts/specs/order.interpretation.ts"), "utf8")).replace(/^\/\/ Code generated[^\n]*\n/, "");
 
 // 例の決定表とコンポーネント (Layer 1) だけを写した仕様ディレクトリ（解釈は無い）
 function specDir() {
   const dir = mkdtempSync(join(mkdtempSync(join(tmpRoot, "d-")), "specs-"));
-  for (const name of ["order.decisions.ts", "order.component.ts"]) copyFileSync(join(repoRoot, "specs", name), join(dir, name));
+  for (const name of ["order.decisions.ts", "order.component.ts"]) copyFileSync(join(repoRoot, "examples/checkout-ts/specs", name), join(dir, name));
   return dir;
 }
 // 仕様を写して、Layer 1 を書き換えたもの。別のディレクトリにする

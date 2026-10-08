@@ -4,8 +4,8 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { RuleConflictError, calculate, component, compose, decide, interpretation, matchCondition, onlyIf } from "@clp/core";
-import { Interpretation } from "../../../specs/order.interpretation.ts";
-import { Order } from "../../../specs/order.component.ts";
+import { Interpretation } from "../../../examples/checkout-ts/specs/order.interpretation.ts";
+import { Order } from "../../../examples/checkout-ts/specs/order.component.ts";
 import { extract } from "../src/extract.ts";
 import type { Ir } from "../src/generate.ts";
 import { layer1Hash, loadSpecs } from "../src/loader.ts";
@@ -41,7 +41,7 @@ test("Layer 1 と解釈の構造には関数が無い (そのまま IR にでき
 });
 
 test("specs/ の IR 出力は実行ごとにバイト一致する", () => {
-  const compile = () => execFileSync(process.execPath, ["packages/cli/bin/clp.ts", "compile", "specs"], { encoding: "utf8" });
+  const compile = () => execFileSync(process.execPath, ["packages/cli/bin/clp.ts", "compile", "examples/checkout-ts/specs"], { encoding: "utf8" });
   const first = compile();
   assert.equal(first, compile());
   const ir = JSON.parse(first);
@@ -79,7 +79,7 @@ test("specs/ の IR 出力は実行ごとにバイト一致する", () => {
 });
 
 test("specs/ は仕様の事前検査に合格する", async () => {
-  assert.deepEqual(await selfCheck(await loadSpecs("specs"), { seed: 1, numRuns: 300 }), { ok: true, numRuns: 300 });
+  assert.deepEqual(await selfCheck(await loadSpecs("examples/checkout-ts/specs"), { seed: 1, numRuns: 300 }), { ok: true, numRuns: 300 });
 });
 
 // --- 仕様の誤りの検出 (loader / extract / selfCheck) ---

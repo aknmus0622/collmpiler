@@ -26,6 +26,18 @@ importers:
       '@clp/cli':
         specifier: workspace:*
         version: link:../../packages/cli
+      '@clp/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+
+  examples/library-ts:
+    devDependencies:
+      '@clp/cli':
+        specifier: workspace:*
+        version: link:../../packages/cli
+      '@clp/core':
+        specifier: workspace:*
+        version: link:../../packages/core
 
   packages/cli:
     dependencies:

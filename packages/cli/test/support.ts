@@ -13,7 +13,8 @@ import type { Phase, Place, Step } from "./fixtures/scripted-agent.ts";
 
 // 出力先は packages/cli 配下に置く（verify.ts が @clp/cli/runtime を解決できる場所）
 export const repoRoot = join(import.meta.dirname, "../../..");
-export const specsDir = join(repoRoot, "specs");
+// 例の仕様（注文）。テストの題材にする
+export const specsDir = join(repoRoot, "examples/checkout-ts/specs");
 // 仕様を写して書き換えるテスト用: 解釈に記された Layer 1 のハッシュを外す（外した解釈は、古いかどうかを問われない）
 export const unstamped = (text: string) => text.replace(/^\/\/ layer1: [^\n]*\n/m, "");
 

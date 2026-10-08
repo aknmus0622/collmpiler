@@ -45,18 +45,18 @@ test("clp: 引数の誤りは、何が違うかと使い方を伝えて、終了
 });
 
 test("clp compile: IR を標準出力に出す。呼び出した場所からの相対パスで読む", () => {
-  const fromRoot = clp(["compile", "specs"]);
+  const fromRoot = clp(["compile", "examples/checkout-ts/specs"]);
   assert.equal(fromRoot.status, 0);
   assert.equal(JSON.parse(fromRoot.stdout).irVersion, 5);
   // 別のディレクトリから呼んでも、同じ IR になる
-  const fromExample = clp(["compile", "../../specs"], { cwd: join(repoRoot, "examples/checkout-ts") });
+  // 仕様のあるディレクトリ（プロジェクト）から呼べば、既定の specs が使われる
+  const fromExample = clp(["compile"], { cwd: join(repoRoot, "examples/checkout-ts") });
   assert.equal(fromExample.stdout, fromRoot.stdout);
-  // 既定は specs
-  assert.equal(clp(["compile"]).stdout, fromRoot.stdout);
+  assert.equal(clp(["compile", "specs"], { cwd: join(repoRoot, "examples/checkout-ts") }).stdout, fromRoot.stdout);
 });
 
 test("clp verify: すでにある本番コードを検証する。何も書き換えない。コンポーネントを選べる", () => {
-  const passed = clp(["verify", "--out", "examples/checkout-ts", "--runs", "50", "--seed", "7"]);
+  const passed = clp(["verify", "--specs", "examples/checkout-ts/specs", "--out", "examples/checkout-ts", "--runs", "50", "--seed", "7"]);
   assert.equal(passed.status, 0);
   assert.match(passed.stdout, /CLP_RESULT \{"status":"pass","seed":7,"numRuns":50\}/);
 
@@ -70,9 +70,13 @@ test("clp verify: すでにある本番コードを検証する。何も書き�
   assert.equal(clp([...self, "--component", "nobody"]).status, 2);
 
   // テストの入口が無い出力先
-  const empty = clp(["verify", "--out", mkdtempSync(join(tmpRoot, "empty-"))]);
+  const empty = clp(["verify", "--specs", specsDir, "--out", mkdtempSync(join(tmpRoot, "empty-"))]);
   assert.equal(empty.status, 1);
   assert.match(empty.stderr, /テストの入口 \(clp\/order\.verify\.ts\) がありません。先に clp apply を実行してください/);
+  // 仕様の無い場所で呼んだ
+  const nowhere = clp(["verify", "--out", "examples/checkout-ts"]);
+  assert.equal(nowhere.status, 1);
+  assert.match(nowhere.stderr, /仕様のディレクトリがありません: [\s\S]*specs[\s\S]*--specs/);
 });
 
 test("clp apply: エージェントを指定しなくても、検証とテスト側の生成はできる。エージェントが要る場面では、そう伝えて止まる", () => {

@@ -3,7 +3,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import type { Violation } from "./check.ts";
-import { DRAFT_SUFFIX } from "./loader.ts";
+import { DRAFT_SUFFIX, requireSpecsDir } from "./loader.ts";
 
 // TypeScript の型チェック。2つの用途がある:
 //   typecheckSpecs … 仕様の検査。仕様は常に TypeScript で書くので、フレームワークに固定で組み込む
@@ -53,6 +53,7 @@ export function typecheck(cwd: string, files: string[]): Violation[] {
 
 // 仕様のディレクトリを型チェックする。ファイルの選び方は loadSpecs と同じ
 export function typecheckSpecs(specsDir: string, options: { drafts?: boolean } = {}): Violation[] {
+  requireSpecsDir(specsDir);
   const all = (readdirSync(specsDir, { recursive: true }) as string[])
     .filter((file) => file.endsWith(".ts") && !file.endsWith(".d.ts"))
     .sort();

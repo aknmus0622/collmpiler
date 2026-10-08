@@ -134,7 +134,7 @@ test("検査: 本番コードはフレームワーク・仕様・テスト側・
       `import { applyDecision } from "@clp/core";`,
       `import ir from "../clp/order.ir.json" with { type: "json" };`,
       `import { readFileSync } from "node:fs";`,
-      `export * from "../../../../../specs/order.component.ts";`,
+      `export * from "../../../../../examples/checkout-ts/specs/order.component.ts";`,
       text,
     ].join("\n"),
   );
@@ -174,6 +174,6 @@ test("検査: アダプターの中身は字面では制限しない (判断の�
 
 test("検査: アダプターは仕様や IR を import できない", async () => {
   const { rules, edit } = await workspace();
-  edit("clp/order.adapter.ts", (text) => `import { CampaignRules } from "../../../../../specs/order.component.ts";\n${text}`);
+  edit("clp/order.adapter.ts", (text) => `import { CampaignRules } from "../../../../../examples/checkout-ts/specs/order.component.ts";\n${text}`);
   assert.deepEqual(rules(), ["clp/order.adapter.ts:forbidden-import"]);
 });
