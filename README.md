@@ -3,8 +3,8 @@
 
 ```
     f(document) = software
-```
               with no code reviews
+```
 
 ## Current Scope
 
