@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { extract, stableStringify, whereOf } from "../extract.ts";
+import { graphDiagnostics } from "../graph.ts";
 import { listComponents, loadSpecs } from "../loader.ts";
 import { seedOf } from "../generate.ts";
 import type { Ir } from "../generate.ts";
@@ -37,8 +38,10 @@ for (const name of names) {
   // 名前の検査は、フレームワーク自身の仕様から生成したコード (Stage 1) で行う。使えなければ手書き (Stage 0)
   const { ir, diagnostics } = extract(spec, await references(spec));
   const tag = names.length > 1 ? `${name}: ` : "";
-  for (const d of diagnostics) console.error(`${d.severity}[${d.code}] ${tag}${whereOf(d)}${d.message}`);
-  if (diagnostics.some((d) => d.severity === "error")) process.exitCode = 1;
+  // グラフの検査: たどり着けない状態とコマンド、使われない語彙（ほかの誤りが無いときに）
+  const structural = diagnostics.some((d) => d.severity === "error") ? [] : graphDiagnostics(spec);
+  for (const d of [...diagnostics, ...structural]) console.error(`${d.severity}[${d.code}] ${tag}${whereOf(d)}${d.message}`);
+  if ([...diagnostics, ...structural].some((d) => d.severity === "error")) process.exitCode = 1;
   irs[name] = ir;
 
   // 仕様の事前検査: 仕様だけをランダムなコマンド列で実行し、条件の衝突や不変条件の破れを見つける

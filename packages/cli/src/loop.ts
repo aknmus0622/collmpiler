@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import { resolveLayout, sourceFiles, workspaceOf } from "./layout.ts";
 import type { Workspace } from "./layout.ts";
 import { boundaryOf, extract, stableStringify, whereOf } from "./extract.ts";
+import { graphDiagnostics } from "./graph.ts";
 import { mergeAssets } from "./assets.ts";
 import type { Asset } from "./assets.ts";
 import { entryGate, exitGate, verifyGate } from "./gates.ts";
@@ -110,6 +111,12 @@ export async function implement(options: ImplementOptions) {
     const errors = diagnostics.filter((d) => d.severity === "error");
     if (errors.length > 0) {
       throw new Error(`仕様 (${name}) にエラーがあります:\n${errors.map((d) => `  ${whereOf(d)}${d.message}`).join("\n")}`);
+    }
+    // グラフの検査: たどり着けない状態やコマンドは、仕様の誤り。使われない語彙は、知らせるだけ
+    const structural = graphDiagnostics(spec);
+    for (const d of structural.filter((entry) => entry.severity === "warning")) log(`注意 (${name}): ${d.message}`);
+    if (structural.some((d) => d.severity === "error")) {
+      throw new Error(`仕様 (${name}) にエラーがあります:\n${structural.filter((d) => d.severity === "error").map((d) => `  ${d.message}`).join("\n")}`);
     }
     const ir = JSON.parse(stableStringify(extracted)) as Ir;
     requireModel(ir);
