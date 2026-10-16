@@ -813,3 +813,365 @@ export const Interpretation = interpretation(Order, {
 * 決定表の行は、条件の取っ手で書く（`when(If.x, { 列: 値 })`、`otherwise({ ... })`）。行の文を、表の中に書かない。
 * 同じまとまりを、複数の部品で使える（型、副作用の並び）。todo の例で `Todo` を2回書いた問題も、ここで片付く。
 * IR は名前で書かれるので、取っ手で書いても、変わらない。
+
+## 16. 1.0 の書き方（N7。紙の上の設計、決定待ち）
+
+`ROADMAP.md` の N7。0.1 の M3 と同じく、これから書く仕様を「こう書きたい」形で先に紙に書き、書きにくさを一覧にして、
+1回の設計（IR の変更は1回、版 7）にまとめる。紙に書いたのは次の3つ。
+
+1. self の4つの部品を、いまの書き方（取っ手、`record` / `list`、部品）で書き直したもの（§16.2）
+2. これから Stage 1 に移す判定: `judge`、作業場所の監査、シミュレーター（§16.3）
+3. 保存先と、依存の失敗のある web（todo）（§16.4）
+
+### 16.0. 全体の形（決定）
+
+書きにくさを1つずつ直す前に、DSL 全体の土台を見直した。目的は2つ。利用者が独自の語を足せること（拡張）と、
+Composite をもっと単純にすること。§16.1 以降の記述例は、まだ前の書き方のままで、この形に書き直す。
+
+#### 2つの概念と1つの操作
+
+| 概念 | 中身 |
+| --- | --- |
+| **ノード** | 種類 + 名前つきの子（葉なら、それに値）。`service`、`command`、`state`、文、型、定数のすべてがノード |
+| **種類** | 子についての決まり（スキーマ）。次の**どちらか一方だけ**を持つ。決まった名前の子（**席**。`command` なら `input`、`from`、`goTo`、`cases`）か、自由な名前の子とその種類（**項目**。`commands` なら、どの名前の子も `command`） |
+
+| 操作 | 中身 |
+| --- | --- |
+| **単一化（unify）** | 同じ道筋のノードどうしを合わせる。Layer 1 と解釈を重ねるのも、並びの要素を名前で突き合わせるのも、この1つ。値がぶつかれば誤り（`problems`）。Layer 1 が勝つ、はこの帰結 |
+
+ここから、次の決まりが導かれる。
+
+1. **子は、すべて名前を持つ。** 名前の無い子を並べる書き方（`component(from(...), goTo(...))`）はやめる。
+2. **名前が生まれるのは、項目を持つ種類（まとまり）の宣言のキーだけ**（`states({...})`、`commands({...})` など）。
+   ほかの `{}` のキーは、すべて席。種類が席と項目の一方だけを持つので、1つの `{}` の中でキーの意味が混ざることはない。
+   例外は、同じものを2つ置くときの付け直し `.as("名前")` だけ。
+3. **`[]` は、名前を持つノードの並び**（`compose([...])` の略記）。並びの要素は、自分の名前で突き合わせる
+   （取っ手から作ったノードは、名前を自分で持つ: `Effect.SendReceipt(...)` は `SendReceipt`、`If.paid.then(...)` は `paid`、
+   `State.PAID` は `PAID`、生の値は、その値）。順序に意味があるか（`emits` はある、`from` と列挙と `cases` は無い）は、席が決める。
+   名前が重なれば誤り。名前を持つノードを `{}` のキーの下に置くことはない（1つのノードが2つの名前を持たない）。
+4. **`component` は基底の種類で、書くときは必ず別名**（`service`、`command`、`state`、`description` など）。
+   いちばん外側の部品は `service`。
+
+#### 略記: 書いた値を、その位置の種類に変換する
+
+| 書いたもの | 変換の先 | 例 |
+| --- | --- | --- |
+| 生の文字列・数・真偽値 | その席が求める葉 | `description: "..."` は文、`data({ price: "integer" })` は型、`responds: 201` は定数、`states({ PAID: "Paid." })` は説明つきの状態 |
+| 取っ手 | その席が求めるノード | `emits: [Effect.SendReceipt]` は入力のまだ無い副作用、`cases: [..., otherwise]` は何も起きない場合、`from: State.DRAFT` は状態への参照 |
+| 1つの値 | 並びの席なら、要素1つの並び | `from: State.DRAFT` は `from: [State.DRAFT]` |
+| 生の `{}` | その席が求める種類のノード | `commands({ PlaceOrder: { input: ..., from: ... } })` の中の `{}` は `command` |
+
+* 1つの席が受け取る葉は1種類だけで、種類の定義に書く。だから略記が2通りに読めることはない。
+* **型の席の `{}` だけは、いまのまま誤り。** `{ type: "integer", min: 1 }` が、範囲つきの整数とも、2つのフィールドを持つレコードとも読めるため。
+  `record({...})`、`integer({...})` と書く。
+* 副作用の入力と、`onlyWhen` のような修飾は、同じ `{}` に入れない。入力は呼び出しの引数、修飾は続けて呼ぶ形
+  （`Effect.IssueCoupon({ type: Campaign.coupon }).onlyWhen(Campaign.grantsCoupon)`）。`.as(...)` と同じ形。
+
+#### 種類の定義: 組み込みの語も、利用者の語も、同じ形
+
+```ts
+// 組み込みの種類（packages/core が持つ）
+const Case     = kind("case",     { fields: { goTo: StateRef, does: Text, emits: listOf(Emit, { key: "effect" }), set: Sets, responds: Value } });
+const Command  = kind("command",  { fields: { description: Text, input: Input, from: listOf(StateRef), goTo: StateRef, cases: listOf(Case, { key: "condition" }) } });
+const Commands = kind("commands", { entries: Command });                 // 項目: 自由な名前の子。値はすべて command
+const Service  = kind("service",  { fields: { description: Text, init: StateRef, uses: listOf(Group) } });
+
+// 利用者の種類（L2: 展開する語）
+const Resource = kind("resource", { fields: { item: Type, path: Text }, expand: ({ item, path }) => commands({ ... }) });
+```
+
+* いまの中央の文法の表（`GRAMMAR`）は、各種類の定義から組み立てる。木の検査は「種類の決まりに合っているか」の1つになり、
+  席の誤り、名前の重なり、置き場所の誤りは、すべてここで見つかる。
+* IR も「種類 + 名前つきの子」のまま書く（書いた語と IR の語が同じ、という方針は変わらない）。
+
+#### 拡張の段階
+
+| 段階 | 利用者ができること | 1.0 |
+| --- | --- | --- |
+| L1. 断片 | 既存の語を組み合わせた値を、変数や関数で作り回す（`const rejected = ...`、`const crud = (Item) => commands({...})`） | 開く（いまもできる） |
+| L2. 展開する語 | 種類を定義し（席と項目の決まり）、中身をコアの語に展開させる。IR は展開した木から作るので、意味はコアのまま | 開く |
+| L3. 注釈 | 意味を持たない情報を IR に載せて運ぶ。正解は無視し、契約や依頼文、利用者の道具が使う | 開く |
+| L4. 新しい意味 | 正解のランタイム、生成器、契約、依頼文に、新しい振る舞いを足す | **1.0 の後**。正解のランタイムは信頼の基盤（`SELF_HOSTING.md` §10）で、利用者のプラグインが入ると、それが広がる。`durable`、`mayFail` のように新しい意味を持つ語は、コアに組み込む |
+
+* 展開（`expand`）は関数だが、走るのは仕様を読み込むときだけ。IR と正解に入るのは展開した結果のデータだけなので、
+  「仕様に関数を書かない」は、展開したあとの木について保たれる。展開は決定的でなければならない（読み込むたびに2回展開して比べる）。
+* 組み込みの `forwards`（W10）と `route` も、L2 / L3 の仕組みで定義し直す。利用者に開く口を、まず自分で使って確かめる。
+* 解釈（LLM）は、展開したあとのコマンドに対して書く。
+
+#### 記述例（注文）
+
+```ts
+export const State = states({ DRAFT: "Before the order is placed.", PENDING: "Waiting for payment.", PAID: "Paid.", CANCELLED: "Cancelled." });
+export const Query = queries({ paymentResult: ["succeeded", "failed"] });
+export const Effect = effects({ SendReceipt: input({ amount: "integer" }), Refund: "What the customer paid is returned." });
+export const If = conditions({ paid: "The payment succeeded" });
+export const PlaceInput = input({ customerRank: Rank, listPrice: Yen });
+
+export const Command = commands({                        // 名前が生まれるのは、ここ
+  PlaceOrder: { input: PlaceInput, from: State.DRAFT, goTo: State.PENDING },              // 中の {} は席
+  Checkout: {
+    from: State.PENDING,
+    cases: [If.paid.then({ goTo: State.PAID, does: "A receipt is sent.", emits: [Effect.SendReceipt] }), otherwise],
+  },
+  Cancel: { from: [State.PENDING, State.PAID], goTo: State.CANCELLED },
+});
+
+export const Order = service({                           // {} は席だけ
+  description: "An order, from placing it to payment.",
+  init: State.DRAFT,
+  uses: [State, Query, Effect, If, Command],             // まとまりは、名前を持つノードとして並べる
+});
+```
+
+解釈も、足すものを、名前を持つノードとして並べるだけになる（`{ commands, meanings }` のような席も要らない）。
+重ねるときは、名前（`Command.Checkout`、`If.paid` ……）で Layer 1 のノードを探して、単一化する。
+
+```ts
+export const Interpretation = interpretation(Order, [
+  Data,                                                   // 足すまとまり
+  Calc,
+  Command.Checkout.with({                                  // コマンドの取っ手に、足す席を書く
+    cases: [If.paid.then({ emits: [Effect.SendReceipt({ amount: Calc.amountCharged })] })],
+  }),
+  If.paid.means((state) => state.paymentResult === "succeeded"),
+  Calc.amountCharged.means((state) => Math.floor((state.price * (100 - Campaign.of(state).discountPercent)) / 100)),
+]);
+```
+
+#### 先にある例
+
+* JSON Schema の `properties`（決まった名前）と `additionalProperties`（自由な名前）が、種類の2つの形に当たる。
+* Kubernetes の strategic merge patch は、並びを `patchMergeKey`（コンテナの `name` など）で突き合わせて重ねる。並びの要素を名前で突き合わせることに当たる。
+* CUE は、設定を単一化で重ね、具体的な値がぶつかれば誤りにする。Layer 1 と解釈を重ねる操作に当たる。
+
+#### 以前の書き方との関係
+
+* 0.1 で消した `structure: {...}` の書き方（文字列で参照し、木の検査が無い）とは別物である。いまは取っ手で参照し、種類の決まりで木を検査する。
+* §4.8（`{}` の意味は受け取る語が決める）は、「種類が、席か項目かを決める」に置き換わる。§15 の取っ手は、そのまま使う。
+* 状態や条件の宣言、決定表、取っ手の意味は変わらない。変わるのは、ノードを束ねる書き方（名前の無い子の並び → 席と項目と並び）と、
+  解釈の書き方（同じ木 → 名前を持つノードの並び）。既存の例は、N8 で機械的に移す（IR は、書き方の変更の分は変わらない）。
+
+### 16.1. 書きにくさの一覧
+
+| # | 書きにくさ | どこで | 案 | IR |
+| --- | --- | --- | --- | --- |
+| W1 | どの場合にも共通の結果を、場合ごとに書き写す | `pipeline` の `Start`（同じ5つの `set` を4回） | コマンドの直下に書いた動詞は、どの場合でも起きる（場合の動詞より先に）。同じデータへの `set` や `goTo` が場合の中にもあれば、エラー | 変わらない（場合ごとに展開する） |
+| W2 | 遷移先を、決定表の値で決められない | `pipeline` の `Start`（計画の表の行と同じ `when` を、遷移先のためだけに並べる） | 決定表のセルに状態の取っ手を書け、`goTo(Plan.next)` と書ける。グラフの検査は、その列の状態すべてを辺にする | `goTo` が参照を持てる |
+| W3 | 条件を組み合わせられない | `pipeline`（`checkPassed` と「通った、かつ既存のコード」）、`payload-check`（`fieldSValueStillBeing` 1〜3） | `when(all(If.passed, If.incremental), ...)`、`not(If.x)`。意味の関数は、組み合わせる前の条件にだけ書く | 場合が、名前の組み合わせを持つ |
+| W4 | 「どれか1つの形」の値を書けない。使わないフィールドに何かを入れて運ぶ（埋め草） | `value-writer`、`payload-check` の `Constant`（`kind` と `text` / `number` / `flag`）。§12 の「場合ごとに形が違う結果」 | `oneOf({ constant: record({...}), reference: record({...}) })`。値は、キーが1つのレコード（`{ constant: {...} }`） | 型の節が1つ増える |
+| W5 | 何でも入る値を書けない | シミュレーター、観測値の比較、IR の組み立て（フレームワークの部品は、仕様の値をそのまま運ぶ） | `value()`: null、真偽値、数、文字列、並び、レコードのどれか。生成器は任意の JSON | 型の節が1つ増える |
+| W6 | 部品を再帰させられない（部品の中に、同じ部品） | シミュレーター（含む部品は、それ自体が仕様の実行） | **入れない。** `pipeline` と同じく、手続きを裏返す（`CallPart` を副作用として出し、答えをコマンドで受ける）。再帰は、つなぐ側（橋渡し）が持つ | — |
+| W7 | 状態を持つ依存（保存先）と、再起動を越えて残ること | web | **決定。** 業務の部品に `durable(Store)` を付ける。状態の持ち主は業務の部品の仕様だけで、検証は試行の途中に「再起動」をはさみ、その状態が残ることを確かめる。保存のコードは、汎用の保存先の部品 `Store`（`durable()`、値は `value()`）として、自分の仕様で検証される（§16.4） | `durable` と、契約の口 |
+| W8 | 依存の失敗を書けない | web（採番や外のサービスが落ちる） | **決定。** 問い合わせに `mayFail()`。失敗は、取っ手の条件 `Query.newId.failed`（尋ねたものは `.as(...)` の取っ手の `.failed`）。**ほかの条件と同じ扱い**で、例外は作らない（§16.4） | 問い合わせの性質と、場合の条件 |
+| W9 | 数の列挙（`[201, 422]`） | todo の API（いまは `integer({ min: 200, max: 599 })` で逃げている） | 数の配列を列挙として受け付ける | 列挙が数を持てる |
+| W10 | 子のコマンドを、そのまま親の口に出す | `todos`（`Complete` は呼んで、答えを返すだけ） | `forwards(Part.items.Complete, missing("not-found"))`（§6 の決定を取っ手で書く）。外側のコマンドの入力はキーと子の入力、答えは子の答えか `missing` の値 | 変わらない（呼んで返すコマンドに展開する） |
+| W11 | Layer 1 に `set` / `emits` を書けない | 例のどれか（解釈だけが書ける） | 書けるようにする。解釈は上書きできない（`goTo` と同じ） | 変わらない |
+| W12 | データと、問い合わせの答えのフィールドを、取っ手で指せない | シミュレーター、`judge`（記録のフィールド） | `Data.last.status`、`Query.fieldOf({...}).as("field").answer.kind`（入力の取っ手と同じ形） | 変わらない（参照の path が伸びる） |
+| W13 | 親の `add` だけが設定するデータに、グラフの検査が「設定されない」と注意を出す | todo-item | `add` で渡すデータも、設定として数える | — |
+| W14 | 隔離した作業場所に、Node の型定義が無い | todo の API（エージェントが `node:http` の型を自分で宣言した） | 許した組み込み（`BUILTINS`）の型定義だけを、作業場所に置く | — |
+
+「条件の名前」（`ROADMAP.md` M4 の残り）は、N1 の `conditions({...})` で済んでいる。
+
+書きにくさではなかったもの（書き方は変えない）:
+
+* **要素ごとに歩く形**（`reference-check`、`payload-check`）。構造を持つ入力を1つの値で受け取り、診断の並びを計算で返すこともできるが、
+  そうすると判断がすべて計算の関数の中に入り、構造（場合、決定表）として現れない。歩く糊は判断を持たないので、
+  判断を構造に置くには、いまの形がよい。依頼文と `SELF_HOSTING.md` に、指針として書く。
+* **集まりは、覚えずに尋ねる**（§5 の `stateDeclared`）。名前で引く対応（`dict`）を足す案は採らない。並びで足りる。
+* **細かく分けた問い合わせ**（`payload-check` の6つ）は、いまでも `record` の答え1つにまとめられる（§16.2）。書き方の不足ではなかった。
+
+### 16.2. self の4つの部品を書き直す
+
+`pipeline`（W1、W2、W3）:
+
+```ts
+export const Plan = decisionTable(
+  when(PlanIf.noCode,          { phase: "design", next: State.DESIGN,  incremental: false }),   // W2: 状態の取っ手をセルに
+  when(PlanIf.boundaryChanged, { phase: "design", next: State.DESIGN,  incremental: true }),
+  when(PlanIf.noAdapter,       { phase: "wiring", next: State.WIRING,  incremental: true }),
+  otherwise(                   { phase: null,     next: State.GRADING, incremental: true }),
+);
+
+Start: component(
+  StartInput, from(State.IDLE),
+  goTo(Plan.next),                                                           // W2
+  Data.maxAttempts.set(StartInput.attemptsPerPhase), Data.maxRounds.set(StartInput.rounds),   // W1, W11: 共通の結果を1回だけ
+  Data.incremental.set(Plan.incremental), Data.round.set(1), Data.attempt.set(1),
+  Effect.StartSession({ phase: Plan.phase, round: 1, attempt: 1 }, onlyWhen(not(PlanIf.gradeFirst))),
+  Effect.GradeCurrentCode({ round: 1 }, onlyWhen(PlanIf.gradeFirst)),
+),
+WiringChecked: component(
+  checked, from(State.WIRING),
+  when(all(If.passed, If.incremental), goTo(State.GRADING), ...),            // W3
+  when(all(If.passed, not(If.incremental)), goTo(State.IMPLEMENTATION), ...),
+  rejected,
+),
+```
+
+`Start` の4つの場合は1つになり、解釈の 40 行ほどが消える。条件は `passed`、`incremental`、`attemptsRemain`、`roundsRemain` の4つだけに意味を書けばよい。
+
+`value-writer`（W4）:
+
+```ts
+export const Value = oneOf({
+  constant: oneOf({ string: "string", number: "number", boolean: "boolean" }),
+  reference: record({ target: ["input", "data", "query", "calculation", "decision"], name: "string", column: optional("string") }),
+  was: list("string"),
+});
+export const WriteInput = input({ value: Value });
+Write: component(WriteInput, output(IrValue), does("...")),       // 答えで返す。副作用で1要素ずつ出して、糊が組み立てる必要がない
+```
+
+`kind` と、使わないフィールド（`text` / `number` / `flag`）の埋め草が消える。答えで返せるので、`stage1Values` の組み立ての糊も小さくなる。
+
+`payload-check`（W3、W4。問い合わせを1つに）:
+
+```ts
+fieldOf: component(input({ effect: "string", field: "string" }),
+  output(optional(record({ kind: FieldKind, members: list("string"), min: optional("number"), max: optional("number") })))),
+
+Value: component(input({ value: oneOf({ constant: Constant, typed: ConstantKind, unresolved: record({}) }) }),
+  from(State.IN_FIELD, State.IN_SETTLED_FIELD, State.IN_UNKNOWN_EFFECT),
+  Query.fieldOf(here).as("field"),
+  when(all(If.checking, not(If.fits)), goTo(State.IN_SETTLED_FIELD), Effect.ReportDiagnostic({ code: "bad-value", ...here })),
+  otherwise(),
+),
+```
+
+`Constant` / `Typed` / `Unresolved` の3つのコマンドは、値の形が違うだけなので1つになる。6つの問い合わせは1つになる。
+`reference-check` は、ほぼ変わらない（W3 で、条件の重複が少し減る）。
+
+### 16.3. これから移す判定
+
+`judge`（`SELF_HOSTING.md` §10.4 の形。いまの書き方で書ける）:
+
+```ts
+export const State = states("IDLE", "IN_VALUE", "BETWEEN_VALUES", "DONE");
+export const Data = data({ sawSite: "boolean", sawKilled: "boolean", located: "boolean", anyKilled: "boolean", value: DecisionValue });
+export const Query = queries({ inAdapter: component(input({ value: DecisionValue }), output("boolean")) });
+export const Effect = effects({
+  Survived: input({ value: DecisionValue }),
+  DecisionInAdapter: input({ value: DecisionValue }),
+  Ineffective: input({}),
+});
+commands: {
+  BeginValue: component(input({ value: DecisionValue }), from(State.BETWEEN_VALUES, State.IDLE), goTo(State.IN_VALUE), ...),
+  Site: component(input({ killed: "boolean" }), from(State.IN_VALUE), does("...")),
+  EndValue: component(from(State.IN_VALUE), goTo(State.BETWEEN_VALUES), Query.inAdapter({ value: Data.value }).as("adapter"),
+    when(all(If.sawSite, not(If.sawKilled)), Effect.Survived({ value: Data.value })),
+    when(all(not(If.sawSite), If.numeric, If.adapter), Effect.DecisionInAdapter({ value: Data.value })),
+    otherwise()),
+  Mutant: component(input({ killed: "boolean" }), does("...")),
+  Finish: component(input({ shared: "boolean" }), goTo(State.DONE),
+    when(all(not(If.located), not(If.shared), not(If.anyKilled)), Effect.Ineffective({})), otherwise()),
+}
+```
+
+書けた。W3 が無いと、`EndValue` と `Finish` の条件は、組み合わせごとに名前と意味の関数を持つことになる（`pipeline` と同じ重複）。
+`DecisionValue` は「数か文字列」なので、W4 の `oneOf({ number: "number", string: "string" })` を使う（いまは `kind` + 埋め草）。
+
+作業場所の監査: 変わったファイル1つごとに `ChangedFile { path, isNew, usedByThis, usedByOthersOnly, inert, partFile }` を渡し、
+`OutOfScope` を出す。状態を持たない部品と、決定表1つで書ける。書きにくさは無かった。
+
+シミュレーター（W4、W5、W6、W12）:
+
+```ts
+// 1手: コマンドを1つ実行する。値の保管と、意味の関数の評価と、含む部品の実行は、橋渡しに尋ねる
+Execute: component(
+  input({ command: "string", input: value() }),
+  Query.enabled({ command: ExecuteInput.command }).as("enabled"),                // from / onlyIf を満たすか（意味の関数は橋渡しが呼ぶ）
+  Query.holdingCases({ command: ExecuteInput.command }).as("holding"),           // 成り立つ場合の名前の並び
+  when(If.notEnabled, responds({ refused: {} })),
+  when(If.conflict, responds({ conflict: { cases: Query.holding.answer } })),   // 2つ以上: RuleConflictError
+  otherwise(Effect.Apply({ command: ..., case: Calc.chosenCase }), responds({ applied: {} })),
+),
+```
+
+書いてみると、シミュレーターが自分で持つ判断は、次の5つに分けられる。
+
+1. 実行できるか（`from`、`onlyIf`、経路に載らない値）
+2. 場合の選び方（同時に1つだけ、無ければ `otherwise`）
+3. 起きることの順序（含む部品の呼び出し → 場合の動詞。副作用は書いた順。`onlyWhen`）
+4. 多数ある部品（無いキーは何もせず `null`、`adds` / `removes`）
+5. 依存の約束（`fresh`、`increasing`）
+
+値そのもの（`value()`）は運ぶだけで、中身で判断しない。含む部品は、`CallPart` を副作用として出し、橋渡しが子のシミュレーターを動かして、
+答えを `PartAnswered` で返す（W6）。これは N12 で、部品を分けて書く（実行できるか、場合の選び方、起きることの順序、多数ある部品）。
+1つの部品にすると大きすぎる。
+
+### 16.4. 保存先と失敗のある web（W7、W8 は決定）
+
+**保存先（W7）**: 再起動を越えて残ることは、業務の部品の観測できる性質として書く。どこに保存するかは書かない。
+保存のコードは、業務を知らない汎用の部品として、別に書いて検証する。
+
+```ts
+// 保存先の部品: 業務を知らない。再起動を越えて残ることが、この部品自身の性質（起点）
+export const Store = component({
+  description: "Keeps values by key.",
+  durable: durable(),                                   // 引数なし: この部品が、自分で残す（本番コードは node:sqlite など）
+  data: Data,                                           // entries: list(record({ key: "string", value: value() }))
+  commands: {
+    Put: component(PutInput, does("The value is kept under the key, replacing what was there.")),
+    Get: component(GetInput, output(optional(value())), does("The value kept under the key, or nothing.")),
+    Delete: component(DeleteInput, does("Nothing is kept under the key any more.")),
+  },
+});
+
+// 業務の部品: 状態は、これまでどおり自分の仕様だけが持つ
+export const Todos = component({
+  description: "A to-do list ...",
+  durable: durable(Store),                              // Store を通して、再起動を越えて残る
+  parts: Part,                                          // items: many(TodoItem, by("id"))
+  commands: { Add: ..., Complete: ..., Remove: ..., List: ... },   // Store のコマンドは呼ばない
+});
+```
+
+検証:
+
+```
+Store:  Put { key: "a", value: { title: "milk" } } → （再起動）→ Get { key: "a" } → 期待値 { title: "milk" }
+Todos:  Add { title: "milk" } → Complete { id: "a" } → （再起動）→ List { only: "all" } → 期待値 [{ id: "a", title: "milk", done: true }]
+```
+
+| 点 | 決めたこと |
+| --- | --- |
+| 状態の持ち主 | 業務の部品の仕様だけ。項目の状態は、2か所に現れない。業務の仕様には `Put` などの保存の手順を書かない |
+| 再起動 | 検証は、試行の途中に「再起動」をはさむ（コマンドと同じく、乱数で選ぶ）。期待値は、`durable` の部品の状態を残し、ほかの部品の状態を始め（`init` と `initially`）に戻したもの。契約に `restartSystem()` を足し、アダプターは本番コードを止めて、同じ保存先で起動し直す（HTTP なら、同じデータベースのファイルでサーバーを起動し直す）。メモリにしか持たない実装は、ここで落ちる |
+| `durable(Store)` の意味 | 「この保存先の部品を、使えるものとして渡す」。**強制しない**（本番コードには制約をかけない）。エージェントが `node:sqlite` を直接使っても、再起動の検証に通れば合格。扱いは N4 の含む部品と同じで、業務の部品を書くエージェントは `Store` の本番コードを見て使えるが、仕様（IR）は見ない。そのコードは変えられず（`out-of-scope`）、ミューテーションも及ばない。`Store` の仕様は、業務の部品の検証では実行しない（呼ばないので） |
+| 引数なしの `durable()` | 自分で残す。`Store` のような起点の部品に付ける。業務の部品に付けてもよく、そのときは保存の方法をエージェントが選ぶ |
+| `Store` の値の形 | 汎用（`value()`、W5）。業務ごとに型を付けた保存先（`TodoStore`）は、型が業務の仕様と二重になるので勧めない |
+| 保存先の場所 | 本番コードは、保存先の場所（ファイルのパス）を受け取る。決めるのは、入口の起動と設定（人が書く composition root）と、検証ではアダプター（隔離した一時ディレクトリ）。`node:sqlite` を許す組み込みに足す。ファイルの読み書き（`node:fs`）は、いまの通り許さない |
+
+**依存の失敗（W8）**: 失敗も、ふつうの条件の1つとして扱う。
+
+```ts
+export const Query = queries({ newId: component(output("string"), fresh(), mayFail()) });
+
+Add: component(
+  AddInput,
+  output(record({ status: [201, 422, 503], body: optional(Todo) })),               // W9: 数の列挙
+  when(If.invalidTitle, responds({ status: 422, body: null })),                       // タイトルが悪ければ、採番の成否によらず 422
+  when(all(not(If.invalidTitle), Query.newId.failed), responds({ status: 503, body: null })),
+  otherwise(Part.items.add(Query.newId, { title: AddInput.title }), responds({ status: 201, body: ... })),
+),
+```
+
+| 点 | 決めたこと |
+| --- | --- |
+| 失敗の優先 | **持たない。** §4.2 の「条件は同時に1つだけ」のまま。失敗が観測されるのは、実装が実際に尋ねたときだけなので、「失敗を先に見る」と決めると、尋ねる前に断る正しい実装（タイトルを先に確かめる）を落とす |
+| 書き忘れ | `all(not(If.invalidTitle), ...)` を書き忘れると、「タイトルが空で、採番も失敗」の手で2つの条件が同時に成り立つ。これは条件の衝突として、エージェントを呼ぶ前に見つかる。その衝突は「断るのは採番の前か後か」という、仕様が答えるべき問いそのもの |
+| 失敗した答えを読む | 意味の関数が、失敗した問い合わせの答えを読んだら、仕様の誤りとして止める |
+| 失敗させる依存 | 代役（`Ports`）の問い合わせだけ。代役は、`mayFail` の問い合わせで、ときどき失敗する（例外を投げる）。部品の本番コード（`node:sqlite`）の失敗は起こさない。副作用の失敗は、1.0 の後（「非同期と失敗」） |
+
+### 16.5. IR の変更（版 7 にまとめる）
+
+| 変更 | 書きにくさ |
+| --- | --- |
+| `goTo` が、決定表の列への参照を持てる | W2 |
+| 場合の条件が、組み合わせ（`all` / `not`）を持てる | W3 |
+| 型に `oneOf`、`value` | W4、W5 |
+| 部品の `durable`、契約の `restartSystem` | W7 |
+| 問い合わせの `mayFail`、場合の条件に失敗（`query:newId.failed`） | W8 |
+| 列挙が数を持てる | W9 |
+
+W1、W10、W11、W12 は、IR を変えない（いまの形に展開する）。W6 は入れない。W13、W14 は実装の直し。
