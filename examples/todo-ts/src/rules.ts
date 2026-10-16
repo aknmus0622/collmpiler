@@ -20,7 +20,7 @@ export function isAcceptableTitle(title: string): boolean {
 
 /**
  * Builds the item to add for a successful add
- * (specification: the `newItem` calculation).
+ * (specification: the `createdTodo` calculation; it is also the `todo` of the `Add` answer).
  *
  * @param id the fresh identifier obtained from the {@link IdSource}.
  * @param title the title as given by the caller.
@@ -31,8 +31,8 @@ export function createItem(id: string, title: string): TodoItem {
 }
 
 /**
- * Returns the items with `item` added
- * (specification: the `itemsWithNew` calculation).
+ * Returns the items with `item` added. Not used by {@link TodoList}, which keeps its items
+ * itself (specification part `items`).
  */
 export function withAdded(items: readonly TodoItem[], item: TodoItem): TodoItem[] {
   return [...items, item];
@@ -48,8 +48,8 @@ export function findItem(items: readonly TodoItem[], id: string): TodoItem | und
 }
 
 /**
- * Returns the items with the item identified by `id` marked done
- * (specification: the `itemsWithCompleted` calculation).
+ * Returns the items with the item identified by `id` marked done. Not used by {@link TodoList},
+ * where each item completes itself (specification: part command `items.Complete`).
  * Call only after checking that such an item exists.
  */
 export function withCompleted(items: readonly TodoItem[], id: string): TodoItem[] {
@@ -57,8 +57,8 @@ export function withCompleted(items: readonly TodoItem[], id: string): TodoItem[
 }
 
 /**
- * Returns the items without the item identified by `id`
- * (specification: the `itemsWithoutRemoved` calculation).
+ * Returns the items without the item identified by `id`. Not used by {@link TodoList}, which
+ * keeps its items itself (specification part `items`).
  * Call only after checking that such an item exists.
  */
 export function withoutItem(items: readonly TodoItem[], id: string): TodoItem[] {
@@ -67,7 +67,7 @@ export function withoutItem(items: readonly TodoItem[], id: string): TodoItem[] 
 
 /**
  * Selects the items to return for a listing
- * (specification: the `listedItems` calculation).
+ * (specification: the `listedTodos` calculation, the answer of the `List` command).
  *
  * @param filter which items to include; see {@link ListFilter}.
  */

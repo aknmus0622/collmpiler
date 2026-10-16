@@ -3,9 +3,10 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import { RuleConflictError, calculate, component, decide, interpretation, matchCondition, onlyIf } from "@clp/core";
+import { RuleConflictError, activate, component, conditions, interpretation, matchCondition, onlyIf, states } from "@clp/core";
 import { Interpretation } from "../../../examples/checkout-ts/specs/order.interpretation.ts";
-import { Order } from "../../../examples/checkout-ts/specs/order.component.ts";
+import { Calc, Order } from "../../../examples/checkout-ts/specs/order.component.ts";
+import { Campaign } from "../../../examples/checkout-ts/specs/order.decisions.ts";
 import { extract } from "../src/extract.ts";
 import type { Ir } from "../src/generate.ts";
 import { layer1Hash, loadSpecs } from "../src/loader.ts";
@@ -16,17 +17,21 @@ import { selfCheck } from "../src/runtime.ts";
 const paid = { status: "PENDING", rank: "Gold", price: 1999, isMonthEnd: true, paymentModuleActive: true, paymentResult: "succeeded" } as const;
 
 test("意味: 決定表は、成り立つ条件の行を返す。どれも成り立たなければ otherwise", () => {
-  assert.deepEqual(decide(Order, "campaign", paid), { discountPercent: 20, grantsCoupon: true, coupon: "Premium" });
-  assert.deepEqual(decide(Order, "campaign", { ...paid, rank: "Bronze" }), { discountPercent: 0, grantsCoupon: false, coupon: null });
+  activate(Interpretation);
+  assert.deepEqual(Campaign.of(paid), { discountPercent: 20, grantsCoupon: true, coupon: "Premium" });
+  assert.deepEqual(Campaign.of({ ...paid, rank: "Bronze" }), { discountPercent: 0, grantsCoupon: false, coupon: null });
 });
 
 test("意味: 計算は決定表の結果を使える (1999円の20%引きは、1599.2 を切り捨てて 1599)", () => {
-  assert.equal(calculate(Order, "amountCharged", paid), 1599);
+  activate(Interpretation);
+  assert.equal(Calc.amountCharged.of(paid), 1599);
 });
 
 test("同時に成り立つ条件は1つまで: 複数成立すると RuleConflictError", () => {
-  const Tiny = component({ states: ["A"], init: "A", commands: { Go: component(onlyIf("First", "Second")) } });
-  const binding = interpretation(Tiny, { commands: { Go: component() }, meanings: { conditions: { First: () => true, Second: () => true } } });
+  const State = states("A");
+  const If = conditions({ first: "First", second: "Second" });
+  const Tiny = component({ states: State, init: State.A, commands: { Go: component(onlyIf(If.first, If.second)) } });
+  const binding = interpretation(Tiny, { commands: { Go: component() }, meanings: [If.first.means(() => true), If.second.means(() => true)] });
   assert.throws(() => matchCondition(binding, ["First", "Second", "otherwise"], {}), RuleConflictError);
   assert.equal(matchCondition(binding, ["otherwise"], {}), "otherwise");
 });
@@ -91,19 +96,28 @@ mkdirSync(tmpRoot, { recursive: true });
 after(() => rmSync(tmpRoot, { recursive: true, force: true }));
 
 // 仕様ファイルを一時ディレクトリに書き出す。declaration は component の中身、structure は解釈が足す構造、meanings は意味の関数
-function specDir(declaration: string, structure?: string, meanings = "conditions: {}") {
+function specDir(declaration: string, structure?: string, meanings = "") {
   const dir = mkdtempSync(join(tmpRoot, "s-"));
   writeFileSync(
     join(dir, "x.component.ts"),
-    `import { asks, component, decisionTable, description, dir, does, emits, file, from, goTo, input, interpretation, onlyIf, onlyWhen, otherwise, output, ref, set, text, when } from "@clp/core";
-const Size = decisionTable({ "It is big": { count: 10, urgent: true }, otherwise: { count: 1, urgent: false } });
-export const Thing = component({ states: ["A", "B"], init: "A", ${declaration} });
-${structure === undefined ? "" : `export const Interpretation = interpretation(Thing, { ${structure}, meanings: { ${meanings} } });`}
+    `import { calculations, component, conditions, data, decisionTable, description, dir, does, effects, file, from, goTo, input, interpretation, invariants, onlyIf, onlyWhen, otherwise, output, queries, states, text, was, when } from "@clp/core";
+const State = states("A", "B", "OPEN", "CLOSED", "Z", "Y");
+const If = conditions({ big: "It is big", flagOn: "Flag is on", odd: "It is odd", firstCase: "First case", secondCase: "Second case" });
+const Inv = invariants({ fine: "It is fine", noteRememberedB: "A note is remembered in B" });
+const Data = data({ total: "string", memo: "string", nickname: "string" });
+const Query = queries({ mode: "string" });
+const Effect = effects({ ReportTotal: input({}), Notify: input({}), Refund: input({}), Grade: input({}), Tag: input({}), Bill: input({}) });
+const Calc = calculations({ raised: output("integer"), title: output("integer"), half: output("integer") });
+const In = input({ note: "string", nota: "string" });
+const Size = decisionTable(when(If.big, { count: 10, urgent: true }), otherwise({ count: 1, urgent: false }));
+const Unused = decisionTable(otherwise({ count: 1 }));
+export const Thing = component({ states: ["A", "B"], init: State.A, ${declaration} });
+${structure === undefined ? "" : `export const Interpretation = interpretation(Thing, { ${structure}, meanings: [${meanings}] });`}
 `,
   );
   return dir;
 }
-const go = `goTo("B"), does("It moves on.")`;
+const go = `goTo(State.B), does("It moves on.")`;
 const codes = async (dir: string) => extract(await loadSpecs(dir)).diagnostics.map((d) => d.code).sort();
 const messages = async (dir: string) => extract(await loadSpecs(dir)).diagnostics.map((d) => d.message);
 
@@ -114,46 +128,46 @@ test("読み込み: data・queries・入力の名前が重なるとエラー (�
 });
 
 test("部品: 遷移先が2つ書かれていたらエラー。文は、つなげて1つになる", async () => {
-  assert.match((await messages(specDir(`commands: { Place: component(goTo("A"), goTo("B")) }`))).join("\n"), /x\.component\.ts:\d+: コマンド "Place"の中に、goToを 2 つ以上は書けません/);
+  assert.match((await messages(specDir(`commands: { Place: component(goTo(State.A), goTo(State.B)) }`))).join("\n"), /x\.component\.ts:\d+: コマンド "Place"の中に、goToを 2 つ以上は書けません/);
   const spec = await loadSpecs(specDir(`commands: { Place: component(description("First."), does("It moves."), description("Second."), does("It stops.")) }`, `commands: { Place: component() }`));
   assert.deepEqual(spec.behaviors.Place, { description: "First. Second.", from: undefined, onlyIf: undefined, when: { otherwise: { does: "It moves. It stops.", effects: [], set: {} } } });
 });
 
 test("解釈: Layer 1 が構造として書いたものは、書き換えられない", async () => {
-  const declaration = `effects: { Notify: input({}), Ping: description("A ping is sent.") }, commands: { Place: component(input({ note: "string" }), from("A"), onlyIf("Flag is on"), when("It is big", goTo("B")), otherwise()), Back: component(goTo("A")) }`;
+  const declaration = `effects: { Notify: input({}), Ping: description("A ping is sent.") }, commands: { Place: component(input({ note: "string" }), from(State.A), onlyIf(If.flagOn), when(If.big, goTo(State.B)), otherwise()), Back: component(goTo(State.A)) }`;
   const report = async (structure: string) => (await messages(specDir(declaration, structure))).join("\n");
-  const fine = `Place: component(when("It is big"), otherwise()), Back: component()`;
+  const fine = `Place: component(when(If.big), otherwise()), Back: component()`;
 
   assert.doesNotMatch(await report(`commands: { ${fine} }`), /Layer 1/);
   assert.match(await report(`states: ["A", "B", "C"], commands: { ${fine} }`), /states は Layer 1 に構造として書かれているので、解釈では書けません/);
-  assert.match(await report(`init: "B", commands: { ${fine} }`), /init は Layer 1 に書かれているので、解釈では書けません/);
+  assert.match(await report(`init: State.B, commands: { ${fine} }`), /init は Layer 1 に書かれているので、解釈では書けません/);
   // 項目を並べたまとまりには、項目を足せない。項目の、書かれていない部品だけを足せる
   assert.match(await report(`effects: { Extra: component() }, commands: { ${fine} }`), /effects の "Extra" は Layer 1 にありません/);
   assert.match(await report(`effects: { Notify: input({ text: "string" }) }, commands: { ${fine} }`), /effects\.Notify の input は Layer 1 に書かれているので、解釈では書けません/);
   assert.doesNotMatch(await report(`effects: { Ping: input({ text: "string" }) }, commands: { ${fine} }`), /Layer 1/);
-  assert.match(await report(`commands: { Place: component(input({ other: "string" }), when("It is big"), otherwise()), Back: component() }`), /コマンド "Place" の input は Layer 1 に書かれているので/);
-  assert.match(await report(`commands: { Place: component(from("B"), when("It is big"), otherwise()), Back: component() }`), /コマンド "Place" の from は Layer 1 に書かれているので/);
-  assert.match(await report(`commands: { Place: component(when("It is big", goTo("A")), otherwise()), Back: component() }`), /コマンド "Place" の条件 "It is big" の goTo は Layer 1 に書かれているので/);
-  assert.match(await report(`commands: { Place: component(when("It is big"), when("It is odd"), otherwise()), Back: component() }`), /条件 "It is odd" は Layer 1 にありません/);
-  assert.match(await report(`commands: { Place: component(goTo("B")), Back: component() }`), /コマンド "Place" は条件で分かれるので、goTo は when の下に/);
+  assert.match(await report(`commands: { Place: component(input({ other: "string" }), when(If.big), otherwise()), Back: component() }`), /コマンド "Place" の input は Layer 1 に書かれているので/);
+  assert.match(await report(`commands: { Place: component(from(State.B), when(If.big), otherwise()), Back: component() }`), /コマンド "Place" の from は Layer 1 に書かれているので/);
+  assert.match(await report(`commands: { Place: component(when(If.big, goTo(State.A)), otherwise()), Back: component() }`), /コマンド "Place" の条件 "It is big" の goTo は Layer 1 に書かれているので/);
+  assert.match(await report(`commands: { Place: component(when(If.big), when(If.odd), otherwise()), Back: component() }`), /条件 "It is odd" は Layer 1 にありません/);
+  assert.match(await report(`commands: { Place: component(goTo(State.B)), Back: component() }`), /コマンド "Place" は条件で分かれるので、goTo は when の下に/);
   assert.match(await report(`commands: { ${fine}, Jump: component() }`), /コマンド "Jump" は Layer 1 にありません/);
   // Layer 1 が遷移先を1つに決めたコマンドを、解釈が場合分けすることもできない
-  assert.match(await report(`commands: { Place: component(when("It is big"), otherwise()), Back: component(when("It is big"), otherwise()) }`), /コマンド "Back": Layer 1 が遷移先を1つに決めているので、解釈では場合分けできません/);
+  assert.match(await report(`commands: { Place: component(when(If.big), otherwise()), Back: component(when(If.big), otherwise()) }`), /コマンド "Back": Layer 1 が遷移先を1つに決めているので、解釈では場合分けできません/);
 });
 
 test("解釈: すべてのコマンドと場合に、構造が要る (足すものが無ければ {})。when には otherwise が要る", async () => {
-  const declaration = `commands: { Place: component(when("It is big", goTo("B")), otherwise()), Back: component(goTo("A")), Split: component(when("It is big", goTo("B"))) }`;
+  const declaration = `commands: { Place: component(when(If.big, goTo(State.B)), otherwise()), Back: component(goTo(State.A)), Split: component(when(If.big, goTo(State.B))) }`;
   const report = async (commands: string) => (await messages(specDir(declaration, `commands: { ${commands} }`))).join("\n");
-  const split = `Split: component(when("It is big"), otherwise())`;
-  assert.match(await report(`Place: component(when("It is big"), otherwise()), ${split}`), /コマンド "Back" の構造が、解釈にありません/);
-  assert.match(await report(`Place: component(when("It is big")), Back: component(), ${split}`), /コマンド "Place" の条件 "otherwise" の構造が、解釈にありません/);
+  const split = `Split: component(when(If.big), otherwise())`;
+  assert.match(await report(`Place: component(when(If.big), otherwise()), ${split}`), /コマンド "Back" の構造が、解釈にありません/);
+  assert.match(await report(`Place: component(when(If.big)), Back: component(), ${split}`), /コマンド "Place" の条件 "otherwise" の構造が、解釈にありません/);
   // Layer 1 が otherwise を書いていなければ、解釈が足す
-  assert.match(await report(`Place: component(when("It is big"), otherwise()), Back: component(), Split: component(when("It is big"))`), /コマンド "Split" に otherwise がありません/);
-  assert.equal((await codes(specDir(declaration, `commands: { Place: component(when("It is big"), otherwise()), Back: component(), ${split} }`, `conditions: { "It is big": () => true }`))).join(), "");
+  assert.match(await report(`Place: component(when(If.big), otherwise()), Back: component(), Split: component(when(If.big))`), /コマンド "Split" に otherwise がありません/);
+  assert.equal((await codes(specDir(declaration, `commands: { Place: component(when(If.big), otherwise()), Back: component(), ${split} }`, `If.big.means(() => true)`))).join(), "");
 });
 
 test("読み込み: 省略した宣言は空として扱い、分かれないコマンドは otherwise だけの表になる", async () => {
-  const spec = await loadSpecs(specDir(`commands: { Place: component(from("A"), ${go}) }`, `commands: { Place: component() }`));
+  const spec = await loadSpecs(specDir(`commands: { Place: component(from(State.A), ${go}) }`, `commands: { Place: component() }`));
   assert.deepEqual(spec.model, { init: "A", states: ["A", "B"], data: {}, commands: { Place: {} }, queries: {}, effects: {} });
   assert.deepEqual(spec.behaviors.Place, {
     from: ["A"],
@@ -166,25 +180,33 @@ test("文だけのコンポーネント: 構造は、すべて解釈が持つ。
   const dir = mkdtempSync(join(tmpRoot, "s-"));
   writeFileSync(
     join(dir, "counter.component.ts"),
-    `import { component, description, does, emits, from, goTo, input, integer, interpretation, output, ref, set } from "@clp/core";
+    `import { calculations, component, conditions, data, description, does, effects, from, goTo, input, integer, interpretation, invariants, otherwise, output, queries, states, was, when } from "@clp/core";
+const State = states("A", "B", "OPEN", "CLOSED", "Z", "Y");
+const If = conditions({ big: "It is big", flagOn: "Flag is on", odd: "It is odd", firstCase: "First case", secondCase: "Second case" });
+const Inv = invariants({ fine: "It is fine", noteRememberedB: "A note is remembered in B" });
+const Data = data({ total: "string", memo: "string", nickname: "string" });
+const Query = queries({ mode: "string" });
+const Effect = effects({ ReportTotal: input({}), Notify: input({}), Refund: input({}), Grade: input({}), Tag: input({}), Bill: input({}) });
+const Calc = calculations({ raised: output("integer"), title: output("integer"), half: output("integer") });
+const In = input({ note: "string", nota: "string" });
 export const Counter = component(description("A counter that can be raised by a step. It reports each new total. It can be closed."));
 export const Interpretation = interpretation(Counter, {
   states: ["OPEN", "CLOSED"],
-  init: "OPEN",
+  init: State.OPEN,
   data: { total: "integer" },
   effects: { ReportTotal: input({ total: "integer" }) },
   calculations: { raised: component(description("the total so far (0 if none) plus the step"), output("integer")) },
   commands: {
     Raise: component(
       input({ step: integer({ min: 0, max: 10 }) }),
-      from("OPEN"),
+      from(State.OPEN),
       does("The total goes up by the step and is reported."),
-      set({ total: ref.calculation("raised") }),
-      emits("ReportTotal", { total: ref.calculation("raised") }),
+      Data.total.set(Calc["raised"]),
+      Effect.ReportTotal({ total: Calc["raised"] }),
     ),
-    Close: component(from("OPEN"), goTo("CLOSED")),
+    Close: component(from(State.OPEN), goTo(State.CLOSED)),
   },
-  meanings: { conditions: {}, calculations: { raised: (state) => (state.total ?? 0) + (state.step ?? 0) } },
+  meanings: [Calc["raised"].means((state) => (state.total ?? 0) + (state.step ?? 0))],
 });
 `,
   );
@@ -208,9 +230,17 @@ test("解釈: 足りない構造 (init / 項目の型) を報告する。状態�
   const dir = mkdtempSync(join(tmpRoot, "s-"));
   writeFileSync(
     join(dir, "x.component.ts"),
-    `import { component, description, interpretation } from "@clp/core";
+    `import { calculations, component, conditions, data, description, effects, input, interpretation, invariants, otherwise, output, queries, states, was, when } from "@clp/core";
+const State = states("A", "B", "OPEN", "CLOSED", "Z", "Y");
+const If = conditions({ big: "It is big", flagOn: "Flag is on", odd: "It is odd", firstCase: "First case", secondCase: "Second case" });
+const Inv = invariants({ fine: "It is fine", noteRememberedB: "A note is remembered in B" });
+const Data = data({ total: "string", memo: "string", nickname: "string" });
+const Query = queries({ mode: "string" });
+const Effect = effects({ ReportTotal: input({}), Notify: input({}), Refund: input({}), Grade: input({}), Tag: input({}), Bill: input({}) });
+const Calc = calculations({ raised: output("integer"), title: output("integer"), half: output("integer") });
+const In = input({ note: "string", nota: "string" });
 export const Thing = component({ states: ["A", "B"], data: { memo: description("A note.") }, queries: { ready: description("Whether it is ready.") }, calculations: { total: description("the sum") }, commands: description("It can be started.") });
-export const Interpretation = interpretation(Thing, { commands: { Start: component() }, meanings: { conditions: {} } });
+export const Interpretation = interpretation(Thing, { commands: { Start: component() }, meanings: [] });
 `,
   );
   assert.deepEqual((await messages(dir)).sort(), [
@@ -223,9 +253,17 @@ export const Interpretation = interpretation(Thing, { commands: { Start: compone
   const stateless = mkdtempSync(join(tmpRoot, "s-"));
   writeFileSync(
     join(stateless, "x.component.ts"),
-    `import { component, does, interpretation } from "@clp/core";
+    `import { calculations, component, conditions, data, does, effects, input, interpretation, invariants, otherwise, output, queries, states, was, when } from "@clp/core";
+const State = states("A", "B", "OPEN", "CLOSED", "Z", "Y");
+const If = conditions({ big: "It is big", flagOn: "Flag is on", odd: "It is odd", firstCase: "First case", secondCase: "Second case" });
+const Inv = invariants({ fine: "It is fine", noteRememberedB: "A note is remembered in B" });
+const Data = data({ total: "string", memo: "string", nickname: "string" });
+const Query = queries({ mode: "string" });
+const Effect = effects({ ReportTotal: input({}), Notify: input({}), Refund: input({}), Grade: input({}), Tag: input({}), Bill: input({}) });
+const Calc = calculations({ raised: output("integer"), title: output("integer"), half: output("integer") });
+const In = input({ note: "string", nota: "string" });
 export const Thing = component({ commands: { Ping: component(does("Nothing happens.")) } });
-export const Interpretation = interpretation(Thing, { commands: { Ping: component() }, meanings: { conditions: {} } });
+export const Interpretation = interpretation(Thing, { commands: { Ping: component() }, meanings: [] });
 `,
   );
   const spec = await loadSpecs(stateless);
@@ -234,7 +272,7 @@ export const Interpretation = interpretation(Thing, { commands: { Ping: componen
 });
 
 test("検査: 解釈が無い、名前の意味が書かれていない", async () => {
-  const declaration = `decisions: { size: Size }, calculations: { total: component(description("count times two"), output("integer")) }, invariants: ["It is fine"], commands: { Place: component(onlyIf("Flag is on"), ${go}) }`;
+  const declaration = `decisions: { size: Size }, calculations: { total: component(description("count times two"), output("integer")) }, invariants: invariants({ fine: "It is fine" }), commands: { Place: component(onlyIf(If.flagOn), ${go}) }`;
   assert.deepEqual(await codes(specDir(declaration)), ["unbound-specification"]);
   assert.deepEqual(await codes(specDir(declaration, `commands: { Place: component() }`)), [
     "unbound-calculation",
@@ -249,37 +287,38 @@ test("検査: 構造の誤りを、場所と理由が分かる文面で報告す
     effects: { Notify: input({ text: "string", count: "integer" }), Grade: input({ level: ["low", "high"] }) },
     decisions: { size: Size }, calculations: { title: component(description("the memo, upper-cased"), output("string")) },
     commands: { Place: component(input({ note: "string" }), ${go}) }`;
-  const meanings = `conditions: { "It is big": () => true }, calculations: { title: () => "t" }`;
+  const meanings = `If.big.means(() => true), Calc["title"].means(() => "t")`;
   const report = async (structure: string) => (await messages(specDir(declaration, `commands: { Place: component(${structure}) }`, meanings))).join("\n");
 
-  assert.equal(await report(`emits("Notify", { text: ref.input("note"), count: ref.decision("size", "count") }), set({ memo: ref.calculation("title") })`), "");
-  assert.match(await report(`emits("Refund")`), /副作用 "Refund" は effects にありません/);
-  assert.match(await report(`emits("Notify", { text: "x" })`), /副作用 Notify に、フィールド "count" がありません/);
-  assert.match(await report(`emits("Notify", { text: "x", count: 1.5 })`), /Notify\.count: 1\.5 は integer に入りません/);
-  assert.match(await report(`emits("Notify", { text: "x", count: ref.decision("size", "urgent") })`), /Notify\.count: 決定表の値 true は integer に入りません/);
-  assert.match(await report(`emits("Notify", { text: "x", count: ref.decision("weight", "count") })`), /決定表 "weight" は、コンポーネントの decisions にありません/);
-  assert.match(await report(`emits("Notify", { text: "x", count: ref.calculation("title") })`), /Notify\.count: string は integer に入りません/);
-  assert.match(await report(`emits("Grade", { level: ref.query("mode") })`), /Grade\.level: "x" \| "y" は "low" \| "high" に入りません/);
-  assert.match(await report(`emits("Grade", { level: "low" }, onlyWhen(ref.decision("size", "count")))`), /Grade の onlyWhen: 決定表の値 10 は boolean に入りません/);
-  assert.match(await report(`emits("Grade", { level: "low" }, onlyWhen(ref.was("Z")))`), /was: "Z" は states にありません/);
-  assert.match(await report(`emits("Grade", { level: "low" }, onlyWhen("It is odd"))`), /条件 "It is odd" の意味が、解釈の conditions に書かれていません/);
-  assert.match(await report(`set({ nickname: "x" })`), /set\.nickname: "nickname" は data にありません/);
-  assert.match(await report(`set({ memo: ref.input("nota") })`), /"nota" は、コマンド Place の input にありません/);
+  assert.equal(await report(`Effect.Notify({ text: In.note, count: Size["count"] }), Data.memo.set(Calc["title"])`), "");
+  assert.match(await report(`Effect.Refund()`), /副作用 "Refund" は effects にありません/);
+  assert.match(await report(`Effect.Notify({ text: "x" })`), /副作用 Notify に、フィールド "count" がありません/);
+  assert.match(await report(`Effect.Notify({ text: "x", count: 1.5 })`), /Notify\.count: 1\.5 は integer に入りません/);
+  assert.match(await report(`Effect.Notify({ text: "x", count: Size["urgent"] })`), /Notify\.count: 決定表の値 true は integer に入りません/);
+  // 部品に置いていない決定表の列（宣言はあるが、decisions に無い）
+  assert.match(await report(`Effect.Notify({ text: "x", count: Unused["count"] })`), /参照している決定表が、コンポーネントの decisions に置かれていません/);
+  assert.match(await report(`Effect.Notify({ text: "x", count: Calc["title"] })`), /Notify\.count: string は integer に入りません/);
+  assert.match(await report(`Effect.Grade({ level: Query.mode })`), /Grade\.level: "x" \| "y" は "low" \| "high" に入りません/);
+  assert.match(await report(`Effect.Grade({ level: "low" }, onlyWhen(Size["count"]))`), /Grade の onlyWhen: 決定表の値 10 は boolean に入りません/);
+  assert.match(await report(`Effect.Grade({ level: "low" }, onlyWhen(was(State.Z)))`), /was: "Z" は states にありません/);
+  assert.match(await report(`Effect.Grade({ level: "low" }, onlyWhen(If.odd))`), /条件 "It is odd" の意味が、解釈の conditions に書かれていません/);
+  assert.match(await report(`Data.nickname.set("x")`), /set\.nickname: "nickname" は data にありません/);
+  assert.match(await report(`Data.memo.set(In.nota)`), /"nota" は、コマンド Place の input にありません/);
 });
 
 test("検査: 存在しない状態への遷移", async () => {
-  const dir = specDir(`commands: { Place: component(from("Z"), goTo("Y")) }`, `commands: { Place: component() }`);
+  const dir = specDir(`commands: { Place: component(from(State.Z), goTo(State.Y)) }`, `commands: { Place: component() }`);
   assert.deepEqual((await messages(dir)).sort(), ['from の "Z" は states にありません', 'goTo の "Y" は states にありません']);
 });
 
 test("解釈が古い: 導いたあとで Layer 1 が変わっていたら、使わない。決定表の値だけの変更は、古くしない", async () => {
   const stamped = (declaration: string, hash: string) => {
-    const dir = specDir(declaration, `commands: { Place: component() }`, `conditions: { "It is big": () => true }`);
+    const dir = specDir(declaration, `commands: { Place: component() }`, `If.big.means(() => true)`);
     const file = join(dir, "x.component.ts");
     writeFileSync(file, `// layer1: ${hash}\n${readFileSync(file, "utf8")}`);
     return dir;
   };
-  const declaration = (prose: string) => `decisions: { size: Size }, commands: { Place: component(goTo("B"), does("${prose}")) }`;
+  const declaration = (prose: string) => `decisions: { size: Size }, commands: { Place: component(goTo(State.B), does("${prose}")) }`;
   const hash = layer1Hash((await loadSpecs(stamped(declaration("It moves on."), "sha256:0"), { bindings: false })).layer1!);
   assert.deepEqual(await codes(stamped(declaration("It moves on."), hash)), []);
   // 文が変わった
@@ -331,9 +370,9 @@ test("添付資料: 無いパス、file と dir の取り違え、名前の重�
 
 test("事前検査: 2つの条件が同時に成り立つ仕様を、実装なしで見つける", async () => {
   const dir = specDir(
-    `commands: { Place: component(when("First case", goTo("B")), when("Second case", goTo("B")), otherwise(goTo("A"))) }`,
-    `commands: { Place: component(when("First case"), when("Second case"), otherwise()) }`,
-    `conditions: { "First case": () => true, "Second case": () => true }`,
+    `commands: { Place: component(when(If.firstCase, goTo(State.B)), when(If.secondCase, goTo(State.B)), otherwise(goTo(State.A))) }`,
+    `commands: { Place: component(when(If.firstCase), when(If.secondCase), otherwise()) }`,
+    `If.firstCase.means(() => true), If.secondCase.means(() => true)`,
   );
   const result = await selfCheck(await loadSpecs(dir), { seed: 1 });
   assert.ok(!result.ok);
@@ -342,11 +381,11 @@ test("事前検査: 2つの条件が同時に成り立つ仕様を、実装な�
 
 test("事前検査: 不変条件が破れるコマンド列を、最短で報告する", async () => {
   const dir = specDir(
-    `data: { note: "string" }, invariants: ["A note is remembered in B"],
-     commands: { Place: component(from("A"), ${go}), Back: component(from("B"), goTo("A"), does("It goes back.")) }`,
+    `data: { note: "string" }, invariants: invariants({ noteRememberedB: "A note is remembered in B" }),
+     commands: { Place: component(from(State.A), ${go}), Back: component(from(State.B), goTo(State.A), does("It goes back.")) }`,
     // Place がメモを覚え忘れている
     `commands: { Place: component(), Back: component() }`,
-    `conditions: {}, invariants: { "A note is remembered in B": (state) => state.status !== "B" || state.note !== undefined }`,
+    `Inv.noteRememberedB.means((state) => state.status !== "B" || state.note !== undefined)`,
   );
   const result = await selfCheck(await loadSpecs(dir), { seed: 1 });
   assert.ok(!result.ok);
@@ -357,16 +396,16 @@ test("事前検査: 不変条件が破れるコマンド列を、最短で報告
 test("決定表: 値の無いセル (null) を書ける。その値が実際に使われる仕様は、事前検査が見つける", async () => {
   const declaration = (when: string) => [
     `effects: { Tag: input({ label: ["big", "small"] }) }, queries: { flag: output("boolean") }, decisions: { kind: Kind }, commands: { Place: component(${go}) }`,
-    `commands: { Place: component(emits("Tag", { label: ref.decision("kind", "label") }${when})) }`,
-    `conditions: { "It is big": (state) => state.flag }`,
+    `commands: { Place: component(Effect.Tag({ label: Kind["label"] }${when})) }`,
+    `If.big.means((state) => state.flag)`,
   ] as const;
   const withTable = (dir: string) => {
     const file = join(dir, "x.component.ts");
-    writeFileSync(file, readFileSync(file, "utf8").replace("export const Thing", 'const Kind = decisionTable({ "It is big": { label: "big", tagged: true }, otherwise: { label: null, tagged: false } });\nexport const Thing'));
+    writeFileSync(file, readFileSync(file, "utf8").replace("export const Thing", 'const Kind = decisionTable(when(If.big, { label: "big", tagged: true }), otherwise({ label: null, tagged: false }));\nexport const Thing'));
     return dir;
   };
   // 値のある行でだけ使う（onlyWhen で守る）なら、正しい仕様
-  const guarded = withTable(specDir(...declaration(`, onlyWhen(ref.decision("kind", "tagged"))`)));
+  const guarded = withTable(specDir(...declaration(`, onlyWhen(Kind["tagged"])`)));
   assert.deepEqual(await codes(guarded), []);
   assert.deepEqual(await selfCheck(await loadSpecs(guarded), { seed: 1, numRuns: 100 }), { ok: true, numRuns: 100 });
   // 守らずに使うと、値の無い行に当たったときに誤りとして報告する
@@ -380,8 +419,8 @@ test("決定表: 値の無いセル (null) を書ける。その値が実際に�
 test("事前検査: 計算の結果が宣言した型に合わなければ報告する", async () => {
   const dir = specDir(
     `effects: { Bill: input({ amount: "integer" }) }, calculations: { half: component(description("half of it, no rounding"), output("integer")) }, commands: { Place: component(${go}) }`,
-    `commands: { Place: component(emits("Bill", { amount: ref.calculation("half") })) }`,
-    `conditions: {}, calculations: { half: () => 1.5 }`,
+    `commands: { Place: component(Effect.Bill({ amount: Calc["half"] })) }`,
+    `Calc["half"].means(() => 1.5)`,
   );
   const result = await selfCheck(await loadSpecs(dir), { seed: 1 });
   assert.ok(!result.ok);

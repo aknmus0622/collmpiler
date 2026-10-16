@@ -1,5 +1,21 @@
-import { component, description, does, from, goTo, input, integer, optional, otherwise, output, record, responds, when } from "@clp/core";
+import { calculations, component, conditions, description, does, from, goTo, input, integer, optional, otherwise, output, record, responds, states, when } from "@clp/core";
 import { Policy } from "./loan.decisions.ts";
+export const If = conditions({
+  memberAlreadyHoldsAtLeast: "The member already holds at least the policy's maximum number of books, or someone else has reserved the book",
+  bookReservedSomeoneElse: "The book is reserved by someone else",
+});
+
+export const State = states("AVAILABLE", "ON_LOAN", "OVERDUE", "LOST");
+
+export const Calc = calculations({
+  lateFee: component(
+    description("The number of days the book is past its due date, times the fee per day, but at most the fee cap."),
+    output("integer"),
+  ),
+});
+
+export const DayPassesInput = input({ days: integer({ min: 1, max: 30 }) });
+
 
 // The loan of one book at a library. Written roughly on purpose: the vocabulary is prose, and so is most of
 // what the commands do. What the prose means is derived by `clp interpret`.
@@ -10,8 +26,8 @@ export const Loan = component({
     "remembers how many days remain until the book is due (negative once it is past due). " +
     "The numbers (how many books, how many days, the fees) are in the policy table.",
 
-  states: ["AVAILABLE", "ON_LOAN", "OVERDUE", "LOST"],
-  init: "AVAILABLE",
+  states: State,
+  init: State.AVAILABLE,
 
   queries: description("How many books the member currently has on loan, and whether someone else has reserved the book."),
   effects: description(
@@ -22,12 +38,7 @@ export const Loan = component({
 
   decisions: { policy: Policy },
 
-  calculations: {
-    lateFee: component(
-      description("The number of days the book is past its due date, times the fee per day, but at most the fee cap."),
-      output("integer"),
-    ),
-  },
+  calculations: Calc,
 
   commands: {
     // Pinned down as structure: two interpretations disagreed on whether a borrowing that is not allowed is
@@ -36,15 +47,15 @@ export const Loan = component({
     // not have to check it at all.)
     // The command answers whoever executed it: a refusal is told as a result, and is verified as one.
     Borrow: component(
-      from("AVAILABLE"),
+      from(State.AVAILABLE),
       output(record({ result: ["lent", "refused"], dueInDays: optional("integer") })),
       when(
-        "The member already holds at least the policy's maximum number of books, or someone else has reserved the book",
+        If.memberAlreadyHoldsAtLeast,
         responds({ result: "refused", dueInDays: null }),
         does("The borrowing is refused; nothing changes."),
       ),
       otherwise(
-        goTo("ON_LOAN"),
+        goTo(State.ON_LOAN),
         does(
           "The book is due in the policy's loan days. The member is told the due date. " +
             "The answer is lent, with the number of days until the book is due.",
@@ -53,9 +64,9 @@ export const Loan = component({
     ),
 
     Extend: component(
-      from("ON_LOAN"),
+      from(State.ON_LOAN),
       output(["extended", "refused"]),
-      when("The book is reserved by someone else", responds("refused"), does("The extension is refused; nothing changes.")),
+      when(If.bookReservedSomeoneElse, responds("refused"), does("The extension is refused; nothing changes.")),
       otherwise(
         does(
           "The due date moves later by the policy's extension days, counted from the current due date. " +
@@ -65,8 +76,8 @@ export const Loan = component({
     ),
 
     DayPasses: component(
-      input({ days: integer({ min: 1, max: 30 }) }),
-      from("ON_LOAN", "OVERDUE"),
+      DayPassesInput,
+      from(State.ON_LOAN, State.OVERDUE),
       does(
         "The given number of days passes. A loan is past its due date when fewer than zero days remain; on the due day itself it is not. " +
           "A loan past its due date becomes overdue. A book past its due date by more than the policy's lost-after days is " +

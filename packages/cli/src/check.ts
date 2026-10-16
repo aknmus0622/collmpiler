@@ -15,6 +15,10 @@ import { importsOf, scan } from "./scan.ts";
 // 業務上の判断がアダプターに書かれていないかは、ミューテーションのゲート (mutation.ts) が確かめる。
 // メッセージはエージェントに渡すため英語。
 
+// Node の組み込みモジュールのうち、HTTP で受けるのに要るものだけ。ファイルやプロセスに触れるもの (node:fs など) は、
+// 仕様や採点基準を読めてしまうので使えない
+export const BUILTINS = new Set(["node:http", "node:url", "node:events", "node:stream", "node:buffer", "node:util", "node:string_decoder"]);
+
 export type Violation = { file: string; rule: string; message: string };
 
 // scope: "source" は本番コードだけを調べる（アダプターがまだ無い、設計の段階用）
@@ -55,13 +59,13 @@ export function checkWorkspace(ws: Workspace, ir: Ir, specs: string, scope: "all
     for (const specifier of specifiers) {
       const target = specifier.startsWith(".") ? posix.normalize(posix.join(posix.dirname(rel), specifier)) : undefined;
       const ok = target !== undefined && !target.startsWith("..") && (isSource(ws, target) || (isAdapter && target === ws.paths.contract));
-      if (ok) continue;
+      if (ok || BUILTINS.has(specifier)) continue;
       report(
         rel,
         "forbidden-import",
         isAdapter
-          ? `"${specifier}": the adapter may only import ${importPath(ws.paths.adapter, ws.paths.contract)} and production files under ${dirFrom(ws.paths.adapter, ws.src)}.`
-          : `"${specifier}": production code may only import other production files under ${sources} by relative path.`,
+          ? `"${specifier}": the adapter may only import ${importPath(ws.paths.adapter, ws.paths.contract)}, production files under ${dirFrom(ws.paths.adapter, ws.src)}, and these Node modules: ${[...BUILTINS].join(", ")}.`
+          : `"${specifier}": production code may only import other production files under ${sources} by relative path, and these Node modules: ${[...BUILTINS].join(", ")}.`,
       );
     }
   };

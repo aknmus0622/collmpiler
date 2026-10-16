@@ -15,25 +15,28 @@ import { harness, repoRoot, specsDir, unstamped } from "./support.ts";
 const { tmpRoot, workdir } = harness("components");
 
 // 2つ目のコンポーネント（ランプ）。解釈も同じファイルに書いてある
-const LAMP = `import { component, does, emits, goTo, input, interpretation, otherwise, when } from "@clp/core";
+const LAMP = `import { component, conditions, does, effects, goTo, input, interpretation, otherwise, states, when } from "@clp/core";
+const State = states("OFF", "ON");
+const If = conditions({ lampOn: "The lamp is on" });
+const Effect = effects({ Notify: input({}) });
 
 export const Lamp = component({
   states: ["OFF", "ON"],
-  init: "OFF",
+  init: State.OFF,
   effects: { Notify: input({ on: "boolean" }) },
   commands: {
     Flip: component(
-      when("The lamp is on", goTo("OFF"), does("The lamp turns off and a notice says so.")),
-      otherwise(goTo("ON"), does("The lamp turns on and a notice says so.")),
+      when(If.lampOn, goTo(State.OFF), does("The lamp turns off and a notice says so.")),
+      otherwise(goTo(State.ON), does("The lamp turns on and a notice says so.")),
     ),
   },
 });
 
 export const LampInterpretation = interpretation(Lamp, {
   commands: {
-    Flip: component(when("The lamp is on", emits("Notify", { on: false })), otherwise(emits("Notify", { on: true }))),
+    Flip: component(when(If.lampOn, Effect.Notify({ on: false })), otherwise(Effect.Notify({ on: true }))),
   },
-  meanings: { conditions: { "The lamp is on": (state) => state.status === "ON" } },
+  meanings: [If.lampOn.means((state) => state.status === "ON")],
 });
 `;
 
@@ -184,7 +187,7 @@ test("複数: あるコンポーネントのための変更が、ほかのコン
 test("範囲: ほかのコンポーネントだけが使っているコードを書き換えたら、元に戻して差し戻す。ミューテーションは、実行した範囲だけ", async () => {
   const out = workdir();
   // ランプが通知しない仕様だった版から始める
-  const silent = LAMP.replace('when("The lamp is on", emits("Notify", { on: false }))', 'when("The lamp is on")').replace('otherwise(emits("Notify", { on: true }))', "otherwise()");
+  const silent = LAMP.replace('when(If.lampOn, Effect.Notify({ on: false }))', "when(If.lampOn)").replace('otherwise(Effect.Notify({ on: true }))', "otherwise()");
   assert.notEqual(silent, LAMP);
   const first = await implement({ specs: specs(undefined, silent), out, strategy: scripted({ silentLamp: true }).strategy, maxAttempts: 1 });
   assert.equal(first.status, "pass");

@@ -1,9 +1,62 @@
-import { asks, component, description, does, from, goTo, input, otherwise, output, ref, when } from "@clp/core";
+import { component, conditions, data, description, does, effects, from, goTo, input, otherwise, output, queries, states, when } from "@clp/core";
 import { ConstantFit, TypeFit } from "./payload-check.decisions.ts";
 
 const FieldKind = ["boolean", "integer", "number", "string", "enum"] as const;
 const ConstantKind = ["boolean", "integer", "number", "string"] as const;
-const here = { effect: ref.data("effect"), field: ref.data("field") } as const;
+export const If = conditions({
+  enteredEffectNotDeclared: "The entered effect is not declared",
+  effectDeclaredSpecificationGivesNo: "The effect is declared, and the specification gives no value for the declared field",
+  effectDeclaredButDoesNot: "The effect is declared but does not declare the given field",
+  effectDeclaredDeclaresGivenField: "The effect is declared and declares the given field",
+  fieldSValueStillBeing: "The field's value is still being checked, and the constant does not fit the field",
+  fieldSValueStillBeing2: "The field's value is still being checked, and a value of that type does not fit the field",
+  fieldSValueStillBeing3: "The field's value is still being checked",
+});
+
+export const State = states({
+  OUTSIDE: description("Between effects."),
+  IN_EFFECT: description("In a declared effect, before any given field."),
+  IN_UNKNOWN_EFFECT: description("In an effect that is not declared. Nothing is checked and nothing is reported until the walk leaves it."),
+  IN_FIELD: description("In a given field of a declared effect whose value is still being checked."),
+  IN_SETTLED_FIELD: description("In a given field for which a diagnostic has already been reported. What follows about its value is ignored."),
+});
+
+export const Data = data({
+  effect: component(description("The name of the effect being walked."), "string"),
+  field: component(description("The name of the given field being walked."), "string"),
+});
+
+export const Query = queries({
+  effectDeclared: component(description("Whether the specification declares an effect of this name."), input({ name: "string" }), output("boolean")),
+  fieldDeclared: component(description("Whether that effect declares a field of this name."), input({ effect: "string", field: "string" }), output("boolean")),
+  fieldGiven: component(description("Whether the specification gives a value for that field of that effect."), input({ effect: "string", field: "string" }), output("boolean")),
+  fieldKind: component(description("What that field takes. \"enum\" means one of a fixed set of strings."), input({ effect: "string", field: "string" }), output(FieldKind)),
+  memberOf: component(description("Whether this string is in the fixed set that field takes."), input({ effect: "string", field: "string", value: "string" }), output("boolean")),
+  hasMinimum: component(description("Whether that field has a minimum."), input({ effect: "string", field: "string" }), output("boolean")),
+  minimum: component(description("That field's minimum. Meaningful only if it has one."), input({ effect: "string", field: "string" }), output("number")),
+  hasMaximum: component(description("Whether that field has a maximum."), input({ effect: "string", field: "string" }), output("boolean")),
+  maximum: component(description("That field's maximum. Meaningful only if it has one."), input({ effect: "string", field: "string" }), output("number")),
+});
+
+export const Effect = effects({
+  ReportDiagnostic: component(
+    description("A mismatch found in the effect being walked, for the named field."),
+    input({ code: ["missing-field", "bad-value"], effect: "string", field: "string" }),
+  ),
+});
+
+export const EnterEffectInput = input({ name: "string" });
+
+export const DeclaredFieldInput = input({ name: "string" });
+
+export const GivenFieldInput = input({ name: "string" });
+
+export const ConstantInput = input({ kind: ConstantKind, text: "string", number: "number" });
+
+export const TypedInput = input({ type: ConstantKind });
+
+const here = { effect: Data.effect, field: Data.field } as const;
+
 
 // The check of an effect's payload (part of packages/cli/src/extract.ts), written as a spec: is every declared
 // field given, is every given field declared, and does every given value fit its field.
@@ -23,71 +76,47 @@ export const PayloadCheck = component({
     "a given value that does not fit its field. For one given field at most one diagnostic is reported: the first. " +
     "An effect that is not declared is reported elsewhere; its fields are not checked here.",
 
-  states: {
-    OUTSIDE: description("Between effects."),
-    IN_EFFECT: description("In a declared effect, before any given field."),
-    IN_UNKNOWN_EFFECT: description("In an effect that is not declared. Nothing is checked and nothing is reported until the walk leaves it."),
-    IN_FIELD: description("In a given field of a declared effect whose value is still being checked."),
-    IN_SETTLED_FIELD: description("In a given field for which a diagnostic has already been reported. What follows about its value is ignored."),
-  },
-  init: "OUTSIDE",
+  states: State,
+  init: State.OUTSIDE,
 
-  data: {
-    effect: component(description("The name of the effect being walked."), "string"),
-    field: component(description("The name of the given field being walked."), "string"),
-  },
+  data: Data,
 
-  queries: {
-    effectDeclared: component(description("Whether the specification declares an effect of this name."), input({ name: "string" }), output("boolean")),
-    fieldDeclared: component(description("Whether that effect declares a field of this name."), input({ effect: "string", field: "string" }), output("boolean")),
-    fieldGiven: component(description("Whether the specification gives a value for that field of that effect."), input({ effect: "string", field: "string" }), output("boolean")),
-    fieldKind: component(description("What that field takes. \"enum\" means one of a fixed set of strings."), input({ effect: "string", field: "string" }), output(FieldKind)),
-    memberOf: component(description("Whether this string is in the fixed set that field takes."), input({ effect: "string", field: "string", value: "string" }), output("boolean")),
-    hasMinimum: component(description("Whether that field has a minimum."), input({ effect: "string", field: "string" }), output("boolean")),
-    minimum: component(description("That field's minimum. Meaningful only if it has one."), input({ effect: "string", field: "string" }), output("number")),
-    hasMaximum: component(description("Whether that field has a maximum."), input({ effect: "string", field: "string" }), output("boolean")),
-    maximum: component(description("That field's maximum. Meaningful only if it has one."), input({ effect: "string", field: "string" }), output("number")),
-  },
+  queries: Query,
 
-  effects: {
-    ReportDiagnostic: component(
-      description("A mismatch found in the effect being walked, for the named field."),
-      input({ code: ["missing-field", "bad-value"], effect: "string", field: "string" }),
-    ),
-  },
+  effects: Effect,
 
   decisions: { constantFit: ConstantFit, typeFit: TypeFit },
 
   commands: {
     EnterEffect: component(
       description("The walk enters an effect and remembers its name."),
-      input({ name: "string" }),
-      from("OUTSIDE"),
-      asks("declared", "effectDeclared", { name: ref.input("name") }),
-      when("The entered effect is not declared", goTo("IN_UNKNOWN_EFFECT")),
-      otherwise(goTo("IN_EFFECT")),
+      EnterEffectInput,
+      from(State.OUTSIDE),
+      Query.effectDeclared({ name: EnterEffectInput.name }).as("declared"),
+      when(If.enteredEffectNotDeclared, goTo(State.IN_UNKNOWN_EFFECT)),
+      otherwise(goTo(State.IN_EFFECT)),
     ),
 
     DeclaredField: component(
       description("A field the effect being walked declares. The walk stays where it is."),
-      input({ name: "string" }),
-      from("IN_EFFECT", "IN_UNKNOWN_EFFECT"),
-      asks("given", "fieldGiven", { effect: ref.data("effect"), field: ref.input("name") }),
-      when("The effect is declared, and the specification gives no value for the declared field", does("A missing-field diagnostic is reported for the effect and that field.")),
+      DeclaredFieldInput,
+      from(State.IN_EFFECT, State.IN_UNKNOWN_EFFECT),
+      Query.fieldGiven({ effect: Data.effect, field: DeclaredFieldInput.name }).as("given"),
+      when(If.effectDeclaredSpecificationGivesNo, does("A missing-field diagnostic is reported for the effect and that field.")),
       otherwise(),
     ),
 
     GivenField: component(
       description("A field the specification gives to the effect being walked. What is known about its value follows."),
-      input({ name: "string" }),
-      from("IN_EFFECT", "IN_FIELD", "IN_SETTLED_FIELD", "IN_UNKNOWN_EFFECT"),
-      asks("declared", "fieldDeclared", { effect: ref.data("effect"), field: ref.input("name") }),
+      GivenFieldInput,
+      from(State.IN_EFFECT, State.IN_FIELD, State.IN_SETTLED_FIELD, State.IN_UNKNOWN_EFFECT),
+      Query.fieldDeclared({ effect: Data.effect, field: GivenFieldInput.name }).as("declared"),
       when(
-        "The effect is declared but does not declare the given field",
-        goTo("IN_SETTLED_FIELD"),
+        If.effectDeclaredButDoesNot,
+        goTo(State.IN_SETTLED_FIELD),
         does("The walk remembers the field's name. A bad-value diagnostic is reported for the effect and that field."),
       ),
-      when("The effect is declared and declares the given field", goTo("IN_FIELD"), does("The walk remembers the field's name.")),
+      when(If.effectDeclaredDeclaresGivenField, goTo(State.IN_FIELD), does("The walk remembers the field's name.")),
       // In an effect that is not declared: nothing happens
       otherwise(),
     ),
@@ -97,17 +126,17 @@ export const PayloadCheck = component({
         "A concrete value for the field being walked. `kind` says what it is. `text` is the value when it is a string, " +
           "and `number` is the value when it is an integer or a number; otherwise they carry nothing.",
       ),
-      input({ kind: ConstantKind, text: "string", number: "number" }),
-      from("IN_FIELD", "IN_SETTLED_FIELD", "IN_UNKNOWN_EFFECT"),
-      asks("takes", "fieldKind", here),
-      asks("inSet", "memberOf", { ...here, value: ref.input("text") }),
-      asks("bounded", "hasMinimum", here),
-      asks("lowest", "minimum", here),
-      asks("capped", "hasMaximum", here),
-      asks("highest", "maximum", here),
+      ConstantInput,
+      from(State.IN_FIELD, State.IN_SETTLED_FIELD, State.IN_UNKNOWN_EFFECT),
+      Query.fieldKind(here).as("takes"),
+      Query.memberOf({ ...here, value: ConstantInput.text }).as("inSet"),
+      Query.hasMinimum(here).as("bounded"),
+      Query.minimum(here).as("lowest"),
+      Query.hasMaximum(here).as("capped"),
+      Query.maximum(here).as("highest"),
       when(
-        "The field's value is still being checked, and the constant does not fit the field",
-        goTo("IN_SETTLED_FIELD"),
+        If.fieldSValueStillBeing,
+        goTo(State.IN_SETTLED_FIELD),
         does("A bad-value diagnostic is reported for the remembered effect and field."),
       ),
       otherwise(),
@@ -115,12 +144,12 @@ export const PayloadCheck = component({
 
     Typed: component(
       description("A value for the field being walked that is known only by its type."),
-      input({ type: ConstantKind }),
-      from("IN_FIELD", "IN_SETTLED_FIELD", "IN_UNKNOWN_EFFECT"),
-      asks("takes", "fieldKind", here),
+      TypedInput,
+      from(State.IN_FIELD, State.IN_SETTLED_FIELD, State.IN_UNKNOWN_EFFECT),
+      Query.fieldKind(here).as("takes"),
       when(
-        "The field's value is still being checked, and a value of that type does not fit the field",
-        goTo("IN_SETTLED_FIELD"),
+        If.fieldSValueStillBeing2,
+        goTo(State.IN_SETTLED_FIELD),
         does("A bad-value diagnostic is reported for the remembered effect and field."),
       ),
       otherwise(),
@@ -128,15 +157,15 @@ export const PayloadCheck = component({
 
     Unresolved: component(
       description("The value given for the field being walked is a reference that points at nothing."),
-      from("IN_FIELD", "IN_SETTLED_FIELD", "IN_UNKNOWN_EFFECT"),
+      from(State.IN_FIELD, State.IN_SETTLED_FIELD, State.IN_UNKNOWN_EFFECT),
       when(
-        "The field's value is still being checked",
-        goTo("IN_SETTLED_FIELD"),
+        If.fieldSValueStillBeing3,
+        goTo(State.IN_SETTLED_FIELD),
         does("A bad-value diagnostic is reported for the remembered effect and field."),
       ),
       otherwise(),
     ),
 
-    LeaveEffect: component(from("IN_EFFECT", "IN_FIELD", "IN_SETTLED_FIELD", "IN_UNKNOWN_EFFECT"), goTo("OUTSIDE")),
+    LeaveEffect: component(from(State.IN_EFFECT, State.IN_FIELD, State.IN_SETTLED_FIELD, State.IN_UNKNOWN_EFFECT), goTo(State.OUTSIDE)),
   },
 });

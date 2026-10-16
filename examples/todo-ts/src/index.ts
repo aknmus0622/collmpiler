@@ -8,6 +8,8 @@
 export type { AddResult, CompleteResult, ListFilter, RemoveResult, TodoItem } from "./types.ts";
 export type { IdSource } from "./idSource.ts";
 export { TodoList } from "./todoList.ts";
+export type { ItemCompleteResult, TodoItemState } from "./todoItem.ts";
+export { Todo } from "./todoItem.ts";
 export {
   createItem,
   findItem,

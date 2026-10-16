@@ -649,7 +649,9 @@ GoTo: component(
 | 節、`component`（部品・名前つきの節・溶け込む束）、`{}` から節への変換 | 済み（`packages/core/index.ts`） |
 | 文法の表と、木の検査（位置つきの診断） | 済み。`clp compile` が報告する。Layer 1 だけでも確かめる |
 | 語: `emits` / `onlyWhen` / `set` / `asks(別名, 問い合わせ, {...})`、裸の型、`integer({...})` | 済み |
-| 解釈を、Layer 1 と同じ語で書く（dict 形式と、`meanings` の表） | 済み。`clp interpret` の雛形と依頼文も、この書き方 |
+| 解釈を、Layer 1 と同じ語で書く（dict 形式と、`meanings` の並び） | 済み。`clp interpret` の雛形と依頼文も、この書き方 |
+| 取っ手（§15）: まとまりの宣言、取っ手での参照、決定表の行を条件の取っ手で、`取っ手.means(関数)`、取っ手の型 | 済み。文字列の参照は、公開の語から消した（内部の作り手としてだけ残る）。既存の例は機械的に書き換え、IR は前後で一致。`clp interpret` の雛形は、Layer 1 が export する取っ手を import して書く。実際の LLM が、取っ手の書き方で解釈を導けることを確かめた |
+| 入力のフィールドの組のフィールド（`PostInput.body.title`） | 済み。入力の取っ手だけ（データと答えのフィールドは、まだ） |
 | 既存の例を移す | 済み。機械的に書き換えた（Layer 1 のハッシュと IR は、前後で一致） |
 | 型の検査を軽くする | 済み。型レベルの検査の仕組みは消した。意味の関数の中の名前の誤りは、仕様を実行するときに確かめる |
 | 解釈の正規形（関数を節に付ける `condition(名前, 関数)`） | 受け付けるが、`clp interpret` が書くのは dict 形式 |
@@ -658,9 +660,11 @@ GoTo: component(
 | 構造を持つ値（`record` / `list` / `optional`）を、型を書けるどこにでも | 済み。並びは順序も比べる。値が合うかは、IR を作るときと、仕様を実行するときに確かめる。セルフホストした `payload-check` の範囲の外なので、語彙に構造を持つ型があれば、その検査は Stage 0 が行う |
 | `initially`、状態を持たない部品（内部では、状態 `READY` を1つ持つ） | 済み |
 | 依存の約束 `fresh` / `increasing` | 済み（引数の無い問い合わせ）。`increasing` の増え幅は、仕様の中の数の前後から選ぶ |
-| 入力の選び方 `among(データ, フィールド)` / `string({ examples })`、自動で集めた数を常に使う | 済み。`among` は、いまは、覚えている並びの要素から選ぶ（含む部品のキーは、部品の入れ子と一緒に） |
-| 名前を付けた条件 | まだ |
-| 部品の中の部品 | まだ（web の例を通してから決める） |
+| 入力の選び方 `among(データ, フィールド)` / `string({ examples })`、自動で集めた数を常に使う | 済み。`among(Data.items, "id")` は覚えている並びの要素から、含む部品が覚えているデータからも選ぶ。`among(Part.items)` は、多数ある部品のいまあるキーから |
+| 名前を付けた条件 | 済み（`conditions({...})`。§15） |
+| 部品の中の部品（§14）: `parts`、`Part.todos.Add({...})`、答え `.answer`、`route(...)` | 済み。期待値は、外側と中の仕様を一緒に実行して作る。観測は外側の答えと、外の世界への副作用すべて（中の部品のものは `todos.<副作用>`）。中の部品の依存は、外側の契約に `todos.<名前>` で並ぶ。部品を含む部品は、含む部品のあとに一致させ、そのエージェントは中の部品の IR を見ず、そのコードを変えられず、ミューテーションもそこには及ばない。既定の試行回数は 500 |
+| 多数ある部品 `many(Todo, by("id"))`: `Part.items.at(キー).Complete()`、`Part.items.add(キー, {...})`、`Part.items.remove(キー)` | 済み。無いキーで呼ぶと、何も起きず、答えは `null`。関数からは `state.items`（作った順の、キー・状態・データの並び）と、その手で呼んだ答え `state.items.Complete`。`add` / `remove` は、解釈だけが書ける（`set` / `emits` と同じ） |
+| `forwards`（子の口をそのまま出す） | まだ。いまは、外側のコマンドを書いて、呼んで、答えを返す |
 | IR の語の統一（版 6） | 済み。計算は `{ description, output }`、場合は `emits: [{ effect, input, onlyWhen }]`。説明の表は変えない（§9） |
 | グラフの検査（到達しない状態、実行されないコマンド、使われない語彙） | 済み（`packages/cli/src/graph.ts`）。仕様を実行せずに、書かれた構造だけから確かめる。関数が読むものを記録して辺に足すことは、まだ |
 
@@ -670,7 +674,142 @@ GoTo: component(
 * 文（`description` / `does`）は、いくつ書いても、つながって1つになる（文法の表では、数を制限しない）。
 * `otherwise` と `init` が無いことは、木の検査では報告しない。Layer 1 に無ければ解釈が足せるので、重ねたあとで確かめる。
 * 解釈の構造の中の注釈は、機械的な書き換えでは残せなかった。
-* `among` は、型を作る語にした（`among("items", "id")` は、手がかりつきの文字列の型。整数なら第3引数に `"integer"`）。
+* `among` は、型を作る語にした（`among(Data.items, "id")` は、手がかりつきの文字列の型。整数なら第3引数に `"integer"`）。
   選ぶ値の型を、覚えているデータの型から導くことはしていない。
 * 乱数の文字列でも、意味の関数の中の文字列を混ぜているので、短い識別子どうしは偶然に一致することがある。
   「`among` が無ければ、覚えている項目に当たらない」とは言い切れない。
+
+## 14. 部品をつなぐ: 入口も部品（1.0、実装済み。§13）
+
+`ROADMAP.md` の 1.0 の「入口まで、エージェントが書く」と「部品をつなぐ」を、1つの仕組みとして扱う。
+
+### 14.1. 方針（決定）
+
+* **入口も部品である。** HTTP の API は、リクエストをコマンドとし、ステータスコードと本文を結果とする部品。
+* **入口は、ドメインの部品を中に含む。** つなぐのは、部品の中の部品（§6）と同じ `parts`。多重度が違うだけ。
+* **検証は、同じ PBT。** 外側の部品を検証するとき、中の部品は本物のコードを使い、期待値は外側と中の仕様を一緒に実行して作る。
+  別の「2段目の検証（決まった筋書き）」は作らない。
+* これで、ステータスコードが仕様の中に入り（検証され、ミューテーションも効く）、保存先も部品として含められる。
+
+### 14.2. たたき台（書き方は §15 の取っ手に合わせて読み替える: `calls("added", "todos", "Add", {...})` は `Part.todos.Add({...})`、`ref.call("added", "todo")` は `Part.todos.Add.answer.todo`）
+
+```ts
+export const TodoApi = component({
+  description: "The HTTP API of the to-do list.",
+  parts: { todos: Todos },                                  // 含む部品（1つ）
+  commands: {
+    PostTodos: component(
+      route("POST /todos"),                                 // 経路（14.3 の 5）
+      input({ body: record({ title: "string" }) }),
+      output(record({ status: [201, 422], body: optional(Todo) })),
+      calls("added", "todos", "Add", { title: ref.input("body", "title") }),   // 中の部品を呼び、答えに名前を付ける
+      when("The list created the item", responds({ status: 201, body: ref.call("added", "todo") })),
+      otherwise(responds({ status: 422, body: null })),
+    ),
+    GetTodos: component(
+      route("GET /todos"),
+      input({ query: record({ only: ["all", "open", "done"] }) }),
+      output(record({ status: [200], body: list(Todo) })),
+      calls("listed", "todos", "List", { only: ref.input("query", "only") }),
+      responds({ status: 200, body: ref.call("listed") }),
+    ),
+  },
+});
+```
+
+### 14.3. 決めたこと（決定。書き方は §15 の取っ手）
+
+| # | 点 | 案 |
+| --- | --- | --- |
+| 1 | 親が子を呼ぶ書き方 | `const Part = parts({ todos: Todos })` を宣言し、`Part.todos.Add({ 入力 })` で呼ぶ。答えは `Part.todos.Add.answer`、フィールドは `Part.todos.Add.answer.todo`。条件と計算からは `state.todos.Add` で読める。呼ぶ順は書いた順で、場合を決める前に呼ぶ（`asks` と同じ）。同じコマンドを2回呼ぶときだけ `.as("名前")`。子の口をそのまま出すだけなら `forwards`（§6） |
+| 2 | 何を観測するか | 外側の部品の答え（`responds`）と、**外の世界への副作用すべて**（外側の部品のものも、中の部品のものも）。中の部品の状態とデータは読まない |
+| 3 | 期待値の作り方 | 外側の仕様を実行し、`calls` の所で中の部品の仕様を実行する。中の部品の状態は、外側の状態の一部として持ち回る |
+| 4 | エージェントに見せるもの | 入口を書くエージェントは、外側の IR と、中の部品の**本番コード**（検証済み）を見る。中の部品の IR は見せない（入口に判断が入らないように）。書いてよいのは、入口のコードだけ。中の部品のコードを変えたら差し戻す。ミューテーションは、入口のコードだけを壊す |
+| 5 | HTTP と経路 | 仕様は、HTTP の意味を持たない。`status` と `body` を持つ結果があるだけ。経路は `route("POST /todos")` で書く。意味ではなく、境界の約束（契約に出る）。本番コードと、それにリクエストを送るアダプターが、同じ経路を使うため。HTTP で当てるのは、外側の部品のアダプター（サーバーを起動し、リクエストを送る） |
+| 6 | 外の依存 | 時計や採番など、外の世界への依存は、どの部品のものも、これまでどおり代役（`Ports`）。中の部品の依存は、外側の契約に名前を付けて並ぶ（`todos.newId`）。アダプターが、それを中の部品のコードに渡す |
+| 7 | 検証の速さ | 外側の部品は HTTP を通すので遅い。外側の部品の既定の試行回数は少なくする（たとえば 500。`--runs` で変えられる）。中の部品の判断は、中の部品の検証で済んでいる |
+| 8 | 多数ある部品 | 同じ仕組みで `many(Todo, by("id"))`、`calls(名前, 部品, キー, コマンド, {...})`。まず1つの場合を作り、多数は後で |
+| 9 | 実装の順 | 取っ手（§15）→ 1つの部品を含む場合 → 入口の例（todo の API を部品として書き直す）→ 多数ある部品 |
+
+## 15. 参照は、すべて取っ手（1.0、実装済み）
+
+### 15.1. 方針
+
+* **参照に、文字列を書かない。** 文字列が残るのは、文（`description`、`does`、条件の文）と、名前を決める宣言のキーだけ。
+  名前は1か所にだけ書き、使う所はすべて、宣言から得た取っ手で指す。
+* **語彙のまとまりは、先に値として宣言する。** 宣言したまとまりが、そのまま取っ手を持つ。部品は、それを組み合わせる。
+* **取っ手は型を持つ。** 書き間違い（`State.PAYED`）や、型の合わない参照は、エディタで型エラーになる。
+  合否は、これまでどおり木の検査と `clp compile` が決める（型は早い知らせ）。
+* **仕様に関数を書かない、という決まりは、そのまま守る。** 自分の宣言を参照するための組み立ての関数（`self`）は使わない。
+* **条件は、必ず名前を付けて宣言する。** `when` / `onlyIf` / `onlyWhen` に、その場で文を書かない。文を直しても名前は変わらないので、
+  導き直しが要らない。
+* 文字列の書き方（`goTo("PAID")`、`ref.data("price")`、`emits("SendReceipt", ...)`、`when("The payment succeeded", ...)`）は、なくす。
+
+### 15.2. 書き方
+
+```ts
+export const State = states("DRAFT", "PENDING", "PAID", "CANCELLED");
+export const Data = data({ rank: Rank, price: Yen });
+export const Query = queries({ paymentResult: ["succeeded", "failed"] });
+export const Effect = effects({ SendReceipt: input({ amount: "integer" }), Refund: description("...") });
+export const If = conditions({ paid: "The payment succeeded", goldMonthEnd: "The customer is a Gold member and it is month-end" });
+export const Campaign = decisionTable(
+  when(If.goldMonthEnd, { discountPercent: 20, coupon: "Premium" }),      // 行も、条件の取っ手で書く
+  otherwise({ discountPercent: 0, coupon: null }),
+);
+export const PlaceInput = input({ customerRank: Rank, listPrice: Yen });
+
+export const Order = component({
+  states: State,
+  init: State.DRAFT,
+  data: Data,
+  queries: Query,
+  effects: Effect,
+  conditions: If,
+  decisions: { campaign: Campaign },
+  commands: {
+    PlaceOrder: component(PlaceInput, from(State.DRAFT), goTo(State.PENDING)),
+    Checkout: component(from(State.PENDING), when(If.paid, goTo(State.PAID), does("A receipt is sent ...")), otherwise()),
+  },
+});
+```
+
+```ts
+// 解釈（LLM が書く）: Layer 1 の取っ手を import する。足した語彙も、同じく先に宣言する
+import { Campaign, Data, Effect, If, PlaceInput, Order, State } from "./order.component.ts";
+
+export const Calc = calculations({ amountCharged: component(description("..."), output("integer")) });
+
+export const Interpretation = interpretation(Order, {
+  calculations: Calc,
+  commands: {
+    PlaceOrder: component(Data.price.set(PlaceInput.listPrice), Data.rank.set(PlaceInput.customerRank)),
+    Checkout: component(
+      when(If.paid, Effect.SendReceipt({ amount: Calc.amountCharged }), Effect.IssueCoupon({ type: Campaign.coupon }, onlyWhen(Campaign.grantsCoupon))),
+      otherwise(),
+    ),
+    Cancel: component(from(State.PENDING, State.PAID), goTo(State.CANCELLED), Effect.Refund(onlyWhen(was(State.PAID)))),
+  },
+  meanings: [
+    If.paid.means((state) => state.paymentResult === "succeeded"),
+    Calc.amountCharged.means((state) => Math.floor((state.price * (100 - Campaign.of(state).discountPercent)) / 100)),
+  ],
+});
+```
+
+| 参照 | 取っ手 |
+| --- | --- |
+| 状態 | `State.PAID`。`was(State.PAID)` |
+| 覚えるデータ | `Data.price`（値）、`Data.price.set(値)`（覚える） |
+| 問い合わせ | `Query.paymentResult`（引数の無いものの答え）。引数つきは `Query.stateDeclared({ name })` で尋ね、答えは `Query.stateDeclared.answer` |
+| 副作用 | `Effect.SendReceipt({ ... })` |
+| 計算 | `Calc.amountCharged` |
+| 決定表の列 | `Campaign.discountPercent`。意味の関数の中では `Campaign.of(state)` で当たった行 |
+| コマンドの入力 | `PlaceInput.listPrice`（入力を先に宣言する） |
+| 条件 | `If.paid`。意味は `If.paid.means(関数)` |
+| 含む部品 | `const Part = parts({ todos: Todos })`、`Part.todos.Add({ ... })`、答えは `Part.todos.Add.answer` |
+
+* まとまりの変数名は自由。依頼文と例では `State`、`Data`、`Query`、`Effect`、`If`、`Calc`、`Part` にそろえる。
+* 決定表の行は、条件の取っ手で書く（`when(If.x, { 列: 値 })`、`otherwise({ ... })`）。行の文を、表の中に書かない。
+* 同じまとまりを、複数の部品で使える（型、副作用の並び）。todo の例で `Todo` を2回書いた問題も、ここで片付く。
+* IR は名前で書かれるので、取っ手で書いても、変わらない。

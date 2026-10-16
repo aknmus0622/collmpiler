@@ -31,17 +31,43 @@ export type SpecModel = {
   // 計算の名前 → 式を述べる文と、結果の型
   calculations?: Record<string, { is: string; type: FieldSchema }>;
   invariants?: readonly string[];
+  // コマンドの名前 → 経路（"POST /todos"）。書いたコマンドがあるときだけ持つ
+  routes?: Record<string, string>;
+  // 含む部品の名前 → その部品の名前と、外から見た境界（呼べるコマンド、依存。依存の名前は部品の名前で修飾したもの）
+  parts?: Record<
+    string,
+    {
+      component: string;
+      // 多数あるときの、キーの名前
+      by?: string;
+      commands: Record<string, Fields>;
+      outputs?: Record<string, OutputSchema>;
+      queries: Record<string, { input: Fields; output: FieldSchema; promise?: "fresh" | "increasing" }>;
+      effects: Record<string, Fields>;
+    }
+  >;
 };
 
 // 構造の中の値: 定数か、参照
-export type Reference = { $ref: "decision" | "calculation" | "input" | "data" | "query" | "was"; path: unknown };
+export type Reference = { $ref: "decision" | "calculation" | "input" | "data" | "query" | "was" | "call"; path: unknown };
 export type SpecValue = Constant | Reference;
 export type SpecEffect = { name: string; payload: Record<string, SpecValue>; when?: string | Reference };
 // goTo が無ければ、状態は変わらない
 // 尋ねること: どの問い合わせを、どの引数で。答えは、付けた名前で読む
 export type SpecAsk = { query: string; input: Record<string, SpecValue> };
+// 含む部品のコマンドを呼ぶこと: どの部品の、どのコマンドを、どの入力で。答えは、付けた名前で読む
+export type SpecCall = { part: string; command: string; input: Record<string, SpecValue>; key?: SpecValue };
 // responds: コマンドが返す値。値1つか、{ フィールド: 値 }
-export type SpecOutcome = { goTo?: string; does?: string; responds?: SpecValue | Record<string, SpecValue>; effects: SpecEffect[]; set: Record<string, SpecValue> };
+export type SpecOutcome = {
+  goTo?: string;
+  does?: string;
+  responds?: SpecValue | Record<string, SpecValue>;
+  effects: SpecEffect[];
+  set: Record<string, SpecValue>;
+  // 多数ある部品を作る、消す
+  adds?: { part: string; key: SpecValue; data: Record<string, SpecValue> }[];
+  removes?: { part: string; key: SpecValue }[];
+};
 
 export type SpecInput = {
   // コンポーネントの名前 (order など)
@@ -50,7 +76,14 @@ export type SpecInput = {
   // コマンド名 → 実行できる状態、事前条件、条件ごとの結果（分かれないコマンドは otherwise だけ）
   behaviors: Record<
     string,
-    { description?: string; from?: readonly string[]; onlyIf?: readonly string[]; asks?: Record<string, SpecAsk>; when: Record<string, SpecOutcome> }
+    {
+      description?: string;
+      from?: readonly string[];
+      onlyIf?: readonly string[];
+      asks?: Record<string, SpecAsk>;
+      calls?: Record<string, SpecCall>;
+      when: Record<string, SpecOutcome>;
+    }
   >;
   decisions: Record<string, Table>;
   // Layer 1 のコンポーネント（書かれたまま）、解釈を重ねたもの、解釈（意味の関数を含む）
@@ -59,6 +92,10 @@ export type SpecInput = {
   binding?: BoundSpecification;
   // Layer 1 と解釈が合わない点
   problems?: string[];
+  // 含む部品（それぞれ、その部品の解釈と一緒に読んだもの）
+  parts?: Record<string, SpecInput>;
+  // 多数ある部品として含まれるときの、キーの名前（含む側が読んだとき）
+  by?: string;
   // 木の検査で見つかったこと（次の書き方で書かれた仕様）。at は、その節を書いた場所
   grammar?: { code: string; message: string; at?: { file: string; line: number } }[];
   // 解釈を導いたあとで、Layer 1 が変わっている
@@ -94,14 +131,26 @@ function typeOf(input: SpecInput, command: string, ref: Reference): { schema?: F
     case "decision": {
       const [decision, column] = ref.path as [string, string];
       const table = input.decisions[decision];
+      // 取っ手の名前は、部品に置いたキーで決まる。置いていない表の列は、名前が決まらない ("?")
+      if (decision === "?") return { problem: "参照している決定表が、コンポーネントの decisions に置かれていません" };
       if (!table) return { problem: `決定表 "${decision}" は、コンポーネントの decisions にありません` };
       if (!(column in table.otherwise)) return { problem: `決定表 "${decision}" に、列 "${column}" はありません` };
       return { values: Object.values(table).map((row) => row[column]) };
     }
     case "calculation":
       return model.calculations?.[name] ? { schema: model.calculations[name].type } : { problem: `計算 "${name}" は、calculations にありません` };
-    case "input":
-      return model.commands[command]?.[name] ? { schema: model.commands[command][name] } : { problem: `"${name}" は、コマンド ${command} の input にありません` };
+    case "input": {
+      // フィールドの組のフィールドは、点でつないだ名前（body.title）
+      const [field, ...inner] = name.split(".");
+      let schema: FieldSchema | undefined = model.commands[command]?.[field];
+      if (schema === undefined) return { problem: `"${field}" は、コマンド ${command} の input にありません` };
+      for (const key of inner) {
+        const record: Fields | undefined = isRecord(schema) ? (schema as unknown as { record: Fields }).record : undefined;
+        if (!record || !(key in record)) return { problem: `"${name}": ${field} に、フィールド "${key}" はありません` };
+        schema = record[key];
+      }
+      return { schema };
+    }
     case "data":
       return model.data[name] ? { schema: model.data[name] } : { problem: `"${name}" は、data にありません` };
     case "query": {
@@ -116,6 +165,21 @@ function typeOf(input: SpecInput, command: string, ref: Reference): { schema?: F
     case "was": {
       const unknown = (ref.path as string[]).find((state) => !model.states.includes(state));
       return unknown === undefined ? { boolean: true } : { problem: `was: "${unknown}" は states にありません` };
+    }
+    case "call": {
+      // 含む部品のコマンドの答え。フィールドを続けて指せば、そのフィールド
+      const [alias, ...fields] = ref.path as string[];
+      const call = input.behaviors[command]?.calls?.[alias];
+      if (!call) return { problem: `"${alias}" は、コマンド ${command} が呼んだ部品のコマンドではありません` };
+      const returned = model.parts?.[call.part]?.outputs?.[call.command] as FieldSchema | undefined;
+      if (returned === undefined) return { problem: `部品 "${call.part}" のコマンド ${call.command} は、何も返しません (output がありません)` };
+      let schema: FieldSchema = returned;
+      for (const field of fields) {
+        const record: Fields | undefined = isRecord(schema) ? (schema as unknown as { record: Fields }).record : undefined;
+        if (!record || !(field in record)) return { problem: `${alias} の答えに、フィールド "${field}" はありません` };
+        schema = record[field];
+      }
+      return { schema };
     }
   }
 }
@@ -148,7 +212,7 @@ export function serialize(value: SpecValue): unknown {
 // 値1つを、直列化に渡すコマンドの列にする。コマンドの名前と入力は、value-writer の仕様のもの
 export type WriteEvent =
   | { name: "Constant"; input: { kind: "string" | "number" | "boolean"; text: string; number: number; flag: boolean } }
-  | { name: "Reference"; input: { target: "input" | "data" | "query" | "calculation" | "decision"; name: string; table: string; column: string } }
+  | { name: "Reference"; input: { target: "input" | "data" | "query" | "calculation" | "decision" | "call"; name: string; table: string; column: string } }
   | { name: "WasState"; input: { state: string } };
 export function* writeEvents(value: SpecValue): Generator<WriteEvent> {
   if (!isReference(value)) {
@@ -188,8 +252,10 @@ export function respondedValues(responds: SpecOutcome["responds"], output: Outpu
   const fields = isRecordOutput(output) && typeof responds === "object" && responds !== null && !Array.isArray(responds) && !("$ref" in responds);
   return fields ? Object.entries(responds as Record<string, SpecValue>) : [["", responds as SpecValue]];
 }
-// 定数のうち、平らな値（真偽値・数値・文字列）。並びやフィールドの組の定数は、セルフホストした部品には渡さない
-const isFlat = (value: unknown) => typeof value !== "object" || (value !== null && "$ref" in (value as object));
+// 定数のうち、平らな値（真偽値・数値・文字列）と参照。並びやフィールドの組の定数と、含む部品の答えの参照は、
+// セルフホストした部品には渡さない（value-writer の仕様の範囲の外。手書きの版が書く）
+const isFlat = (value: unknown) =>
+  typeof value !== "object" || (value !== null && "$ref" in (value as object) && (value as Reference).$ref !== "call");
 // 語彙に、構造を持つ型があるか。あれば、ペイロードの検査は手書きの版 (Stage 0) が行う
 // （セルフホストした payload-check の仕様は、平らな値だけを扱う）
 export function structuredVocabulary(model: SpecModel): boolean {
@@ -211,7 +277,7 @@ export function* valuesToWrite(input: SpecInput): Generator<[slot: string, value
     for (const [caseName, outcome] of Object.entries(behavior.when)) {
       for (const [index, effect] of outcome.effects.entries()) {
         for (const [field, value] of Object.entries(effect.payload)) if (isFlat(value)) yield [SLOT.payload(command, caseName, index, field), value];
-        if (effect.when !== undefined && typeof effect.when !== "string") yield [SLOT.when(command, caseName, index), effect.when];
+        if (effect.when !== undefined && typeof effect.when !== "string" && isFlat(effect.when)) yield [SLOT.when(command, caseName, index), effect.when];
       }
       for (const [field, value] of Object.entries(outcome.set)) if (isFlat(value)) yield [SLOT.set(command, caseName, field), value];
       for (const [field, value] of respondedValues(outcome.responds, input.model?.outputs?.[command])) if (isFlat(value)) yield [SLOT.responds(command, caseName, field), value];
@@ -364,7 +430,7 @@ export function extract(
   const model = input.model;
   const binding = input.binding;
   // 解釈が無い、または Layer 1 と合わない: 語彙が定まらないので、IR は作れない
-  if (input.layer1 && !binding) report("unbound-specification", "", "", "このコンポーネントの解釈 (interpretation) がありません。clp interpret で導いて、確定してください");
+  if (input.layer1 && !binding && !input.sources?.binding) report("unbound-specification", "", "", "このコンポーネントの解釈 (interpretation) がありません。clp interpret で導いて、確定してください");
   for (const found of input.grammar ?? []) {
     report(found.code, "", "", `${found.at ? `${relative(process.cwd(), found.at.file)}:${found.at.line}: ` : ""}${found.message}`);
   }
@@ -422,6 +488,32 @@ export function extract(
         if (problem) report("bad-value", name, "", `asks.${alias}.${field}: ${problem}`);
       }
       asks[alias] = { query: asked.query, input: Object.fromEntries(Object.entries(asked.input).map(([field, value]) => [field, write(SLOT.ask(name, alias, field), value)])) };
+    }
+
+    // 含む部品のコマンドを呼ぶこと: 部品とコマンドがあること、入力がそろっていること、入力の型が合うこと
+    const calls: Record<string, unknown> = {};
+    for (const [alias, call] of Object.entries(behavior.calls ?? {})) {
+      const part = model.parts?.[call.part];
+      const fields = part?.commands[call.command];
+      if (!part) report("unknown-part", name, "", `${alias}: 部品 "${call.part}" は parts にありません`);
+      else if ((part.by === undefined) !== (call.key === undefined)) {
+        report("bad-value", name, "", `${alias}: 部品 "${call.part}" は${part.by === undefined ? "1つだけなので、at(...) は要りません" : "多数あるので、at(キー) でどれかを選んでください"}`);
+      } else if (!fields) report("unknown-command", name, "", `${alias}: 部品 "${call.part}" (${part.component}) に、コマンド ${call.command} はありません`);
+      else {
+        for (const field of Object.keys(fields)) {
+          if (!(field in call.input)) report("missing-field", name, "", `${alias}: コマンド ${call.command} に、入力 "${field}" がありません`);
+        }
+        for (const [field, value] of Object.entries(call.input)) {
+          const problem = !fields[field] ? `コマンド ${call.command} に、入力 "${field}" はありません` : mismatch(input, name, value, fields[field]);
+          if (problem) report("bad-value", name, "", `${alias}.${field}: ${problem}`);
+        }
+      }
+      calls[alias] = {
+        part: call.part,
+        command: call.command,
+        ...(call.key === undefined ? {} : { at: serialize(call.key) }),
+        input: Object.fromEntries(Object.entries(call.input).map(([field, value]) => [field, serialize(value)])),
+      };
     }
 
     const when: Record<string, unknown> = {};
@@ -496,6 +588,18 @@ export function extract(
       }
       const written = responded.map(([field, value]) => [field, isFlat(value) ? write(SLOT.responds(name, caseName, field), value) : value] as const);
 
+      // 多数ある部品を作る、消す: 多数ある部品であること、作るときのデータが、その部品のデータにあって型が合うこと
+      for (const { part } of [...(outcome.adds ?? []), ...(outcome.removes ?? [])]) {
+        if (model.parts?.[part]?.by === undefined) report("unknown-part", name, caseName, `部品 "${part}" は、多数ある部品 (many) として parts にありません`);
+      }
+      for (const added of outcome.adds ?? []) {
+        const data = input.parts?.[added.part]?.model?.data ?? {};
+        for (const [field, value] of Object.entries(added.data)) {
+          const problem = data[field] ? mismatch(input, name, value, data[field]) : `部品 "${added.part}" の data に、"${field}" はありません`;
+          if (problem) report("bad-value", name, caseName, `${added.part}.add.${field}: ${problem}`);
+        }
+      }
+
       when[caseName] = {
         ...(outcome.goTo === undefined ? {} : { goTo: outcome.goTo }),
         ...(outcome.does === undefined ? {} : { does: outcome.does }),
@@ -504,6 +608,16 @@ export function extract(
         ...(Object.keys(outcome.set).length > 0
           ? { set: Object.fromEntries(Object.entries(outcome.set).map(([field, value]) => [field, write(SLOT.set(name, caseName, field), value)])) }
           : {}),
+        ...(outcome.adds?.length
+          ? {
+              adds: outcome.adds.map((added) => ({
+                part: added.part,
+                key: serialize(added.key),
+                data: Object.fromEntries(Object.entries(added.data).map(([field, value]) => [field, serialize(value)])),
+              })),
+            }
+          : {}),
+        ...(outcome.removes?.length ? { removes: outcome.removes.map((removed) => ({ part: removed.part, key: serialize(removed.key) })) } : {}),
       };
     }
     behaviors.push({
@@ -512,6 +626,7 @@ export function extract(
       from: [...(behavior.from ?? model.states)],
       onlyIf: [...(behavior.onlyIf ?? [])],
       ...(Object.keys(asks).length > 0 ? { asks } : {}),
+      ...(Object.keys(calls).length > 0 ? { calls } : {}),
       when,
     });
   }
@@ -602,8 +717,8 @@ function irModel(model: SpecModel): unknown {
 
 // 境界: アダプターの契約を決める部分（状態・コマンドと入力・問い合わせ・副作用）
 export const boundaryOf = (ir: { model?: Partial<Omit<SpecModel, "calculations">> }) => {
-  const { init, states, commands, queries, effects, outputs } = ir.model ?? {};
-  return stableStringify({ init, states, commands, queries, effects, ...(outputs ? { outputs } : {}) });
+  const { init, states, commands, queries, effects, outputs, parts, routes } = ir.model ?? {};
+  return stableStringify({ init, states, commands, queries, effects, ...(outputs ? { outputs } : {}), ...(parts ? { parts } : {}), ...(routes ? { routes } : {}) });
 };
 
 // キーをソートし、インデントと改行を固定する（出力の決定性）

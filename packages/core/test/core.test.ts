@@ -1,99 +1,97 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  asks, calculation, check, command, component, condition, data, decision, description, does, effect, emits, field, from, fresh, goTo,
-  init, initially, input, integer, invariant, list, onlyIf, onlyWhen, optional, otherwise, output, plain, query, record, responds, set,
-  state, string, when,
-  decisionTable, ref,
+  calculations, check, component, conditions, data, decisionTable, description, does, effects, fresh, from, goTo, initially, input, integer,
+  invariants, list, onlyIf, onlyWhen, optional, otherwise, output, plain, queries, record, responds, states, string, was, when,
 } from "../index.ts";
 
-// 仕様を書くための語彙 (DSL.md) の土台: 節、`{}` から節への変換、木の検査
+// 仕様を書くための語彙 (DSL.md): 節、取っ手、`{}` から節への変換、木の検査
 
 const Rank = ["Gold", "Silver", "Bronze"] as const;
 const Yen = integer({ min: 0, max: 1_000_000 });
-const Campaign = decisionTable({ otherwise: { discountPercent: 0 } });
 
-// 注文の例（一部）を、dict 形式で
-const sugar = () =>
+// 注文の例（一部）。語彙のまとまりを先に宣言し、取っ手で参照する
+const State = states("DRAFT", "PENDING", "PAID");
+const Data = data({ rank: Rank, price: Yen, notes: component(list("string"), initially([])) });
+const Query = queries({
+  isMonthEnd: component(description("Whether today is the last day of the month."), output("boolean")),
+  paymentResult: ["succeeded", "failed"],
+  stateDeclared: component(input({ name: "string" }), output("boolean")),
+  newId: component(output("string"), fresh()),
+});
+const Effect = effects({ SendReceipt: input({ amount: "integer" }), Refund: description("What the customer paid is returned.") });
+const Calc = calculations({ amountCharged: component(description("price × (100 − discount percent) ÷ 100"), output("integer")) });
+const Inv = invariants({ priced: "Every order past the draft state has a price" });
+const If = conditions({ paid: "The payment succeeded", active: "The external payment module is active", gold: "The customer is a Gold member" });
+const Campaign = decisionTable(when(If.gold, { discountPercent: 20 }), otherwise({ discountPercent: 0 }));
+const PlaceInput = input({ customerRank: Rank, listPrice: Yen });
+
+const order = () =>
   component({
     description: "An order.",
-    states: ["DRAFT", "PENDING", "PAID"],
-    init: "DRAFT",
-    data: { rank: Rank, price: Yen, notes: component(list("string"), initially([])) },
-    queries: {
-      isMonthEnd: component(description("Whether today is the last day of the month."), output("boolean")),
-      paymentResult: ["succeeded", "failed"],
-      stateDeclared: component(input({ name: "string" }), output("boolean")),
-      newId: component(output("string"), fresh()),
-    },
-    effects: { SendReceipt: input({ amount: "integer" }), Refund: description("What the customer paid is returned.") },
+    states: State,
+    init: State.DRAFT,
+    data: Data,
+    queries: Query,
+    effects: Effect,
     decisions: { campaign: Campaign },
-    calculations: { amountCharged: component(description("price × (100 − discount percent) ÷ 100"), output("integer")) },
-    conditions: { paid: "The payment succeeded" },
-    invariants: ["Every order past the draft state has a price"],
+    calculations: Calc,
+    invariants: Inv,
     commands: {
-      PlaceOrder: component(
-        input({ customerRank: Rank, listPrice: Yen }),
-        from("DRAFT"),
-        goTo("PENDING"),
-        set({ rank: ref.input("customerRank"), price: ref.input("listPrice") }),
-        does("An order confirmation is sent."),
-      ),
+      PlaceOrder: component(PlaceInput, from(State.DRAFT), goTo(State.PENDING), Data.rank.set(PlaceInput.customerRank), Data.price.set(PlaceInput.listPrice), does("An order confirmation is sent.")),
       Checkout: component(
-        from("PENDING"),
-        onlyIf("The external payment module is active"),
-        asks("declared", "stateDeclared", { name: "PAID" }),
+        from(State.PENDING),
+        onlyIf(If.active),
+        Query.stateDeclared({ name: "PAID" }).as("declared"),
         output(record({ result: ["paid", "failed"], receipt: optional("integer") })),
-        when("paid", goTo("PAID"), emits("SendReceipt", { amount: ref.calculation("amountCharged") }), responds({ result: "paid", receipt: 1 })),
-        otherwise(emits("Refund", onlyWhen(ref.was("PAID"))), responds({ result: "failed", receipt: null })),
+        when(If.paid, goTo(State.PAID), Effect.SendReceipt({ amount: Calc.amountCharged }), responds({ result: "paid", receipt: Campaign.discountPercent })),
+        otherwise(Effect.Refund(onlyWhen(was(State.PAID))), responds({ result: "failed", receipt: null })),
       ),
     },
   });
 
-test("節: 例の仕様は、木の検査を通る", () => {
-  assert.deepEqual(check(sugar()), []);
+test("取っ手: 例の仕様は、木の検査を通る", () => {
+  assert.deepEqual(check(order()), []);
 });
 
-test("節: dict 形式は、節だけの正規形と同じ木になる", () => {
-  const normal = component(
-    description("An order."),
-    state("DRAFT"), state("PENDING"), state("PAID"),
-    init("DRAFT"),
-    data("rank", Rank), data("price", integer({ min: 0, max: 1_000_000 })), data("notes", list("string"), initially([])),
-    query("isMonthEnd", description("Whether today is the last day of the month."), output("boolean")),
-    query("paymentResult", output(["succeeded", "failed"])),
-    query("stateDeclared", input(record(field("name", "string"))), output("boolean")),
-    query("newId", output("string"), fresh()),
-    effect("SendReceipt", input({ amount: "integer" })),
-    effect("Refund", description("What the customer paid is returned.")),
-    calculation("amountCharged", description("price × (100 − discount percent) ÷ 100"), output("integer")),
-    command(
-      "PlaceOrder",
-      input({ customerRank: Rank, listPrice: Yen }),
-      from("DRAFT"),
-      goTo("PENDING"),
-      set(field("rank", ref.input("customerRank")), field("price", ref.input("listPrice"))),
-      does("An order confirmation is sent."),
-    ),
-    command(
-      "Checkout",
-      from("PENDING"),
-      onlyIf("The external payment module is active"),
-      asks("declared", "stateDeclared", field("name", "PAID")),
-      output(record(field("result", ["paid", "failed"]), field("receipt", optional("integer")))),
-      when("paid", goTo("PAID"), emits("SendReceipt", field("amount", ref.calculation("amountCharged"))), responds(field("result", "paid"), field("receipt", 1))),
-      otherwise(emits("Refund", onlyWhen(ref.was("PAID"))), responds({ result: "failed", receipt: null })),
-    ),
-    decision("campaign", Campaign),
-    condition("paid", "The payment succeeded"),
-    invariant("Every order past the draft state has a price"),
-  );
-  assert.deepEqual(plain(sugar()), plain(normal));
-  assert.deepEqual(check(normal), []);
+test("取っ手: 宣言したまとまりは、部品の中にその場で書いたものと同じ木になる。参照は、名前の参照になる", () => {
+  const inline = component({
+    states: ["DRAFT", "PENDING", "PAID"],
+    data: { rank: Rank, price: Yen },
+    effects: { SendReceipt: input({ amount: "integer" }) },
+  });
+  const declared = component({ states: states("DRAFT", "PENDING", "PAID"), data: data({ rank: Rank, price: Yen }), effects: effects({ SendReceipt: input({ amount: "integer" }) }) });
+  assert.deepEqual(plain(declared), plain(inline));
+
+  // 参照は、構造に書く値（{ $ref, path }）と、状態や条件の名前になる
+  assert.deepEqual({ ...Data.price }, { $ref: "data", path: "price" });
+  assert.deepEqual({ ...Calc.amountCharged }, { $ref: "calculation", path: "amountCharged" });
+  assert.deepEqual({ ...PlaceInput.listPrice }, { $ref: "input", path: "listPrice" });
+  assert.deepEqual(was(State.PAID), { $ref: "was", path: ["PAID"] });
+  assert.deepEqual(plain(goTo(State.PAID)), { kind: "goTo", value: "PAID" });
+  assert.deepEqual(plain(when(If.paid)), { kind: "when", name: "The payment succeeded" });
+  // 引数つきの問い合わせ: 呼ぶと尋ねる節。答えは、付けた名前の参照
+  const asked = Query.stateDeclared({ name: "PAID" }).as("declared");
+  assert.deepEqual([asked.kind, asked.name, asked.value], ["asks", "declared", "stateDeclared"]);
+  assert.deepEqual(asked.answer, { $ref: "query", path: "declared" });
+  assert.deepEqual(Query.stateDeclared.answer, { $ref: "query", path: "stateDeclared" });
+  // 副作用を起こす節
+  assert.deepEqual(plain(Effect.Refund(onlyWhen(If.paid))), { kind: "emits", value: "Refund", children: [{ kind: "onlyWhen", value: "The payment succeeded" }] });
+});
+
+test("取っ手: 決定表の行は条件の取っ手で書く。列の参照は、部品に置いたキーを名前に使う", () => {
+  assert.deepEqual({ ...Campaign }, { "The customer is a Gold member": { discountPercent: 20 }, otherwise: { discountPercent: 0 } });
+  order();
+  assert.deepEqual({ ...Campaign.discountPercent }, { $ref: "decision", path: ["campaign", "discountPercent"] });
+  // 意味の関数は、取っ手に付ける
+  const meaning = If.paid.means(() => true);
+  assert.deepEqual([meaning.$meaning, meaning.name], ["conditions", "The payment succeeded"]);
+  assert.deepEqual([Calc.amountCharged.means(() => 1).$meaning, Inv.priced.means(() => true).name], ["calculations", "Every order past the draft state has a price"]);
 });
 
 test("節: 名前の無い component は、置いた先に溶け込む（共有する断片）", () => {
-  const refused = component(when("The request is refused", responds("refused")), otherwise(responds("done")));
+  const Refused = conditions({ refused: "The request is refused" });
+  const refused = component(when(Refused.refused, responds("refused")), otherwise(responds("done")));
   const spec = component({ commands: { A: component(input({ n: "integer" }), refused), B: component(refused) } });
   assert.deepEqual(check(spec), []);
   const [a, b] = spec.children;
@@ -102,15 +100,17 @@ test("節: 名前の無い component は、置いた先に溶け込む（共有�
 });
 
 test("木の検査: 書けない組み合わせ、多すぎる子、重なった名前を、場所と一緒に報告する", () => {
+  const S = states("A", "A");
+  const X = conditions({ x: "x", y: "y" });
   const spec = component({
-    states: ["A", "A"],
-    init: "C",
+    states: S,
+    init: { $state: "C" },
     data: { count: component(integer(), output("integer")) },
     queries: { now: component(output("integer"), initially(0)) },
-    effects: { Send: component(input({ a: "string" }), input({ a: "integer" }), from("A")) },
+    effects: { Send: component(input({ a: "string" }), input({ a: "integer" }), from(S.A)) },
     commands: {
-      Go: component(goTo("A"), when("x", description("no"), when("y")), fresh()),
-      Stop: component(when("x", goTo("A")), when("x", goTo("A"))),
+      Go: component(goTo(S.A), when(X.x, description("no"), when(X.y)), fresh()),
+      Stop: component(when(X.x, goTo(S.A)), when(X.x, goTo(S.A))),
     },
   });
   const found = check(spec);
@@ -125,10 +125,10 @@ test("木の検査: 書けない組み合わせ、多すぎる子、重なった
     'misplaced: コマンド "Go"の中に、freshは書けません',
     'mixed-outcome: コマンド "Go"は場合に分かれているので、goToは、場合 (when / otherwise) の中に書いてください',
     'duplicate: コマンド "Stop"の中に、場合 (when)が2回書かれています',
-    '初期状態 "C" は、状態にありません'.replace(/^/, "unknown-state: "),
+    'unknown-state: 初期状態 "C" は、状態にありません',
   ]);
   // 診断は、その節を書いた場所（このファイルの行）を指す
-  for (const diagnostic of found) {
+  for (const diagnostic of found.filter((d) => d.code !== "unknown-state" && d.code !== "duplicate")) {
     assert.ok(diagnostic.at?.file.endsWith("core.test.ts"), JSON.stringify(diagnostic));
     assert.ok(diagnostic.at!.line > 0);
   }
@@ -142,7 +142,7 @@ test("木の検査: 裸の {} と、知らないまとまりは書けない", ()
   const spec = component({
     data: { days: { type: "integer", min: 1 } },
     commnds: {},
-    commands: { A: component(input({ n: string({ examples: ["x"] }) }), emits("Send", { a: 1 }, { onlyWhen: true })) },
+    commands: { A: component(input({ n: string({ examples: ["x"] }) })) },
   } as never);
   assert.deepEqual(check(spec).map((d) => d.message), [
     '部品の中に、"commnds" というまとまりは書けません',

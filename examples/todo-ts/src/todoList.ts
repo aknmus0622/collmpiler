@@ -6,15 +6,8 @@
  */
 
 import type { IdSource } from "./idSource.ts";
-import {
-  createItem,
-  findItem,
-  isAcceptableTitle,
-  selectItems,
-  withAdded,
-  withCompleted,
-  withoutItem,
-} from "./rules.ts";
+import { createItem, isAcceptableTitle, selectItems } from "./rules.ts";
+import { Todo } from "./todoItem.ts";
 import type {
   AddResult,
   CompleteResult,
@@ -25,16 +18,18 @@ import type {
 
 export class TodoList {
   private readonly ids: IdSource;
-  private items: TodoItem[];
+  /** The items, keyed by identifier, in the order they were added (specification part `items`). */
+  private readonly items: Map<string, Todo>;
 
   /**
    * Creates an empty list.
    *
-   * @param ids where identifiers for new items come from; asked once per item actually created.
+   * @param ids where identifiers for new items come from (specification: the `newId` query);
+   *   asked once per item actually created.
    */
   constructor(ids: IdSource) {
     this.ids = ids;
-    this.items = [];
+    this.items = new Map();
   }
 
   /**
@@ -51,27 +46,24 @@ export class TodoList {
       return { result: "invalid", todo: null };
     }
     const todo = createItem(this.ids.nextId(), title);
-    this.items = withAdded(this.items, todo);
+    this.items.set(todo.id, new Todo(title));
     return { result: "created", todo: { ...todo } };
   }
 
   /**
-   * Marks an item done (specification: command `Complete`, input field `id`).
+   * Marks an item done (specification: command `Complete`, input field `id`). The item itself
+   * decides the answer ({@link Todo.complete}).
    *
    * @param id identifier of the item to complete.
    * @returns `"completed"` on success; `"not-found"` or `"already-done"` when refused, in which
    *   case nothing changes.
    */
   complete(id: string): CompleteResult {
-    const item = findItem(this.items, id);
+    const item = this.items.get(id);
     if (item === undefined) {
       return "not-found";
     }
-    if (item.done) {
-      return "already-done";
-    }
-    this.items = withCompleted(this.items, id);
-    return "completed";
+    return item.complete();
   }
 
   /**
@@ -81,7 +73,7 @@ export class TodoList {
    * @returns copies of the matching items in the order they were added.
    */
   list(filter: ListFilter): TodoItem[] {
-    return selectItems(this.items, filter).map((item) => ({ ...item }));
+    return selectItems(this.snapshot(), filter);
   }
 
   /**
@@ -91,10 +83,14 @@ export class TodoList {
    * @returns `"removed"` on success; `"not-found"` when refused, in which case nothing changes.
    */
   remove(id: string): RemoveResult {
-    if (findItem(this.items, id) === undefined) {
+    if (!this.items.delete(id)) {
       return "not-found";
     }
-    this.items = withoutItem(this.items, id);
     return "removed";
+  }
+
+  /** The items as plain values, in the order they were added. */
+  private snapshot(): TodoItem[] {
+    return Array.from(this.items, ([id, item]) => ({ id, title: item.title, done: item.done }));
   }
 }

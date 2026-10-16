@@ -50,6 +50,18 @@ export function decisionValues(ir: Ir): DecisionValue[] {
     else if (typeof node === "object" && node !== null) Object.values(node).forEach(walk);
   };
   for (const decision of Object.values(ir.decisions)) Object.values(decision.rows).forEach(walk);
+  // 仕様がじかに決めて、検証で観測される定数（返す値と、副作用の入力）。参照（{ $ref }、{ $was }）は値ではない。
+  // 決定表を持たない部品（答えが文字列だけ、など）では、これが無いと壊すものが無く、正しい実装が差し戻された
+  const constant = (node: unknown) => {
+    if (typeof node === "number" || typeof node === "string") values.add(node);
+    else if (typeof node === "object" && node !== null && !("$ref" in node) && !("$was" in node)) Object.values(node).forEach(constant);
+  };
+  for (const behavior of ir.behaviors) {
+    for (const outcome of Object.values(behavior.when) as { responds?: unknown; emits?: { input: unknown }[] }[]) {
+      constant(outcome.responds);
+      for (const emitted of outcome.emits ?? []) constant(emitted.input);
+    }
+  }
   return [...values];
 }
 

@@ -1,10 +1,10 @@
-import { decisionTable } from "@clp/core";
+import { decisionTable, otherwise } from "@clp/core";
 
 // The library's rules, as numbers. They apply always, so the table has only `otherwise`.
 // Values written here reach the generated code without passing through the interpretation: changing one
 // does not require interpreting again.
-export const Policy = decisionTable({
-  otherwise: {
+export const Policy = decisionTable(
+  otherwise({
     // A member holding this many books cannot borrow another
     maxBooks: 3,
     loanDays: 14,
@@ -14,5 +14,5 @@ export const Policy = decisionTable({
     feeCap: 1000,
     // A book more than this many days past its due date is considered lost
     lostAfterDays: 30,
-  },
-});
+  }),
+);

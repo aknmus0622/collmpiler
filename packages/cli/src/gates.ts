@@ -64,6 +64,11 @@ export type GateContext = {
   // 設計と実装の段階には、その IR も渡す（本番コードは、すべての仕様を満たし続けなければならない）。
   // 実装の段階の採点では、配線済みのものの検証も回す（回帰）
   others: { name: string; ir: Ir; ws: Workspace; seed: number }[];
+  // 含む部品（さらに中のものも）の名前。設計と実装の段階には、その IR を見せない（入口に判断が入らないように。
+  // 中の部品は、本番コードとして見える）
+  parts?: string[];
+  // 含む部品の検証が使う本番コードのファイル。この部品の作業では書き換えられず、ミューテーションでも壊さない
+  partFiles?: string[];
 };
 
 // どの Strategy で何個壊し、何個検出したか（毎回結果に記録する）
@@ -122,7 +127,8 @@ export function entryGate(ctx: GateContext, phase: Phase, attempt: number, feedb
   const inputs: Record<string, string> = {
     [REQUEST]: renderRequest(ctx.target, ws, phase, attempt, feedback, ctx.guide, assets, {
       incremental: ctx.incremental,
-      others: ctx.others.map((other) => other.ws.paths.ir),
+      others: visibleOthers(ctx).map((other) => other.ws.paths.ir),
+      partFiles: ctx.partFiles ?? [],
     }),
   };
   for (const asset of assets) if (asset.kind === "file") inputs[`${ASSETS_DIR}/${asset.name}`] = asset.content;
@@ -134,7 +140,7 @@ export function entryGate(ctx: GateContext, phase: Phase, attempt: number, feedb
   } else {
     inputs[ws.paths.ir] = stableStringify(ctx.ir);
     // ほかのコンポーネントの仕様。配線の段階には渡さない（配線は、どの仕様も見ない）
-    for (const other of ctx.others) inputs[other.ws.paths.ir] = stableStringify(other.ir);
+    for (const other of visibleOthers(ctx)) inputs[other.ws.paths.ir] = stableStringify(other.ir);
   }
   // 本番コード: 設計の段階ではやり直しのときの前回の成果、以降の段階では骨組み
   for (const rel of sourceFiles(ws)) inputs[rel] = readFileSync(join(ws.root, rel), "utf8");
@@ -151,6 +157,21 @@ export function entryGate(ctx: GateContext, phase: Phase, attempt: number, feedb
   mkdirSync(join(dir, ws.src), { recursive: true });
 
   return { dir, phase, inputs, env: scrubEnv(process.env, hidden) };
+}
+
+// 設計と実装の段階に IR を見せる、ほかのコンポーネント。含む部品のものは見せない
+const visibleOthers = (ctx: GateContext) => ctx.others.filter((other) => !(ctx.parts ?? []).includes(other.name));
+
+// 含む部品の検証が使う本番コードのファイル（その部品が、いまの仕様で配線まで済んでいるとき）
+export function partFilesOf(ctx: GateContext): string[] {
+  const files = new Set<string>();
+  for (const other of settledOthers(ctx).filter((candidate) => (ctx.parts ?? []).includes(candidate.name))) {
+    writeFileSync(join(other.ws.root, other.ws.paths.contract), ctx.target.generate.contract(other.ir));
+    writeFileSync(join(other.ws.root, other.ws.paths.verify), ctx.target.generate.verify(other.ir, other.ws, ctx.specsDir));
+    const { usage } = runVerify(ctx, other, true);
+    for (const rel of sourceFiles(ctx.ws)) if (usage?.uses(rel)) files.add(rel);
+  }
+  return [...files].sort();
 }
 
 // 環境変数からリポジトリのパスを取り除く (PWD / INIT_CWD / npm_* や PATH 内の node_modules/.bin など)
@@ -259,6 +280,20 @@ export async function exitGate(ctx: GateContext, sandbox: Sandbox): Promise<Gate
   for (const rel of outputs) {
     mkdirSync(dirname(join(ws.root, rel)), { recursive: true });
     cpSync(join(sandbox.dir, rel), join(ws.root, rel));
+  }
+  // 含む部品のコードは、使うだけで、書き換えない。書き換えたら元に戻して差し戻す
+  if (phase !== "wiring") {
+    for (const rel of ctx.partFiles ?? []) {
+      const now = existsSync(join(ws.root, rel)) ? readFileSync(join(ws.root, rel), "utf8") : undefined;
+      if (now === ctx.before[rel] || ctx.before[rel] === undefined) continue;
+      mkdirSync(dirname(join(ws.root, rel)), { recursive: true });
+      writeFileSync(join(ws.root, rel), ctx.before[rel]);
+      violations.push({
+        file: rel,
+        rule: "out-of-scope",
+        message: "This file belongs to a component this system contains. Use that code as it is; do not change it. It has been restored to what it was.",
+      });
+    }
   }
 
   return judgeOutput(ctx, phase, violations, outputs);
@@ -407,7 +442,8 @@ async function judgeOutput(
   const values = decisionValues(ctx.ir);
   const report = await ctx.mutation.run({
     root: ws.root,
-    files: sourceFiles(ws),
+    // 含む部品のコードは壊さない（そちらの検証で済んでいる。ここで壊しても、この部品の誤りではない）
+    files: sourceFiles(ws).filter((rel) => !(ctx.partFiles ?? []).includes(rel)),
     values,
     // 壊す範囲（調べられない言語では、全体）:
     //   このコンポーネントの検証が実行した所 … 対象

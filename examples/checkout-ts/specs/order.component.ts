@@ -1,9 +1,44 @@
-import { component, description, does, from, goTo, input, integer, onlyIf, otherwise, output, when } from "@clp/core";
+import { calculations, component, conditions, data, description, does, effects, from, goTo, input, integer, invariants, onlyIf, otherwise, output, queries, states, when } from "@clp/core";
 import { Campaign, Shipping } from "./order.decisions.ts";
 
 const Rank = ["Gold", "Silver", "Bronze"] as const;
 // Money is a whole number of yen. `around` lists thresholds the property-based test probes closely.
 const Yen = integer({ min: 0, max: 1_000_000, around: [10_000] });
+export const If = conditions({
+  externalPaymentModuleActive: "The external payment module is active",
+  paymentSucceeded: "The payment succeeded",
+});
+
+export const State = states("DRAFT", "PENDING", "PAID", "SHIPPED", "CANCELLED");
+
+export const Data = data({ rank: Rank, price: Yen });
+
+export const Query = queries({
+  isMonthEnd: component(description("Whether today is the last day of the month."), output("boolean")),
+  paymentModuleActive: output("boolean"),
+  paymentResult: component(description("What the payment module answered for this order."), output(["succeeded", "failed"])),
+});
+
+export const Effect = effects({
+  SendOrderConfirmation: input({}),
+  SendReceipt: input({ discountPercent: "integer", amount: "integer" }),
+  IssueCoupon: input({ type: ["Premium", "Standard"] }),
+  NotifyPaymentFailure: input({}),
+  SendShippingNotice: input({ priority: "boolean" }),
+  // Prose only: whether it carries anything is left to the interpretation
+  Refund: description("What the customer paid is returned."),
+});
+
+export const Calc = calculations({
+  amountCharged: component(description("price × (100 − discount percent) ÷ 100, rounded down to a whole yen"), output("integer")),
+});
+
+export const Inv = invariants({
+  everyOrderPastDraftState: "Every order past the draft state has a member rank and a price",
+});
+
+export const PlaceOrderInput = input({ customerRank: Rank, listPrice: Yen });
+
 
 // Layer 1 of the "order" component, written by a person. Every entry is prose (`description`), parts (a type,
 // `input`, `output`, `from`, `goTo`, ...), or both bundled by `component`, whichever the author wants to pin down. What the prose means — the rest of the structure, and the meaning of every
@@ -13,56 +48,42 @@ export const Order = component({
   description: "An order: placed by a customer, paid through an external payment module, then shipped or cancelled.",
 
   // ── Vocabulary ──────────────────────────────────────────────
-  states: ["DRAFT", "PENDING", "PAID", "SHIPPED", "CANCELLED"],
-  init: "DRAFT",
+  states: State,
+  init: State.DRAFT,
 
   // What the order remembers between commands (nothing is set at the start)
-  data: { rank: Rank, price: Yen },
+  data: Data,
 
   // What the order asks its dependencies (a clock, configuration, an external service's response)
-  queries: {
-    isMonthEnd: component(description("Whether today is the last day of the month."), output("boolean")),
-    paymentModuleActive: output("boolean"),
-    paymentResult: component(description("What the payment module answered for this order."), output(["succeeded", "failed"])),
-  },
+  queries: Query,
 
   // The effects the order has on its dependencies
-  effects: {
-    SendOrderConfirmation: input({}),
-    SendReceipt: input({ discountPercent: "integer", amount: "integer" }),
-    IssueCoupon: input({ type: ["Premium", "Standard"] }),
-    NotifyPaymentFailure: input({}),
-    SendShippingNotice: input({ priority: "boolean" }),
-    // Prose only: whether it carries anything is left to the interpretation
-    Refund: description("What the customer paid is returned."),
-  },
+  effects: Effect,
 
   // ── Decisions and calculations ──────────────────────────────
   decisions: { campaign: Campaign, shipping: Shipping },
 
-  calculations: {
-    amountCharged: component(description("price × (100 − discount percent) ÷ 100, rounded down to a whole yen"), output("integer")),
-  },
+  calculations: Calc,
 
   // Properties that must hold after every command
-  invariants: ["Every order past the draft state has a member rank and a price"],
+  invariants: Inv,
 
   // ── Commands ────────────────────────────────────────────────
   commands: {
     // Fully structured: input, where it applies, where it leads
     PlaceOrder: component(
-      input({ customerRank: Rank, listPrice: Yen }),
-      from("DRAFT"),
-      goTo("PENDING"),
+      PlaceOrderInput,
+      from(State.DRAFT),
+      goTo(State.PENDING),
       does("The order remembers the customer's rank and the list price. An order confirmation is sent."),
     ),
 
     Checkout: component(
-      from("PENDING"),
-      onlyIf("The external payment module is active"),
+      from(State.PENDING),
+      onlyIf(If.externalPaymentModuleActive),
       when(
-        "The payment succeeded",
-        goTo("PAID"),
+        If.paymentSucceeded,
+        goTo(State.PAID),
         does(
           "A receipt is sent with the campaign's discount percent and the amount charged. " +
             "Then a coupon is issued if the campaign grants one.",
@@ -73,7 +94,7 @@ export const Order = component({
     ),
 
     // Partly structured: the resulting state is left to the prose
-    Ship: component(from("PAID"), does("The order becomes shipped. A shipping notice is sent, with priority as the shipping decision says.")),
+    Ship: component(from(State.PAID), does("The order becomes shipped. A shipping notice is sent, with priority as the shipping decision says.")),
 
     // Prose only
     Cancel: description("A pending or paid order can be cancelled. If the order had been paid, a refund is issued."),

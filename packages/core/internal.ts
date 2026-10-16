@@ -112,6 +112,14 @@ export type OutcomeShape = { goTo?: string; does?: string; responds?: unknown };
 export type OutputSchema = FieldSchema;
 // 尋ねること: 答えに付ける名前 → { 問い合わせの名前: 引数 }
 export type Asks = Record<string, Record<string, Record<string, unknown>>>;
+// 含む部品のコマンドを呼ぶこと: どの部品の、どのコマンドを、どの入力で
+// key: 多数ある部品のうち、どれを呼ぶか（値か参照）
+export type Call = { part: string; command: string; input: Record<string, unknown>; key?: unknown };
+// 含む部品: その部品と、多数あるならキーの名前
+export type PartDeclaration = { component: object; by?: string };
+// 多数ある部品を作る（キーと、子のデータのはじめの値）、消す
+export type Adds = { part: string; key: unknown; data: Record<string, unknown> };
+export type Removes = { part: string; key: unknown };
 // 部品が決める構造。どの部品をどこに書けるかは、項目の種類で決まる（読み込みのあとで検査する）
 export type CommandShape = {
   description?: string;
@@ -126,6 +134,8 @@ export type CommandShape = {
   from?: readonly string[];
   onlyIf?: readonly string[];
   asks?: Asks;
+  calls?: Record<string, Call>;
+  route?: string;
   goTo?: string;
   does?: string;
   responds?: unknown;
@@ -151,6 +161,8 @@ export type Layer1 = {
   calculations?: Record<string, Entry> | Description;
   invariants?: readonly string[];
   commands?: Record<string, Entry> | Description;
+  // 含む部品（名前 → その部品と、多数あるならキーの名前）
+  parts?: Record<string, PartDeclaration>;
 };
 
 // 構造として書かれた値（文や省略なら never）
@@ -175,6 +187,10 @@ export type CommandDeclaration = {
   onlyIf?: readonly string[];
   // 尋ねること。答えに付ける名前 → 問い合わせと引数
   asks?: Record<string, Asked>;
+  // 含む部品のコマンドを呼ぶこと（書いた順）。答えに付ける名前 → 部品、コマンド、入力
+  calls?: Record<string, Call>;
+  // 経路（"POST /todos"）。外からどう届くかの約束
+  route?: string;
   // 条件ごとの結果。条件で分かれないコマンドは otherwise だけ
   when: Record<string, Outcome>;
 };
@@ -195,8 +211,10 @@ export type Declaration = {
   calculations: Record<string, { is: string; type: FieldSchema }>;
   invariants: readonly string[];
   commands: Record<string, CommandDeclaration>;
+  // 含む部品（名前 → Layer 1 の component(...) の値と、多数あるならキーの名前）
+  parts?: Record<string, PartDeclaration>;
 };
-export type Structure = { effects?: readonly Record<string, unknown>[]; set?: Record<string, unknown> };
+export type Structure = { effects?: readonly Record<string, unknown>[]; set?: Record<string, unknown>; adds?: readonly Adds[]; removes?: readonly Removes[] };
 export type BoundSpecification = {
   // Layer 1 のコンポーネント（component(...) が返した値）
   source: object;
@@ -218,6 +236,8 @@ type CommandStructure = OutcomeStructure & {
   from?: readonly string[];
   onlyIf?: readonly string[];
   asks?: Asks;
+  calls?: Record<string, Call>;
+  route?: string;
   when?: Record<string, OutcomeStructure>;
 };
 type EntryStructure = Record<string, unknown>;
@@ -233,8 +253,8 @@ type StructureValue = {
   commands?: Record<string, CommandStructure>;
 };
 
-const OUTCOME_KEYS = ["goTo", "does", "responds", "effects", "set"] as const;
-const COMMAND_KEYS = ["description", "input", "output", "from", "onlyIf", "asks", "when", ...OUTCOME_KEYS] as const;
+const OUTCOME_KEYS = ["goTo", "does", "responds", "effects", "set", "adds", "removes"] as const;
+const COMMAND_KEYS = ["description", "input", "output", "route", "from", "onlyIf", "asks", "calls", "when", ...OUTCOME_KEYS] as const;
 const STRUCTURE_KEYS = ["states", "init", "data", "queries", "effects", "decisions", "calculations", "invariants", "commands"] as const;
 // まとまりごとの、項目に書ける部品。required は、Layer 1 か解釈のどちらかに無ければならないもの
 const ENTRY_PARTS = {
@@ -243,7 +263,7 @@ const ENTRY_PARTS = {
   effects: { parts: ["description", "input"], required: [], additive: false },
   calculations: { parts: ["description", "output"], required: ["description", "output"], additive: true },
 } as const;
-const COMMAND_PARTS = ["description", "input", "output", "from", "onlyIf", "asks", "goTo", "does", "responds", "when"];
+const COMMAND_PARTS = ["description", "input", "output", "route", "from", "onlyIf", "asks", "calls", "goTo", "does", "responds", "when"];
 
 // Layer 1 に解釈の構造を重ねる。Layer 1 が構造として書いたものは、解釈では書き換えられない。
 // 合わない点は problems に集める（読み込みの時点では投げない。報告は IR を作るときに行う）
@@ -361,7 +381,7 @@ export function resolveComponent(
     for (const key of Object.keys(right)) {
       if (!(COMMAND_KEYS as readonly string[]).includes(key)) problems.push(`コマンド "${name}": 解釈に "${key}" というキーは書けません`);
     }
-    for (const key of ["input", "output", "from", "onlyIf", "asks", "description"] as const) {
+    for (const key of ["input", "output", "route", "from", "onlyIf", "asks", "calls", "description"] as const) {
       if (left[key] !== undefined && right[key] !== undefined) {
         problems.push(`コマンド "${name}" の ${key} は Layer 1 に書かれているので、解釈では書けません`);
       }
@@ -375,7 +395,12 @@ export function resolveComponent(
       const responds = a.responds !== undefined ? a.responds : b.responds;
       return [
         { ...(goTo === undefined ? {} : { goTo }), ...(does === undefined ? {} : { does }), ...(responds === undefined ? {} : { responds }) },
-        { ...(b.effects === undefined ? {} : { effects: b.effects }), ...(b.set === undefined ? {} : { set: b.set }) },
+        {
+          ...(b.effects === undefined ? {} : { effects: b.effects }),
+          ...(b.set === undefined ? {} : { set: b.set }),
+          ...(b.adds === undefined ? {} : { adds: b.adds }),
+          ...(b.removes === undefined ? {} : { removes: b.removes }),
+        },
       ];
     };
     const outcomes: Record<string, Outcome> = {};
@@ -418,6 +443,16 @@ export function resolveComponent(
       if (queried.length !== 1) problems.push(`コマンド "${name}" の asks.${alias}: 問い合わせを1つだけ書いてください (${queried.join(", ") || "なし"})`);
       else asked[alias] = { query: queried[0], input: entry[queried[0]] ?? {} };
     }
+    // 含む部品を呼ぶこと
+    const called = left.calls ?? right.calls ?? {};
+    for (const [alias, call] of Object.entries(called)) {
+      const part = base.parts?.[call.part];
+      if (!part) problems.push(`コマンド "${name}" の ${alias}: 部品 "${call.part}" は parts にありません`);
+      else if ((part.by === undefined) !== (call.key === undefined)) {
+        problems.push(`コマンド "${name}" の ${alias}: 部品 "${call.part}" は${part.by === undefined ? "1つだけなので、at(...) は要りません" : "多数あるので、at(キー) でどれかを選んでください"}`);
+      }
+    }
+    const routed = left.route ?? right.route;
     const accepted = left.input ?? right.input;
     const returned = (left.output ?? right.output) as OutputSchema | undefined;
     const allowed = left.from ?? right.from;
@@ -426,9 +461,11 @@ export function resolveComponent(
       ...(text === undefined ? {} : { description: text }),
       ...(accepted === undefined ? {} : { input: accepted }),
       ...(returned === undefined ? {} : { output: returned }),
+      ...(routed === undefined ? {} : { route: routed }),
       ...(allowed === undefined ? {} : { from: allowed }),
       ...(required === undefined ? {} : { onlyIf: required }),
       ...(Object.keys(asked).length === 0 ? {} : { asks: asked }),
+      ...(Object.keys(called).length === 0 ? {} : { calls: called }),
       when: outcomes,
     };
     structures[name] = cases;
@@ -448,6 +485,7 @@ export function resolveComponent(
     // 不変条件は、解釈が足してもよい
     invariants: [...(base.invariants ?? []), ...(structure.invariants ?? [])],
     commands,
+    ...(base.parts ? { parts: base.parts } : {}),
   };
   return { declaration, commands: structures, problems };
 }
@@ -456,7 +494,16 @@ export function resolveComponent(
 const registry = new WeakMap<object, BoundSpecification>();
 export const bindingOf = (target: object): BoundSpecification | undefined => registry.get(target);
 // 同じコンポーネントに解釈が2つ読み込まれているとき（確定版と下書きなど）に、使うほうを選ぶ
-export const activate = (binding: BoundSpecification): void => void registry.set(binding.source, binding);
+// いま評価している解釈。意味の関数の中の取っ手（決定表の of、計算の of）が、これを引く
+let current: BoundSpecification | undefined;
+export const active = (): BoundSpecification => {
+  if (!current) throw new Error("評価している解釈がありません（意味の関数の外で、取っ手の of は使えません）");
+  return current;
+};
+export const activate = (binding: BoundSpecification): void => {
+  registry.set(binding.source, binding);
+  current = binding;
+};
 
 // --- 評価 ---
 export class RuleConflictError extends Error {

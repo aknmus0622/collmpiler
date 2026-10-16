@@ -267,7 +267,7 @@ PBT の実行中に同じ種類の問題が見つかった場合も、実装の�
       text("Money is always handled as whole yen."),             // 短い文言
       text("Adapters are named *Gateway.", { phases: ["wiring"] }),  // 第2引数で、渡す段階を指定する
     ],
-    states: ["DRAFT", "PENDING", "PAID", "SHIPPED", "CANCELLED"],
+    states: State,
     // ...
   });
   ```
@@ -408,26 +408,36 @@ PBT は別プロセスで実行します。LLM が書いたコードが実行さ
 
 #### 決定表
 
-条件（自然言語）から値を選ぶ表です。コンポーネントとは別に定義します。
+条件（自然言語）から値を選ぶ表です。コンポーネントとは別に定義します。行の条件は、先に `conditions({...})` で名前を付けて宣言し、その取っ手（下の「取っ手」）で書きます。表の中に文は書きません。
 
 ```typescript
 // --- specs/order.decisions.ts ---
-import { decisionTable } from "@clp/core";
+import { conditions, decisionTable, otherwise, when } from "@clp/core";
+
+export const CampaignIf = conditions({
+  customerGoldMemberMonthEnd: "The customer is a Gold member and it is month-end",
+  customerSilverMember: "The customer is a Silver member",
+});
+
+export const ShippingIf = conditions({
+  customerGoldMemberOrder10: "The customer is a Gold member, or the order is 10,000 yen or more",
+});
 
 // 割引率は整数のパーセントで持つ（小数だと金額の計算に誤差が出る）
-export const Campaign = decisionTable({
-  "The customer is a Gold member and it is month-end": { discountPercent: 20, grantsCoupon: true, coupon: "Premium" },
-  "The customer is a Silver member": { discountPercent: 5, grantsCoupon: false, coupon: null },
-  otherwise: { discountPercent: 0, grantsCoupon: false, coupon: null },
-});
+export const Campaign = decisionTable(
+  when(CampaignIf.customerGoldMemberMonthEnd, { discountPercent: 20, grantsCoupon: true, coupon: "Premium" }),
+  when(CampaignIf.customerSilverMember, { discountPercent: 5, grantsCoupon: false, coupon: null }),
+  otherwise({ discountPercent: 0, grantsCoupon: false, coupon: null }),
+);
 
-export const Shipping = decisionTable({
-  "The customer is a Gold member, or the order is 10,000 yen or more": { priority: true },
-  otherwise: { priority: false },
-});
+export const Shipping = decisionTable(
+  when(ShippingIf.customerGoldMemberOrder10, { priority: true }),
+  otherwise({ priority: false }),
+);
 ```
 
-* どの条件にも当たらないときの `otherwise` が必須で、全行が同じ列を持ちます（どちらも型エラーになります）。
+* 表の名前は、コンポーネントの `decisions` に置いたときのキーです（`decisions: { campaign: Campaign }`）。
+* どの条件にも当たらないときの `otherwise` が必須で、全行が同じ列を持ちます。
 * **セルに書けるのは値だけです。** 表が決めるのは率や区分といったパラメータで、副作用や計算は書きません。「副作用を起こすかどうか」は真偽値の列にし、構造の側で条件として使います（§3.2）。
 * **その行では使われない列には、`null` を書きます**（上の例の、クーポンを出さない行の `coupon`）。使われない値を埋めると、実装がそれを忠実に写したときに「変えても結果が変わらない値」になり、ミューテーションのゲートが差し戻すためです。値の無いセルが実際に使われる仕様（`when` で守らずに参照している、など）は誤りで、仕様の事前検査が見つけます。IR には `null` のまま出ます。
 * 同時に成り立つ条件は1つまでです（Hit Policy: Unique）。
@@ -443,30 +453,70 @@ export const Shipping = decisionTable({
 export const Order = component(description("An order: placed by a customer, paid, then shipped or cancelled. ..."));
 
 // まとまりごと文にするか、項目を並べるかを選ぶ。項目は、文だけか、部品か
+export const State = states("DRAFT", "PENDING", "PAID", "SHIPPED", "CANCELLED");
+export const Effect = effects({
+  Refund: description("What the customer paid is returned."),               // 項目を文だけで
+  SendReceipt: input({ discountPercent: "integer", amount: "integer" }),    // 項目を部品で
+});
+
 export const Order = component({
-  states: ["DRAFT", "PENDING", "PAID", "SHIPPED", "CANCELLED"],
+  states: State,
   queries: description("Whether it is month-end, and the payment result."),   // まとまりごと文
-  effects: {
-    Refund: description("What the customer paid is returned."),               // 項目を文だけで
-    SendReceipt: input({ discountPercent: "integer", amount: "integer" }),    // 項目を部品で
-  },
+  effects: Effect,
   commands: {
     Cancel: description("A pending or paid order can be cancelled. ..."),
-    Ship: component(from("PAID"), does("The order becomes shipped. ...")),    // 一部だけ部品に
+    Ship: component(from(State.PAID), does("The order becomes shipped. ...")),    // 一部だけ部品に
   },
 });
 ```
 
+#### 取っ手: 名前を文字列で指さない
+
+**語彙は、先にまとまりとして宣言し、そのまとまりが持つ「取っ手」で指します。** 状態も、条件も、データも、副作用も、
+文字列で名前を書いて指すことはありません。名前を書くのは、宣言のキーの1か所だけです。そのため、書き間違い（`State.PAYED`）や
+型の合わない参照は、エディタで型エラーになります（合否は、これまでどおり木の検査と `clp compile` が決めます。型は早い知らせです）。
+解釈は Layer 1 と同じ取っ手を import して使うので、**宣言したまとまりは、すべて export します。**
+
+```typescript
+export const State = states("DRAFT", "PENDING", "PAID");            // 説明を添えるなら states({ DRAFT: description("..."), ... })
+export const If = conditions({ paid: "The payment succeeded" });     // 条件の文
+export const Data = data({ price: Yen });
+export const Query = queries({ isMonthEnd: output("boolean") });
+export const Effect = effects({ SendReceipt: input({ amount: "integer" }) });
+export const Calc = calculations({ charged: component(description("..."), output("integer")) });
+export const Inv = invariants({ priced: "Every order past the draft state has a price" });
+export const PlaceInput = input({ listPrice: Yen });                 // コマンドの入力
+```
+
+| 取っ手 | 使い方 |
+| --- | --- |
+| `State.PAID` | 状態。`from(...)`、`goTo(...)`、`was(...)`、`init` |
+| `If.paid` | 条件。`when(...)`、`onlyIf(...)`、`onlyWhen(...)`、決定表の行 |
+| `Data.price` | 覚えているデータ（値として）。`Data.price.set(値)` で覚える |
+| `Query.isMonthEnd` | 引数の無い問い合わせの答え |
+| `Query.stateDeclared({ name: "PAID" }).as("found")` | 引数つきの問い合わせを尋ねる。その `.answer` が答えの値 |
+| `Effect.SendReceipt({ amount: ... })` | 副作用を起こす（何も運ばなければ `Effect.Refund()`） |
+| `Calc.charged` | 計算の結果 |
+| `Campaign.discountPercent` | 決定表の、当たった行の列の値 |
+| `PlaceInput.listPrice` | コマンドの入力のフィールド |
+
+* まとまりは、コンポーネントの中に、そのキーで置きます（`states: State`、`data: Data`、…）。条件のまとまりは宣言するだけで、置きません。
+* まとまりをその場に書く（`data: { price: Yen }`）こともでき、意味は同じですが、その場合は取っ手で指せません。
+* まとまりの変数名は自由です。例と依頼文では `State`、`Data`、`Query`、`Effect`、`If`、`Calc`、`Inv` にそろえています。
+* 文字列が残るのは、文（`description`、`does`、条件の文）と、名前を決める宣言のキーだけです。条件は、`when` などの中にその場で文を
+  書かず、必ず名前を付けて宣言します。文を直しても名前は変わりません。
+* IR は名前で書かれるので、取っ手で書いても IR は変わりません（§3.3）。
+
 | まとまり | 意味 | 項目に書ける部品 |
 | --- | --- | --- |
 | `description` | コンポーネント全体の説明（文字列） | — |
-| `states` / `init` | 状態名と初期状態。状態は配列。説明を添えるなら `{ 名前: description("...") }` | — |
+| `states` / `init` | 状態名と初期状態。`states("A", "B")` で宣言したものを置き、初期状態は `init: State.A` | — |
 | `data` | 部品が覚えているデータ。初めは未設定 | 型（そのまま書く） |
 | `queries` | 依存への問い合わせ（部品が外に尋ねて答えをもらう値） | `output(答えの型)`、`input({ 引数 })` |
 | `effects` | 依存への副作用（部品が外に対して行うこと） | `input({ ペイロード })` |
-| `decisions` | 使う決定表（`{ 名前: 決定表 }`） | — |
+| `decisions` | 使う決定表（`{ 名前: 決定表 }`。キーが表の名前になる） | — |
 | `calculations` | 計算。`description` が、式を述べる文になる | `output(結果の型)` |
-| `invariants` | 不変条件（文の配列） | — |
+| `invariants` | 不変条件（`invariants({ 名前: "文" })` で宣言したもの） | — |
 | `commands` | 外から部品を動かすコマンド | 下の表 |
 | `assets` | 実装を LLM に依頼するときに添付する資料（§2.3）。仕様の意味には影響しない | `file` / `dir` / `text` の配列 |
 
@@ -482,70 +532,92 @@ export const Order = component({
 | 部品 | 意味 |
 | --- | --- |
 | `description("...")` | コマンドの説明（文） |
-| `input({...})` | 入力 |
-| `from("A", "B")` | 実行できる状態。どこにも書かなければ全状態 |
-| `onlyIf("...")` | 事前条件（条件の文）。`from` と `onlyIf` を満たさない場合の挙動は仕様の対象外で、PBT も検証しない |
-| `asks(名前, 問い合わせ, { 引数 })` | 尋ねること。引数つきの問い合わせを、どの引数で尋ねるか。答えは、付けた名前で読む（下の「引数つきの問い合わせ」） |
-| `goTo("A")` | 遷移先。**どこにも書かなければ、状態は変わらない** |
+| 入力の取っ手（`PlaceOrderInput`） | 入力。`export const PlaceOrderInput = input({...})` と先に宣言して置く |
+| `from(State.A, State.B)` | 実行できる状態。どこにも書かなければ全状態 |
+| `onlyIf(If.x)` | 事前条件（条件の取っ手）。`from` と `onlyIf` を満たさない場合の挙動は仕様の対象外で、PBT も検証しない |
+| `Query.q({ 引数 }).as("名前")` | 尋ねること。引数つきの問い合わせを、どの引数で尋ねるか。答えは、付けた名前で読む（下の「引数つきの問い合わせ」） |
+| `goTo(State.A)` | 遷移先。**どこにも書かなければ、状態は変わらない** |
 | `output(型)` | 返すものの形。値1つの型か、`record({ フィールド: 型 })`。場合によって無いフィールドは `optional(型)`（下の「コマンドの結果」） |
 | `responds(値)` | 返す値。`output` を宣言したコマンドは、どの場合にも要る |
 | `does("...")` | 何が起きるかの文 |
-| `when("条件", ...)` | 条件で分かれるときの、1つの場合。中に `goTo`・`responds`・`does` を書く |
+| `when(If.x, ...)` | 条件で分かれるときの、1つの場合。中に `goTo`・`responds`・`does` を書く |
 | `otherwise(...)` | どの条件にも当たらない場合 |
 
 ```typescript
 // --- specs/order.component.ts ---
-import { component, description, does, from, goTo, input, integer, onlyIf, otherwise, output, when } from "@clp/core";
+import { calculations, component, conditions, data, description, does, effects, from, goTo, input, integer, invariants, onlyIf, otherwise, output, queries, states, when } from "@clp/core";
 import { Campaign, Shipping } from "./order.decisions.ts";
 
 const Rank = ["Gold", "Silver", "Bronze"] as const;   // 配列は列挙
 // 数値の制約。around は、その前後を PBT が重点的に生成するしきい値
 const Yen = integer({ min: 0, max: 1_000_000, around: [10_000] });
 
+// 語彙: 先に宣言し、取っ手で指す
+export const If = conditions({
+  externalPaymentModuleActive: "The external payment module is active",
+  paymentSucceeded: "The payment succeeded",
+});
+
+export const State = states("DRAFT", "PENDING", "PAID", "SHIPPED", "CANCELLED");
+
+export const Data = data({ rank: Rank, price: Yen });
+
+export const Query = queries({
+  isMonthEnd: component(description("Whether today is the last day of the month."), output("boolean")),
+  paymentModuleActive: output("boolean"),
+  paymentResult: component(description("What the payment module answered for this order."), output(["succeeded", "failed"])),
+});
+
+export const Effect = effects({
+  SendOrderConfirmation: input({}),
+  SendReceipt: input({ discountPercent: "integer", amount: "integer" }),
+  IssueCoupon: input({ type: ["Premium", "Standard"] }),
+  NotifyPaymentFailure: input({}),
+  SendShippingNotice: input({ priority: "boolean" }),
+  // 文だけ: 何を運ぶかは、解釈に任せる
+  Refund: description("What the customer paid is returned."),
+});
+
+export const Calc = calculations({
+  amountCharged: component(description("price × (100 − discount percent) ÷ 100, rounded down to a whole yen"), output("integer")),
+});
+
+export const Inv = invariants({
+  everyOrderPastDraftState: "Every order past the draft state has a member rank and a price",
+});
+
+export const PlaceOrderInput = input({ customerRank: Rank, listPrice: Yen });
+
 export const Order = component({
   description: "An order: placed by a customer, paid through an external payment module, then shipped or cancelled.",
 
   // 語彙
-  states: ["DRAFT", "PENDING", "PAID", "SHIPPED", "CANCELLED"],
-  init: "DRAFT",
-  data: { rank: Rank, price: Yen },
-  queries: {
-    isMonthEnd: component(description("Whether today is the last day of the month."), output("boolean")),
-    paymentModuleActive: output("boolean"),
-    paymentResult: component(description("What the payment module answered for this order."), output(["succeeded", "failed"])),
-  },
-  effects: {
-    SendOrderConfirmation: input({}),
-    SendReceipt: input({ discountPercent: "integer", amount: "integer" }),
-    IssueCoupon: input({ type: ["Premium", "Standard"] }),
-    NotifyPaymentFailure: input({}),
-    SendShippingNotice: input({ priority: "boolean" }),
-    // 文だけ: 何を運ぶかは、解釈に任せる
-    Refund: description("What the customer paid is returned."),
-  },
+  states: State,
+  init: State.DRAFT,
+  data: Data,
+  queries: Query,
+  effects: Effect,
 
   // 決めごとと計算
   decisions: { campaign: Campaign, shipping: Shipping },
-  calculations: {
-    amountCharged: component(description("price × (100 − discount percent) ÷ 100, rounded down to a whole yen"), output("integer")),
-  },
-  invariants: ["Every order past the draft state has a member rank and a price"],
+  calculations: Calc,
+  invariants: Inv,
 
   commands: {
     // すべてを構造で: 入力、実行できる状態、遷移先
     PlaceOrder: component(
-      input({ customerRank: Rank, listPrice: Yen }),
-      from("DRAFT"),
-      goTo("PENDING"),
+      PlaceOrderInput,
+      from(State.DRAFT),
+      goTo(State.PENDING),
       does("The order remembers the customer's rank and the list price. An order confirmation is sent."),
     ),
 
     Checkout: component(
-      from("PENDING"),
-      onlyIf("The external payment module is active"),
+      from(State.PENDING),
+      onlyIf(If.externalPaymentModuleActive),
       when(
-        "The payment succeeded",
-        goTo("PAID"),
+        If.paymentSucceeded,
+        goTo(State.PAID),
         does(
           "A receipt is sent with the campaign's discount percent and the amount charged. " +
             "Then a coupon is issued if the campaign grants one.",
@@ -556,7 +628,7 @@ export const Order = component({
     ),
 
     // 一部だけ構造で: 遷移先は文に任せる
-    Ship: component(from("PAID"), does("The order becomes shipped. A shipping notice is sent, with priority as the shipping decision says.")),
+    Ship: component(from(State.PAID), does("The order becomes shipped. A shipping notice is sent, with priority as the shipping decision says.")),
 
     // 文だけ
     Cancel: description("A pending or paid order can be cancelled. If the order had been paid, a refund is issued."),
@@ -566,9 +638,9 @@ export const Order = component({
 
 * **`component(...)` は、節を束ねます。** 名前のある節（`commands: { Ship: component(...) }`）は、親に含まれます。名前の無い節は、置いた先に溶け込みます。複数のコマンドに共通する場合分けは、`component(when(...), otherwise(...))` を変数に取り出して共有します。`packages/cli/self/specs/pipeline.component.ts` では、「検査に落ちたら、同じ段階をもう一度。回数を使い切ったら設計からやり直す」という場合分け（`rejected`）を、3つのコマンドが共有しています。
 * **`{}` は、「名前つきの子の並び」の短い書き方です。** 何の名前かは、受け取る語が決めます: `commands: {...}` ならコマンドの名前、`input({...})` ならフィールドとその型、`integer({...})` なら設定です。受け取る語の無い裸の `{}` は、型としては書けません（`{ type: "integer", min: 1 }` ではなく `integer({ min: 1 })`）。
-* **木の検査**: 書いたものは、文法（何の中に何を、いくつまで書けるか）に照らして確かめます。コマンドの中に書けない部品、2つ書いた遷移先や入力、同じ名前の重なり、知らないまとまりの名前は、**書いた場所（ファイルと行）と一緒に**報告します（例: `order.component.ts:42: コマンド "Ship"の中に、goToを 2 つ以上は書けません`）。解釈が無くても、Layer 1 だけで確かめます。`states` にない名前を `from`・`goTo` に書いたことは、解釈を重ねたあとで報告します。
-* **型の付け方**: 型（tsc）の役割は、補完と、軽い誤りの検出です。誤りの検出の主役は、木の検査と、IR を作るときの検査です。`Rank` のように変数に取り出した配列には、`as const` を付けておきます。
-* **名前の重複**: 条件と計算からは、状態名（`status`）、覚えているデータ、引数の無い問い合わせの答え、コマンドの入力、尋ねた答えに付けた名前（`asks`）が同じ階層で見えます。そのため、これらの名前は重複できません（入力どうし、`asks` の名前どうしは、コマンドが違えば同名で構いません）。
+* **木の検査**: 書いたものは、文法（何の中に何を、いくつまで書けるか）に照らして確かめます。コマンドの中に書けない部品、2つ書いた遷移先や入力、同じ名前の重なり、知らないまとまりの名前は、**書いた場所（ファイルと行）と一緒に**報告します（例: `order.component.ts:42: コマンド "Ship"の中に、goToを 2 つ以上は書けません`）。解釈が無くても、Layer 1 だけで確かめます。宣言に無い状態や副作用を指すことは、取っ手で書く限り型エラーになります（`State.PAYED`）。
+* **型の付け方**: 型（tsc）の役割は、補完と、軽い誤りの検出です（取っ手の書き間違い、型の合わない参照）。誤りの検出の主役は、木の検査と、IR を作るときの検査です。`Rank` のように変数に取り出した配列には、`as const` を付けておきます。
+* **名前の重複**: 条件と計算からは、状態名（`status`）、覚えているデータ、引数の無い問い合わせの答え、コマンドの入力、尋ねた答えに付けた名前（`.as("名前")`）が同じ階層で見えます。そのため、これらの名前は重複できません（入力どうし、尋ねた答えの名前どうしは、コマンドが違えば同名で構いません）。
 * **数値**: 金額は整数で扱い、丸め方を計算の文に明記します。小数の計算は式の順序だけで結果がずれ、正解と実装が正当な理由なく食い違うためです。
 * **しきい値**: 条件に数値の境目があるときは、`around` に宣言します。ちょうどその値と前後の値を重点的に生成しないと、「以上」と「より大きい」の取り違えを見逃します。
 
@@ -578,16 +650,22 @@ export const Order = component({
 副作用のペイロード、計算の結果、コマンドの結果）。
 
 ```typescript
-const Todo = record({ id: "string", title: "string", done: "boolean" });
+export const Todo = record({ id: "string", title: "string", done: "boolean" });
+export const Data = data({ items: component(list(Todo), initially([])) });    // 並び。はじめは空
+export const Query = queries({ newId: component(description("A fresh identifier."), output("string"), fresh()) });
+
+export const AddInput = input({ title: "string" });
+export const CompleteInput = input({ id: among(Data.items, "id") });
+export const ListInput = input({ only: ["all", "open", "done"] });
 
 export const Todos = component({
   // 状態を持たない部品: states / init を書かない
-  data: { items: component(list(Todo), initially([])) },                    // 並び。はじめは空
-  queries: { newId: component(description("A fresh identifier."), output("string"), fresh()) },
+  data: Data,
+  queries: Query,
   commands: {
-    Add: component(input({ title: "string" }), output(record({ result: ["created", "invalid"], todo: optional(Todo) })), ...),
-    Complete: component(input({ id: among("items", "id") }), output(["completed", "not-found", "already-done"]), ...),
-    List: component(output(list(Todo)), does("The answer is the items, in the order they were added.")),
+    Add: component(AddInput, output(record({ result: ["created", "invalid"], todo: optional(Todo) })), ...),
+    Complete: component(CompleteInput, output(["completed", "not-found", "already-done"]), ...),
+    List: component(ListInput, output(list(Todo)), does("The answer is the items in the order they were added, filtered as asked.")),
   },
 });
 ```
@@ -599,9 +677,9 @@ export const Todos = component({
 | `optional(型)` | 無いことがある値。無いときの値は `null` |
 
 * **`initially(値)`** で、覚えるデータのはじめの値を宣言します。宣言しないデータは、いままでどおり、覚えるまで未設定です
-  （意味の関数からは `undefined`）。`optional` のデータには、`set` で `null` を入れて「無い」に戻せます。
+  （意味の関数からは `undefined`）。`optional` のデータには、`Data.x.set(null)` で「無い」に戻せます。
 * **並びやフィールドの組を「どう変えるか」は、構造の語彙にしません。** 計算（文と関数）にして、その結果を覚えます
-  （`set({ items: ref.calculation("itemsWithNew") })`）。IR には「この計算の結果を覚える」と、計算を定める文が出ます。
+  （`Data.items.set(Calc.itemsWithNew)`）。IR には「この計算の結果を覚える」と、計算を定める文が出ます。
 * 値が型に合うことは、IR を作るときの検査（定数と、参照の型）と、仕様を実行する検査（計算の結果）が確かめます。
 * **構造を持つ値の検査は、手書きの版（Stage 0）が行います。** フレームワーク自身の `payload-check` の仕様は平らな値だけを
   扱うので、語彙に構造を持つ型があるときは、Stage 1 を使いません（`pipeline` の「仕様の範囲の外は Stage 0 が決める」と同じです）。
@@ -624,7 +702,7 @@ export const Todos = component({
 
 | 書き方 | 意味 |
 | --- | --- |
-| `among("items", "id")` | 入力を、いま覚えている並び `items` の要素の `id` から選ぶ（4回に3回。残りは乱数のままで、無いものも試す） |
+| `among(Data.items, "id")` | 入力を、いま覚えている並び `items` の要素の `id` から選ぶ（4回に3回。残りは乱数のままで、無いものも試す） |
 | `string({ examples: [...] })` | 形式の決まった文字列の例。生成に混ぜる |
 | `integer({ ..., around: [...] })` | 試すしきい値を足す |
 
@@ -638,17 +716,22 @@ export const Todos = component({
 
 ```typescript
 // --- examples/library-ts/specs/loan.component.ts（抜粋） ---
+export const If = conditions({
+  memberAlreadyHoldsAtLeast: "The member already holds at least the policy's maximum number of books, or someone else has reserved the book",
+  bookReservedSomeoneElse: "The book is reserved by someone else",
+});
+// ...
 Borrow: component(
-  from("AVAILABLE"),
+  from(State.AVAILABLE),
   output(record({ result: ["lent", "refused"], dueInDays: optional("integer") })),
   when(
-    "The member already holds at least the policy's maximum number of books, or someone else has reserved the book",
+    If.memberAlreadyHoldsAtLeast,
     responds({ result: "refused", dueInDays: null }),          // 断ったことを、結果として返す
     does("The borrowing is refused; nothing changes."),
   ),
-  otherwise(goTo("ON_LOAN"), does("... The answer is lent, with the number of days until the book is due.")),
+  otherwise(goTo(State.ON_LOAN), does("... The answer is lent, with the number of days until the book is due.")),
 ),
-Extend: component(from("ON_LOAN"), output(["extended", "refused"]), when("The book is reserved by someone else", responds("refused"), ...), otherwise(...)),
+Extend: component(from(State.ON_LOAN), output(["extended", "refused"]), when(If.bookReservedSomeoneElse, responds("refused"), ...), otherwise(...)),
 ```
 
 * **形**は、どの型でも書けます: 値1つ（`output("boolean")`、`output(["extended", "refused"])`）、フィールドの組（`output(record({...}))`）、並び（`output(list(Todo))`）。
@@ -662,32 +745,35 @@ Extend: component(from("ON_LOAN"), output(["extended", "refused"]), when("The bo
 * **契約**: `executeCommand` が、その値を返します。返すコマンドが1つも無い仕様では、契約も IR も以前のままです。
 * 仕様が決めない値（採番した ID、時刻）は、問い合わせの答えにして、それを返す形にします。「何でもよい」という期待値はありません。
 
-#### 引数つきの問い合わせ（`asks`）
+#### 引数つきの問い合わせ（`Query.q({...}).as(...)`）
 
 問い合わせには、引数を持たせられます。「月末か」は引数の無い問い合わせ、「この名前の状態は宣言済みか」は引数つきの問い合わせです。
 
 ```typescript
 // --- packages/cli/self/specs/reference-check.component.ts（抜粋） ---
-queries: {
+export const Query = queries({
   stateDeclared: component(description("Whether the specification declares a state of this name."), input({ name: "string" }), output("boolean")),
-},
+});
+
+export const GoToInput = input({ state: "string" });
+// ...
 commands: {
   GoTo: component(
-    input({ state: "string" }),
-    from("IN_CASE"),
+    GoToInput,
+    from(State.IN_CASE),
     // このコマンドは、入力の state について、stateDeclared を尋ねる。答えに declared という名前を付ける
-    asks("declared", "stateDeclared", { name: ref.input("state") }),
-    when("The named state is not declared", does("An unknown-state diagnostic is reported ...")),
+    Query.stateDeclared({ name: GoToInput.state }).as("declared"),
+    when(If.namedStateNotDeclared, does("An unknown-state diagnostic is reported ...")),
     otherwise(),
   ),
 },
 ```
 
-* **引数の無い問い合わせ**は、宣言しなくても名前で読めます（`state.isMonthEnd`、`ref.query("isMonthEnd")`）。
-* **引数つきの問い合わせ**は、コマンドが「何について尋ねるか」を `asks` に書きます。引数は、定数か、`ref.input` / `ref.data` です。答えは、付けた名前で読みます（`state.declared`、`ref.query("declared")`）。尋ねずに読むことはできません。
+* **引数の無い問い合わせ**は、尋ねると書かなくても読めます（意味の関数では `state.isMonthEnd`、構造では `Query.isMonthEnd`）。
+* **引数つきの問い合わせ**は、コマンドが「何について尋ねるか」を `Query.q({ 引数 }).as("名前")` で書きます。引数は、定数か、入力のフィールド（`GoToInput.state`）か、覚えているデータ（`Data.x`）です。答えは、付けた名前で読みます（意味の関数では `state.declared`、構造では尋ねた取っ手の `.answer`）。尋ねずに読むことはできません。
 * 1つのコマンドで、同じ問い合わせを別の引数で何度でも尋ねられます（名前を別々に付けます）。同じ手の中では、同じ引数には同じ答えが返ります。手が変われば、答えは変わり得ます（引数の無い問い合わせと同じです）。
-* `asks` は、Layer 1 に書いても、解釈に書いても構いません。Layer 1 に書いたコマンドには、解釈は `asks` を書けません。
-* **検証（§3.6）**: 実装が尋ねてよいのは、そのコマンドの `asks` に書かれた引数だけです。**書かれていない引数で尋ねたら、不合格にします。** 尋ねなかったこと、尋ねる順序と回数は問いません。答えで結果が変わるなら、尋ねない実装は結果の食い違いとして見つかるからです。
+* 尋ねること（`.as(...)`）は、Layer 1 に書いても、解釈に書いても構いません。Layer 1 に書いたコマンドには、解釈は尋ねることを書けません。
+* **検証（§3.6）**: 実装が尋ねてよいのは、そのコマンドが尋ねると書いた引数だけです。**書かれていない引数で尋ねたら、不合格にします。** 尋ねなかったこと、尋ねる順序と回数は問いません。答えで結果が変わるなら、尋ねない実装は結果の食い違いとして見つかるからです。
 * 尋ねた答えを、次の問い合わせの引数にすることは、まだできません。
 
 #### どこまで構造にするか
@@ -707,9 +793,10 @@ commands: {
 
 今後の課題（書き方は `DSL.md` で決めてあり、実装がこれからのもの）:
 
-* 名前を付けた条件、Layer 1 に書いた `set` / `emits`、部品の中の部品。書くと、「まだ使えません」と報告します。
-* IR のキーを、書き方の語にそろえること（`effects` → `emits` など）。
-* コンポーネントは複数書けますが（§2.3「複数のコンポーネント」）、互いに独立に検証されます。コンポーネントの組み合わせ（ある部品の依存を、代役ではなく別の本物の部品につなぐ）は未実装です。
+* Layer 1 に書いた `Data.x.set(...)` / `Effect.E(...)` / `Part.items.add(...)`。書くと、「まだ使えません」と報告します（解釈には書けます）。
+  条件のまとまりは、コンポーネントに置いても置かなくても同じです（宣言するだけで使えます）。
+* 部品の中の部品（`parts`、`many`、`route`）の書き方は `REFERENCE.md` の「Parts」と `DSL.md` §13・§14 にあります。
+  子の口をそのまま出す `forwards` は、まだです。
 
 ### 3.2. Layer 2: 解釈 (Interpretation)
 
@@ -724,47 +811,81 @@ Layer 1 の文を、構造と意味に細かくしたものです。**LLM が導
 ```typescript
 // --- specs/order.interpretation.ts ---
 // Code generated by clp interpret. Do not edit: make the component (Layer 1) more precise and run it again.
-// layer1: sha256:6329e3a0…
-import { component, decide, emits, from, goTo, interpretation, onlyWhen, otherwise, ref, set, when } from "@clp/core";
-import { Order } from "./order.component.ts";
+// layer1: sha256:ce958488…
+import { component, from, goTo, interpretation, onlyWhen, otherwise, was, when } from "@clp/core";
+// Layer 1 の取っ手を import する。名前を文字列で書く所は無い
+import { Campaign, CampaignIf, Shipping, ShippingIf } from "./order.decisions.ts";
+import { Calc, Data, Effect, If, Inv, Order, PlaceOrderInput, State } from "./order.component.ts";
 
 export const Interpretation = interpretation(Order, {
   // 構造: Layer 1 が文のままにした分（宣言。IR に出る）
   commands: {
-    PlaceOrder: component(emits("SendOrderConfirmation"), set({ rank: ref.input("customerRank"), price: ref.input("listPrice") })),
+    PlaceOrder: component(Effect.SendOrderConfirmation(), Data.rank.set(PlaceOrderInput.customerRank), Data.price.set(PlaceOrderInput.listPrice)),
     Checkout: component(
       when(
-        "The payment succeeded",
-        emits("SendReceipt", { discountPercent: ref.decision("campaign", "discountPercent"), amount: ref.calculation("amountCharged") }),
-        emits("IssueCoupon", { type: ref.decision("campaign", "coupon") }, onlyWhen(ref.decision("campaign", "grantsCoupon"))),
+        If.paymentSucceeded,
+        Effect.SendReceipt({ discountPercent: Campaign.discountPercent, amount: Calc.amountCharged }),
+        Effect.IssueCoupon({ type: Campaign.coupon }, onlyWhen(Campaign.grantsCoupon)),
       ),
-      otherwise(emits("NotifyPaymentFailure")),
+      otherwise(Effect.NotifyPaymentFailure()),
     ),
     // Layer 1 が書かなかった遷移先を、文から決める
-    Ship: component(goTo("SHIPPED"), emits("SendShippingNotice", { priority: ref.decision("shipping", "priority") })),
+    Ship: component(goTo(State.SHIPPED), Effect.SendShippingNotice({ priority: Shipping.priority })),
     // 文だけのコマンド: 実行できる状態も、遷移先も、ここで決まる
-    Cancel: component(from("PENDING", "PAID"), goTo("CANCELLED"), emits("Refund", onlyWhen(ref.was("PAID")))),
+    Cancel: component(from(State.PENDING, State.PAID), goTo(State.CANCELLED), Effect.Refund(onlyWhen(was(State.PAID)))),
   },
 
-  // 意味: 名前が何を指すか（関数。IR に出ない）
-  meanings: {
-    conditions: {
-      "The customer is a Gold member and it is month-end": (state) => state.rank === "Gold" && state.isMonthEnd,
-      "The customer is a Silver member": (state) => state.rank === "Silver",
-      "The customer is a Gold member, or the order is 10,000 yen or more": (state) =>
-        state.rank === "Gold" || (state.price ?? 0) >= 10_000,
-      "The external payment module is active": (state) => state.paymentModuleActive,
-      "The payment succeeded": (state) => state.paymentResult === "succeeded",
-    },
-    calculations: {
-      amountCharged: (state) =>
-        Math.floor(((state.price ?? 0) * (100 - decide(Order, "campaign", state).discountPercent)) / 100),
-    },
-    invariants: {
-      "Every order past the draft state has a member rank and a price": (state) =>
-        state.status === "DRAFT" || (state.rank !== undefined && state.price !== undefined),
-    },
+  // 意味: 名前が何を指すか（関数。IR に出ない）。取っ手に関数を付ける
+  meanings: [
+    CampaignIf.customerGoldMemberMonthEnd.means((state) => state.rank === "Gold" && state.isMonthEnd),
+    CampaignIf.customerSilverMember.means((state) => state.rank === "Silver"),
+    ShippingIf.customerGoldMemberOrder10.means((state) =>
+      state.rank === "Gold" || (state.price ?? 0) >= 10_000),
+    If.externalPaymentModuleActive.means((state) => state.paymentModuleActive),
+    If.paymentSucceeded.means((state) => state.paymentResult === "succeeded"),
+    Calc.amountCharged.means((state) =>
+      Math.floor(((state.price ?? 0) * (100 - Campaign.of(state).discountPercent)) / 100)),
+    Inv.everyOrderPastDraftState.means((state) =>
+      state.status === "DRAFT" || (state.rank !== undefined && state.price !== undefined)),
+  ],
+});
+```
+
+Layer 1 に無い語彙を解釈が足すときは、解釈のファイルの中で、同じようにまとまりを先に宣言して置きます。Layer 1 がすでに同じ名前の
+取っ手を持つときは、`IfAdded`・`CalcAdded`・`QueryAdded` のように別の名前にします。
+
+```typescript
+// --- examples/library-ts/specs/loan.interpretation.ts（抜粋） ---
+import { Policy } from "./loan.decisions.ts";
+import { Calc, If, Loan, State } from "./loan.component.ts";
+
+export const IfAdded = conditions({
+  loanThenPastDueDate: "The loan is then past its due date, but not by more than the policy's lost-after days",
+});
+export const Data = data({ daysUntilDue: "integer" });                 // Layer 1 に data が無いので、解釈が宣言する
+export const CalcAdded = calculations({
+  daysUntilDueAfterDaysPass: component(description("The days until the loan is due, minus the days that pass"), output("integer")),
+});
+
+export const Interpretation = interpretation(Loan, {
+  data: Data,
+  calculations: CalcAdded,
+  commands: {
+    DayPasses: component(
+      // （紛失になる場合の when は省略）
+      when(IfAdded.loanThenPastDueDate, goTo(State.OVERDUE), Data.daysUntilDue.set(CalcAdded.daysUntilDueAfterDaysPass)),
+      otherwise(Data.daysUntilDue.set(CalcAdded.daysUntilDueAfterDaysPass)),
+    ),
+    // ...
   },
+  meanings: [
+    IfAdded.loanThenPastDueDate.means((state) => {
+      const daysUntilDue = CalcAdded.daysUntilDueAfterDaysPass.of(state);
+      return daysUntilDue < 0 && daysUntilDue >= -Policy.of(state).lostAfterDays;
+    }),
+    CalcAdded.daysUntilDueAfterDaysPass.means((state) => (state.daysUntilDue ?? 0) - (state.days ?? 0)),
+    // ...
+  ],
 });
 ```
 
@@ -778,46 +899,50 @@ export const Interpretation = interpretation(Order, {
 | 語彙のまとまり（`data`・`queries`・`effects`・`calculations`）が文か、無い | そのまとまりを書く |
 | 語彙のまとまりに、項目を並べている | 項目は足せない（計算だけは足せる）。項目ごとに、**書かれていない部品だけ**を足す |
 | コマンドを並べている | コマンドは足せない。**すべてのコマンドに1つずつ書く**（足すものが無ければ `component()`） |
-| コマンドの `input`・`from`・`onlyIf`・`asks`・`goTo` | その部品は書けない |
-| コマンドの場合分け（`when`） | 同じ場合のそれぞれを、もう一度書く（足すものが無ければ `when("同じ文")`）。足せるのは `otherwise` だけ |
+| コマンドの入力・`from`・`onlyIf`・尋ねること（`.as(...)`）・`goTo` | その部品は書けない |
+| コマンドの場合分け（`when`） | 同じ場合のそれぞれを、同じ条件の取っ手で、もう一度書く（足すものが無ければ `when(If.x)`）。足せるのは `otherwise` だけ |
 | コマンドが文だけ | 入力・実行できる状態・尋ねること・場合分け・遷移先のすべてを決める |
 
-解釈では、語彙の項目を、次のように書きます。
+解釈では、足す語彙を Layer 1 と同じく、まとまりとして先に宣言し（`export const Data = data({...})` など）、`interpretation` の
+同じキーに置きます（`data: Data`）。足した条件は `conditions({...})` で宣言するだけです。まとまりの中の項目は、次のように書きます。
 
 | まとまり | 解釈での書き方 |
 | --- | --- |
-| `data` | `名前: 型` |
-| `queries` | `名前: output(型)`（それだけなら、型をそのまま）。引数があれば `component(input({...}), output(型))` |
-| `effects` | `名前: input({...})`。何も運ばなければ `component()` |
-| `calculations` | `名前: component(description("式"), output(型))`。Layer 1 が文を書いた計算には `output(型)` だけ |
+| `data` | `data({ 名前: 型 })` |
+| `queries` | `queries({ 名前: output(型) })`（それだけなら、型をそのまま）。引数があれば `component(input({...}), output(型))` |
+| `effects` | `effects({ 名前: input({...}) })`。何も運ばなければ `component()` |
+| `calculations` | `calculations({ 名前: component(description("式"), output(型)) })`。Layer 1 が文を書いた計算には `output(型)` だけ |
+| `invariants` | `invariants({ 名前: "文" })` |
 
 これらに反した解釈は、IR を作るときに `bad-interpretation` として報告します（例: `コマンド "Checkout" の条件 "The payment succeeded" の goTo は Layer 1 に書かれているので、解釈では書けません`）。
 
 #### 構造の書き方
 
-コマンドごとに、`asks`（尋ねること。§3.1）と、起きることを書きます。起きることは、条件で分かれるコマンドでは `when(...)` / `otherwise(...)` の中に書きます。
+コマンドごとに、尋ねること（`Query.q({...}).as("名前")`。§3.1）と、起きることを書きます。起きることは、条件で分かれるコマンドでは `when(...)` / `otherwise(...)` の中に書きます。
 
-* `goTo("状態")`: 遷移先です。**書かなければ、状態は変わりません。**
-* `emits("副作用", { フィールド: 値 })`: 起こす副作用です。起こす順に並べます。最後に `onlyWhen(...)` を添えると、それが成り立つときだけ起こします。
-* `set({ フィールド: 値 })`: 覚えるデータです。書いたフィールドだけが更新されます。
+* `goTo(State.X)`: 遷移先です。**書かなければ、状態は変わりません。**
+* `Effect.E({ フィールド: 値 })`: 起こす副作用です（何も運ばなければ `Effect.E()`）。起こす順に並べます。最後に `onlyWhen(...)` を添えると、それが成り立つときだけ起こします。
+* `Data.x.set(値)`: 覚えるデータです。書いたデータだけが更新されます。
 
-値は、定数か参照です。参照は `ref` からたどって書きます。名前は、指す先の宣言の見出しと同じです。
+値は、定数か、取っ手による参照です。参照は、宣言から得た取っ手で書きます。名前を文字列で書く所はありません。
 
 | 参照 | 指すもの |
 | --- | --- |
-| `ref.input("名前")` | そのコマンドの入力 |
-| `ref.data("名前")` | 覚えているデータ |
-| `ref.query("名前")` | 引数の無い問い合わせの答え。または、そのコマンドの `asks` で付けた名前の答え |
-| `ref.decision("表", "列")` | 決定表の、当たった行の列の値 |
-| `ref.calculation("名前")` | 計算の結果 |
-| `ref.was("状態", ...)` | コマンドの実行前の状態が、挙げたどれかであること（真偽値） |
+| `PlaceOrderInput.listPrice` | そのコマンドの入力のフィールド |
+| `Data.price` | 覚えているデータ |
+| `Query.isMonthEnd` | 引数の無い問い合わせの答え |
+| `Query.q({...}).as("名前")` の `.answer` | そのコマンドが尋ねた、引数つきの問い合わせの答え |
+| `Campaign.discountPercent` | 決定表の、当たった行の列の値 |
+| `Calc.amountCharged` | 計算の結果 |
+| `was(State.A, ...)` | コマンドの実行前の状態が、挙げたどれかであること（真偽値） |
 
-`onlyWhen` には、条件の文か、真偽値の参照を書けます。表を引くだけの判断や、実行前の状態による判断は、参照で書けば条件の文と関数を増やさずに済みます。場合（`when`）と違って、ほかと排他ではありません。
+`onlyWhen` には、条件の取っ手か、真偽値の参照を書けます。表を引くだけの判断や、実行前の状態による判断は、参照で書けば条件の文と関数を増やさずに済みます。場合（`when`）と違って、ほかと排他ではありません。
 
 #### 意味の書き方
 
-* 条件と計算の関数は、状態名（`status`）、覚えているデータ（未設定があり得る）、引数の無い問い合わせの答え、コマンドの入力、そのコマンドが尋ねた答え（`asks` で付けた名前）を受け取ります。入力と尋ねた答えは、ほかのコマンドの実行中は未設定です。不変条件の関数が受け取るのは、状態名と覚えているデータだけです。
-* 関数の中では、`decide(コンポーネント, "表", state)` で決定表の当たった行を、`calculate(コンポーネント, "名前", state)` で別の計算の結果を使えます。
+* 条件と計算の関数は、状態名（`status`）、覚えているデータ（未設定があり得る）、引数の無い問い合わせの答え、コマンドの入力、そのコマンドが尋ねた答え（`.as("名前")` で付けた名前）を受け取ります。入力と尋ねた答えは、ほかのコマンドの実行中は未設定です。不変条件の関数が受け取るのは、状態名と覚えているデータだけです。
+* `meanings` は、取っ手に関数を付けたものの並びです（`If.x.means(関数)`、`Calc.c.means(関数)`、`Inv.k.means(関数)`）。
+* 関数の中では、`Campaign.of(state)` で決定表の当たった行を、`Calc.c.of(state)` で別の計算の結果を使えます。
 * 不変条件が検証するのは仕様であって実装ではありません。覚えているデータを本番システムから読まない方針のため、実装に対しては確かめられません。IR には文を載せるので、LLM には前提として伝わります。
 
 #### 検査
@@ -968,7 +1093,7 @@ pnpm clp interpret --accept                                            # 確定�
 * 場合の中の `emits` は、起こす副作用を順に並べたものです（`effect` が副作用の名前、`input` が渡す値、`onlyWhen` があればそれが成り立つときだけ）。起こす副作用が無ければ、`emits` は出ません（`set` と同じ）。
 * **IR は、Layer 1 をどこまで構造で書いたかによりません。** 同じ内容なら、Layer 1 に書いても解釈に書いても、同じ IR になります（文の置き場所だけが変わります）。
 * `onlyWhen` は、条件の文か、真偽値の参照です。
-* 参照: `{"$ref": "input:<名前>"}`、`{"$ref": "data:<名前>"}`、`{"$ref": "query:<名前>"}` は、コマンドの入力、覚えているデータ、問い合わせの答え。`{"$ref": "calculation:<名前>"}` は計算の結果。`{"$ref": "decision:<表>.<列>"}` は当たった行の列の値。`{"$was": [...]}` は、実行前の状態が挙げたどれかであること。解釈の `ref.*` と同じ名前です。
+* 参照: `{"$ref": "input:<名前>"}`、`{"$ref": "data:<名前>"}`、`{"$ref": "query:<名前>"}` は、コマンドの入力、覚えているデータ、問い合わせの答え。`{"$ref": "calculation:<名前>"}` は計算の結果。`{"$ref": "decision:<表>.<列>"}` は当たった行の列の値。`{"$was": [...]}` は、実行前の状態が挙げたどれかであること。取っ手が指す先と同じ名前です（`PlaceOrderInput.listPrice` は `input:listPrice`、`Campaign.discountPercent` は `decision:campaign.discountPercent`）。
 * 条件・計算・不変条件は自然言語のまま出力されます。評価関数は含みません。
 * `irVersion`（整数、単調増加）が唯一の互換性契約です。版 6 で、キーを仕様を書くときの語にそろえました（計算の `{ is, type }` → `{ description, output }`、場合の `effects: [{ name, payload, when }]` → `emits: [{ effect, input, onlyWhen }]`）。
 * **説明は、`descriptions` の表のまま残します。** 語彙の項目（`model.data` の各フィールドなど）は型そのものなので、説明を入れると、すべての型がオブジェクトになってしまうためです（`DSL.md` §9 の当初の案から変えました）。
@@ -1050,8 +1175,8 @@ export interface TargetSystemAdapter {
 1. `setupIsolation(ports)` で、初期状態の本番システムを代役につないで作る。
 2. 1手ごとに、入力と問い合わせの答えをランダムに決める。引数つきの問い合わせには、「引数から答えを決める関数」を1手ごとに決める（同じ引数には同じ答え）。数値は、範囲の端としきい値（`around`）の前後を重点的に生成する。意味の関数に書かれた定数と、決定表の値も混ぜる（決定表の「30 日」のようなしきい値は、関数の中には現れないため）。現在の状態で実行でき（`from`）、事前条件（`onlyIf`）を満たすコマンドの中から1つを選ぶ。
 3. 解釈の意味（関数）で、成り立つ条件を決める。その条件の構造（宣言）の参照を解決して、期待される次状態と副作用の列を得る。`when` が成り立たない副作用は含めない（決定表の行と計算も、意味の関数で評価する）。
-4. `executeCommand(command)` を呼び、`getCurrentState` の結果と、その手の間に代役が受けた副作用の列（順序を含む）が期待と一致することを確かめる。その手の間に、引数つきの問い合わせが、そのコマンドの `asks` に無い引数で呼ばれていたら、不合格にする（本番コードが例外を握りつぶしていても同じ）。
-5. 一致すれば、構造の `set` を仕様側の「覚えているデータ」に反映して次の手へ進む。最後に `teardownIsolation` を呼ぶ。
+4. `executeCommand(command)` を呼び、`getCurrentState` の結果と、その手の間に代役が受けた副作用の列（順序を含む）が期待と一致することを確かめる。その手の間に、引数つきの問い合わせが、そのコマンドが尋ねると書いていない引数（IR の `asks` に無いもの）で呼ばれていたら、不合格にする（本番コードが例外を握りつぶしていても同じ）。
+5. 一致すれば、構造の `Data.x.set(...)` を仕様側の「覚えているデータ」に反映して次の手へ進む。最後に `teardownIsolation` を呼ぶ。
 
 仕様側の評価で問題が起きた場合（条件の衝突、不変条件の破れなど）は、実装の誤りではなく仕様の誤りとして報告します（§2.3 の事前検査）。
 

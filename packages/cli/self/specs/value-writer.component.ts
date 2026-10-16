@@ -1,5 +1,32 @@
-import { component, description, input, output } from "@clp/core";
+import { calculations, component, description, effects, input, output, states } from "@clp/core";
 import { ReferenceForm } from "./value-writer.decisions.ts";
+export const State = states("READY");
+
+export const Effect = effects({
+  WriteConstant: component(
+    description("A constant, as it was given."),
+    input({ kind: ["string", "number", "boolean"], text: "string", number: "number", flag: "boolean" }),
+  ),
+  WriteReference: component(description("A reference, as one text."), input({ text: "string" })),
+  WriteWasState: component(description("One state of a reference to the state before the command."), input({ state: "string" })),
+});
+
+export const Calc = calculations({
+  referenceText: component(
+    description(
+      "The prefix the reference form gives, followed by what is referred to: the name, or, for a column of a " +
+        "decision table, the table, a dot, and the column. Nothing else is added and nothing is trimmed.",
+    ),
+    output("string"),
+  ),
+});
+
+export const ConstantInput = input({ kind: ["string", "number", "boolean"], text: "string", number: "number", flag: "boolean" });
+
+export const ReferenceInput = input({ target: ["input", "data", "query", "calculation", "decision"], name: "string", table: "string", column: "string" });
+
+export const WasStateInput = input({ state: "string" });
+
 
 // How the values of a specification are written into the IR (`serialize` in packages/cli/src/extract.ts),
 // written as a spec. A value is a constant or a reference; the IR holds a constant as it is and a reference
@@ -13,29 +40,14 @@ export const ValueWriter = component({
     "A constant is written as it is. A reference is written as one text. A reference to the state before a " +
     "command lists states; they are handed over, and written, one at a time.",
 
-  states: ["READY"],
-  init: "READY",
+  states: State,
+  init: State.READY,
 
-  effects: {
-    WriteConstant: component(
-      description("A constant, as it was given."),
-      input({ kind: ["string", "number", "boolean"], text: "string", number: "number", flag: "boolean" }),
-    ),
-    WriteReference: component(description("A reference, as one text."), input({ text: "string" })),
-    WriteWasState: component(description("One state of a reference to the state before the command."), input({ state: "string" })),
-  },
+  effects: Effect,
 
   decisions: { form: ReferenceForm },
 
-  calculations: {
-    referenceText: component(
-      description(
-        "The prefix the reference form gives, followed by what is referred to: the name, or, for a column of a " +
-          "decision table, the table, a dot, and the column. Nothing else is added and nothing is trimmed.",
-      ),
-      output("string"),
-    ),
-  },
+  calculations: Calc,
 
   commands: {
     Constant: component(
@@ -43,7 +55,7 @@ export const ValueWriter = component({
         "A constant written in the specification. `kind` says what it is; `text` holds a string, `number` a number, " +
           "`flag` a boolean. It is written as a constant with exactly the kind, text, number and flag it was given.",
       ),
-      input({ kind: ["string", "number", "boolean"], text: "string", number: "number", flag: "boolean" }),
+      ConstantInput,
     ),
 
     Reference: component(
@@ -52,12 +64,12 @@ export const ValueWriter = component({
           "thing's name; for a column of a decision table, `table` and `column` name it instead. " +
           "It is written as a reference whose text is the reference text.",
       ),
-      input({ target: ["input", "data", "query", "calculation", "decision"], name: "string", table: "string", column: "string" }),
+      ReferenceInput,
     ),
 
     WasState: component(
       description("One of the states listed by a reference to the state before the command. It is written as that state."),
-      input({ state: "string" }),
+      WasStateInput,
     ),
   },
 });

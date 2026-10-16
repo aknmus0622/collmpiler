@@ -23,7 +23,13 @@ const specDir = (source: string) => {
 };
 
 // todo の一覧。状態を持たず、項目の並びを覚える
-const TODOS = (options: { newId?: string; id?: string } = {}) => `import { among, component, description, does, fresh, initially, input, interpretation, list, optional, otherwise, output, record, ref, responds, set, when } from "@clp/core";
+const TODOS = (options: { newId?: string; id?: string } = {}) => `import { among, calculations, component, conditions, data, description, does, fresh, initially, input, interpretation, invariants, list, optional, otherwise, output, queries, record, responds, states, when } from "@clp/core";
+const State = states("NONE", "ISSUED", "USED");
+const If = conditions({ titleBlank: "The title is blank", noItemGivenIdentifier: "No item has the given identifier", itemAlreadyDone: "The item is already done", addressNotEMailAddress: "The address is not an e-mail address", tokenExpired: "The token has expired", textTooLong: "The text is too long" });
+const Inv = invariants({ noTwoItemsHaveSame: "No two items have the same identifier" });
+const Data = data({ items: "string", issuedAt: "string" });
+const Query = queries({ now: "string" });
+const Calc = calculations({ newItem: output("integer"), itemsWithNew: output("integer"), itemsWithDone: output("integer") });
 const Todo = record({ id: "string", title: "string", done: "boolean" });
 export const Todos = component({
   description: "A to-do list. Items are added, completed and listed.",
@@ -33,19 +39,19 @@ export const Todos = component({
     Add: component(
       input({ title: "string" }),
       output(record({ result: ["created", "invalid"], todo: optional(Todo) })),
-      when("The title is blank", responds({ result: "invalid", todo: null })),
+      when(If.titleBlank, responds({ result: "invalid", todo: null })),
       otherwise(does("A new open item with a fresh identifier and the given title is added at the end. The answer is created, with the item.")),
     ),
     Complete: component(
-      input({ id: ${options.id ?? `among("items", "id")`} }),
+      input({ id: ${options.id ?? `among(Data.items, "id")`} }),
       output(["completed", "not-found", "already-done"]),
-      when("No item has the given identifier", responds("not-found")),
-      when("The item is already done", responds("already-done")),
+      when(If.noItemGivenIdentifier, responds("not-found")),
+      when(If.itemAlreadyDone, responds("already-done")),
       otherwise(does("The item becomes done."), responds("completed")),
     ),
     List: component(output(list(Todo)), does("The answer is the items, in the order they were added.")),
   },
-  invariants: ["No two items have the same identifier"],
+  invariants: invariants({ noTwoItemsHaveSame: "No two items have the same identifier" }),
 });
 type Item = { id: string; title: string; done: boolean };
 export const Interpretation = interpretation(Todos, {
@@ -55,25 +61,11 @@ export const Interpretation = interpretation(Todos, {
     itemsWithDone: component(description("the items, with the item of the given identifier done"), output(list(Todo))),
   },
   commands: {
-    Add: component(when("The title is blank"), otherwise(set({ items: ref.calculation("itemsWithNew") }), responds({ result: "created", todo: ref.calculation("newItem") }))),
-    Complete: component(when("No item has the given identifier"), when("The item is already done"), otherwise(set({ items: ref.calculation("itemsWithDone") }))),
-    List: component(responds(ref.data("items"))),
+    Add: component(when(If.titleBlank), otherwise(Data.items.set(Calc["itemsWithNew"]), responds({ result: "created", todo: Calc["newItem"] }))),
+    Complete: component(when(If.noItemGivenIdentifier), when(If.itemAlreadyDone), otherwise(Data.items.set(Calc["itemsWithDone"]))),
+    List: component(responds(Data.items)),
   },
-  meanings: {
-    conditions: {
-      "The title is blank": (state) => state.title.trim() === "",
-      "No item has the given identifier": (state) => !state.items.some((item: Item) => item.id === state.id),
-      "The item is already done": (state) => state.items.some((item: Item) => item.id === state.id && item.done),
-    },
-    calculations: {
-      newItem: (state) => ({ id: state.newId, title: state.title, done: false }),
-      itemsWithNew: (state) => [...state.items, { id: state.newId, title: state.title, done: false }],
-      itemsWithDone: (state) => state.items.map((item: Item) => (item.id === state.id ? { ...item, done: true } : item)),
-    },
-    invariants: {
-      "No two items have the same identifier": (state) => new Set(state.items.map((item: Item) => item.id)).size === state.items.length,
-    },
-  },
+  meanings: [If.titleBlank.means((state) => state.title.trim() === ""), If.noItemGivenIdentifier.means((state) => !state.items.some((item: Item) => item.id === state.id)), If.itemAlreadyDone.means((state) => state.items.some((item: Item) => item.id === state.id && item.done)), Calc["newItem"].means((state) => ({ id: state.newId, title: state.title, done: false })), Calc["itemsWithNew"].means((state) => [...state.items, { id: state.newId, title: state.title, done: false }]), Calc["itemsWithDone"].means((state) => state.items.map((item: Item) => (item.id === state.id ? { ...item, done: true } : item))), Inv.noTwoItemsHaveSame.means((state) => new Set(state.items.map((item: Item) => item.id)).size === state.items.length)],
 });
 `;
 
@@ -160,31 +152,32 @@ test("依存の約束 fresh: 一度返した値は、二度と返さない。約
 });
 
 // 確認の期限: 発行した時刻を覚え、いまの時刻との差で、期限切れかを決める
-const TOKEN = (now: string) => `import { component, decide, decisionTable, does, from, goTo, increasing, integer, interpretation, otherwise, output, ref, responds, set, string, when, input } from "@clp/core";
-const Policy = decisionTable({ otherwise: { ttlSeconds: 3600 } });
+const TOKEN = (now: string) => `import { calculations, component, conditions, data, decisionTable, does, from, goTo, increasing, input, integer, interpretation, invariants, otherwise, output, queries, responds, states, string, when } from "@clp/core";
+const State = states("NONE", "ISSUED", "USED");
+const If = conditions({ titleBlank: "The title is blank", noItemGivenIdentifier: "No item has the given identifier", itemAlreadyDone: "The item is already done", addressNotEMailAddress: "The address is not an e-mail address", tokenExpired: "The token has expired", textTooLong: "The text is too long" });
+const Inv = invariants({ noTwoItemsHaveSame: "No two items have the same identifier" });
+const Data = data({ items: "string", issuedAt: "string" });
+const Query = queries({ now: "string" });
+const Calc = calculations({ newItem: output("integer"), itemsWithNew: output("integer"), itemsWithDone: output("integer") });
+const Policy = decisionTable(otherwise({ ttlSeconds: 3600 }));
 export const Token = component({
   states: ["NONE", "ISSUED", "USED"],
-  init: "NONE",
+  init: State.NONE,
   data: { issuedAt: "integer" },
   queries: { now: ${now} },
   decisions: { policy: Policy },
   commands: {
-    Issue: component(input({ email: string({ examples: ["a@example.com", "not-an-address"] }) }), from("NONE"), output(["issued", "invalid"]),
-      when("The address is not an e-mail address", responds("invalid")), otherwise(goTo("ISSUED"), responds("issued"))),
-    Confirm: component(from("ISSUED"), output(["confirmed", "expired"]), when("The token has expired", responds("expired")), otherwise(goTo("USED"), responds("confirmed"))),
+    Issue: component(input({ email: string({ examples: ["a@example.com", "not-an-address"] }) }), from(State.NONE), output(["issued", "invalid"]),
+      when(If.addressNotEMailAddress, responds("invalid")), otherwise(goTo(State.ISSUED), responds("issued"))),
+    Confirm: component(from(State.ISSUED), output(["confirmed", "expired"]), when(If.tokenExpired, responds("expired")), otherwise(goTo(State.USED), responds("confirmed"))),
   },
 });
 export const Interpretation = interpretation(Token, {
   commands: {
-    Issue: component(when("The address is not an e-mail address"), otherwise(set({ issuedAt: ref.query("now") }))),
-    Confirm: component(when("The token has expired"), otherwise()),
+    Issue: component(when(If.addressNotEMailAddress), otherwise(Data.issuedAt.set(Query.now))),
+    Confirm: component(when(If.tokenExpired), otherwise()),
   },
-  meanings: {
-    conditions: {
-      "The address is not an e-mail address": (state) => !/^[^@ ]+@[^@ ]+[.][a-z]+$/.test(state.email),
-      "The token has expired": (state) => state.now - (state.issuedAt ?? 0) > decide(Token, "policy", state).ttlSeconds,
-    },
-  },
+  meanings: [If.addressNotEMailAddress.means((state) => !/^[^@ ]+@[^@ ]+[.][a-z]+$/.test(state.email)), If.tokenExpired.means((state) => state.now - (state.issuedAt ?? 0) > Policy.of(state).ttlSeconds)],
 });
 `;
 
@@ -201,15 +194,21 @@ test("依存の約束 increasing と、文字列の例: 現実の時刻でも、
 });
 
 test("入力の生成: 仕様の中の数の前後の長さの文字列も試す（文字列の長さのしきい値に届く）", async () => {
-  const spec = (limit: number) => specDir(`import { component, decide, decisionTable, input, interpretation, otherwise, output, responds, when } from "@clp/core";
-const Limits = decisionTable({ otherwise: { maxLength: ${limit} } });
+  const spec = (limit: number) => specDir(`import { calculations, component, conditions, data, decisionTable, input, interpretation, invariants, otherwise, output, queries, responds, states, when } from "@clp/core";
+const State = states("NONE", "ISSUED", "USED");
+const If = conditions({ titleBlank: "The title is blank", noItemGivenIdentifier: "No item has the given identifier", itemAlreadyDone: "The item is already done", addressNotEMailAddress: "The address is not an e-mail address", tokenExpired: "The token has expired", textTooLong: "The text is too long" });
+const Inv = invariants({ noTwoItemsHaveSame: "No two items have the same identifier" });
+const Data = data({ items: "string", issuedAt: "string" });
+const Query = queries({ now: "string" });
+const Calc = calculations({ newItem: output("integer"), itemsWithNew: output("integer"), itemsWithDone: output("integer") });
+const Limits = decisionTable(otherwise({ maxLength: ${limit} }));
 export const Note = component({
   decisions: { limits: Limits },
-  commands: { Write: component(input({ text: "string" }), output(["ok", "too-long"]), when("The text is too long", responds("too-long")), otherwise(responds("ok"))) },
+  commands: { Write: component(input({ text: "string" }), output(["ok", "too-long"]), when(If.textTooLong, responds("too-long")), otherwise(responds("ok"))) },
 });
 export const Interpretation = interpretation(Note, {
-  commands: { Write: component(when("The text is too long"), otherwise()) },
-  meanings: { conditions: { "The text is too long": (state) => state.text.length > decide(Note, "limits", state).maxLength } },
+  commands: { Write: component(when(If.textTooLong), otherwise()) },
+  meanings: [If.textTooLong.means((state) => state.text.length > Limits.of(state).maxLength)],
 });
 `);
   // 乱数の文字列は短いので、以前は 100 文字のしきい値に届かず、「検証に現れない」と報告された
@@ -220,10 +219,10 @@ test("検査: 型に合わない値（並びの要素、フィールドの過不
   const todos = (edit: (text: string) => string) => specDir(edit(TODOS()));
   const messages = async (dir: string) => extract(await loadSpecs(dir)).diagnostics.map((d) => d.message).join("\n");
   assert.match(await messages(todos((text) => text.replace("initially([])", `initially([{ id: "a", title: "t" }])`))), /data\.items の initially: \[\{"id":"a","title":"t"\}\] は \{ id: string, title: string, done: boolean \}\[\] に入りません/);
-  assert.match(await messages(todos((text) => text.replace(`responds(ref.data("items"))`, `responds(ref.calculation("newItem"))`))), /responds: \{ id: string, title: string, done: boolean \} は \{ id: string, title: string, done: boolean \}\[\] に入りません/);
-  assert.match(await messages(todos((text) => text.replace(`todo: ref.calculation("newItem") }`, `todo: ref.data("items") }`))), /responds\.todo: .*\[\] は \{ id: string, title: string, done: boolean \} に入りません/);
+  assert.match(await messages(todos((text) => text.replace(`responds(Data.items)`, `responds(Calc["newItem"])`))), /responds: \{ id: string, title: string, done: boolean \} は \{ id: string, title: string, done: boolean \}\[\] に入りません/);
+  assert.match(await messages(todos((text) => text.replace(`todo: Calc["newItem"] }`, `todo: Data.items }`))), /responds\.todo: .*\[\] は \{ id: string, title: string, done: boolean \} に入りません/);
   // 計算の結果が宣言した形に合わなければ、仕様を実行する検査が見つける
-  const broken = todos((text) => text.replace(`newItem: (state) => ({ id: state.newId, title: state.title, done: false }),`, `newItem: (state) => ({ id: state.newId, title: state.title }),`));
+  const broken = todos((text) => text.replace(`Calc["newItem"].means((state) => ({ id: state.newId, title: state.title, done: false }))`, `Calc["newItem"].means((state) => ({ id: state.newId, title: state.title }))`));
   const checked = await selfCheck(await loadSpecs(broken), { seed: 1, numRuns: 300 });
   assert.ok(!checked.ok);
   assert.match(checked.message, /responds: todo = .* が宣言した型・範囲に合いません/);

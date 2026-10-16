@@ -6,7 +6,7 @@ import { boundaryOf, extract, stableStringify, whereOf } from "./extract.ts";
 import { graphDiagnostics } from "./graph.ts";
 import { mergeAssets } from "./assets.ts";
 import type { Asset } from "./assets.ts";
-import { entryGate, exitGate, verifyGate } from "./gates.ts";
+import { entryGate, exitGate, partFilesOf, verifyGate } from "./gates.ts";
 import type { Feedback, GateContext, MutationSummary } from "./gates.ts";
 import { requireModel, seedOf } from "./generate.ts";
 import type { Ir } from "./generate.ts";
@@ -15,7 +15,7 @@ import { DRAFT_SUFFIX, listComponents, loadSpecs } from "./loader.ts";
 import type { MutationStrategy } from "./mutation.ts";
 import { PHASES } from "./request.ts";
 import type { Phase } from "./request.ts";
-import { DEFAULT_RUNS, describeUnobservable, observability, selfCheck, unreachedCases } from "./runtime.ts";
+import { DEFAULT_RUNS, defaultRuns, describeUnobservable, observability, selfCheck, unreachedCases } from "./runtime.ts";
 import { references, stage1Adapter, stage1Unavailable } from "./stage1.ts";
 import type { StaticCheckStrategy } from "./static-check.ts";
 import { clearVerified, writeVerified } from "./verified.ts";
@@ -144,6 +144,21 @@ export async function implement(options: ImplementOptions) {
     });
   }
 
+  // 部品を含む部品は、含む部品のあとに一致させる（中の部品の本番コードを使うので）
+  const partsOf = (unit: Unit, trail: string[] = []): string[] =>
+    Object.values(unit.ir.model?.parts ?? {}).flatMap(({ component }) => {
+      const inner = units.find((candidate) => candidate.name === component);
+      return inner && !trail.includes(component) ? [component, ...partsOf(inner, [...trail, component])] : [];
+    });
+  const ordered: Unit[] = [];
+  const place = (unit: Unit) => {
+    if (ordered.includes(unit)) return;
+    for (const name of partsOf(unit)) place(units.find((candidate) => candidate.name === name)!);
+    ordered.push(unit);
+  };
+  for (const unit of units) place(unit);
+  units.splice(0, units.length, ...ordered);
+
   // --fresh: 本番コードと、すべてのコンポーネントのアダプター・前回の IR を捨てる（何も無い状態からやり直す）
   if (options.fresh) {
     for (const rel of [...sourceFiles(units[0].ws), ...units.flatMap((unit) => [unit.ws.paths.adapter, unit.ws.paths.ir])]) {
@@ -171,7 +186,7 @@ export async function implement(options: ImplementOptions) {
       specsDir,
       ws: unit.ws,
       seed: unit.seed,
-      runs: options.runs ?? DEFAULT_RUNS,
+      runs: options.runs ?? defaultRuns(unit.ir.model),
       guide: DEFAULT_GUIDE,
       assets: mergeAssets(unit.assets, options.assets ?? []),
       drafts,
@@ -181,7 +196,10 @@ export async function implement(options: ImplementOptions) {
       baseline: "",
       before: {},
       others: units.filter((other) => other !== unit).map(({ name, ir, ws, seed }) => ({ name, ir, ws, seed })),
+      parts: partsOf(unit),
     };
+    // 含む部品のコード: この部品の作業では、使うだけ
+    if (ctx.parts!.length > 0) ctx.partFiles = partFilesOf(ctx);
     const tag = units.length > 1 ? `${unit.name} ` : "";
     const passed = await reconcile(ctx, options, attempts, (line) => log(`${tag}${line}`), stages);
     if (!passed) {

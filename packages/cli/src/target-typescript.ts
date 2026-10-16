@@ -4,7 +4,7 @@ import { stripTypeScriptTypes } from "node:module";
 import { tmpdir } from "node:os";
 import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { checkWorkspace } from "./check.ts";
+import { BUILTINS, checkWorkspace } from "./check.ts";
 import { TS_FILES, generateAdapterSkeleton, generateContract, generateVerify } from "./generate.ts";
 import { dirFrom, importPath, isSource, label, sourceFiles } from "./layout.ts";
 import type { Workspace } from "./layout.ts";
@@ -121,7 +121,7 @@ export const typescriptTarget: Target = {
     sourceRules: `- Production code is plain TypeScript that Node can run directly (erasable syntax only: no \`enum\`, no
   \`namespace\`, no parameter properties; relative imports need the \`.ts\` extension).
 - Production code may import only other production files under \`${label(ws.src)}\`, by relative path. No
-  packages, no \`node:\` built-ins, no \`import()\` / \`require()\`.`,
+  packages, no \`import()\` / \`require()\`. Of Node's built-in modules, only these: ${[...BUILTINS].map((name) => `\`${name}\``).join(", ")}.`,
     skeletonBody: `throw new Error("${NOT_IMPLEMENTED}");`,
     adapterGuide: `- \`setupIsolation(ports)\`: build a fresh production system in its initial state, giving it dependencies that
   forward to \`ports\`. Where the production code expects a value in a different form than \`ports\` provides (a

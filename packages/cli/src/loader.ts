@@ -19,7 +19,11 @@ export const stampIn = (text: string): string | undefined => new RegExp(`^${STAM
 // Layer 1 のハッシュ。解釈に影響し得るものすべてを含める。
 // 決定表のセルの値は含めない（値は解釈を通らずに IR に届く。含めるのは、行と列の名前と、値の型だけ）。添付資料も含めない
 export function layer1Hash(layer1: object): string {
-  const { assets: _assets, decisions, ...rest } = layer1 as { assets?: unknown; decisions?: Record<string, Record<string, Record<string, unknown>>> };
+  const { assets: _assets, decisions, parts, ...rest } = layer1 as {
+    assets?: unknown;
+    decisions?: Record<string, Record<string, Record<string, unknown>>>;
+    parts?: Record<string, { component: object; by?: string }>;
+  };
   const shapes = Object.fromEntries(
     Object.entries(decisions ?? {}).map(([name, table]) => [
       name,
@@ -28,11 +32,32 @@ export function layer1Hash(layer1: object): string {
       ),
     ]),
   );
-  return `sha256:${createHash("sha256").update(stableStringify({ ...rest, decisions: shapes })).digest("hex")}`;
+  // 含む部品は、その部品の Layer 1 のハッシュで表す（書いた行の位置は含めない）
+  const nested =
+    parts === undefined
+      ? {}
+      : {
+          parts: Object.fromEntries(
+            Object.entries(parts).map(([name, { component, by }]) => {
+              const hash = layer1Hash(isComponent(component) ? layer1Of(component) : component);
+              return [name, by === undefined ? hash : { layer1: hash, by }];
+            }),
+          ),
+        };
+  return `sha256:${createHash("sha256").update(stableStringify({ ...rest, decisions: shapes, ...nested })).digest("hex")}`;
 }
 
 type Found = { name: string; declaration: object; file: string; exportName: string };
-type Scan = { root: string; components: Found[]; bindings: { binding: BoundSpecification; file: string }[]; exported: Map<object, { file: string; exportName: string }> };
+type Scan = {
+  root: string;
+  components: Found[];
+  bindings: { binding: BoundSpecification; file: string }[];
+  exported: Map<object, { file: string; exportName: string }>;
+  // 読み込めなかった解釈のファイル（Layer 1 から消えた取っ手を使っているときなど）
+  broken: { file: string; message: string }[];
+};
+// 解釈のファイル（確定版と下書き）。読み込めなくても、ほかの仕様の読み込みは止めない
+const INTERPRETATION_FILE = /\.interpretation(\.draft)?\.ts$/;
 
 // コンポーネントの名前: export 名を小文字とハイフンにしたもの (Order → order、CheckoutButton → checkout-button)。
 // テスト側のファイル名と、--component の指定に使う
@@ -63,8 +88,16 @@ async function scanSpecs(dir: string, options: { drafts?: boolean }): Promise<Sc
   const components: Found[] = [];
   const bindings: Scan["bindings"] = [];
   const exported: Scan["exported"] = new Map();
+  const broken: Scan["broken"] = [];
   for (const file of files) {
-    const mod = await import(pathToFileURL(join(root, file)).href);
+    let mod: Record<string, unknown>;
+    try {
+      mod = await import(pathToFileURL(join(root, file)).href);
+    } catch (error) {
+      if (!INTERPRETATION_FILE.test(file)) throw error;
+      broken.push({ file, message: error instanceof Error ? error.message : String(error) });
+      continue;
+    }
     for (const [exportName, value] of Object.entries(mod)) {
       if (typeof value !== "object" || value === null) continue;
       exported.set(value, { file, exportName });
@@ -80,7 +113,7 @@ async function scanSpecs(dir: string, options: { drafts?: boolean }): Promise<Sc
     }
   }
   components.sort((a, b) => (a.name < b.name ? -1 : 1));
-  return { root, components, bindings, exported };
+  return { root, components, bindings, exported, broken };
 }
 
 // 仕様にあるコンポーネントの名前（名前順）
@@ -96,7 +129,7 @@ export async function loadSpecs(
   dir: string,
   options: { drafts?: boolean; bindings?: boolean; component?: string } = {},
 ): Promise<SpecInput> {
-  const { root, components, bindings, exported } = await scanSpecs(dir, options);
+  const { root, components, bindings, exported, broken } = await scanSpecs(dir, options);
   if (components.length === 0) return { behaviors: {}, decisions: {} };
   const names = components.map((found) => found.name).join(", ");
   if (options.component === undefined && components.length > 1) {
@@ -123,9 +156,46 @@ export async function loadSpecs(
     const stamp = stampIn(readFileSync(join(root, bound.file), "utf8"));
     if (stamp !== undefined && stamp !== layer1Hash(declaration)) input.stale = true;
   }
+  // このコンポーネントの解釈のファイル（名前で決まる）が読み込めなければ、解釈の誤りとして報告する
+  const base = file.replace(/(\.component)?\.ts$/, "");
+  const unloadable = bound ? undefined : broken.find((entry) => entry.file.replace(INTERPRETATION_FILE, "") === base);
+  if (unloadable && options.bindings !== false) {
+    input.problems = [...(input.problems ?? []), `解釈のファイル ${unloadable.file} を読み込めません: ${unloadable.message}`];
+  }
+  // 含む部品: それぞれを、その部品の解釈と一緒に読む
+  const nest = (spec: SpecInput, trail: string[]) => {
+    const declared = spec.component?.parts;
+    if (!declared || !spec.model) return;
+    const found: Record<string, SpecInput> = {};
+    const problems: string[] = [];
+    for (const [part, { component: written, by }] of Object.entries(declared)) {
+      const inner = components.find((other) => other.declaration === written);
+      if (!inner) {
+        problems.push(`含む部品 "${part}" は、仕様のファイルから export された部品ではありません`);
+        continue;
+      }
+      if (trail.includes(inner.name)) {
+        problems.push(`含む部品 "${part}" (${inner.name}) が、自分を含んでいます (${[...trail, inner.name].join(" → ")})`);
+        continue;
+      }
+      const child = normalize(inner.exportName, isComponent(written) ? layer1Of(written) : written, bindings.find(({ binding }) => binding.source === written)?.binding);
+      child.name = inner.name;
+      if (!child.model) {
+        problems.push(`含む部品 "${part}" (${inner.name}) の解釈が無いか、Layer 1 と合いません。先に、その部品を clp interpret してください`);
+        continue;
+      }
+      nest(child, [...trail, inner.name]);
+      if (by !== undefined) child.by = by;
+      found[part] = child;
+    }
+    if (problems.length > 0) spec.problems = [...(spec.problems ?? []), ...problems];
+    spec.parts = found;
+    spec.model.parts = Object.fromEntries(Object.entries(found).map(([part, child]) => [part, boundaryOfPart(child)]));
+  };
+  if (options.bindings !== false) nest(input, [name]);
   input.sources = {
     component: { file, exportName },
-    ...(bound ? { binding: bound.file } : {}),
+    ...(bound ? { binding: bound.file } : unloadable ? { binding: unloadable.file.replace(/\.draft\.ts$/, ".ts") } : {}),
     // ほかのコンポーネントの解釈のファイル（このコンポーネントだけを検査するときに、そこの誤りを除くため）
     otherBindings: bindings.filter((other) => other !== bound).map((other) => other.file),
     decisions: Object.fromEntries(Object.entries(input.decisions).map(([table, value]) => [table, exported.get(value)])),
@@ -164,8 +234,11 @@ function normalize(name: string, layer1: object, binding: BoundSpecification | u
   // コマンドが返すものの形（返すコマンドがあるときだけ持つ）
   const outputs = Object.fromEntries(Object.entries(component.commands).flatMap(([command, decl]) => (decl.output === undefined ? [] : [[command, decl.output]])));
   if (Object.keys(outputs).length > 0) model.outputs = outputs;
+  // 経路（コマンドが外からどう届くか）。書いたコマンドがあるときだけ持つ
+  const routes = Object.fromEntries(Object.entries(component.commands).flatMap(([command, decl]) => (decl.route === undefined ? [] : [[command, decl.route]])));
+  if (Object.keys(routes).length > 0) model.routes = routes;
   if (component.initial) model.initial = component.initial;
-  const vocabulary = validateModel(name, model, Object.values(component.commands).flatMap((decl) => Object.keys(decl.asks ?? {})), component.decisions);
+  const vocabulary = validateModel(name, model, Object.values(component.commands).flatMap((decl) => Object.keys(decl.asks ?? {})), component.decisions, Object.keys(component.parts ?? {}));
   if (vocabulary.length > 0) return { behaviors: {}, decisions: {}, layer1, binding, grammar: vocabulary };
 
   const behaviors: SpecInput["behaviors"] = {};
@@ -179,6 +252,8 @@ function normalize(name: string, layer1: object, binding: BoundSpecification | u
         ...(outcome.responds === undefined ? {} : { responds: outcome.responds as SpecOutcome["responds"] }),
         effects: effectsOf(name, `commands.${command}`, written),
         set: (written.set ?? {}) as Record<string, SpecValue>,
+        ...(written.adds ? { adds: written.adds as SpecOutcome["adds"] } : {}),
+        ...(written.removes ? { removes: written.removes as SpecOutcome["removes"] } : {}),
       };
     }
     behaviors[command] = {
@@ -186,6 +261,7 @@ function normalize(name: string, layer1: object, binding: BoundSpecification | u
       from: decl.from,
       onlyIf: decl.onlyIf,
       ...(decl.asks ? { asks: decl.asks as Record<string, SpecAsk> } : {}),
+      ...(decl.calls ? { calls: decl.calls as SpecInput["behaviors"][string]["calls"] } : {}),
       when,
     };
   }
@@ -195,7 +271,7 @@ function normalize(name: string, layer1: object, binding: BoundSpecification | u
 
 // 語彙の誤り。読み込みを止めずに、ほかの診断と一緒に報告する（場所と直し方を添える）
 type VocabularyProblem = { code: string; message: string };
-function validateModel(name: string, model: SpecModel, asked: string[], decisions: Record<string, Record<string, unknown>>): VocabularyProblem[] {
+function validateModel(name: string, model: SpecModel, asked: string[], decisions: Record<string, Record<string, unknown>>, parts: string[] = []): VocabularyProblem[] {
   const problems: VocabularyProblem[] = [];
   if (!model.states.includes(model.init)) {
     problems.push({ code: "unknown-state", message: `初期状態 (init) の "${model.init}" が、states にありません` });
@@ -220,7 +296,35 @@ function validateModel(name: string, model: SpecModel, asked: string[], decision
   for (const [field, query] of Object.entries(model.queries)) if (Object.keys(query.input).length === 0) claim(field, "queries");
   // 尋ねた答えに付けた名前どうしは、コマンドが違えば同名でよい
   for (const alias of asked) claim(alias, "asks", true);
+  // 含む部品の名前（呼んだ答えを state.<部品>.<コマンド> で読む）
+  for (const part of parts) claim(part, "parts");
   // 入力どうしはコマンドが違えば同名でよい
   for (const fields of Object.values(model.commands)) for (const field of Object.keys(fields)) claim(field, "input", true);
   return problems;
+}
+
+// 含む部品の、外から見た境界: 呼べるコマンド（入力と、返すもの）と、その部品（と、さらに中の部品）の依存。
+// 依存の名前は、部品の名前で修飾する（todos.newId）。外側の部品の契約に、この名前で並ぶ
+export function boundaryOfPart(child: SpecInput): NonNullable<SpecModel["parts"]>[string] {
+  const model = child.model!;
+  const { queries, effects } = dependenciesOf(child);
+  return {
+    component: child.name ?? "",
+    ...(child.by === undefined ? {} : { by: child.by }),
+    commands: model.commands,
+    ...(model.outputs ? { outputs: model.outputs } : {}),
+    queries,
+    effects,
+  };
+}
+// その部品自身と、含む部品の依存（中の部品のものは、部品の名前で修飾する）
+export function dependenciesOf(spec: SpecInput): { queries: SpecModel["queries"]; effects: SpecModel["effects"] } {
+  const queries = { ...spec.model!.queries };
+  const effects = { ...spec.model!.effects };
+  for (const [part, child] of Object.entries(spec.parts ?? {})) {
+    const inner = dependenciesOf(child);
+    for (const [name, query] of Object.entries(inner.queries)) queries[`${part}.${name}`] = query;
+    for (const [name, fields] of Object.entries(inner.effects)) effects[`${part}.${name}`] = fields;
+  }
+  return { queries, effects };
 }

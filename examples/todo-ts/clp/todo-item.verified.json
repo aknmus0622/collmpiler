@@ -1,0 +1,17 @@
+{
+  "specs": "sha256:1d5f9662b0527de1984f39376d55c8aead13998b3b1265e904eba36115177098",
+  "code": "sha256:8edab1a274c36013519cb4758a39d104919c4606e89d21d1cbf618955bf7d41d",
+  "files": [
+    "../src/apiResponses.ts",
+    "../src/httpServer.ts",
+    "../src/idSource.ts",
+    "../src/index.ts",
+    "../src/nodeHttp.d.ts",
+    "../src/rules.ts",
+    "../src/todoApi.ts",
+    "../src/todoItem.ts",
+    "../src/todoList.ts",
+    "../src/types.ts",
+    "todo-item.adapter.ts"
+  ]
+}

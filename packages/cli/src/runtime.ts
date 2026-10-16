@@ -6,7 +6,7 @@ import { extract, isRecordOutput, isReference, respondedValues, stableStringify 
 import { seedOf } from "./generate.ts";
 import type { Ir } from "./generate.ts";
 import type { Reference, SpecInput, SpecModel, SpecValue } from "./extract.ts";
-import { loadSpecs } from "./loader.ts";
+import { dependenciesOf, loadSpecs } from "./loader.ts";
 import { conforms, isEnum, isList, isNumberSchema, isOptional, isRecord, isStringSchema } from "./schema.ts";
 
 // 生成された verify.ts から呼ばれる PBT ランタイム。
@@ -35,10 +35,14 @@ type RawStep = {
   answers: Record<string, (input: Values) => unknown>;
   deltas: Record<string, number>;
   chosen: Record<string, Record<string, number | null>>;
+  // 含む部品の、この手の問い合わせの答えなど（部品の名前 → その部品の1手分）
+  parts?: Record<string, RawStep>;
 };
 // 依存の約束を守るために、試行の中で覚えておくこと（前の答え、すでに返した値）
 type Env = { last: Record<string, number>; used: Record<string, unknown[]> };
-type State = { status: string; data: Values; env?: Env };
+// parts: 含む部品の、状態とデータ（外側の状態の一部として持ち回る）
+// many: 多数ある部品の、キーと状態（作った順）
+type State = { status: string; data: Values; env?: Env; parts?: Record<string, State>; many?: Record<string, { key: unknown; state: State }[]> };
 // output は、返すものの形を宣言したコマンドだけが持つ
 type Observation = { state: unknown; effects: unknown; output?: unknown };
 
@@ -70,6 +74,9 @@ const MAX_STEPS = 8;
 // シードによっては一度も検証されなかった。壊れた実装の検証は最初の失敗で止まるので、回数に比例して遅くなるのは、
 // 合格する検証だけ
 export const DEFAULT_RUNS = 5000;
+// 部品を含む部品（入口）の既定の試行回数。HTTP を通すので遅く、中の部品の判断は、中の部品の検証で済んでいる
+export const ENTRY_RUNS = 500;
+export const defaultRuns = (model: { parts?: object } | undefined) => (Object.keys(model?.parts ?? {}).length > 0 ? ENTRY_RUNS : DEFAULT_RUNS);
 
 // 仕様の評価中に起きた問題（条件の衝突、意味の漏れ、不変条件の破れ、型に合わない値）
 class SpecError extends Error {
@@ -85,6 +92,9 @@ class SpecError extends Error {
 // 自由な文字列や、しきい値を宣言していない数値は、一様な乱数では関数の中の定数にまず当たらないため
 // （文字列を "Gold" と比べる条件は、"Gold" を生成しなければ一度も成り立たない）
 type Hints = { strings: string[]; numbers: number[] };
+// 含む部品（さらに中のものも）の解釈。仕様の中の数と文字列は、どの部品のものも試す
+const bindingsOf = (input: SpecInput): BoundSpecification[] =>
+  Object.values(input.parts ?? {}).flatMap((child) => [...(child.binding ? [child.binding] : []), ...bindingsOf(child)]);
 function literalsIn(...bindings: BoundSpecification[]): Hints {
   const strings = new Set<string>();
   const numbers = new Set<number>();
@@ -160,8 +170,18 @@ const plain = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 const messageOf = (error: unknown) => (error instanceof Error ? `${error.name}: ${error.message}` : String(error));
 
 // 仕様側のシミュレーション。実装には触れず、仕様だけで「次に何が起きるべきか」を進める
-function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecification, hints: Hints = literalsIn(binding)) {
+type Simulator = ReturnType<typeof simulator>;
+function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecification, hints: Hints = literalsIn(binding, ...bindingsOf(input))) {
   const commands = Object.keys(input.behaviors).sort();
+  // 含む部品の仕様。外側のコマンドが呼んだ所で、その部品の仕様を実行する
+  const children: Record<string, Simulator> = Object.fromEntries(
+    Object.entries(input.parts ?? {}).map(([part, child]) => [part, simulator(child, child.model!, child.binding!, hints)]),
+  );
+  // 多数ある部品（名前 → キーの名前）
+  const keyed: Record<string, string> = Object.fromEntries(Object.entries(input.parts ?? {}).flatMap(([part, child]) => (child.by === undefined ? [] : [[part, child.by]])));
+  // 意味の関数から見た、多数ある部品: キー・状態・データを並べたもの（作った順）
+  const manyViews = (many: State["many"]): Values =>
+    Object.fromEntries(Object.entries(keyed).map(([part, key]) => [part, (many?.[part] ?? []).map((entry) => ({ [key]: entry.key, status: entry.state.status, ...entry.state.data }))]));
   // 引数の無い問い合わせは、1手に1つの答え。引数つきは、1手ごとに、引数から答えを決める関数
   const nullary = Object.keys(model.queries).filter((name) => Object.keys(model.queries[name].input).length === 0);
   const parameterized = Object.keys(model.queries).filter((name) => !nullary.includes(name));
@@ -179,8 +199,7 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
     return arbitraryOf({ type: isNumberSchema(output) ? output.type : (output as "integer" | "number"), min: 0 }, hints) as fc.Arbitrary<number>;
   };
 
-  const sequences = fc.array(
-    fc.record({
+  const step: fc.Arbitrary<RawStep> = fc.record({
       pick: fc.nat(),
       inputs: fc.record(Object.fromEntries(commands.map((name) => [name, recordOf(model.commands[name] ?? {}, hints)]))),
       queries: recordOf(Object.fromEntries(nullary.map((name) => [name, model.queries[name].output])), hints),
@@ -188,9 +207,9 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
       deltas: fc.record(Object.fromEntries(increasing.map((name) => [name, deltaOf(name)]))),
       // 4回に3回は、いま覚えているものから選ぶ。残りは、乱数の値のまま（無いものも試す）
       chosen: fc.record(Object.fromEntries(commands.map((name) => [name, fc.record(Object.fromEntries(selecting[name].map(([field]) => [field, fc.option(fc.nat(), { nil: null, freq: 4 })])))]))),
-    }),
-    { minLength: 1, maxLength: MAX_STEPS },
-  );
+      parts: fc.record(Object.fromEntries(Object.entries(children).map(([part, child]) => [part, child.step]))),
+    });
+  const sequences = fc.array(step, { minLength: 1, maxLength: MAX_STEPS });
 
   // 意味の関数に渡す状態。仕様に無い名前を読んだら、誤りとして止める。
   // 以前は、意味の関数の引数に型を付けて、名前の書き間違いを型エラーにしていた。型の検査を軽くした代わりに、ここで確かめる
@@ -200,6 +219,9 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
     ...Object.entries(model.queries).filter(([, query]) => Object.keys(query.input).length === 0).map(([name]) => name),
     ...Object.values(model.commands).flatMap((fields) => Object.keys(fields)),
     ...Object.values(input.behaviors).flatMap((behavior) => Object.keys(behavior.asks ?? {})),
+    // 含む部品の答え: state.<部品>.<コマンド>、または .as(...) で付けた名前
+    ...Object.keys(children),
+    ...Object.values(input.behaviors).flatMap((behavior) => Object.keys(behavior.calls ?? {}).filter((alias) => !alias.includes("."))),
   ]);
   const IGNORED = new Set(["toJSON", "then", "constructor", "valueOf", "toString", "inspect", "nodeType", "asymmetricMatch"]);
   const guarded = <T extends object>(state: T): T =>
@@ -217,6 +239,10 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
     // はじめの値を宣言したデータは、その値。ほかは未設定（undefined のキーとして持つ）
     data: Object.fromEntries(Object.keys(model.data).map((field) => [field, model.initial && field in model.initial ? plain(model.initial[field]) : undefined])) as Values,
     env: { last: {}, used: {} },
+    ...(Object.keys(children).length > Object.keys(keyed).length
+      ? { parts: Object.fromEntries(Object.entries(children).filter(([part]) => !(part in keyed)).map(([part, child]) => [part, child.start()])) }
+      : {}),
+    ...(Object.keys(keyed).length > 0 ? { many: Object.fromEntries(Object.keys(keyed).map((part) => [part, []])) } : {}),
   });
 
   // 依存の約束を守った、問い合わせの答え。increasing は、前の答えに増え幅を足す。fresh は、すでに返した値を避ける
@@ -246,13 +272,25 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
     const given: Values = { ...raw.inputs[name] };
     for (const [field, among] of selecting[name]) {
       const pick = raw.chosen[name]?.[field];
-      const remembered = state.data[among.data];
+      // 自分が覚えていなければ、含む部品が覚えているものから（入口の部品が、中の部品の項目を指すとき）
+      // 多数ある部品を指したときは、そのキーから
+      const remembered =
+        among.data in state.data ? state.data[among.data] : among.data in keyed ? (state.many?.[among.data] ?? []).map((entry) => entry.key) : rememberedInParts(state, among.data);
       const candidates = (Array.isArray(remembered) ? remembered : [])
         .map((item) => (among.field === undefined ? item : (item as Values | null)?.[among.field]))
         .filter((value) => value !== undefined && value !== null && conforms(model.commands[name][field], value));
       if (pick !== null && pick !== undefined && candidates.length > 0) given[field] = candidates[pick % candidates.length];
     }
     return given;
+  };
+
+  const rememberedInParts = (state: State, field: string): unknown => {
+    for (const part of Object.values(state.parts ?? {})) {
+      // 含む部品が覚えているデータか、その部品が多数含む部品のキー
+      const found = field in part.data ? part.data[field] : part.many?.[field] ? part.many[field].map((entry) => entry.key) : rememberedInParts(part, field);
+      if (found !== undefined) return found;
+    }
+    return undefined;
   };
 
   const checkInvariants = (state: State, steps: Step[]) => {
@@ -285,20 +323,31 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
         if (!calculation) throw new Error(`計算 "${name}" の中身が、解釈にありません`);
         return calculation(context);
       }
-      case "input":
-        if (!(name in (model.commands[command] ?? {}))) throw new Error(`"${name}" は、コマンド ${command} の入力ではありません`);
-        return context[name];
+      case "input": {
+        // フィールドの組のフィールドは、点でつないだ名前（body.title）
+        const [field, ...inner] = name.split(".");
+        if (!(field in (model.commands[command] ?? {}))) throw new Error(`"${field}" は、コマンド ${command} の入力ではありません`);
+        return inner.reduce<unknown>((value, key) => (value as Values | null | undefined)?.[key], context[field]);
+      }
       case "data":
       case "query":
         return context[name];
       case "was":
         return (ref.path as string[]).includes(context.status);
+      case "call": {
+        // 含む部品のコマンドの答え。フィールドを続けて指せば、そのフィールド
+        const [alias, ...fields] = ref.path as string[];
+        let answer = alias.split(".").reduce<unknown>((value, key) => (value as Values | undefined)?.[key], context);
+        for (const field of fields) answer = (answer as Values | null | undefined)?.[field];
+        return answer;
+      }
     }
   };
 
   // 1手進める。実行できるコマンドが無ければ undefined。仕様の評価に失敗したら SpecError
   // force: そのコマンドを、実行できるかどうか (from / onlyIf) を見ずに実行する（仕様のミューテーションで使う）
-  const next = (state: State, raw: RawStep, steps: Step[], force?: string) => {
+  // strict: force したコマンドが、いまの状態で実行できなければ、仕様の誤りにする（外側の部品が呼んだとき）
+  const next = (state: State, raw: RawStep, steps: Step[], force?: string, strict = false): { step: Step; expected: Observation; after: State } | undefined => {
     try {
       // 意味の関数の中の decide / calculate が、この解釈を引くようにする
       activate(binding);
@@ -319,6 +368,7 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
         guarded({
           status: state.status,
           ...state.data,
+          ...manyViews(state.many),
           ...queries,
           ...inputs[name],
           ...Object.fromEntries(askedBy(name).map((asked) => [asked.name, asked.answer])),
@@ -335,9 +385,55 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
         );
       });
       if (force === undefined && enabled.length === 0) return undefined;
+      if (force !== undefined && strict && !enabled.includes(force)) {
+        throw new Error(`コマンド ${force} は、いまの状態 (${state.status}) では実行できません（from / onlyIf に合いません）`);
+      }
 
       const command = force ?? enabled[raw.pick % enabled.length];
-      const context = contextOf(command);
+      // 含む部品のコマンドを、書いた順に呼ぶ（場合を決める前）。部品の状態は、ここで進む
+      const partStates: Record<string, State> = { ...state.parts };
+      const manyStates: Record<string, { key: unknown; state: State }[]> = Object.fromEntries(Object.entries(state.many ?? {}).map(([part, list]) => [part, [...list]]));
+      const answers: Values = {};
+      const childEffects: { name: string; payload: Values }[] = [];
+      const childQueries: Values = {};
+      const childAsks: Asked[] = [];
+      for (const [alias, call] of Object.entries(input.behaviors[command].calls ?? {})) {
+        const child = children[call.part];
+        if (!child) throw new Error(`${alias}: 部品 "${call.part}" は parts にありません`);
+        const base = { ...contextOf(command), ...answers };
+        const args = plain(Object.fromEntries(Object.entries(call.input).map(([field, value]) => [field, resolve(value, base as Values & { status: string }, command)]))) as Values;
+        const childRaw: RawStep = { ...raw.parts![call.part], pick: 0, inputs: { [call.command]: args }, chosen: {} };
+        // 多数ある部品: キーで1つを選ぶ。無ければ、何も起きず、答えは null
+        const key = call.key === undefined ? undefined : plain(resolve(call.key, base as Values & { status: string }, command));
+        const list = call.part in keyed ? manyStates[call.part] : undefined;
+        const index = list ? list.findIndex((entry) => isDeepStrictEqual(entry.key, key)) : -1;
+        let result: ReturnType<Simulator["next"]>;
+        if (list && index < 0) result = undefined;
+        else {
+          try {
+            result = child.next(list ? list[index].state : partStates[call.part], childRaw, [], call.command, true);
+          } catch (error) {
+            throw new Error(`${command} が呼んだ ${call.part}.${call.command} で: ${error instanceof SpecError ? error.message : messageOf(error)}`);
+          } finally {
+            activate(binding);
+          }
+          if (list) list[index] = { key, state: result!.after };
+          else partStates[call.part] = result!.after;
+        }
+        const output = result ? result.expected.output : null;
+        if (alias.includes(".")) {
+          const [part, name] = alias.split(".");
+          answers[part] = { ...(answers[part] as Values | undefined), [name]: output };
+        } else answers[alias] = output;
+        if (!result) continue;
+        childEffects.push(...(result.expected.effects as { name: string; payload: Values }[]).map((effect) => ({ name: `${call.part}.${effect.name}`, payload: effect.payload })));
+        for (const [name, value] of Object.entries(result.step.queries)) if (!(`${call.part}.${name}` in childQueries)) childQueries[`${call.part}.${name}`] = value;
+        childAsks.push(...result.step.asks.map((asked) => ({ ...asked, query: `${call.part}.${asked.query}` })));
+      }
+      // 多数ある部品は、呼んだあとの並びに、呼んだ答えを添える（state.items と state.items.Complete）
+      const views = manyViews(manyStates);
+      for (const part of Object.keys(keyed)) if (answers[part]) Object.assign(views[part] as object, answers[part]);
+      const context = guarded({ ...contextOf(command), ...answers, ...views });
       const cases = input.behaviors[command].when;
       let matched: string;
       try {
@@ -348,7 +444,15 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
         steps.push({ from: state.status, data: plain(state.data), command, input: inputs[command], queries, asks: plain(askedBy(command)), case: `(${error.hits.join(" / ")})` });
         throw new SpecError(`${command} で、${error.message}（入力 ${JSON.stringify(inputs[command])}）`, steps);
       }
-      const step: Step = { from: state.status, data: plain(state.data), command, input: inputs[command], queries, asks: plain(askedBy(command)), case: matched };
+      const step: Step = {
+        from: state.status,
+        data: plain(state.data),
+        command,
+        input: inputs[command],
+        queries: { ...queries, ...childQueries },
+        asks: plain([...askedBy(command), ...childAsks]),
+        case: matched,
+      };
       steps.push(step);
 
       const outcome = cases[matched];
@@ -357,7 +461,8 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
       if (!model.states.includes(target)) throw new Error(`goTo "${target}" は states にありません`);
 
       // 副作用: when が成り立つものだけを、書かれた順に
-      const effects: { name: string; payload: Values }[] = [];
+      // 含む部品の副作用が先（呼んだのは、場合を決める前）。名前は、部品の名前で修飾する
+      const effects: { name: string; payload: Values }[] = [...childEffects];
       for (const effect of outcome.effects) {
         const issued =
           effect.when === undefined
@@ -407,7 +512,35 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
         }
       }
 
-      const after: State = { status: target, data: { ...state.data, ...set } as Values, env };
+      // 多数ある部品を作る、消す（場合が決まったあと、書いた順に）
+      for (const added of outcome.adds ?? []) {
+        const child = children[added.part];
+        const list = manyStates[added.part];
+        if (!child || !list) throw new Error(`部品 "${added.part}" は、多数ある部品 (many) ではありません`);
+        const key = plain(resolve(added.key, context, command));
+        if (list.some((entry) => isDeepStrictEqual(entry.key, key))) throw new Error(`${added.part}: キー ${JSON.stringify(key)} の部品は、すでにあります`);
+        const fresh = child.start();
+        const given = plain(Object.fromEntries(Object.entries(added.data).map(([field, value]) => [field, resolve(value, context, command)]))) as Values;
+        for (const [field, value] of Object.entries(given)) {
+          const schema = input.parts![added.part].model!.data[field];
+          if (!schema) throw new Error(`${added.part}: "${field}" は、その部品の data にありません`);
+          if (!conforms(schema, value)) throw new Error(`${added.part}.${field} = ${JSON.stringify(value)} が宣言した型・範囲に合いません`);
+        }
+        list.push({ key, state: { ...fresh, data: { ...fresh.data, ...given } } });
+      }
+      for (const removed of outcome.removes ?? []) {
+        const key = plain(resolve(removed.key, context, command));
+        if (!manyStates[removed.part]) throw new Error(`部品 "${removed.part}" は、多数ある部品 (many) ではありません`);
+        manyStates[removed.part] = manyStates[removed.part].filter((entry) => !isDeepStrictEqual(entry.key, key));
+      }
+
+      const after: State = {
+        status: target,
+        data: { ...state.data, ...set } as Values,
+        env,
+        ...(state.parts ? { parts: partStates } : {}),
+        ...(state.many ? { many: manyStates } : {}),
+      };
       checkInvariants(after, steps);
       return { step, expected: plain({ state: target, effects, ...(declared === undefined ? {} : { output }) }) as Observation, after };
     } catch (error) {
@@ -415,7 +548,7 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
     }
   };
 
-  return { commands, sequences, start, next, checkInvariants };
+  return { commands, step, sequences, start, next, checkInvariants };
 }
 
 // 仕様の事前検査: 実装なしで、仕様だけをランダムなアクション列で実行する。
@@ -677,7 +810,7 @@ export async function runPbt(options: { specs: string; adapter: Adapter; compone
   const result = await check(options.specs, options.adapter, { drafts: values.drafts, component: options.component }, {
     seed: values.seed === undefined ? undefined : Number(values.seed),
     path: values.path,
-    numRuns: values.runs === undefined ? DEFAULT_RUNS : Number(values.runs),
+    ...(values.runs === undefined ? {} : { numRuns: Number(values.runs) }),
   });
   console.log(RESULT_PREFIX + JSON.stringify(result));
   if (result.status !== "pass") process.exitCode = 1;
@@ -689,10 +822,11 @@ export async function check(
   specs: string,
   adapter: Adapter,
   select: { drafts: boolean; component?: string },
-  params: { seed?: number; path?: string; numRuns: number },
+  given: { seed?: number; path?: string; numRuns?: number },
 ): Promise<PbtResult> {
   const input = await loadSpecs(specs, select);
   const model = input.model;
+  let params = { ...given, numRuns: given.numRuns ?? defaultRuns(model) };
   if (input.problems?.length) return { status: "error", message: `解釈が Layer 1 と合いません: ${input.problems.join(" / ")}` };
   if (!model && input.layer1) return { status: "error", message: "コンポーネントの解釈 (interpretation) がありません" };
   if (input.stale) return { status: "error", message: "解釈を導いたあとで、Layer 1 が変わっています (clp interpret を実行してください)" };
@@ -700,6 +834,8 @@ export async function check(
   if (!input.binding) return { status: "error", message: "コンポーネントの解釈 (interpretation) がありません" };
   const sim = simulator(input, model, input.binding);
   if (sim.commands.length === 0) return { status: "error", message: "検証するコマンドがありません" };
+  // 代役が答える問い合わせと、記録する副作用。含む部品のものは、部品の名前で修飾したもの（todos.newId）
+  const dependencies = dependenciesOf(input);
   // シードの指定が無ければ、clp apply と同じく、仕様のハッシュから決める（同じ仕様とコードなら、いつも同じ結果）
   if (params.seed === undefined) params = { ...params, seed: seedOf(JSON.parse(stableStringify(extract(input).ir)) as Ir) };
 
@@ -713,11 +849,11 @@ export async function check(
 
     const ports: Ports = {
       queries: Object.fromEntries(
-        Object.keys(model.queries).map((name) => [
+        Object.keys(dependencies.queries).map((name) => [
           name,
           (asked?: unknown) => {
             if (!current) throw new Error(`ports.queries.${name}() was called before any command; ask during the command instead`);
-            if (Object.keys(model.queries[name].input).length === 0) return current.queries[name];
+            if (Object.keys(dependencies.queries[name].input).length === 0) return current.queries[name];
             // 引数つき: そのコマンドが尋ねることの中から、引数が一致するものを探す。
             // 尋ねなかったことは問わない（答えで結果が変わるなら、結果の不一致として現れる）
             const given = plain(asked ?? {});
@@ -732,7 +868,7 @@ export async function check(
         ]),
       ),
       effects: Object.fromEntries(
-        Object.keys(model.effects).map((name) => [
+        Object.keys(dependencies.effects).map((name) => [
           name,
           (payload: unknown) => void recorded.push({ name, payload: plain(payload ?? {}) }),
         ]),

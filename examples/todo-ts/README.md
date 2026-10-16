@@ -1,30 +1,73 @@
-# A to-do API (the web example of version 0.1)
+# A to-do API
 
-A to-do list behind an HTTP API, taken all the way through with `clp`: the spec is written by a person, the
-interpretation is derived by an LLM, the API part (`src/`) is written by an agent and verified, and the entry
-point (`server/`) is written by a person.
+A to-do list behind an HTTP API, taken all the way through with `clp`. The spec is written by a person. The
+interpretations are derived by an LLM. The list (`src/todoList.ts` and friends) **and the HTTP server**
+(`src/httpServer.ts`, `src/todoApi.ts`, `src/apiResponses.ts`) are written by agents and verified, the server over
+real HTTP. Only the composition root (`server/main.ts`: a real identifier source and a port) is written by a person.
 
 ```text
 examples/todo-ts/
-├── specs/    todos.component.ts and todos.decisions.ts (written by a person), todos.interpretation.ts (derived)
-├── src/      the to-do list, written by an agent
-├── clp/      the test side, generated
-└── server/   the HTTP server, written by a person: requests → commands, answers → responses. The list is in memory
+├── specs/    todo-item.* (one item: OPEN → DONE), todos.* (the list, which contains many items) and todo-api.*
+│             (the API, which contains the list): components and decisions written by a person, interpretations derived
+├── src/      the list and the HTTP server, written by agents
+├── clp/      the test side, generated (todo-api.adapter.ts starts the server and sends requests with fetch)
+└── server/   main.ts: gives the server its dependency and a port (written by a person, 9 lines)
 ```
 
 ```bash
 pnpm install
 cd examples/todo-ts
 pnpm start                       # http://localhost:3000/todos  (PORT=... to change)
-pnpm exec clp verify --out .     # verify src/ against the spec
+pnpm exec clp verify --out .     # verify both components (the API over HTTP, 500 runs)
 ```
 
-| HTTP | Command | Response |
-| --- | --- | --- |
-| `POST /todos` `{"title": "..."}` | `Add` | `created` → 201 with the item, `invalid` → 422 |
-| `POST /todos/:id/complete` | `Complete` | `completed` → 200, `already-done` → 409, `not-found` → 404 |
-| `DELETE /todos/:id` | `Remove` | `removed` → 204, `not-found` → 404 |
-| `GET /todos?only=all\|open\|done` | `List` | 200 with the items, in the order they were added |
+| HTTP | Command of `todo-api` | Calls on `todos` | Response |
+| --- | --- | --- | --- |
+| `POST /todos` `{"title": "..."}` | `PostTodos` | `Add` | 201 with the item, 422 |
+| `POST /todos/:id/complete` | `CompleteTodo` | `Complete` | 200, 404, 409 |
+| `DELETE /todos/:id` | `DeleteTodo` | `Remove` | 204, 404 |
+| `GET /todos?only=all\|open\|done` | `GetTodos` | `List` | 200 with the items, in the order they were added |
+
+## One item as a component (1.0, N5)
+
+`specs/todo-item.component.ts` is one item, with states `OPEN` and `DONE` and its own `Complete` command. The list
+declares `parts({ items: many(TodoItem, by("id")) })`: it creates items (`Part.items.add(newId, { title })`),
+removes them, and asks the one with a given identifier to complete (`Part.items.at(id).Complete()`; with no such
+item, nothing happens and the answer is `null`, which the list answers as `not-found`). The item's life is now
+structure in its own IR, rather than a calculation in the list's oracle. `among(Part.items)` draws identifiers
+from the items that exist.
+
+1. **`clp interpret`**: the item, then the list. Each time, two sessions agreed. The list's agent asked two
+   questions (Unicode whitespace; characters counted as code points). Both were accepted as written.
+2. **`clp apply`, first run: failed.** All six implementation attempts for the item were rejected as
+   `mutation-ineffective`, with 0 of 23 mutants killed. The item has no decision table, and the built-in mutation
+   changes strings only when they are decision values, so its answers (`"completed"`, `"already-done"`) were never
+   broken. The 23 mutants were in older code that no component used yet. The framework now also mutates the
+   constants a spec fixes directly in `responds` and in effect payloads.
+3. **`clp apply`, second run: passed** (about 5 minutes):
+   - The item's code from the first run passed at once.
+   - The list was redesigned to keep one `Todo` (from `src/todoItem.ts`) per identifier. After wiring, the code
+     already passed.
+   - The API was designed and wired again for the list's new shape, and passed the same way.
+
+## The API as a component (1.0, N4)
+
+`specs/todo-api.component.ts` declares `parts({ todos: Todos })`, a `route(...)` per command, and the status
+codes in prose, so they are verified. The expected responses come from running both specs together.
+
+1. **`clp interpret`, todo-api**: the first session wrote `PostTodosInput.body.title`, which the vocabulary
+   could not express yet, so the attempt was rejected. The second attempt worked around it with a calculation.
+   Fields of a record input became handles, and a fresh derivation then wrote the direct form. Two sessions
+   agreed on every sequence, and there were no questions.
+2. **`clp apply`, three runs**: `todos` was graded and skipped each time (nothing to implement).
+   - The first `todo-api` run passed with a framework-free router, but the adapter called it without HTTP:
+     nothing said the routes had to be served over real HTTP. The request now says so.
+   - The second run also passed, but the agent put the listener behind an interface. The request text still
+     said "no `node:` built-ins", while the check allowed the ones a server needs.
+   - The third run passed with `node:http` in production code and `fetch` in the adapter. It took design 1,
+     wiring 1 and implementation 3 attempts, about 8 minutes, with 18 of 19 mutants killed.
+3. The agent declared the part of `node:http` it uses in `src/nodeHttp.d.ts`, because the sandbox has no Node
+   type definitions. That is a gap in the framework (open).
 
 ## How it was made
 

@@ -15,7 +15,15 @@ export type IrModel = Omit<SpecModel, "calculations"> & { calculations?: Record<
 export type Ir = {
   irVersion: number;
   descriptions?: Record<string, string>;
-  behaviors: { name: string; description?: string; from: string[]; onlyIf: string[]; asks?: Record<string, { query: string; input: Record<string, unknown> }>; when: Record<string, { goTo?: string; does?: string }> }[];
+  behaviors: {
+    name: string;
+    description?: string;
+    from: string[];
+    onlyIf: string[];
+    asks?: Record<string, { query: string; input: Record<string, unknown> }>;
+    calls?: Record<string, { part: string; command: string; input: Record<string, unknown> }>;
+    when: Record<string, { goTo?: string; does?: string }>;
+  }[];
   decisions: Record<string, { rows: Record<string, Record<string, unknown>> }>;
   model?: IrModel;
 };
@@ -75,13 +83,21 @@ const members = (lines: string[]) => (lines.length === 0 ? "{}" : `{\n${lines.ma
 export function generateContract(ir: Ir): string {
   const model = requireModel(ir);
   const behaviors = [...ir.behaviors].sort((a, b) => (a.name < b.name ? -1 : 1));
-  const queries = Object.keys(model.queries).sort().map((name) => {
-    const { input, output, promise } = model.queries[name];
+  // 含む部品の依存も、部品の名前で修飾して並ぶ（todos.newId）。アダプターが、それを中の部品のコードに渡す
+  const allQueries = { ...model.queries };
+  const allEffects = { ...model.effects };
+  for (const [part, boundary] of Object.entries(model.parts ?? {})) {
+    for (const [name, query] of Object.entries(boundary.queries)) allQueries[`${part}.${name}`] = query;
+    for (const [name, fields] of Object.entries(boundary.effects)) allEffects[`${part}.${name}`] = fields;
+  }
+  const key = (name: string) => (/^[A-Za-z_$][\w$]*$/.test(name) ? name : JSON.stringify(name));
+  const queries = Object.keys(allQueries).sort().map((name) => {
+    const { input, output, promise } = allQueries[name];
     // 依存の約束。代役は、これを守って答える
     const note = promise === "fresh" ? "/** Never answers with the same value twice. */ " : promise === "increasing" ? "/** Never answers with less than it answered before. */ " : "";
-    return `${note}${name}(${Object.keys(input).length > 0 ? `input: ${shape(input)}` : ""}): ${fieldType(output)}`;
+    return `${note}${key(name)}(${Object.keys(input).length > 0 ? `input: ${shape(input)}` : ""}): ${fieldType(output)}`;
   });
-  const effects = Object.keys(model.effects).sort().map((name) => `${name}(payload: ${shape(model.effects[name])}): void`);
+  const effects = Object.keys(allEffects).sort().map((name) => `${key(name)}(payload: ${shape(allEffects[name])}): void`);
   // コマンドが返すもの。返すコマンドが無ければ、契約は以前のまま
   const outputs = Object.keys(model.outputs ?? {}).sort().map((name) => {
     return `${name}: ${fieldType(model.outputs![name])}`;
@@ -99,6 +115,25 @@ ${outputs.map((line) => `  ${line};`).join("\n")}
 
 `;
 
+  // 経路: コマンドが外からどう届くか。HTTP の決まりは、契約の文で述べる（仕様は HTTP の意味を持たない）
+  const routes = Object.keys(model.routes ?? {}).sort();
+  const routing =
+    routes.length === 0
+      ? ""
+      : `/**
+ * The commands below reach the production system as HTTP requests. Start its server in \`setupIsolation\`
+ * (on a free port) and send each command to its route:
+ * - the method and the path are the route; a path segment \`:name\` is the input field \`name\` (URL-encoded);
+ * - the input field \`body\` is the JSON request body; every other input field goes into the query string;
+ * - the answer has the fields the command's output declares: \`status\` is the response status code, and
+ *   \`body\` the response body parsed as JSON (\`null\` when the response has no body).
+ */
+export const routes = {
+${routes.map((name) => `  ${name}: ${JSON.stringify(model.routes![name])},`).join("\n")}
+} as const;
+
+`;
+
   return `${header(ir)}
 export type StateName = ${union(model.states)};
 
@@ -106,9 +141,13 @@ export type StateName = ${union(model.states)};
 export type Command =
 ${behaviors.map((b) => `  | { name: ${JSON.stringify(b.name)}; input: ${shape(model.commands[b.name] ?? {})} }`).join("\n")};
 
-${results}/**
+${routing}${results}/**
  * Stand-ins for everything the system depends on. The test harness owns them; connect them to
- * whatever seams your production code has.
+ * whatever seams your production code has.${
+   Object.keys(model.parts ?? {}).length > 0
+     ? "\n * A name with a dot (`todos.newId`) is a dependency of a component the system contains (`todos`): connect it to that component's code."
+     : ""
+ }
  */
 export type Ports = {
   /**

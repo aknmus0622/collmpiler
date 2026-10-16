@@ -98,15 +98,22 @@ framework runs on them (`examples/co-llm-piler` is a link to it).
 You write **decision tables** and a **component**. A scenario, a domain part, and a UI part are all written
 as components of the same shape. Neither contains a function.
 
-**Decision tables** (`specs/order.decisions.ts`). Each row is a condition in natural language; cells are
-values, or `null` where a row gives no value for a column. `otherwise` is mandatory.
+Nothing is referred to by a string: a state, a condition, a data field, an effect is declared once, as a
+**handle**, and used through it, so a typo is a type error.
+
+**Decision tables** (`specs/order.decisions.ts`). Each row is a condition in natural language, declared as a
+handle; cells are values, or `null` where a row gives no value for a column. `otherwise` is mandatory.
 
 ```ts
-export const Campaign = decisionTable({
-  "The customer is a Gold member and it is month-end": { discountPercent: 20, grantsCoupon: true, coupon: "Premium" },
-  "The customer is a Silver member": { discountPercent: 5, grantsCoupon: false, coupon: null },
-  otherwise: { discountPercent: 0, grantsCoupon: false, coupon: null },
+export const CampaignIf = conditions({
+  customerGoldMemberMonthEnd: "The customer is a Gold member and it is month-end",
+  customerSilverMember: "The customer is a Silver member",
 });
+export const Campaign = decisionTable(
+  when(CampaignIf.customerGoldMemberMonthEnd, { discountPercent: 20, grantsCoupon: true, coupon: "Premium" }),
+  when(CampaignIf.customerSilverMember, { discountPercent: 5, grantsCoupon: false, coupon: null }),
+  otherwise({ discountPercent: 0, grantsCoupon: false, coupon: null }),
+);
 ```
 
 **The component** (`specs/order.component.ts`). The roughest form is prose alone:
@@ -116,54 +123,67 @@ export const Order = component(description("An order: placed by a customer, paid
 ```
 
 From there, write as structure only what you want to pin down. Every entry — a data field, a query, an
-effect, a calculation, a command — is prose (`description`), parts, or both bundled by `component`:
+effect, a calculation, a command — is prose (`description`), parts, or both bundled by `component`. The
+vocabulary is declared first, as groups of handles, and exported so that the interpretation can use it too:
 
 ```ts
 const Rank = ["Gold", "Silver", "Bronze"] as const;
 const Yen = integer({ min: 0, max: 1_000_000, around: [10_000] });
 
+export const If = conditions({
+  externalPaymentModuleActive: "The external payment module is active",
+  paymentSucceeded: "The payment succeeded",
+});
+export const State = states("DRAFT", "PENDING", "PAID", "SHIPPED", "CANCELLED");
+export const Data = data({ rank: Rank, price: Yen });         // what the order remembers: a type is written as it is
+export const Query = queries({                                // what it asks its dependencies
+  isMonthEnd: component(description("Whether today is the last day of the month."), output("boolean")),
+  paymentModuleActive: output("boolean"),
+  paymentResult: component(description("What the payment module answered for this order."), output(["succeeded", "failed"])),
+});
+export const Effect = effects({                               // what it does to its dependencies
+  SendReceipt: input({ discountPercent: "integer", amount: "integer" }),
+  IssueCoupon: input({ type: ["Premium", "Standard"] }),
+  Refund: description("What the customer paid is returned."),   // prose only
+  // ...
+});
+export const Calc = calculations({
+  amountCharged: component(description("price × (100 − discount percent) ÷ 100, rounded down to a whole yen"), output("integer")),
+});
+export const Inv = invariants({ everyOrderPastDraftState: "Every order past the draft state has a member rank and a price" });
+export const PlaceOrderInput = input({ customerRank: Rank, listPrice: Yen });
+
 export const Order = component({
   description: "An order: placed by a customer, paid through an external payment module, then shipped or cancelled.",
-  states: ["DRAFT", "PENDING", "PAID", "SHIPPED", "CANCELLED"],
-  init: "DRAFT",
-  data: { rank: Rank, price: Yen },                       // what the order remembers: a type is written as it is
-  queries: {                                              // what it asks its dependencies
-    isMonthEnd: component(description("Whether today is the last day of the month."), output("boolean")),
-    paymentModuleActive: "boolean",                       // a bare type is the type of the answer
-    paymentResult: ["succeeded", "failed"],
-  },
-  effects: {                                              // what it does to its dependencies
-    SendReceipt: input({ discountPercent: "integer", amount: "integer" }),
-    IssueCoupon: input({ type: ["Premium", "Standard"] }),
-    Refund: description("What the customer paid is returned."),   // prose only
-    // ...
-  },
+  states: State,
+  init: State.DRAFT,
+  data: Data,
+  queries: Query,
+  effects: Effect,
   decisions: { campaign: Campaign, shipping: Shipping },
-  calculations: {
-    amountCharged: component(description("price × (100 − discount percent) ÷ 100, rounded down to a whole yen"), output("integer")),
-  },
-  invariants: ["Every order past the draft state has a member rank and a price"],
+  calculations: Calc,
+  invariants: Inv,
 
-  commands: {                                             // what drives it from outside
+  commands: {                                                 // what drives it from outside
     // fully structured: input, where it applies, where it leads
     PlaceOrder: component(
-      input({ customerRank: Rank, listPrice: Yen }),
-      from("DRAFT"),
-      goTo("PENDING"),
+      PlaceOrderInput,
+      from(State.DRAFT),
+      goTo(State.PENDING),
       does("The order remembers the customer's rank and the list price. An order confirmation is sent."),
     ),
     Checkout: component(
-      from("PENDING"),
-      onlyIf("The external payment module is active"),
+      from(State.PENDING),
+      onlyIf(If.externalPaymentModuleActive),
       when(
-        "The payment succeeded",
-        goTo("PAID"),
+        If.paymentSucceeded,
+        goTo(State.PAID),
         does("A receipt is sent with the campaign's discount percent and the amount charged. Then a coupon is issued if the campaign grants one."),
       ),
       otherwise(does("The customer is notified of the payment failure.")),   // no goTo: the state stays
     ),
     // partly structured: the resulting state is left to the prose
-    Ship: component(from("PAID"), does("The order becomes shipped. A shipping notice is sent, with priority as the shipping decision says.")),
+    Ship: component(from(State.PAID), does("The order becomes shipped. A shipping notice is sent, with priority as the shipping decision says.")),
     // prose only
     Cancel: description("A pending or paid order can be cancelled. If the order had been paid, a refund is issued."),
   },
@@ -180,17 +200,17 @@ A query can take an input, when it is a question *about something*. The command 
 and names the answer; the implementation is tested against that, and fails if it asks about anything else:
 
 ```ts
-queries: {
-  stateDeclared: component(input({ name: "string" }), output("boolean")),
-},
-commands: {
-  GoTo: component(
-    input({ state: "string" }),
-    asks("declared", "stateDeclared", { name: ref.input("state") }),       // read as `state.declared`
-    when("The named state is not declared", does("An unknown-state diagnostic is reported.")),
-    otherwise(),
-  ),
-},
+export const Query = queries({ stateDeclared: component(input({ name: "string" }), output("boolean")) });
+export const GoToInput = input({ state: "string" });
+// ...
+  commands: {
+    GoTo: component(
+      GoToInput,
+      Query.stateDeclared({ name: GoToInput.state }).as("declared"),    // read as `state.declared`
+      when(If.namedStateNotDeclared, does("An unknown-state diagnostic is reported.")),
+      otherwise(),
+    ),
+  },
 ```
 
 ### 2. Have an LLM interpret it
@@ -201,39 +221,36 @@ pnpm exec clp interpret \
 ```
 
 The agent writes the **interpretation**: the structure Layer 1 left as prose, and the meaning of every
-sentence as a function. You do not write this file.
+sentence as a function attached to its handle. You do not write this file.
 
 ```ts
 // specs/order.interpretation.ts — generated
+import { Campaign, CampaignIf, Shipping, ShippingIf } from "./order.decisions.ts";
+import { Calc, Data, Effect, If, Inv, Order, PlaceOrderInput, State } from "./order.component.ts";
+
 export const Interpretation = interpretation(Order, {
-  // Structure: declarations and references, no functions, in the same words as Layer 1. It goes into the IR.
+  // Structure: declarations and handles, no functions, in the same words as Layer 1. It goes into the IR.
   commands: {
-    PlaceOrder: component(emits("SendOrderConfirmation"), set({ rank: ref.input("customerRank"), price: ref.input("listPrice") })),
+    PlaceOrder: component(Effect.SendOrderConfirmation(), Data.rank.set(PlaceOrderInput.customerRank), Data.price.set(PlaceOrderInput.listPrice)),
     Checkout: component(
       when(
-        "The payment succeeded",
-        emits("SendReceipt", { discountPercent: ref.decision("campaign", "discountPercent"), amount: ref.calculation("amountCharged") }),
-        emits("IssueCoupon", { type: ref.decision("campaign", "coupon") }, onlyWhen(ref.decision("campaign", "grantsCoupon"))),
+        If.paymentSucceeded,
+        Effect.SendReceipt({ discountPercent: Campaign.discountPercent, amount: Calc.amountCharged }),
+        Effect.IssueCoupon({ type: Campaign.coupon }, onlyWhen(Campaign.grantsCoupon)),
       ),
-      otherwise(emits("NotifyPaymentFailure")),
+      otherwise(Effect.NotifyPaymentFailure()),
     ),
-    Ship: component(goTo("SHIPPED"), emits("SendShippingNotice", { priority: ref.decision("shipping", "priority") })),
-    Cancel: component(from("PENDING", "PAID"), goTo("CANCELLED"), emits("Refund", onlyWhen(ref.was("PAID")))),
+    Ship: component(goTo(State.SHIPPED), Effect.SendShippingNotice({ priority: Shipping.priority })),
+    Cancel: component(from(State.PENDING, State.PAID), goTo(State.CANCELLED), Effect.Refund(onlyWhen(was(State.PAID)))),
   },
 
   // meanings: functions. The oracle for the tests; never shown to the implementing agent.
-  meanings: {
-    conditions: {
-      "The customer is a Gold member and it is month-end": (state) => state.rank === "Gold" && state.isMonthEnd,
-      "The payment succeeded": (state) => state.paymentResult === "succeeded",
-      // ...
-    },
-    calculations: {
-      amountCharged: (state) =>
-        Math.floor(((state.price ?? 0) * (100 - decide(Order, "campaign", state).discountPercent)) / 100),
-    },
+  meanings: [
+    CampaignIf.customerGoldMemberMonthEnd.means((state) => state.rank === "Gold" && state.isMonthEnd),
+    If.paymentSucceeded.means((state) => state.paymentResult === "succeeded"),
+    Calc.amountCharged.means((state) => Math.floor(((state.price ?? 0) * (100 - Campaign.of(state).discountPercent)) / 100)),
     // ...
-  },
+  ],
 });
 ```
 

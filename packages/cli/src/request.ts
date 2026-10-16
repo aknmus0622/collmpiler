@@ -54,6 +54,19 @@ The IR describes one component by its boundary.
   guarantees about the answers: \`fresh\` means it never answers with the same value twice, \`increasing\`
   that it never answers with less than before. Rely on it; do not implement it.
 - \`model.effects\`: the side effects the component may perform on its environment, with their payload fields.
+- \`model.parts\` (if present): components this one contains. Each entry names the contained component
+  (\`component\`), the commands you can call on it (\`commands\`, with their input fields, and \`outputs\`, what they
+  answer), and its own dependencies (\`queries\`, \`effects\`). Their production code already exists; use it.
+  Their dependencies come from the same environment as this component's: pass them on to that code. An entry
+  with \`by\` is a component of which there are many, one per key (\`by\` names the key): this component creates
+  them (\`adds\`), removes them (\`removes\`) and executes a command on the one with a given key (\`at\` in \`calls\`).
+- \`model.routes\` (if present): how each command reaches the system from outside, as an HTTP method and path
+  (\`"POST /todos"\`, \`"DELETE /todos/:id"\`). The production code serves them over HTTP itself: it includes the
+  HTTP server (Node's \`node:http\`), which can be started with its dependencies on a given port (0 for any free
+  one), tells the port it listens on, can be stopped, and serves each command at its route. A path segment written \`:name\`
+  is the input field \`name\`, the input field \`body\` is the JSON request body, and every other input field is
+  a query-string parameter. A command whose answer has \`status\` (and \`body\`) answers with that response
+  status code (and that JSON response body; \`null\` means no body).
 - Field types: an array lists the allowed values; a string is a primitive type (\`integer\` is a whole number);
   an object such as \`{"type": "integer", "min": 0, "max": 1000000}\` is a number with constraints (\`around\`
   lists thresholds the test will probe closely, including the values just below and above them);
@@ -78,7 +91,10 @@ The IR describes one component by its boundary.
   hold; behaviour outside them is not tested. \`asks\` (if present) lists what the command asks through a
   query that takes an input: each entry names the answer, the \`query\`, and the \`input\` to ask it with. Ask
   with exactly that input; other questions through that query are not part of the specification. You need not
-  ask when the answer cannot matter. \`when\` maps each condition to what happens when it holds
+  ask when the answer cannot matter. \`calls\` (if present) lists, in order, the commands of contained
+  components that the command executes before its case is decided: each entry names the answer, the \`part\`,
+  the \`command\`, and its \`input\`; \`at\` (if present) is the key of the one to execute it on, and if none has that
+  key, nothing happens and the answer is \`null\`. \`when\` maps each condition to what happens when it holds
   (a command that does not branch has only \`otherwise\`):
   - \`goTo\`: the resulting state. If it is absent, the state does not change.
   - \`does\` (if present): what happens, in prose. It explains the intent; the fields below are the precise form.
@@ -86,6 +102,8 @@ The IR describes one component by its boundary.
     \`onlyWhen\` is performed only if that holds; \`onlyWhen\` is either a condition sentence or a reference to a
     boolean value. No \`emits\` means no effect.
   - \`set\`: the data to remember.
+  - \`adds\` / \`removes\` (if present): create a new one of a contained component listed with \`by\`, with that
+    \`key\` and that starting \`data\` (it starts in its own initial state), or remove the one with that \`key\`.
   - \`responds\` (if present): what the command answers with, given back to whoever executed it. It is a
     single value, or one value per field; \`null\` means the command has no value for that field in this
     case. \`model.outputs\` gives the shape of the answer for each command that has one (\`record\` lists
@@ -95,7 +113,8 @@ The IR describes one component by its boundary.
     input, remembered field, or query answer (\`<name>\` is a query without input, or a name given in \`asks\`).
   - \`{"$ref": "calculation:<name>"}\`: the result of that computation.
   - \`{"$ref": "decision:<table>.<column>"}\`: the value of that column in the row whose condition holds.
-  - \`{"$was": [<states>]}\`: true if the state before the command was one of those listed.`;
+  - \`{"$was": [<states>]}\`: true if the state before the command was one of those listed.
+  - \`{"$ref": "call:<name>"}\`: the answer of a command listed in \`calls\` (\`call:<name>.<field>\`: one field of it).`;
 
 // 本番コードと同じ場所にテスト側のファイルが並ぶとき、その名前を本番コードに使わせない
 const reserved = (ws: Workspace) =>
@@ -274,7 +293,8 @@ export function renderRequest(
   assets: Asset[] = [],
   // incremental: すでにある本番コードを、仕様の変更に合わせて直す。
   // others: 同じ本番コードを共有する、ほかのコンポーネントの IR の場所
-  options: { incremental?: boolean; others?: string[] } = {},
+  // partFiles: 含む部品のコード（使うだけで、書き換えない）
+  options: { incremental?: boolean; others?: string[]; partFiles?: string[] } = {},
 ): string {
   const incremental = options.incremental ?? false;
   const body =
@@ -295,5 +315,11 @@ export function renderRequest(
     phase === "wiring" || others.length === 0
       ? ""
       : `\n## Other components of the same system\n\nThe production code is shared with other components. Their specifications are here, in the same format:\n\n${others.map((path) => `- \`${path}\``).join("\n")}\n\nYour task is the specification named at the top. The code must keep satisfying the others too: their tests are run again after yours pass. Do not change exported names or signatures that already exist unless your specification requires it. Reuse what fits; do not edit those files.\n\nYou may change code that your component uses, including code it shares with the others. Code that only other components use is not yours to change: such a change is undone and the attempt is rejected. New files are always fine.\n`;
-  return `# ${TITLES[phase]} (attempt ${attempt})\n\n${body}${system}${renderAssets(assets)}${previous}`;
+  // 含む部品のコード: 設計と実装の段階は、それを使う。中身を変えてはならない
+  const partFiles = options.partFiles ?? [];
+  const contained =
+    phase === "wiring" || partFiles.length === 0
+      ? ""
+      : `\n## Components this one contains\n\nThe specification lists in \`model.parts\` the components this one contains. Their production code already exists and has been verified on its own. Use it as it is, through its exported API; read it to learn that API:\n\n${partFiles.map((path) => `- \`${path}\``).join("\n")}\n\nDo not change these files: a change is undone and the attempt is rejected. Your code is what connects the outside (\`model.routes\`, if present) to them.\n`;
+  return `# ${TITLES[phase]} (attempt ${attempt})\n\n${body}${system}${contained}${renderAssets(assets)}${previous}`;
 }

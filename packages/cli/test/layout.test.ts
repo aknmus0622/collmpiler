@@ -142,6 +142,12 @@ test("検査: 本番コードはフレームワーク・仕様・テスト側・
   assert.deepEqual(rules(), Array(4).fill("src/order-service.ts:forbidden-import"));
 });
 
+test("検査: 組み込みモジュールのうち、HTTP で受けるのに要るものは使える", async () => {
+  const { rules, edit } = await workspace();
+  edit("src/order-service.ts", (text) => [`import { createServer } from "node:http";`, `import { URL } from "node:url";`, text].join("\n"));
+  assert.deepEqual(rules(), []);
+});
+
 test("検査: 動的ロードは不可。コメント・文字列・正規表現の中は対象外", async () => {
   const { rules, edit } = await workspace();
   edit("src/order-service.ts", (text) => `// import x from "node:fs"\nconst s = 'import("node:fs")'; const r = /from "x"/;\n${text}`);
