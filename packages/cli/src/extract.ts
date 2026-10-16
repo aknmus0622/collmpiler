@@ -1,7 +1,8 @@
-import type { BoundSpecification, Constant, Declaration, FieldSchema, Fields, OutputSchema, Table } from "@clp/core";
+import { compositionOf } from "@clp/core";
+import type { BoundSpecification, Composition, Constant, Declaration, FieldSchema, Fields, GoTo, OutputSchema, Table } from "@clp/core";
 import { relative } from "node:path";
 import type { Asset } from "./assets.ts";
-import { compatible, conforms, describe, isEnum, isNumberSchema, isRecord, isStructured } from "./schema.ts";
+import { compatible, conforms, describe, isEnum, isNumberSchema, isOneOf, isRecord, isStructured } from "./schema.ts";
 
 // 仕様 (Layer 1 のコンポーネント + 決定表 + 解釈の構造) から IR を作る。
 // どれにも関数は無いので、IR は宣言をほぼそのまま並べ直したものになる。
@@ -11,7 +12,7 @@ import { compatible, conforms, describe, isEnum, isNumberSchema, isRecord, isStr
 // あわせて、型チェックをすり抜けた誤りを、分かりやすい文面で報告する。
 
 // 6: キーを、仕様を書くときの語にそろえた（計算の { description, output }、場合の emits: [{ effect, input, onlyWhen }]）
-export const IR_VERSION = 6;
+export const IR_VERSION = 7;
 
 // --- 読み込んだ仕様を、扱いやすい形に正規化したもの (loader が作る) ---
 export type SpecModel = {
@@ -59,7 +60,8 @@ export type SpecAsk = { query: string; input: Record<string, SpecValue> };
 export type SpecCall = { part: string; command: string; input: Record<string, SpecValue>; key?: SpecValue };
 // responds: コマンドが返す値。値1つか、{ フィールド: 値 }
 export type SpecOutcome = {
-  goTo?: string;
+  // 状態の名前か、決定表の列の参照（その行の値が、状態の名前） (W2)
+  goTo?: GoTo;
   does?: string;
   responds?: SpecValue | Record<string, SpecValue>;
   effects: SpecEffect[];
@@ -147,22 +149,28 @@ function typeOf(input: SpecInput, command: string, ref: Reference): { schema?: F
       let schema: FieldSchema | undefined = model.commands[command]?.[field];
       if (schema === undefined) return { problem: `"${field}" は、コマンド ${command} の input にありません` };
       for (const key of inner) {
-        const record: Fields | undefined = isRecord(schema) ? (schema as unknown as { record: Fields }).record : undefined;
+        const record = fieldsOfSchema(schema);
         if (!record || !(key in record)) return { problem: `"${name}": ${field} に、フィールド "${key}" はありません` };
         schema = record[key];
       }
       return { schema };
     }
-    case "data":
-      return model.data[name] ? { schema: model.data[name] } : { problem: `"${name}" は、data にありません` };
+    case "data": {
+      // フィールドの組のフィールドは、点でつないだ名前（last.status。W12）
+      const [field, ...inner] = model.data[name] ? [name] : name.split(".");
+      if (!model.data[field]) return { problem: `"${field}" は、data にありません` };
+      return fieldIn(model.data[field], inner, field);
+    }
     case "query": {
-      // そのコマンドが尋ねたことに付けた名前か、引数の無い問い合わせの名前
-      const asked = input.behaviors[command]?.asks?.[name];
-      if (asked) return model.queries[asked.query] ? { schema: model.queries[asked.query].output } : { problem: `問い合わせ "${asked.query}" は、queries にありません` };
-      const query = model.queries[name];
-      if (!query) return { problem: `"${name}" は、queries にも、コマンド ${command} の asks にもありません` };
-      if (Object.keys(query.input).length > 0) return { problem: `問い合わせ "${name}" には引数があります。asks で尋ねて、付けた名前で読んでください` };
-      return { schema: query.output };
+      // そのコマンドが尋ねたことに付けた名前か、引数の無い問い合わせの名前。答えのフィールドは、点でつないで続ける (W12)
+      const asks = input.behaviors[command]?.asks ?? {};
+      const [head, ...inner] = asks[name] || model.queries[name] ? [name] : name.split(".");
+      const asked = asks[head];
+      if (asked) return model.queries[asked.query] ? fieldIn(model.queries[asked.query].output, inner, head) : { problem: `問い合わせ "${asked.query}" は、queries にありません` };
+      const query = model.queries[head];
+      if (!query) return { problem: `"${head}" は、queries にも、コマンド ${command} の asks にもありません` };
+      if (Object.keys(query.input).length > 0) return { problem: `問い合わせ "${head}" には引数があります。asks で尋ねて、付けた名前で読んでください` };
+      return fieldIn(query.output, inner, head);
     }
     case "was": {
       const unknown = (ref.path as string[]).find((state) => !model.states.includes(state));
@@ -184,6 +192,20 @@ function typeOf(input: SpecInput, command: string, ref: Reference): { schema?: F
       return { schema };
     }
   }
+}
+
+// フィールドの組の中を、名前の並びでたどった型 (W12)
+// フィールドの組のフィールドか、どれか1つの形 (oneOf) の形
+const fieldsOfSchema = (schema: FieldSchema): Fields | undefined =>
+  isRecord(schema) ? (schema as unknown as { record: Fields }).record : isOneOf(schema) ? schema.oneOf : undefined;
+function fieldIn(schema: FieldSchema, fields: string[], owner: string): { schema?: FieldSchema; problem?: string } {
+  let current = schema;
+  for (const field of fields) {
+    const record = fieldsOfSchema(current);
+    if (!record || !(field in record)) return { problem: `${owner} に、フィールド "${field}" はありません` };
+    current = record[field];
+  }
+  return { schema: current };
 }
 
 // 値 (定数か参照) を、宣言した型のフィールドに入れてよいか。だめなら理由を返す
@@ -212,29 +234,25 @@ export function serialize(value: SpecValue): unknown {
 }
 
 // 値1つを、直列化に渡すコマンドの列にする。コマンドの名前と入力は、value-writer の仕様のもの
-export type WriteEvent =
-  | { name: "Constant"; input: { kind: "string" | "number" | "boolean"; text: string; number: number; flag: boolean } }
-  | { name: "Reference"; input: { target: "input" | "data" | "query" | "calculation" | "decision" | "call"; name: string; table: string; column: string } }
-  | { name: "WasState"; input: { state: string } };
-export function* writeEvents(value: SpecValue): Generator<WriteEvent> {
-  if (!isReference(value)) {
-    yield {
-      name: "Constant",
-      input: {
-        kind: typeof value as "string" | "number" | "boolean",
-        text: typeof value === "string" ? value : "",
-        number: typeof value === "number" ? value : 0,
-        flag: value === true,
-      },
-    };
-  } else if (value.$ref === "was") {
-    for (const state of value.path as string[]) yield { name: "WasState", input: { state } };
-  } else if (value.$ref === "decision") {
+// value-writer に渡すコマンド: 値1つを、どれか1つの形 (oneOf) で渡す。答えが、IR に書く値
+export type WriteEvent = {
+  name: "Write";
+  input: {
+    value:
+      | { constant: string | number | boolean }
+      | { reference: { target: "input" | "data" | "query" | "calculation" | "call"; name: string } }
+      | { column: { table: string; column: string } }
+      | { was: string[] };
+  };
+};
+export function writeEvent(value: SpecValue): WriteEvent {
+  if (!isReference(value)) return { name: "Write", input: { value: { constant: value as string | number | boolean } } };
+  if (value.$ref === "was") return { name: "Write", input: { value: { was: [...(value.path as string[])] } } };
+  if (value.$ref === "decision") {
     const [table, column] = value.path as [string, string];
-    yield { name: "Reference", input: { target: "decision", name: "", table, column } };
-  } else {
-    yield { name: "Reference", input: { target: value.$ref, name: String(value.path), table: "", column: "" } };
+    return { name: "Write", input: { value: { column: { table, column } } } };
   }
+  return { name: "Write", input: { value: { reference: { target: value.$ref as "input", name: String(value.path) } } } };
 }
 
 // IR に書く値を、置き場所の名前と一緒に並べる（尋ねることの引数、副作用のペイロードと when、覚えるデータ）
@@ -251,7 +269,7 @@ export const isRecordOutput = (schema: OutputSchema | undefined): schema is { re
   schema !== undefined && isRecord(schema);
 export function respondedValues(responds: SpecOutcome["responds"], output: OutputSchema | undefined): [string, SpecValue][] {
   if (responds === undefined) return [];
-  const fields = isRecordOutput(output) && typeof responds === "object" && responds !== null && !Array.isArray(responds) && !("$ref" in responds);
+  const fields = (isRecordOutput(output) || (output !== undefined && isOneOf(output))) && typeof responds === "object" && responds !== null && !Array.isArray(responds) && !("$ref" in responds);
   return fields ? Object.entries(responds as Record<string, SpecValue>) : [["", responds as SpecValue]];
 }
 // 定数のうち、平らな値（真偽値・数値・文字列）と参照。並びやフィールドの組の定数と、含む部品の答えの参照は、
@@ -298,6 +316,14 @@ export type ReferenceEvent =
   | { name: "Begin" | "LeaveCommand" | "Finish"; input: {} }
   | { name: "EnterCommand" | "EnterCase" | "UseEffect"; input: { name: string } }
   | { name: "AllowFrom" | "GoTo"; input: { state: string } };
+// 遷移先になりうる状態: 名前なら、その1つ。決定表の列なら、その列の値（null を除く） (W2)
+export function goToTargets(input: SpecInput, goTo: GoTo): string[] {
+  if (typeof goTo === "string") return [goTo];
+  if (goTo.$ref !== "decision") return [];
+  const [table, column] = goTo.path as [string, string];
+  return [...new Set(Object.values(input.decisions[table] ?? {}).map((row) => row[column]).filter((cell): cell is string => typeof cell === "string"))];
+}
+
 export function* referenceEvents(input: SpecInput): Generator<ReferenceEvent> {
   yield { name: "Begin", input: {} };
   for (const name of Object.keys(input.behaviors).sort()) {
@@ -307,7 +333,7 @@ export function* referenceEvents(input: SpecInput): Generator<ReferenceEvent> {
     for (const caseName of Object.keys(behavior.when).sort()) {
       const outcome = behavior.when[caseName];
       yield { name: "EnterCase", input: { name: caseName } };
-      if (outcome.goTo !== undefined) yield { name: "GoTo", input: { state: outcome.goTo } };
+      if (outcome.goTo !== undefined) for (const state of goToTargets(input, outcome.goTo)) yield { name: "GoTo", input: { state } };
       for (const effect of outcome.effects) yield { name: "UseEffect", input: { name: effect.name } };
     }
     yield { name: "LeaveCommand", input: {} };
@@ -374,7 +400,7 @@ const constantEvent = (value: Constant): ValueEvent =>
         : { name: "Unresolved", input: {} };
 // フィールドの型の種類。"enum" は、決まった文字列のどれか
 export const kindOf = (schema: FieldSchema): "boolean" | "integer" | "number" | "string" | "enum" =>
-  isEnum(schema) ? "enum" : isNumberSchema(schema) ? schema.type : typeof schema === "string" ? schema : "string";
+  isEnum(schema) ? "enum" : isNumberSchema(schema) ? schema.type : typeof schema === "string" && schema !== "value" ? schema : "string";
 
 export function* valueEvents(input: SpecInput, command: string, value: SpecValue): Generator<ValueEvent> {
   if (!isReference(value)) return void (yield constantEvent(value));
@@ -445,7 +471,16 @@ export function extract(
   }
   if (!model) return { ir: { irVersion: IR_VERSION, behaviors: [], decisions: {} }, diagnostics };
 
+  // 使われた条件の組み合わせ (W3)。IR に、その中身を出す
+  const compositions: Record<string, Composition> = {};
   const condition = (behavior: string, caseName: string, name: string) => {
+    const composition = compositionOf(name);
+    if (composition) {
+      compositions[name] = composition;
+      // 組み合わせの意味は自動で決まるので、組み合わせる前の条件を確かめる
+      for (const part of "all" in composition ? composition.all : [composition.not]) condition(behavior, caseName, part);
+      return;
+    }
     if (binding && name !== "otherwise" && typeof binding.conditions?.[name] !== "function") {
       report("unbound-condition", behavior, caseName, `条件 "${name}" の意味が、解釈の conditions に書かれていません`);
     }
@@ -525,8 +560,15 @@ export function extract(
     for (const caseName of Object.keys(behavior.when).sort()) {
       const outcome = behavior.when[caseName];
       condition(name, caseName, caseName);
-      if (outcome.goTo !== undefined && reported("unknown-state", name, caseName, outcome.goTo)) {
-        report("unknown-state", name, caseName, `goTo の "${outcome.goTo}" は states にありません`);
+      if (outcome.goTo !== undefined) {
+        const targets = goToTargets(input, outcome.goTo);
+        for (const state of targets) if (reported("unknown-state", name, caseName, state)) report("unknown-state", name, caseName, `goTo の "${state}" は states にありません`);
+        if (typeof outcome.goTo !== "string") {
+          const found = isReference(outcome.goTo) ? typeOf(input, name, outcome.goTo as Reference) : { problem: "参照ではありません" };
+          if (outcome.goTo.$ref !== "decision") report("bad-value", name, caseName, "goTo に書けるのは、状態か、状態の名前を値に持つ決定表の列です");
+          else if (found.problem) report("bad-value", name, caseName, `goTo: ${found.problem}`);
+          else if (targets.length === 0) report("bad-value", name, caseName, "goTo に書いた決定表の列に、状態がありません");
+        }
       }
 
       const effects = outcome.effects.map((effect, index) => {
@@ -585,6 +627,15 @@ export function extract(
         for (const field of given.keys()) {
           if (field !== "" && !(field in output.record)) report("bad-value", name, caseName, `responds.${field}: "${field}" は、output のフィールドにありません`);
         }
+      } else if (isOneOf(output)) {
+        // どれか1つの形: 形の名前を1つだけキーにする（{ constant: 値 }）
+        if (responded.length !== 1 || responded[0][0] === "" || !(responded[0][0] in output.oneOf)) {
+          report("bad-response", name, caseName, `responds: 返すものは、${Object.keys(output.oneOf).join(" / ")} のどれか1つの形です。responds: { 形: 値 } と書いてください`);
+        } else {
+          const [variant, given] = responded[0];
+          const problem = mismatch(input, name, given, output.oneOf[variant]);
+          if (problem) report("bad-value", name, caseName, `responds.${variant}: ${problem}`);
+        }
       } else if (responded.length !== 1 || responded[0][0] !== "") {
         report("bad-response", name, caseName, "responds: 返すものは値1つです。responds(値) と書いてください");
       } else {
@@ -606,7 +657,7 @@ export function extract(
       }
 
       when[caseName] = {
-        ...(outcome.goTo === undefined ? {} : { goTo: outcome.goTo }),
+        ...(outcome.goTo === undefined ? {} : { goTo: typeof outcome.goTo === "string" ? outcome.goTo : serialize(outcome.goTo as SpecValue) }),
         ...(outcome.does === undefined ? {} : { does: outcome.does }),
         ...(outcome.responds === undefined ? {} : { responds: written.length === 1 && written[0][0] === "" ? written[0][1] : Object.fromEntries(written) }),
         ...(effects.length > 0 ? { emits: effects } : {}),
@@ -640,6 +691,11 @@ export function extract(
   const typeProblems = (schema: FieldSchema): string[] => {
     if (isEnum(schema)) return schema.length === 0 ? ["列挙が空です。取り得る値を1つ以上書いてください"] : [];
     if (typeof schema !== "object") return [];
+    if ("oneOf" in schema) {
+      const variants = Object.entries(schema.oneOf);
+      if (variants.length === 0) return ["oneOf に形がありません。形を1つ以上書いてください"];
+      return variants.flatMap(([variant, inner]) => typeProblems(inner).map((problem) => `${variant}: ${problem}`));
+    }
     if ("list" in schema) return typeProblems(schema.list);
     if ("optional" in schema && !("record" in schema)) return typeProblems(schema.optional as FieldSchema);
     if ("record" in schema) return Object.entries(schema.record).flatMap(([field, inner]) => typeProblems(inner).map((problem) => `${field}: ${problem}`));
@@ -704,7 +760,15 @@ export function extract(
   // Layer 1 が文で書いた説明（全体と、項目ごと）。構造が正確な形で、こちらは意図を伝える
   const descriptions = input.component?.descriptions ?? {};
   return {
-    ir: { irVersion: IR_VERSION, ...(Object.keys(descriptions).length > 0 ? { descriptions } : {}), model: irModel(model), decisions, behaviors },
+    ir: {
+      irVersion: IR_VERSION,
+      ...(Object.keys(descriptions).length > 0 ? { descriptions } : {}),
+      model: irModel(model),
+      decisions,
+      behaviors,
+      // 組み合わせた条件の中身（使われたものだけ）
+      ...(Object.keys(compositions).length > 0 ? { conditions: compositions } : {}),
+    },
     diagnostics,
   };
 }

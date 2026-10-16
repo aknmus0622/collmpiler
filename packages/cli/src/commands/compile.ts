@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { extract, stableStringify, whereOf } from "../extract.ts";
-import { graphDiagnostics } from "../graph.ts";
+import { graphDiagnostics, providedData } from "../graph.ts";
 import { listComponents, loadSpecs } from "../loader.ts";
 import { seedOf } from "../generate.ts";
 import type { Ir } from "../generate.ts";
@@ -29,6 +29,8 @@ const dir = resolve(process.cwd(), positionals[0] ?? "specs");
 const all = await listComponents(dir, { drafts: values.drafts });
 const names = values.component === undefined ? all : [values.component];
 
+// 含む部品が作るときに渡すデータ（ほかのコンポーネントの仕様から分かる）
+const provided = providedData(await Promise.all(all.map((name) => loadSpecs(dir, { drafts: values.drafts, component: name }))));
 const irs: Record<string, unknown> = {};
 const ignored = new Set<string>();
 const checks: (() => Promise<void>)[] = [];
@@ -39,7 +41,7 @@ for (const name of names) {
   const { ir, diagnostics } = extract(spec, await references(spec));
   const tag = names.length > 1 ? `${name}: ` : "";
   // グラフの検査: たどり着けない状態とコマンド、使われない語彙（ほかの誤りが無いときに）
-  const structural = diagnostics.some((d) => d.severity === "error") ? [] : graphDiagnostics(spec);
+  const structural = diagnostics.some((d) => d.severity === "error") ? [] : graphDiagnostics(spec, provided.get(name));
   for (const d of [...diagnostics, ...structural]) console.error(`${d.severity}[${d.code}] ${tag}${whereOf(d)}${d.message}`);
   if ([...diagnostics, ...structural].some((d) => d.severity === "error")) process.exitCode = 1;
   irs[name] = ir;

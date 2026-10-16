@@ -1,8 +1,8 @@
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync } from "node:fs";
-import { stripTypeScriptTypes } from "node:module";
 import { tmpdir } from "node:os";
-import { join, relative, sep } from "node:path";
+import { createRequire, stripTypeScriptTypes } from "node:module";
+import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BUILTINS, checkWorkspace } from "./check.ts";
 import { TS_FILES, generateAdapterSkeleton, generateContract, generateVerify } from "./generate.ts";
@@ -66,6 +66,28 @@ function usageFrom(dir: string, ws: Workspace): Usage {
   };
 }
 
+// @types/node の型定義（.d.ts と package.json）。一度だけ読む
+let NODE_TYPES: Record<string, string> | undefined;
+function nodeTypes(): Record<string, string> {
+  if (NODE_TYPES) return NODE_TYPES;
+  const found: Record<string, string> = {};
+  try {
+    const root = dirname(createRequire(import.meta.url).resolve("@types/node/package.json"));
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const path = join(dir, entry.name);
+        if (entry.isDirectory()) walk(path);
+        else if (entry.name.endsWith(".d.ts") || entry.name === "package.json") found[`node_modules/@types/node/${relative(root, path).split(sep).join("/")}`] = readFileSync(path, "utf8");
+      }
+    };
+    walk(root);
+  } catch {
+    // 型定義が無い環境では、置かない
+  }
+  NODE_TYPES = found;
+  return found;
+}
+
 export const typescriptTarget: Target = {
   name: "typescript",
 
@@ -116,12 +138,16 @@ export const typescriptTarget: Target = {
     }
   },
 
+  // 許した組み込みの型定義 (@types/node)。作業場所の node_modules に置き、エージェントが自分で型を確かめられるようにする
+  toolchain: nodeTypes,
+
   notImplemented: NOT_IMPLEMENTED,
   request: (ws) => ({
     sourceRules: `- Production code is plain TypeScript that Node can run directly (erasable syntax only: no \`enum\`, no
   \`namespace\`, no parameter properties; relative imports need the \`.ts\` extension).
 - Production code may import only other production files under \`${label(ws.src)}\`, by relative path. No
-  packages, no \`import()\` / \`require()\`. Of Node's built-in modules, only these: ${[...BUILTINS].map((name) => `\`${name}\``).join(", ")}.`,
+  packages, no \`import()\` / \`require()\`. Of Node's built-in modules, only these: ${[...BUILTINS].map((name) => `\`${name}\``).join(", ")}.
+  Their type definitions are in \`node_modules/@types/node\`; do not declare them yourself.`,
     skeletonBody: `throw new Error("${NOT_IMPLEMENTED}");`,
     adapterGuide: `- \`setupIsolation(ports)\`: build a fresh production system in its initial state, giving it dependencies that
   forward to \`ports\`. Where the production code expects a value in a different form than \`ports\` provides (a

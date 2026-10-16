@@ -1,18 +1,25 @@
-import { commands, conditions, effects, input, integer, invariants, otherwise, queries, service, states } from "@clp/core";
-import { Decision, PlanIf } from "./pipeline.decisions.ts";
+import { all, commands, conditions, effects, input, integer, invariants, not, otherwise, queries, service } from "@clp/core";
+import { Decision, PlanIf, State } from "./pipeline.decisions.ts";
+
+export { State };
 
 const Limit = integer({ min: 1, max: 3 });
 const Count = integer({ min: 1, max: 4 });
 const Phase = ["design", "wiring", "implementation"] as const;
-export const If = conditions({
-  checkWasRejectedAttemptsRemain: "The check was rejected and attempts remain in this phase",
-  checkWasRejectedNoAttempts: "The check was rejected, no attempts remain in this phase, and rounds remain",
-  checkPassed: "The check passed",
-  checkPassedExistingCodeBeing: "The check passed and existing code is being changed",
-  checkPassedCodeBeingWritten: "The check passed and the code is being written from nothing",
-});
 
-export const State = states(["IDLE", "DESIGN", "WIRING", "GRADING", "IMPLEMENTATION", "DONE", "FAILED"]);
+// What a check's result means; the combinations below are named once and used as cases
+export const If = conditions({
+  checkPassed: "The check passed",
+  existingCode: "Existing code is being changed (the code was not written from nothing)",
+  attemptsRemain: "Attempts remain in this phase",
+  roundsRemain: "Rounds remain",
+});
+export const When = conditions({
+  passedExistingCode: all(If.checkPassed, If.existingCode),
+  passedNewCode: all(If.checkPassed, not(If.existingCode)),
+  retry: all(not(If.checkPassed), If.attemptsRemain),
+  restart: all(not(If.checkPassed), not(If.attemptsRemain), If.roundsRemain),
+});
 
 export const Query = queries({
   hasProductionCode: "boolean",
@@ -32,15 +39,13 @@ export const Inv = invariants({
 });
 
 export const StartInput = input({ attemptsPerPhase: Limit, rounds: Limit });
-
+const Checked = input({ passed: "boolean" });
 
 // What happens when a phase's check is rejected. The same for every phase, so it is written once and shared.
 const rejected = [
   // No goTo: the pipeline stays in the phase
-  If.checkWasRejectedAttemptsRemain.then({
-    does: "The attempt number goes up by one. A session of the same phase is started with the new attempt number.",
-  }),
-  If.checkWasRejectedNoAttempts.then({
+  When.retry.then({ does: "The attempt number goes up by one. A session of the same phase is started with the new attempt number." }),
+  When.restart.then({
     goTo: State.DESIGN,
     does:
       "The round number goes up by one and the attempt number goes back to 1. " +
@@ -48,7 +53,6 @@ const rejected = [
   }),
   otherwise({ goTo: State.FAILED }),
 ];
-const Checked = input({ passed: "boolean" });
 
 export const Command = commands({
   Start: {
@@ -57,12 +61,7 @@ export const Command = commands({
       "Then a session of the plan's phase is started; where the plan has no phase, the current code is graded instead.",
     input: StartInput,
     from: State.IDLE,
-    cases: [
-      PlanIf.thereNoProductionCodeYet.then({ goTo: State.DESIGN }),
-      PlanIf.thereProductionCodeBoundaryDiffers.then({ goTo: State.DESIGN }),
-      PlanIf.thereProductionCodeBoundaryUnchanged.then({ goTo: State.WIRING }),
-      otherwise({ goTo: State.GRADING }),
-    ],
+    goTo: Decision.plan.next,
   },
 
   DesignChecked: {
@@ -75,8 +74,8 @@ export const Command = commands({
     input: Checked,
     from: State.WIRING,
     cases: [
-      If.checkPassedExistingCodeBeing.then({ goTo: State.GRADING, does: "The attempt number goes back to 1. The current code is graded." }),
-      If.checkPassedCodeBeingWritten.then({ goTo: State.IMPLEMENTATION, does: "The attempt number goes back to 1. An implementation session is started." }),
+      When.passedExistingCode.then({ goTo: State.GRADING, does: "The attempt number goes back to 1. The current code is graded." }),
+      When.passedNewCode.then({ goTo: State.IMPLEMENTATION, does: "The attempt number goes back to 1. An implementation session is started." }),
       ...rejected,
     ],
   },
@@ -104,5 +103,5 @@ export const Pipeline = service({
   init: State.IDLE,
   // What the output directory holds (queries), the sessions and grades it asks for (effects), the plan, and
   // properties that must hold after every command
-  uses: [State, Query, Effect, Decision, PlanIf, If, Inv, Command],
+  uses: [State, Query, Effect, Decision, PlanIf, If, When, Inv, Command],
 });

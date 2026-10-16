@@ -4,7 +4,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, 
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { after, test } from "node:test";
-import { extract, payloadDiagnostics, referenceDiagnostics, referenceEvents, serialize, stableStringify, valuesToWrite } from "../src/extract.ts";
+import { extract, payloadDiagnostics, referenceDiagnostics, referenceEvents, serialize, stableStringify, structuredVocabulary, valuesToWrite } from "../src/extract.ts";
 import { listComponents, loadSpecs } from "../src/loader.ts";
 import { references, stage1Payloads, stage1References, stage1Values } from "../src/stage1.ts";
 import { implement } from "../src/loop.ts";
@@ -82,9 +82,13 @@ test("Stage 1: 誤りの無い仕様でも一致する（例の仕様と、フ�
       const stage1 = await stage1References(spec);
       assert.deepEqual(stage1, [], `${component}: Stage 1 が実行できること`);
       assert.deepEqual(stage1, referenceDiagnostics(spec));
+      // 語彙に構造を持つ型 (oneOf、value など) があれば、ペイロードの検査は Stage 0 が行う（payload-check の仕様の範囲の外）
       const payloads = await stage1Payloads(spec);
-      assert.deepEqual(payloads, [], `${component}: ペイロードの検査も Stage 1 で実行できること`);
-      assert.deepEqual(payloads, payloadDiagnostics(spec));
+      if (structuredVocabulary(spec.model!)) assert.equal(payloads, undefined, `${component}: 構造を持つ型は Stage 0 が検査する`);
+      else {
+        assert.deepEqual(payloads, [], `${component}: ペイロードの検査も Stage 1 で実行できること`);
+        assert.deepEqual(payloads, payloadDiagnostics(spec));
+      }
       // 値の直列化: IR が、どちらの Stage で作ってもバイト一致する
       assert.ok(await stage1Values(spec), `${component}: 値の直列化も Stage 1 で実行できること`);
       assert.equal(stableStringify(extract(spec, await references(spec)).ir), stableStringify(extract(spec).ir));

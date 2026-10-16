@@ -39,7 +39,8 @@ export function harness(name: string) {
       run(assignment) {
         const files: Record<string, string> = {};
         for (const name of readdirSync(assignment.dir, { recursive: true }) as string[]) {
-          if (name.includes(".")) files[name.split("\\").join("/")] = readFileSync(join(assignment.dir, name), "utf8");
+          // 道具のためのファイル（型定義）は除く
+          if (name.includes(".") && !name.startsWith("node_modules")) files[name.split("\\").join("/")] = readFileSync(join(assignment.dir, name), "utf8");
         }
         const phase = assignment.phase as Phase;
         seen.push({ phase, dir: assignment.dir, files });

@@ -7,7 +7,7 @@ import { seedOf } from "./generate.ts";
 import type { Ir } from "./generate.ts";
 import type { Reference, SpecInput, SpecModel, SpecValue } from "./extract.ts";
 import { dependenciesOf, loadSpecs } from "./loader.ts";
-import { conforms, isEnum, isList, isNumberSchema, isOptional, isRecord, isStringSchema } from "./schema.ts";
+import { conforms, isEnum, isList, isNumberSchema, isOneOf, isOptional, isRecord, isStringSchema } from "./schema.ts";
 
 // 生成された verify.ts から呼ばれる PBT ランタイム。
 // 1回の試行は「初期状態から始まるコマンド列」。期待値は仕様 (Layer 1/2) を具体値で実行して得る。
@@ -119,6 +119,10 @@ function literalsIn(...bindings: BoundSpecification[]): Hints {
 
 function arbitraryOf(schema: FieldSchema, hints: Hints): fc.Arbitrary<unknown> {
   if (schema === "boolean") return fc.boolean();
+  // 何でも入る値: JSON で書ける値（-0 などは、JSON を通したものにそろえる）
+  if (schema === "value") return fc.jsonValue({ maxDepth: 2 }).map((value) => JSON.parse(JSON.stringify(value)) as unknown);
+  // どれか1つの形: 形ごとに、キーが1つのフィールドの組
+  if (isOneOf(schema)) return fc.oneof(...Object.entries(schema.oneOf).map(([variant, type]) => arbitraryOf(type, hints).map((value) => ({ [variant]: value }))));
   // 構造を持つ値。並びは短く（長さより、中身と場合の組み合わせを試したい）。無いことがある値は、4回に1回は無い
   if (isOptional(schema)) return fc.option(arbitraryOf(schema.optional, hints), { nil: null, freq: 4 });
   if (isList(schema)) return fc.array(arbitraryOf(schema.list, hints), { maxLength: 4 });
@@ -330,8 +334,12 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
         return inner.reduce<unknown>((value, key) => (value as Values | null | undefined)?.[key], context[field]);
       }
       case "data":
-      case "query":
-        return context[name];
+      case "query": {
+        // フィールドの組のフィールドは、点でつないだ名前（last.status。W12）
+        if (name in context) return context[name];
+        const [head, ...inner] = name.split(".");
+        return inner.reduce<unknown>((value, key) => (value as Values | null | undefined)?.[key], context[head]);
+      }
       case "was":
         return (ref.path as string[]).includes(context.status);
       case "call": {
@@ -466,8 +474,8 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
       steps.push(step);
 
       const outcome = cases[matched];
-      // goTo が無ければ、状態は変わらない
-      const target = outcome.goTo ?? state.status;
+      // goTo が無ければ、状態は変わらない。決定表の列なら、当たった行の値 (W2)
+      const target = outcome.goTo === undefined ? state.status : typeof outcome.goTo === "string" ? outcome.goTo : String(resolve(outcome.goTo as SpecValue, contextOf(command), command));
       if (!model.states.includes(target)) throw new Error(`goTo "${target}" は states にありません`);
 
       // 副作用: when が成り立つものだけを、書かれた順に
@@ -516,6 +524,10 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
             if (!fits) throw new Error(`responds: ${field} = ${JSON.stringify(fields[field])} が宣言した型・範囲に合いません`);
           }
           output = fields;
+        } else if (isOneOf(declared)) {
+          // どれか1つの形: { 形: 値 }
+          output = Object.fromEntries(responded.map(([variant, value]) => [variant, valueOf(value)]));
+          if (!conforms(declared, output)) throw new Error(`responds: ${JSON.stringify(output)} が宣言した型・範囲に合いません`);
         } else {
           output = valueOf(responded[0][1]);
           if (!conforms(declared as FieldSchema, output)) throw new Error(`responds: ${JSON.stringify(output)} が宣言した型・範囲に合いません`);

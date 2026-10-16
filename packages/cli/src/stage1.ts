@@ -1,4 +1,4 @@
-import { effectOccurrences, isReference, kindOf, payloadEvents, referenceEvents, structuredVocabulary, valuesToWrite, writeEvents } from "./extract.ts";
+import { effectOccurrences, isReference, kindOf, payloadEvents, referenceEvents, structuredVocabulary, valuesToWrite, writeEvent } from "./extract.ts";
 import type { PayloadDiagnostic, ReferenceDiagnostic, SpecInput } from "./extract.ts";
 import { isEnum, isNumberSchema } from "./schema.ts";
 import type { Adapter } from "./runtime.ts";
@@ -120,35 +120,21 @@ export async function stage1Payloads(input: SpecInput, url?: string): Promise<Pa
 }
 
 // 値の直列化を Stage 1 で実行する。返すのは、置き場所の名前 → IR の形。実行できなければ undefined
-type Written =
-  | { name: "WriteConstant"; payload: { kind: "string" | "number" | "boolean"; text: string; number: number; flag: boolean } }
-  | { name: "WriteReference"; payload: { text: string } }
-  | { name: "WriteWasState"; payload: { state: string } };
 export async function stage1Values(input: SpecInput, url?: string): Promise<Map<string, unknown> | undefined> {
   if (!input.model) return undefined;
   const adapter = await stage1Adapter("value-writer", url);
   if (!adapter) return undefined;
   const values = new Map<string, unknown>();
-  let written: Written[] = [];
-  const record = (name: Written["name"]) => (payload: unknown) => void written.push({ name, payload: { ...(payload as object) } } as Written);
   try {
-    await adapter.setupIsolation({
-      queries: {},
-      effects: { WriteConstant: record("WriteConstant"), WriteReference: record("WriteReference"), WriteWasState: record("WriteWasState") },
-    });
+    await adapter.setupIsolation({ queries: {}, effects: {} });
     try {
       for (const [slot, value] of valuesToWrite(input)) {
-        written = [];
-        for (const event of writeEvents(value)) await adapter.executeCommand(event);
-        // 書かれたものを、置き場所に組み上げる（1要素ずつ出てくるものを、IR の入れ子に戻す。判断は無い）
-        const wasStates = written.flatMap((entry) => (entry.name === "WriteWasState" ? [entry.payload.state] : []));
-        const [first] = written;
-        if (isReference(value) && value.$ref === "was" && wasStates.length === written.length) values.set(slot, { $was: wasStates });
-        else if (written.length === 1 && first.name === "WriteReference") values.set(slot, { $ref: first.payload.text });
-        else if (written.length === 1 && first.name === "WriteConstant") {
-          const { kind, text, number, flag } = first.payload;
-          values.set(slot, kind === "string" ? text : kind === "number" ? number : flag);
-        } else throw new Error(`値 ${slot} に対して、書かれたものが想定と違います: ${JSON.stringify(written)}`);
+        const written = (await adapter.executeCommand(writeEvent(value))) as { constant?: unknown; reference?: string; was?: string[] } | undefined;
+        // 答えを、IR の形に置き換える（形の名前を、IR のキーに読み替えるだけ。判断は無い）
+        if (written && "constant" in written) values.set(slot, written.constant);
+        else if (written && "reference" in written) values.set(slot, { $ref: written.reference });
+        else if (written && "was" in written) values.set(slot, { $was: written.was });
+        else throw new Error(`値 ${slot} に対して、答えが想定と違います: ${JSON.stringify(written)}`);
       }
     } finally {
       await adapter.teardownIsolation();

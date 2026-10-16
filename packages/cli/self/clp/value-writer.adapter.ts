@@ -1,5 +1,5 @@
-import type { StateName, TargetSystemAdapter } from "./value-writer.adapter.contract.ts";
-import type { ValueWriterState } from "../src/value-writer/types.ts";
+import type { Command, CommandOutput, StateName, TargetSystemAdapter } from "./value-writer.adapter.contract.ts";
+import type { ConstantValue, SpecValue, ValueWriterState, WrittenValue } from "../src/value-writer/types.ts";
 import { ValueWriter } from "../src/value-writer/value-writer.ts";
 
 const STATE_NAMES: Record<ValueWriterState, StateName> = {
@@ -13,14 +13,41 @@ function current(): ValueWriter {
   return writer;
 }
 
+function toSpecValue(value: Extract<Command, { name: "Write" }>["input"]["value"]): SpecValue {
+  if ("constant" in value) return { kind: "constant", constant: value.constant as ConstantValue };
+  if ("reference" in value) {
+    const { target, name } = value.reference;
+    return { kind: "reference", reference: { target, name } };
+  }
+  if ("column" in value) {
+    const { table, column } = value.column;
+    return { kind: "reference", reference: { target: "decision", table, column } };
+  }
+  if ("was" in value) return { kind: "was", states: value.was };
+  const unknown: never = value;
+  throw new Error(`adapter: unknown value ${JSON.stringify(unknown)}`);
+}
+
+function toWriteOutput(written: WrittenValue): CommandOutput["Write"] {
+  switch (written.kind) {
+    case "constant":
+      return { constant: written.constant as Extract<CommandOutput["Write"], { constant: unknown }>["constant"] };
+    case "reference":
+      return { reference: written.text };
+    case "was":
+      return { was: [...written.states] };
+    default: {
+      const unknown: never = written;
+      throw new Error(`adapter: unknown written value ${JSON.stringify(unknown)}`);
+    }
+  }
+}
+
 // Import the production code from ../src/ and forward each call to it. No business logic here.
 export const adapter: TargetSystemAdapter = {
-  async setupIsolation(ports) {
-    writer = new ValueWriter({
-      writeConstant: ({ kind, text, number, flag }) => ports.effects.WriteConstant({ kind, text, number, flag }),
-      writeReference: (text) => ports.effects.WriteReference({ text }),
-      writeWasState: (state) => ports.effects.WriteWasState({ state }),
-    });
+  async setupIsolation(_ports) {
+    // The value writer has no dependencies, so there is nothing in `ports` to connect.
+    writer = new ValueWriter();
   },
   async teardownIsolation() {
     writer = undefined;
@@ -28,21 +55,10 @@ export const adapter: TargetSystemAdapter = {
   async executeCommand(command) {
     const system = current();
     switch (command.name) {
-      case "Constant": {
-        const { kind, text, number, flag } = command.input;
-        system.constant({ kind, text, number, flag });
-        break;
-      }
-      case "Reference": {
-        const { target, name, table, column } = command.input;
-        system.reference(target === "decision" ? { target, table, column } : { target, name });
-        break;
-      }
-      case "WasState":
-        system.wasState(command.input.state);
-        break;
+      case "Write":
+        return toWriteOutput(system.write(toSpecValue(command.input.value)));
       default: {
-        const unknown: never = command;
+        const unknown: never = command.name;
         throw new Error(`adapter: unknown command ${JSON.stringify(unknown)}`);
       }
     }

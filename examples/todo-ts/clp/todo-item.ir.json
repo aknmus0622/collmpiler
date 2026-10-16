@@ -23,7 +23,7 @@
   "descriptions": {
     "component": "One item of a to-do list. It is open until it is completed."
   },
-  "irVersion": 6,
+  "irVersion": 7,
   "model": {
     "commands": {
       "Complete": {}

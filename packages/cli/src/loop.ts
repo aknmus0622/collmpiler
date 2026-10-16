@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import { resolveLayout, sourceFiles, workspaceOf } from "./layout.ts";
 import type { Workspace } from "./layout.ts";
 import { boundaryOf, extract, stableStringify, whereOf } from "./extract.ts";
-import { graphDiagnostics } from "./graph.ts";
+import { graphDiagnostics, providedData } from "./graph.ts";
 import { mergeAssets } from "./assets.ts";
 import type { Asset } from "./assets.ts";
 import { entryGate, exitGate, partFilesOf, verifyGate } from "./gates.ts";
@@ -108,15 +108,18 @@ export async function implement(options: ImplementOptions) {
     throw new Error(`コンポーネント "${options.component}" がありません (あるのは: ${names.join(", ")})`);
   }
   const units: Unit[] = [];
+  const specs = new Map(await Promise.all(names.map(async (name) => [name, await loadSpecs(specsDir, { drafts, component: name })] as const)));
+  // 含む部品が作るときに渡すデータ（覚える (set) コマンドが無くても、設定される）
+  const provided = providedData([...specs.values()]);
   for (const name of names) {
-    const spec = await loadSpecs(specsDir, { drafts, component: name });
+    const spec = specs.get(name)!;
     const { ir: extracted, diagnostics } = extract(spec, await references(spec));
     const errors = diagnostics.filter((d) => d.severity === "error");
     if (errors.length > 0) {
       throw new Error(`仕様 (${name}) にエラーがあります:\n${errors.map((d) => `  ${whereOf(d)}${d.message}`).join("\n")}`);
     }
     // グラフの検査: たどり着けない状態やコマンドは、仕様の誤り。使われない語彙は、知らせるだけ
-    const structural = graphDiagnostics(spec);
+    const structural = graphDiagnostics(spec, provided.get(name));
     for (const d of structural.filter((entry) => entry.severity === "warning")) log(`注意 (${name}): ${d.message}`);
     if (structural.some((d) => d.severity === "error")) {
       throw new Error(`仕様 (${name}) にエラーがあります:\n${structural.filter((d) => d.severity === "error").map((d) => `  ${d.message}`).join("\n")}`);

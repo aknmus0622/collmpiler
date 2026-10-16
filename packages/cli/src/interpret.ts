@@ -138,8 +138,10 @@ const withoutThresholds = <T>(value: T): T =>
 
 // 型と、フィールドの並びの書き方
 function typeText(type: FieldSchema): string {
+  if (type === "value") return "value()";
   if (typeof type === "string" || Array.isArray(type)) return JSON.stringify(type);
   const given = type as Record<string, unknown>;
+  if ("oneOf" in given) return `oneOf({ ${Object.entries(given.oneOf as Fields).map(([name, inner]) => `${name}: ${typeText(inner)}`).join(", ")} })`;
   if ("list" in given) return `list(${typeText(given.list as FieldSchema)})`;
   if ("record" in given) {
     const optional = (given.optional as string[] | undefined) ?? [];
@@ -184,7 +186,7 @@ const member = (group: string, key: string) => (/^[A-Za-z_$][\w$]*$/.test(key) ?
 const keyText = (key: string) => (/^[A-Za-z_$][\w$]*$/.test(key) ? key : quote(key));
 
 const CORE_WORDS =
-  "among, calculations, commands, conditions, data, effects, input, integer, interpretation, invariants, list, number, optional, otherwise, queries, record, states, string, was";
+  "among, calculations, commands, conditions, data, effects, input, integer, interpretation, invariants, list, number, oneOf, optional, otherwise, queries, record, states, string, value, was";
 
 // 出発点: Layer 1 に書かれたコマンドと名前を並べ、中身は空にしておく。参照は、Layer 1 が export する取っ手で書く。
 // 解釈は、足すものを名前を持つノードとして並べる（DSL.md §16.0）。pinned があれば（2つ目の解釈）、

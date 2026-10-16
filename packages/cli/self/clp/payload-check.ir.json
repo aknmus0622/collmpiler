@@ -387,7 +387,7 @@
     "states.IN_UNKNOWN_EFFECT": "In an effect that is not declared. Nothing is checked and nothing is reported until the walk leaves it.",
     "states.OUTSIDE": "Between effects."
   },
-  "irVersion": 6,
+  "irVersion": 7,
   "model": {
     "commands": {
       "Constant": {

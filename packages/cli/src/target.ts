@@ -67,6 +67,9 @@ export interface Target {
   inert?(ws: Workspace, rel: string): boolean;
   // ミューテーションの壊し方。言語によっては無い
   mutation: MutationStrategy | undefined;
+  // 作業場所に置く、道具のためのファイル（相対パス → 内容）。エージェントが自分で型を確かめるための型定義など。
+  // 読むだけで、書き換えたら差し戻す。取り出しの対象ではない
+  toolchain?(): Record<string, string>;
 
   // --- エージェントとの取り決め ---
   // 骨組みの未実装部分が出すエラーの文言。配線の段階で「未実装による失敗」を見分けるのに使う

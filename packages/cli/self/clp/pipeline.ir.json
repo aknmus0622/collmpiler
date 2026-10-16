@@ -36,26 +36,7 @@
       "name": "DesignChecked",
       "onlyIf": [],
       "when": {
-        "The check passed": {
-          "does": "The attempt number goes back to 1. A wiring session is started.",
-          "emits": [
-            {
-              "effect": "StartSession",
-              "input": {
-                "attempt": 1,
-                "phase": "wiring",
-                "round": {
-                  "$ref": "data:round"
-                }
-              }
-            }
-          ],
-          "goTo": "WIRING",
-          "set": {
-            "attempt": 1
-          }
-        },
-        "The check was rejected and attempts remain in this phase": {
+        "(not \"The check passed\" and \"Attempts remain in this phase\")": {
           "does": "The attempt number goes up by one. A session of the same phase is started with the new attempt number.",
           "emits": [
             {
@@ -77,7 +58,7 @@
             }
           }
         },
-        "The check was rejected, no attempts remain in this phase, and rounds remain": {
+        "(not \"The check passed\" and not \"Attempts remain in this phase\" and \"Rounds remain\")": {
           "does": "The round number goes up by one and the attempt number goes back to 1. The code is discarded if it was being written from nothing. Then a design session is started in the new round.",
           "emits": [
             {
@@ -104,6 +85,25 @@
             }
           }
         },
+        "The check passed": {
+          "does": "The attempt number goes back to 1. A wiring session is started.",
+          "emits": [
+            {
+              "effect": "StartSession",
+              "input": {
+                "attempt": 1,
+                "phase": "wiring",
+                "round": {
+                  "$ref": "data:round"
+                }
+              }
+            }
+          ],
+          "goTo": "WIRING",
+          "set": {
+            "attempt": 1
+          }
+        },
         "otherwise": {
           "goTo": "FAILED"
         }
@@ -116,10 +116,7 @@
       "name": "ImplementationChecked",
       "onlyIf": [],
       "when": {
-        "The check passed": {
-          "goTo": "DONE"
-        },
-        "The check was rejected and attempts remain in this phase": {
+        "(not \"The check passed\" and \"Attempts remain in this phase\")": {
           "does": "The attempt number goes up by one. A session of the same phase is started with the new attempt number.",
           "emits": [
             {
@@ -141,7 +138,7 @@
             }
           }
         },
-        "The check was rejected, no attempts remain in this phase, and rounds remain": {
+        "(not \"The check passed\" and not \"Attempts remain in this phase\" and \"Rounds remain\")": {
           "does": "The round number goes up by one and the attempt number goes back to 1. The code is discarded if it was being written from nothing. Then a design session is started in the new round.",
           "emits": [
             {
@@ -168,6 +165,9 @@
             }
           }
         },
+        "The check passed": {
+          "goTo": "DONE"
+        },
         "otherwise": {
           "goTo": "FAILED"
         }
@@ -181,100 +181,30 @@
       "name": "Start",
       "onlyIf": [],
       "when": {
-        "There is no production code yet": {
-          "emits": [
-            {
-              "effect": "StartSession",
-              "input": {
-                "attempt": 1,
-                "phase": {
-                  "$ref": "decision:plan.phase"
-                },
-                "round": 1
-              }
-            }
-          ],
-          "goTo": "DESIGN",
-          "set": {
-            "attempt": 1,
-            "incremental": {
-              "$ref": "decision:plan.incremental"
-            },
-            "maxAttempts": {
-              "$ref": "input:attemptsPerPhase"
-            },
-            "maxRounds": {
-              "$ref": "input:rounds"
-            },
-            "round": 1
-          }
-        },
-        "There is production code, and the boundary differs from the previous run": {
-          "emits": [
-            {
-              "effect": "StartSession",
-              "input": {
-                "attempt": 1,
-                "phase": {
-                  "$ref": "decision:plan.phase"
-                },
-                "round": 1
-              }
-            }
-          ],
-          "goTo": "DESIGN",
-          "set": {
-            "attempt": 1,
-            "incremental": {
-              "$ref": "decision:plan.incremental"
-            },
-            "maxAttempts": {
-              "$ref": "input:attemptsPerPhase"
-            },
-            "maxRounds": {
-              "$ref": "input:rounds"
-            },
-            "round": 1
-          }
-        },
-        "There is production code, the boundary is unchanged, and there is no adapter": {
-          "emits": [
-            {
-              "effect": "StartSession",
-              "input": {
-                "attempt": 1,
-                "phase": {
-                  "$ref": "decision:plan.phase"
-                },
-                "round": 1
-              }
-            }
-          ],
-          "goTo": "WIRING",
-          "set": {
-            "attempt": 1,
-            "incremental": {
-              "$ref": "decision:plan.incremental"
-            },
-            "maxAttempts": {
-              "$ref": "input:attemptsPerPhase"
-            },
-            "maxRounds": {
-              "$ref": "input:rounds"
-            },
-            "round": 1
-          }
-        },
         "otherwise": {
           "emits": [
+            {
+              "effect": "StartSession",
+              "input": {
+                "attempt": 1,
+                "phase": {
+                  "$ref": "decision:plan.phase"
+                },
+                "round": 1
+              },
+              "onlyWhen": "The plan has a phase"
+            },
             {
               "effect": "GradeCurrentCode",
               "input": {
                 "round": 1
-              }
+              },
+              "onlyWhen": "The plan has no phase"
             }
           ],
-          "goTo": "GRADING",
+          "goTo": {
+            "$ref": "decision:plan.next"
+          },
           "set": {
             "attempt": 1,
             "incremental": {
@@ -298,7 +228,7 @@
       "name": "WiringChecked",
       "onlyIf": [],
       "when": {
-        "The check passed and existing code is being changed": {
+        "(\"The check passed\" and \"Existing code is being changed (the code was not written from nothing)\")": {
           "does": "The attempt number goes back to 1. The current code is graded.",
           "emits": [
             {
@@ -315,7 +245,7 @@
             "attempt": 1
           }
         },
-        "The check passed and the code is being written from nothing": {
+        "(\"The check passed\" and not \"Existing code is being changed (the code was not written from nothing)\")": {
           "does": "The attempt number goes back to 1. An implementation session is started.",
           "emits": [
             {
@@ -334,7 +264,7 @@
             "attempt": 1
           }
         },
-        "The check was rejected and attempts remain in this phase": {
+        "(not \"The check passed\" and \"Attempts remain in this phase\")": {
           "does": "The attempt number goes up by one. A session of the same phase is started with the new attempt number.",
           "emits": [
             {
@@ -356,7 +286,7 @@
             }
           }
         },
-        "The check was rejected, no attempts remain in this phase, and rounds remain": {
+        "(not \"The check passed\" and not \"Attempts remain in this phase\" and \"Rounds remain\")": {
           "does": "The round number goes up by one and the attempt number goes back to 1. The code is discarded if it was being written from nothing. Then a design session is started in the new round.",
           "emits": [
             {
@@ -389,23 +319,63 @@
       }
     }
   ],
+  "conditions": {
+    "(\"The check passed\" and \"Existing code is being changed (the code was not written from nothing)\")": {
+      "all": [
+        "The check passed",
+        "Existing code is being changed (the code was not written from nothing)"
+      ]
+    },
+    "(\"The check passed\" and not \"Existing code is being changed (the code was not written from nothing)\")": {
+      "all": [
+        "The check passed",
+        "not \"Existing code is being changed (the code was not written from nothing)\""
+      ]
+    },
+    "(not \"The check passed\" and \"Attempts remain in this phase\")": {
+      "all": [
+        "not \"The check passed\"",
+        "Attempts remain in this phase"
+      ]
+    },
+    "(not \"The check passed\" and not \"Attempts remain in this phase\" and \"Rounds remain\")": {
+      "all": [
+        "not \"The check passed\"",
+        "not \"Attempts remain in this phase\"",
+        "Rounds remain"
+      ]
+    },
+    "not \"Attempts remain in this phase\"": {
+      "not": "Attempts remain in this phase"
+    },
+    "not \"Existing code is being changed (the code was not written from nothing)\"": {
+      "not": "Existing code is being changed (the code was not written from nothing)"
+    },
+    "not \"The check passed\"": {
+      "not": "The check passed"
+    }
+  },
   "decisions": {
     "plan": {
       "rows": {
         "There is no production code yet": {
           "incremental": false,
+          "next": "DESIGN",
           "phase": "design"
         },
         "There is production code, and the boundary differs from the previous run": {
           "incremental": true,
+          "next": "DESIGN",
           "phase": "design"
         },
         "There is production code, the boundary is unchanged, and there is no adapter": {
           "incremental": true,
+          "next": "WIRING",
           "phase": "wiring"
         },
         "otherwise": {
           "incremental": true,
+          "next": "GRADING",
           "phase": null
         }
       }
@@ -416,7 +386,7 @@
     "effects.GradeCurrentCode": "Grade the production code as it is, without an agent.",
     "queries.boundaryChanged": "Whether the component's boundary differs from the one the previous run worked from."
   },
-  "irVersion": 6,
+  "irVersion": 7,
   "model": {
     "calculations": {
       "nextAttempt": {

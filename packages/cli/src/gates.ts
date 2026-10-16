@@ -97,6 +97,8 @@ export type Sandbox = {
   env: NodeJS.ProcessEnv;
   // 作業場所に置いたファイル (相対パス → 内容)。隔離の証跡でもある
   inputs: Record<string, string>;
+  // 道具のためのファイル（型定義など。Target.toolchain）。読むだけ
+  toolchain?: Record<string, string>;
 };
 
 const REQUEST = `${TEST_DIR}/${FILES.request}`;
@@ -156,8 +158,14 @@ export function entryGate(ctx: GateContext, phase: Phase, attempt: number, feedb
     writeFileSync(join(dir, rel), content);
   }
   mkdirSync(join(dir, ws.src), { recursive: true });
+  // 道具のためのファイル（許した組み込みの型定義など）。リポジトリのパスは含まない
+  const toolchain = ctx.target.toolchain?.() ?? {};
+  for (const [rel, content] of Object.entries(toolchain)) {
+    mkdirSync(dirname(join(dir, rel)), { recursive: true });
+    writeFileSync(join(dir, rel), content);
+  }
 
-  return { dir, phase, inputs, env: scrubEnv(process.env, hidden) };
+  return { dir, phase, inputs, toolchain, env: scrubEnv(process.env, hidden) };
 }
 
 // 設計と実装の段階に IR を見せる、ほかのコンポーネント。含む部品のものは見せない
@@ -259,6 +267,12 @@ export async function exitGate(ctx: GateContext, sandbox: Sandbox): Promise<Gate
   for (const { rel, entry } of filesUnder(sandbox.dir)) {
     found.add(rel);
     if (rel.startsWith(".") || rel === REQUEST) continue;
+    if (sandbox.toolchain && rel in sandbox.toolchain) {
+      if (!entry.isFile() || readFileSync(join(sandbox.dir, rel), "utf8") !== sandbox.toolchain[rel]) {
+        violations.push({ file: rel, rule: "read-only-file-modified", message: "This file is a tool's file (type definitions); it may not be edited." });
+      }
+      continue;
+    }
     if (!entry.isFile()) {
       violations.push({ file: rel, rule: "unexpected-file", message: "Only regular files are allowed (no symlinks)." });
     } else if (writable(ws, phase, rel)) {

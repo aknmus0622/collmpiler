@@ -155,7 +155,8 @@ test("解釈: Layer 1 が構造として書いたものは、書き換えられ�
   assert.match(await report(`Command.Place.with({ from: State.B })`), /コマンド "Place" の from は Layer 1 に書かれているので/);
   assert.match(await report(`Command.Place.with({ cases: [If.big.then({ goTo: State.A })] })`), /コマンド "Place" の条件 "It is big" の goTo は Layer 1 に書かれているので/);
   assert.match(await report(`Command.Place.with({ cases: [If.odd.then({})] })`), /条件 "It is odd" は Layer 1 にありません/);
-  assert.match(await report(`Command.Place.with({ goTo: State.B })`), /コマンド "Place" は条件で分かれるので、goTo は when の下に/);
+  // コマンドに書いた goTo は、どの場合にも足される (W1)。Layer 1 が goTo を書いた場合とは、ぶつかる
+  assert.match(await report(`Command.Place.with({ goTo: State.B })`), /コマンド "Place" の条件 "It is big" の goTo は Layer 1 に書かれているので/);
   assert.match(await report(`commands({ Jump: {} })`), /コマンド "Jump" は Layer 1 にありません/);
   // Layer 1 が遷移先を1つに決めたコマンドを、解釈が場合分けすることもできない
   assert.match(await report(`Command.Back.with({ cases: [If.big.then({}), otherwise] })`), /コマンド "Back": Layer 1 が遷移先を1つに決めているので、解釈では場合分けできません/);

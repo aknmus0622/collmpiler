@@ -217,7 +217,7 @@
     "queries.effectDeclared": "Whether the specification declares an effect of this name.",
     "queries.stateDeclared": "Whether the specification declares a state of this name."
   },
-  "irVersion": 6,
+  "irVersion": 7,
   "model": {
     "commands": {
       "AllowFrom": {

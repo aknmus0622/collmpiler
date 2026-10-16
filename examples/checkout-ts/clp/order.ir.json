@@ -161,7 +161,7 @@
     "queries.isMonthEnd": "Whether today is the last day of the month.",
     "queries.paymentResult": "What the payment module answered for this order."
   },
-  "irVersion": 6,
+  "irVersion": 7,
   "model": {
     "calculations": {
       "amountCharged": {

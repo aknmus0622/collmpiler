@@ -121,7 +121,7 @@
     "component": "A to-do list behind an HTTP API. Items are added, completed, removed and listed. Each item is a to-do item of its own, with an identifier given by the list and a title; whether it is done is the item's state.",
     "queries.newId": "A fresh identifier for a new item."
   },
-  "irVersion": 6,
+  "irVersion": 7,
   "model": {
     "calculations": {
       "createdTodo": {

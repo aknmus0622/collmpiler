@@ -25,12 +25,17 @@ export type FieldSchema =
   | "number"
   | "integer"
   | "string"
-  | readonly string[]
+  // 何でも入る値（null、真偽値、数、文字列、並び、フィールドの組）。中身では判断しない部品が運ぶ
+  | "value"
+  // 列挙: 取り得る値（文字列か数）
+  | readonly (string | number)[]
   | NumberSchema
   | StringSchema
   | { readonly list: FieldSchema }
   | { readonly record: Fields; readonly optional?: readonly string[] }
-  | { readonly optional: FieldSchema };
+  | { readonly optional: FieldSchema }
+  // どれか1つの形。値は、キーが1つのフィールドの組（{ constant: ... }）
+  | { readonly oneOf: Fields };
 export type Fields = Record<string, FieldSchema>;
 
 // --- 型エラーの説明 ---
@@ -107,7 +112,10 @@ export const isDescription = (value: unknown): value is Description =>
   typeof value === "object" && value !== null && "$description" in value;
 
 // responds: コマンドが返す値。値1つ（定数か参照）か、{ フィールド: 値 }
-export type OutcomeShape = { goTo?: string; does?: string; responds?: unknown };
+// 遷移先: 状態の名前か、決定表の列の参照（その行の値が、状態の名前） (W2)
+export type GoTo = string | { readonly $ref: string; readonly path: unknown };
+// Layer 1 も、覚えることと副作用を書ける (W11)。解釈の分は、そのあとに足される
+export type OutcomeShape = { goTo?: GoTo; does?: string; responds?: unknown; effects?: readonly Record<string, unknown>[]; set?: Record<string, unknown>; adds?: readonly Adds[]; removes?: readonly Removes[] };
 // コマンドが返すものの形。どの型でも書ける
 export type OutputSchema = FieldSchema;
 // 尋ねること: 答えに付ける名前 → { 問い合わせの名前: 引数 }
@@ -136,7 +144,7 @@ export type CommandShape = {
   asks?: Asks;
   calls?: Record<string, Call>;
   route?: string;
-  goTo?: string;
+  goTo?: GoTo;
   does?: string;
   responds?: unknown;
   when?: Record<string, OutcomeShape>;
@@ -173,7 +181,7 @@ export const BINDING = Symbol.for("clp.binding");
 
 // --- 実行時に扱う形 ---
 // Layer 1 に解釈を重ねて、すべてが構造になったコンポーネント
-export type Outcome = { goTo?: string; does?: string; responds?: unknown };
+export type Outcome = { goTo?: GoTo; does?: string; responds?: unknown };
 // 尋ねること: どの問い合わせを、どの引数で
 export type Asked = { query: string; input: Record<string, unknown> };
 export type CommandDeclaration = {
@@ -263,7 +271,7 @@ const ENTRY_PARTS = {
   effects: { parts: ["description", "input"], required: [], additive: false },
   calculations: { parts: ["description", "output"], required: ["description", "output"], additive: true },
 } as const;
-const COMMAND_PARTS = ["description", "input", "output", "route", "from", "onlyIf", "asks", "calls", "goTo", "does", "responds", "when"];
+const COMMAND_PARTS = ["description", "input", "output", "route", "from", "onlyIf", "asks", "calls", "goTo", "does", "responds", "effects", "set", "adds", "removes", "when"];
 
 // Layer 1 に解釈の構造を重ねる。Layer 1 が構造として書いたものは、解釈では書き換えられない。
 // 合わない点は problems に集める（読み込みの時点では投げない。報告は IR を作るときに行う）
@@ -393,13 +401,24 @@ export function resolveComponent(
       const goTo = a.goTo ?? b.goTo;
       const does = a.does ?? b.does;
       const responds = a.responds !== undefined ? a.responds : b.responds;
+      // 覚えること: 同じデータを両方が覚えるなら、Layer 1 が勝つ（解釈は書き換えられない）
+      for (const field of Object.keys(b.set ?? {})) {
+        if (a.set && field in a.set) problems.push(`${where} の set.${field} は Layer 1 に書かれているので、解釈では書けません`);
+      }
+      // 副作用と、部品を作る・消すことは、Layer 1 の分が先、解釈の分があと
+      const joined = <T>(first: readonly T[] | undefined, second: readonly T[] | undefined) =>
+        first === undefined && second === undefined ? undefined : [...(first ?? []), ...(second ?? [])];
+      const effects = joined(a.effects, b.effects);
+      const set = a.set === undefined && b.set === undefined ? undefined : { ...(b.set ?? {}), ...(a.set ?? {}) };
+      const adds = joined(a.adds, b.adds);
+      const removes = joined(a.removes, b.removes);
       return [
         { ...(goTo === undefined ? {} : { goTo }), ...(does === undefined ? {} : { does }), ...(responds === undefined ? {} : { responds }) },
         {
-          ...(b.effects === undefined ? {} : { effects: b.effects }),
-          ...(b.set === undefined ? {} : { set: b.set }),
-          ...(b.adds === undefined ? {} : { adds: b.adds }),
-          ...(b.removes === undefined ? {} : { removes: b.removes }),
+          ...(effects === undefined ? {} : { effects }),
+          ...(set === undefined ? {} : { set }),
+          ...(adds === undefined ? {} : { adds }),
+          ...(removes === undefined ? {} : { removes }),
         },
       ];
     };

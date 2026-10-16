@@ -170,7 +170,7 @@
     "effects": "A due-date notice to the member, carrying the number of days until the book is due; a late-fee charge, carrying the amount in yen; a notice to the next member waiting, carrying nothing; and a replacement charge, carrying nothing.",
     "queries": "How many books the member currently has on loan, and whether someone else has reserved the book."
   },
-  "irVersion": 6,
+  "irVersion": 7,
   "model": {
     "calculations": {
       "daysUntilDueAfterDaysPass": {

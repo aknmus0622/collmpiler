@@ -1,77 +1,33 @@
 {
   "behaviors": [
     {
-      "description": "A constant written in the specification. `kind` says what it is; `text` holds a string, `number` a number, `flag` a boolean. It is written as a constant with exactly the kind, text, number and flag it was given.",
+      "description": "One value of a specification is written into the IR, and the answer is what is written.",
       "from": [
         "READY"
       ],
-      "name": "Constant",
+      "name": "Write",
       "onlyIf": [],
       "when": {
-        "otherwise": {
-          "emits": [
-            {
-              "effect": "WriteConstant",
-              "input": {
-                "flag": {
-                  "$ref": "input:flag"
-                },
-                "kind": {
-                  "$ref": "input:kind"
-                },
-                "number": {
-                  "$ref": "input:number"
-                },
-                "text": {
-                  "$ref": "input:text"
-                }
-              }
+        "The value is a constant (whatever it is, null included)": {
+          "responds": {
+            "constant": {
+              "$ref": "input:value.constant"
             }
-          ]
-        }
-      }
-    },
-    {
-      "description": "A reference to something the specification declares. `target` says what kind of thing. `name` is the thing's name; for a column of a decision table, `table` and `column` name it instead. It is written as a reference whose text is the reference text.",
-      "from": [
-        "READY"
-      ],
-      "name": "Reference",
-      "onlyIf": [],
-      "when": {
-        "otherwise": {
-          "emits": [
-            {
-              "effect": "WriteReference",
-              "input": {
-                "text": {
-                  "$ref": "calculation:referenceText"
-                }
-              }
+          }
+        },
+        "The value is a reference by name, or a reference to a column of a decision table": {
+          "responds": {
+            "reference": {
+              "$ref": "calculation:referenceText"
             }
-          ]
-        }
-      }
-    },
-    {
-      "description": "One of the states listed by a reference to the state before the command. It is written as that state.",
-      "from": [
-        "READY"
-      ],
-      "name": "WasState",
-      "onlyIf": [],
-      "when": {
+          }
+        },
         "otherwise": {
-          "emits": [
-            {
-              "effect": "WriteWasState",
-              "input": {
-                "state": {
-                  "$ref": "input:state"
-                }
-              }
+          "responds": {
+            "was": {
+              "$ref": "input:value.was"
             }
-          ]
+          }
         }
       }
     }
@@ -98,66 +54,59 @@
     }
   },
   "descriptions": {
-    "component": "Writes the values of a specification into its intermediate representation, one value at a time. A constant is written as it is. A reference is written as one text. A reference to the state before a command lists states; they are handed over, and written, one at a time.",
-    "effects.WriteConstant": "A constant, as it was given.",
-    "effects.WriteReference": "A reference, as one text.",
-    "effects.WriteWasState": "One state of a reference to the state before the command."
+    "component": "Writes the values of a specification into its intermediate representation, one value at a time. A constant is written as it is. A reference is written as one text. A reference to the state before a command is written as the states it lists."
   },
-  "irVersion": 6,
+  "irVersion": 7,
   "model": {
     "calculations": {
       "referenceText": {
-        "description": "The prefix the reference form gives, followed by what is referred to: the name, or, for a column of a decision table, the table, a dot, and the column. Nothing else is added and nothing is trimmed.",
+        "description": "The prefix the reference form gives, followed by what is referred to: for a reference by name, the name; for a column of a decision table, the table, a dot, and the column. Nothing else is added and nothing is trimmed.",
         "output": "string"
       }
     },
     "commands": {
-      "Constant": {
-        "flag": "boolean",
-        "kind": [
-          "string",
-          "number",
-          "boolean"
-        ],
-        "number": "number",
-        "text": "string"
-      },
-      "Reference": {
-        "column": "string",
-        "name": "string",
-        "table": "string",
-        "target": [
-          "input",
-          "data",
-          "query",
-          "calculation",
-          "decision"
-        ]
-      },
-      "WasState": {
-        "state": "string"
+      "Write": {
+        "value": {
+          "oneOf": {
+            "column": {
+              "record": {
+                "column": "string",
+                "table": "string"
+              }
+            },
+            "constant": "value",
+            "reference": {
+              "record": {
+                "name": "string",
+                "target": [
+                  "input",
+                  "data",
+                  "query",
+                  "calculation"
+                ]
+              }
+            },
+            "was": {
+              "list": "string"
+            }
+          }
+        }
       }
     },
     "data": {},
-    "effects": {
-      "WriteConstant": {
-        "flag": "boolean",
-        "kind": [
-          "string",
-          "number",
-          "boolean"
-        ],
-        "number": "number",
-        "text": "string"
-      },
-      "WriteReference": {
-        "text": "string"
-      },
-      "WriteWasState": {
-        "state": "string"
+    "effects": {},
+    "init": "READY",
+    "outputs": {
+      "Write": {
+        "oneOf": {
+          "constant": "value",
+          "reference": "string",
+          "was": {
+            "list": "string"
+          }
+        }
       }
     },
-    "init": "READY",
     "queries": {},
     "states": [
       "READY"

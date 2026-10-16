@@ -94,7 +94,8 @@ function scripted(options: { order?: Step[]; breakLamp?: number[]; silentLamp?: 
       const phase = rawPhase as Phase;
       const files: Record<string, string> = {};
       for (const name of readdirSync(dir, { recursive: true }) as string[]) {
-        if (name.includes(".")) files[name] = readFileSync(join(dir, name), "utf8");
+        // 道具のためのファイル（型定義）は除く
+        if (name.includes(".") && !name.startsWith("node_modules")) files[name] = readFileSync(join(dir, name), "utf8");
       }
       const component =
         phase === "wiring"

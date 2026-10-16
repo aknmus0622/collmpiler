@@ -222,39 +222,43 @@ Stage 1 のコードは、本番コード（`self/src/`）を直接呼ばず、*
 仕様に書かれた値を、IR の形にします（定数はそのまま、参照は `{"$ref": "input:x"}`、決定表の列は
 `{"$ref": "decision:表.列"}`、実行前の状態は `{"$was": [...]}`）。
 
-**出力も、1要素ずつ出します。** コンポーネントの副作用は平らな値しか運べないので、入れ子の JSON は出せません。
-入力をコマンドの列に崩したのと同じ考え方を、出力にも当てます。
+**値1つを、どれか1つの形 (`oneOf`) で受け取り、書く値を答えで返します**（1.0 の N8 で書き直した形。DSL.md §16）。
+以前は、副作用が平らな値しか運べなかったので、値を要素に崩して受け取り、書いたものを1要素ずつ副作用で出し、
+たどる側の糊が組み上げていました。`oneOf` と `value()`（何でも入る値）が入って、その崩しと組み上げが要らなくなりました。
 
-| 入ってくるコマンド | 出す副作用 |
+| 入ってくる値 (`Write { value }`) | 答え |
 | --- | --- |
-| `Constant { kind, text, number, flag }` | `WriteConstant { kind, text, number, flag }` |
-| `Reference { target, name, table, column }` | `WriteReference { text }` |
-| `WasState { state }`（実行前の状態を1つずつ） | `WriteWasState { state }` |
+| `{ constant: 値 }`（どんな値でも、null も） | `{ constant: 値 }` |
+| `{ reference: { target, name } }`（名前で指す参照） | `{ reference: "input:名前" }` |
+| `{ column: { table, column } }`（決定表の列） | `{ reference: "decision:表.列" }` |
+| `{ was: [状態, ...] }`（実行前の状態） | `{ was: [状態, ...] }` |
 
-書かれたものを IR の入れ子に組み上げるのは、たどる側（手書きの糊）です。組み上げたものは、
-「どこに置く値か」の名前（コマンド・場合・副作用の番号・フィールド）と対にして、`extract` に渡します。
+糊は、答えの形の名前を IR のキーに読み替えるだけです（`constant` はそのまま、`reference` は `$ref`、`was` は `$was`）。
+以前の形では、参照の `table` / `column` に、使わないときの埋め草を入れていました。書き直すとき、それを `optional` にしたら、
+2つの解釈が「無いときに何を書くか」で分かれました。決定表の列を別の形 (`column`) にして、無いことがある欄そのものをなくしました。
 
 **文字列の組み立ては、計算に任せます。** `"input:" + 名前` のような連結は、仕様の語彙にありません。
 そこで、前置き（`input:` など）は決定表に、つなぎ方は計算の文に書きます。
 
 ```typescript
 // 前置きは決定表（値なので、ミューテーションのゲートが、本番コードで決まっていることを確かめる）
-export const ReferenceForm = decisionTable({
-  "The reference is to an input of the command": { prefix: "input:" },
-  // ...
-  otherwise: { prefix: "decision:" },
+export const Decision = decisions({
+  form: [
+    ReferenceFormIf.referenceInputCommand.then({ prefix: "input:" }),
+    // ...
+    otherwise({ prefix: "decision:" }),
+  ],
 });
 
-calculations: {
-  referenceText: component(
-    description("The prefix the reference form gives, followed by what is referred to: the name, or, for a column of a decision table, the table, a dot, and the column. Nothing else is added and nothing is trimmed."),
-    output("string"),
-  ),
-},
+export const Calc = calculations({
+  referenceText: {
+    description: "The prefix the reference form gives, followed by what is referred to: for a reference by name, the name; for a column of a decision table, the table, a dot, and the column. Nothing else is added and nothing is trimmed.",
+    output: "string",
+  },
+});
 ```
 
-正解は解釈の関数が計算し、PBT は、副作用が運ぶ文字列が1文字まで一致するかを見ます。
-新しい語彙を足さずに、文字列を組み立てる出力まで書けました。
+正解は解釈の関数が計算し、PBT は、答えの文字列が1文字まで一致するかを見ます。
 
 確かめ方は、IR のバイト一致です。Stage 0 と Stage 1 で、同じ仕様から同じ IR が出ることを見ます。
 

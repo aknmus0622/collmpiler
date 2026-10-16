@@ -1,3 +1,4 @@
+import { goToTargets } from "./extract.ts";
 import type { Diagnostic, SpecInput } from "./extract.ts";
 
 // グラフを土台にした検査 (DSL.md §8)。仕様を実行せず、書かれた構造だけから分かることを確かめる。
@@ -11,7 +12,27 @@ import type { Diagnostic, SpecInput } from "./extract.ts";
 // 道があるのに届かないこと（いつも偽の条件など）は、仕様を実行する検査（事前検査、仕様のミューテーション）が見る。
 //
 // extract の診断とは分けてある。たどり着けない状態やコマンドは誤り (error)、入ってくる辺の無い語彙は注意 (warning)
-export function graphDiagnostics(input: SpecInput): Diagnostic[] {
+// 多数ある部品として含まれる部品のデータのうち、含む部品が作るとき (adds) に渡すもの (W13)。部品の名前 → データの名前
+export function providedData(specs: SpecInput[]): Map<string, Set<string>> {
+  const provided = new Map<string, Set<string>>();
+  for (const spec of specs) {
+    for (const behavior of Object.values(spec.behaviors ?? {})) {
+      for (const outcome of Object.values(behavior.when)) {
+        for (const added of outcome.adds ?? []) {
+          const child = spec.model?.parts?.[added.part]?.component;
+          if (child === undefined) continue;
+          const names = provided.get(child) ?? new Set<string>();
+          for (const field of Object.keys(added.data)) names.add(field);
+          provided.set(child, names);
+        }
+      }
+    }
+  }
+  return provided;
+}
+
+// provided: 含む部品が作るときに渡すデータ（覚える (set) コマンドが無くても、設定される）
+export function graphDiagnostics(input: SpecInput, provided: ReadonlySet<string> = new Set()): Diagnostic[] {
   const model = input.model;
   if (!model) return [];
   const found: Diagnostic[] = [];
@@ -27,9 +48,11 @@ export function graphDiagnostics(input: SpecInput): Diagnostic[] {
     for (const [, behavior] of behaviors) {
       if (!(behavior.from ?? model.states).some((state) => reachable.has(state))) continue;
       for (const outcome of Object.values(behavior.when)) {
-        if (outcome.goTo !== undefined && model.states.includes(outcome.goTo) && !reachable.has(outcome.goTo)) {
-          reachable.add(outcome.goTo);
-          grown = true;
+        for (const target of outcome.goTo === undefined ? [] : goToTargets(input, outcome.goTo)) {
+          if (model.states.includes(target) && !reachable.has(target)) {
+            reachable.add(target);
+            grown = true;
+          }
         }
       }
     }
@@ -56,7 +79,7 @@ export function graphDiagnostics(input: SpecInput): Diagnostic[] {
   }
   const remembered = new Set(outcomes.flatMap((outcome) => Object.keys(outcome.set)));
   for (const field of Object.keys(model.data)) {
-    if (!remembered.has(field)) report("warning", "unset-data", "", `データ "${field}" を覚える (set) コマンドが、1つもありません。いつも未設定のままです`);
+    if (!remembered.has(field) && !provided.has(field)) report("warning", "unset-data", "", `データ "${field}" を覚える (set) コマンドが、1つもありません。いつも未設定のままです`);
   }
   const asked = new Set(behaviors.flatMap(([, behavior]) => Object.values(behavior.asks ?? {}).map((ask) => ask.query)));
   for (const [query, declaration] of Object.entries(model.queries)) {

@@ -17,7 +17,9 @@ export function referencePrefix(target: ReferenceTarget): string {
 /**
  * Pure calculation. Corresponds to the specification's `referenceText`.
  *
- * @param reference the reference to write (the input of the `Reference` command)
+ * @param reference the reference to write (the `reference` or `column` alternative of the `Write`
+ *   command's `value`)
+ * @returns the text written for it (the `reference` alternative of the `Write` command's answer)
  */
 export function referenceText(reference: Reference): string {
   const referredTo =
