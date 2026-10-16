@@ -37,6 +37,13 @@ ${lines.join("\n")}
 }
 
 const [name, ...rest] = process.argv.slice(2);
+// 版: パッケージの版。生成するファイルには書かない（互換性の約束は、IR の版だけ）
+if (name === "--version" || name === "-v") {
+  const { readFileSync } = await import("node:fs");
+  const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
+  console.log(version);
+  process.exit(0);
+}
 if (name === undefined || name === "--help" || name === "-h" || name === "help") {
   console.log(await overview());
   process.exit(name === undefined ? 2 : 0);
