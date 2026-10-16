@@ -473,7 +473,9 @@ export const Order = component({
 * どのまとまりも省略できます。`states`・`data`・`queries`・`effects`・`calculations`・`commands` は、まとまりごと `description("...")` にもできます。
 * **境界でのやり取りは、同じ形にそろえてあります。** コマンドには入力があり、問い合わせには引数（入力）と答え（出力）があり、副作用にはペイロード（入力）があります。どれも `input({...})` で書きます。
 * **裸の型は、その項目の値の形です。** データなら覚える値（`price: Yen`）、問い合わせなら答え（`isMonthEnd: "boolean"` は `output("boolean")` と同じ）、計算なら結果です。
-* **型**は、`"boolean"` / `"integer"` / `"number"` / `"string"`、列挙（文字列の配列）、制約つきの数（`integer({ min, max })`、`number({ min, max })`）です。
+* **型**は、`"boolean"` / `"integer"` / `"number"` / `"string"`、列挙（文字列の配列）、制約つきの数（`integer({ min, max })`、`number({ min, max })`）、
+  そして構造を持つ値です（下の「構造を持つ値」）。
+* **状態を持たない部品**は、`states` も `init` も書きません（内部では、`READY` という1つだけの状態を持つものとして扱います）。
 
 コマンドに書ける部品は、次のとおりです。
 
@@ -570,6 +572,66 @@ export const Order = component({
 * **数値**: 金額は整数で扱い、丸め方を計算の文に明記します。小数の計算は式の順序だけで結果がずれ、正解と実装が正当な理由なく食い違うためです。
 * **しきい値**: 条件に数値の境目があるときは、`around` に宣言します。ちょうどその値と前後の値を重点的に生成しないと、「以上」と「より大きい」の取り違えを見逃します。
 
+#### 構造を持つ値（`record` / `list` / `optional`）と、初期値（`initially`）
+
+型は、入れ子にできます。型を書けるところなら、どこにでも書けます（覚えるデータ、入力、問い合わせの答え、
+副作用のペイロード、計算の結果、コマンドの結果）。
+
+```typescript
+const Todo = record({ id: "string", title: "string", done: "boolean" });
+
+export const Todos = component({
+  // 状態を持たない部品: states / init を書かない
+  data: { items: component(list(Todo), initially([])) },                    // 並び。はじめは空
+  queries: { newId: component(description("A fresh identifier."), output("string"), fresh()) },
+  commands: {
+    Add: component(input({ title: "string" }), output(record({ result: ["created", "invalid"], todo: optional(Todo) })), ...),
+    Complete: component(input({ id: among("items", "id") }), output(["completed", "not-found", "already-done"]), ...),
+    List: component(output(list(Todo)), does("The answer is the items, in the order they were added.")),
+  },
+});
+```
+
+| 型 | 意味 |
+| --- | --- |
+| `record({ フィールド: 型 })` | フィールドの組。`input({...})` の中身と同じもの |
+| `list(型)` | 並び。**順序も比べます** |
+| `optional(型)` | 無いことがある値。無いときの値は `null` |
+
+* **`initially(値)`** で、覚えるデータのはじめの値を宣言します。宣言しないデータは、いままでどおり、覚えるまで未設定です
+  （意味の関数からは `undefined`）。`optional` のデータには、`set` で `null` を入れて「無い」に戻せます。
+* **並びやフィールドの組を「どう変えるか」は、構造の語彙にしません。** 計算（文と関数）にして、その結果を覚えます
+  （`set({ items: ref.calculation("itemsWithNew") })`）。IR には「この計算の結果を覚える」と、計算を定める文が出ます。
+* 値が型に合うことは、IR を作るときの検査（定数と、参照の型）と、仕様を実行する検査（計算の結果）が確かめます。
+* **構造を持つ値の検査は、手書きの版（Stage 0）が行います。** フレームワーク自身の `payload-check` の仕様は平らな値だけを
+  扱うので、語彙に構造を持つ型があるときは、Stage 1 を使いません（`pipeline` の「仕様の範囲の外は Stage 0 が決める」と同じです）。
+
+#### 依存の約束（`fresh` / `increasing`）と、入力の選び方（`among` / `examples`）
+
+問い合わせの答えは、1手ごとに独立に決まります。それでは困る依存には、依存が守る約束を宣言します。
+
+| 書き方 | 意味 | 使いどころ |
+| --- | --- | --- |
+| `fresh()` | 一度返した値は、二度と返さない | 識別子の採番 |
+| `increasing()` | 前の答えより小さくならない | 時計 |
+
+* 代役は、この約束を守って答えます。契約にも書かれます。本番コードは、約束を当てにしてよく、自分で実装はしません。
+* **`increasing()` の増え幅は、仕様の中の数の前後から選びます。** 「発行から 3600 秒以内」のような、覚えた値との差で決まる
+  しきい値に、時計の範囲が現実の時刻でも届きます（約束が無いと、時刻は1手ごとに無関係な値になり、届きません）。
+* 引数つきの問い合わせには、まだ付けられません。
+
+生成する入力を、仕様の中の値に寄せる手がかりです。合否の決まりではありません。
+
+| 書き方 | 意味 |
+| --- | --- |
+| `among("items", "id")` | 入力を、いま覚えている並び `items` の要素の `id` から選ぶ（4回に3回。残りは乱数のままで、無いものも試す） |
+| `string({ examples: [...] })` | 形式の決まった文字列の例。生成に混ぜる |
+| `integer({ ..., around: [...] })` | 試すしきい値を足す |
+
+* **仕様の中の数と文字列（意味の関数の中の定数、決定表の値）は、いつも自動で試します。** `around` は、それに足すためのもので、
+  狙う値を書き写す必要はありません。以前は、`around` を書くと自動で集めた数が使われなくなり、`around` が値の写しを書く場所に
+  なっていました。
+
 #### コマンドの結果（`output` と `responds`）
 
 コマンドは、実行した相手に値を返せます。返すものの形を `output` で宣言し、場合ごとに返す値を `responds` で書きます。
@@ -589,7 +651,7 @@ Borrow: component(
 Extend: component(from("ON_LOAN"), output(["extended", "refused"]), when("The book is reserved by someone else", responds("refused"), ...), otherwise(...)),
 ```
 
-* **形**は、値1つの型（`output("boolean")`、`output(["extended", "refused"])`）か、フィールドの組（`output(record({...}))`）です。
+* **形**は、どの型でも書けます: 値1つ（`output("boolean")`、`output(["extended", "refused"])`）、フィールドの組（`output(record({...}))`）、並び（`output(list(Todo))`）。
   場合によって値が無いフィールドは `optional(型)` と宣言し、無いときは `null` を返します（決定表の `null` と同じ決まりです。
   埋め草の値を書かせません）。
 * **値**は、定数か参照です（§3.2）。Layer 1 に書いても、解釈に書いても構いません。Layer 1 に書いた値は、解釈は書き換えられません。
@@ -599,7 +661,6 @@ Extend: component(from("ON_LOAN"), output(["extended", "refused"]), when("The bo
   不合格になります。以前は、断ることは「何も起きない」としか検証できませんでした。
 * **契約**: `executeCommand` が、その値を返します。返すコマンドが1つも無い仕様では、契約も IR も以前のままです。
 * 仕様が決めない値（採番した ID、時刻）は、問い合わせの答えにして、それを返す形にします。「何でもよい」という期待値はありません。
-* 並び（`list`）は、まだ返せません。
 
 #### 引数つきの問い合わせ（`asks`）
 
@@ -646,8 +707,8 @@ commands: {
 
 今後の課題（書き方は `DSL.md` で決めてあり、実装がこれからのもの）:
 
-* 構造を持つ値を、結果のほかでも使うこと（`record` / `list` / `optional` は、いまはコマンドの `output` の中だけ）、覚えるデータの初期値（`initially`）、依存の約束（`fresh` / `increasing`）、
-  入力の選び方（`among` / `examples`）、名前を付けた条件、部品の中の部品。書くと、「まだ使えません」と報告します。
+* 名前を付けた条件、Layer 1 に書いた `set` / `emits`、部品の中の部品。書くと、「まだ使えません」と報告します。
+* IR のキーを、書き方の語にそろえること（`effects` → `emits` など）。
 * コンポーネントは複数書けますが（§2.3「複数のコンポーネント」）、互いに独立に検証されます。コンポーネントの組み合わせ（ある部品の依存を、代役ではなく別の本物の部品につなぐ）は未実装です。
 
 ### 3.2. Layer 2: 解釈 (Interpretation)
