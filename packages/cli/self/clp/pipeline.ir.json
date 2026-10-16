@@ -9,15 +9,14 @@
       "when": {
         "The check passed": {
           "does": "Nothing: there is nothing to implement.",
-          "effects": [],
           "goTo": "DONE"
         },
         "otherwise": {
           "does": "An implementation session is started (attempt 1).",
-          "effects": [
+          "emits": [
             {
-              "name": "StartSession",
-              "payload": {
+              "effect": "StartSession",
+              "input": {
                 "attempt": 1,
                 "phase": "implementation",
                 "round": {
@@ -39,10 +38,10 @@
       "when": {
         "The check passed": {
           "does": "The attempt number goes back to 1. A wiring session is started.",
-          "effects": [
+          "emits": [
             {
-              "name": "StartSession",
-              "payload": {
+              "effect": "StartSession",
+              "input": {
                 "attempt": 1,
                 "phase": "wiring",
                 "round": {
@@ -58,10 +57,10 @@
         },
         "The check was rejected and attempts remain in this phase": {
           "does": "The attempt number goes up by one. A session of the same phase is started with the new attempt number.",
-          "effects": [
+          "emits": [
             {
-              "name": "StartSession",
-              "payload": {
+              "effect": "StartSession",
+              "input": {
                 "attempt": {
                   "$ref": "calculation:nextAttempt"
                 },
@@ -80,15 +79,15 @@
         },
         "The check was rejected, no attempts remain in this phase, and rounds remain": {
           "does": "The round number goes up by one and the attempt number goes back to 1. The code is discarded if it was being written from nothing. Then a design session is started in the new round.",
-          "effects": [
+          "emits": [
             {
-              "name": "DiscardCode",
-              "payload": {},
-              "when": "The code is being written from nothing"
+              "effect": "DiscardCode",
+              "input": {},
+              "onlyWhen": "The code is being written from nothing"
             },
             {
-              "name": "StartSession",
-              "payload": {
+              "effect": "StartSession",
+              "input": {
                 "attempt": 1,
                 "phase": "design",
                 "round": {
@@ -106,7 +105,6 @@
           }
         },
         "otherwise": {
-          "effects": [],
           "goTo": "FAILED"
         }
       }
@@ -119,15 +117,14 @@
       "onlyIf": [],
       "when": {
         "The check passed": {
-          "effects": [],
           "goTo": "DONE"
         },
         "The check was rejected and attempts remain in this phase": {
           "does": "The attempt number goes up by one. A session of the same phase is started with the new attempt number.",
-          "effects": [
+          "emits": [
             {
-              "name": "StartSession",
-              "payload": {
+              "effect": "StartSession",
+              "input": {
                 "attempt": {
                   "$ref": "calculation:nextAttempt"
                 },
@@ -146,15 +143,15 @@
         },
         "The check was rejected, no attempts remain in this phase, and rounds remain": {
           "does": "The round number goes up by one and the attempt number goes back to 1. The code is discarded if it was being written from nothing. Then a design session is started in the new round.",
-          "effects": [
+          "emits": [
             {
-              "name": "DiscardCode",
-              "payload": {},
-              "when": "The code is being written from nothing"
+              "effect": "DiscardCode",
+              "input": {},
+              "onlyWhen": "The code is being written from nothing"
             },
             {
-              "name": "StartSession",
-              "payload": {
+              "effect": "StartSession",
+              "input": {
                 "attempt": 1,
                 "phase": "design",
                 "round": {
@@ -172,7 +169,6 @@
           }
         },
         "otherwise": {
-          "effects": [],
           "goTo": "FAILED"
         }
       }
@@ -186,10 +182,10 @@
       "onlyIf": [],
       "when": {
         "There is no production code yet": {
-          "effects": [
+          "emits": [
             {
-              "name": "StartSession",
-              "payload": {
+              "effect": "StartSession",
+              "input": {
                 "attempt": 1,
                 "phase": {
                   "$ref": "decision:plan.phase"
@@ -214,10 +210,10 @@
           }
         },
         "There is production code, and the boundary differs from the previous run": {
-          "effects": [
+          "emits": [
             {
-              "name": "StartSession",
-              "payload": {
+              "effect": "StartSession",
+              "input": {
                 "attempt": 1,
                 "phase": {
                   "$ref": "decision:plan.phase"
@@ -242,10 +238,10 @@
           }
         },
         "There is production code, the boundary is unchanged, and there is no adapter": {
-          "effects": [
+          "emits": [
             {
-              "name": "StartSession",
-              "payload": {
+              "effect": "StartSession",
+              "input": {
                 "attempt": 1,
                 "phase": {
                   "$ref": "decision:plan.phase"
@@ -270,10 +266,10 @@
           }
         },
         "otherwise": {
-          "effects": [
+          "emits": [
             {
-              "name": "GradeCurrentCode",
-              "payload": {
+              "effect": "GradeCurrentCode",
+              "input": {
                 "round": 1
               }
             }
@@ -304,10 +300,10 @@
       "when": {
         "The check passed and existing code is being changed": {
           "does": "The attempt number goes back to 1. The current code is graded.",
-          "effects": [
+          "emits": [
             {
-              "name": "GradeCurrentCode",
-              "payload": {
+              "effect": "GradeCurrentCode",
+              "input": {
                 "round": {
                   "$ref": "data:round"
                 }
@@ -321,10 +317,10 @@
         },
         "The check passed and the code is being written from nothing": {
           "does": "The attempt number goes back to 1. An implementation session is started.",
-          "effects": [
+          "emits": [
             {
-              "name": "StartSession",
-              "payload": {
+              "effect": "StartSession",
+              "input": {
                 "attempt": 1,
                 "phase": "implementation",
                 "round": {
@@ -340,10 +336,10 @@
         },
         "The check was rejected and attempts remain in this phase": {
           "does": "The attempt number goes up by one. A session of the same phase is started with the new attempt number.",
-          "effects": [
+          "emits": [
             {
-              "name": "StartSession",
-              "payload": {
+              "effect": "StartSession",
+              "input": {
                 "attempt": {
                   "$ref": "calculation:nextAttempt"
                 },
@@ -362,15 +358,15 @@
         },
         "The check was rejected, no attempts remain in this phase, and rounds remain": {
           "does": "The round number goes up by one and the attempt number goes back to 1. The code is discarded if it was being written from nothing. Then a design session is started in the new round.",
-          "effects": [
+          "emits": [
             {
-              "name": "DiscardCode",
-              "payload": {},
-              "when": "The code is being written from nothing"
+              "effect": "DiscardCode",
+              "input": {},
+              "onlyWhen": "The code is being written from nothing"
             },
             {
-              "name": "StartSession",
-              "payload": {
+              "effect": "StartSession",
+              "input": {
                 "attempt": 1,
                 "phase": "design",
                 "round": {
@@ -388,7 +384,6 @@
           }
         },
         "otherwise": {
-          "effects": [],
           "goTo": "FAILED"
         }
       }
@@ -421,16 +416,16 @@
     "effects.GradeCurrentCode": "Grade the production code as it is, without an agent.",
     "queries.boundaryChanged": "Whether the component's boundary differs from the one the previous run worked from."
   },
-  "irVersion": 5,
+  "irVersion": 6,
   "model": {
     "calculations": {
       "nextAttempt": {
-        "is": "the current attempt number plus one",
-        "type": "integer"
+        "description": "the current attempt number plus one",
+        "output": "integer"
       },
       "nextRound": {
-        "is": "the current round number plus one",
-        "type": "integer"
+        "description": "the current round number plus one",
+        "output": "integer"
       }
     },
     "commands": {

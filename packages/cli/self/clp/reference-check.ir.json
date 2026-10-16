@@ -19,10 +19,10 @@
       "when": {
         "The named state is not declared": {
           "does": "An unknown-state diagnostic is reported for the remembered command, with an empty case name and the state as the subject. The walk remembers that something was reported.",
-          "effects": [
+          "emits": [
             {
-              "name": "ReportDiagnostic",
-              "payload": {
+              "effect": "ReportDiagnostic",
+              "input": {
                 "caseName": "",
                 "code": "unknown-state",
                 "command": {
@@ -38,9 +38,7 @@
             "reported": true
           }
         },
-        "otherwise": {
-          "effects": []
-        }
+        "otherwise": {}
       }
     },
     {
@@ -52,7 +50,6 @@
       "when": {
         "otherwise": {
           "does": "Nothing has been reported yet.",
-          "effects": [],
           "goTo": "BETWEEN_COMMANDS",
           "set": {
             "reported": false
@@ -70,7 +67,6 @@
       "when": {
         "otherwise": {
           "does": "The walk remembers the case's name.",
-          "effects": [],
           "goTo": "IN_CASE",
           "set": {
             "caseName": {
@@ -89,7 +85,6 @@
       "when": {
         "otherwise": {
           "does": "The walk remembers the command's name, and an empty case name.",
-          "effects": [],
           "goTo": "IN_COMMAND",
           "set": {
             "caseName": "",
@@ -109,11 +104,9 @@
       "onlyIf": [],
       "when": {
         "Nothing was reported": {
-          "effects": [],
           "goTo": "ACCEPTED"
         },
         "otherwise": {
-          "effects": [],
           "goTo": "REJECTED"
         }
       }
@@ -137,10 +130,10 @@
       "when": {
         "The named state is not declared": {
           "does": "An unknown-state diagnostic is reported for the remembered command and case, with the state as the subject. The walk remembers that something was reported.",
-          "effects": [
+          "emits": [
             {
-              "name": "ReportDiagnostic",
-              "payload": {
+              "effect": "ReportDiagnostic",
+              "input": {
                 "caseName": {
                   "$ref": "data:caseName"
                 },
@@ -158,9 +151,7 @@
             "reported": true
           }
         },
-        "otherwise": {
-          "effects": []
-        }
+        "otherwise": {}
       }
     },
     {
@@ -172,7 +163,6 @@
       "onlyIf": [],
       "when": {
         "otherwise": {
-          "effects": [],
           "goTo": "BETWEEN_COMMANDS"
         }
       }
@@ -196,10 +186,10 @@
       "when": {
         "The named effect is not declared": {
           "does": "An unknown-effect diagnostic is reported for the remembered command and case, with the effect as the subject. The walk remembers that something was reported.",
-          "effects": [
+          "emits": [
             {
-              "name": "ReportDiagnostic",
-              "payload": {
+              "effect": "ReportDiagnostic",
+              "input": {
                 "caseName": {
                   "$ref": "data:caseName"
                 },
@@ -217,9 +207,7 @@
             "reported": true
           }
         },
-        "otherwise": {
-          "effects": []
-        }
+        "otherwise": {}
       }
     }
   ],
@@ -229,7 +217,7 @@
     "queries.effectDeclared": "Whether the specification declares an effect of this name.",
     "queries.stateDeclared": "Whether the specification declares a state of this name."
   },
-  "irVersion": 5,
+  "irVersion": 6,
   "model": {
     "commands": {
       "AllowFrom": {

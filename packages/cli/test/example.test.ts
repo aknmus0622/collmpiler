@@ -51,12 +51,13 @@ test("specs/ の IR 出力は実行ごとにバイト一致する", () => {
   const succeeded = find("Checkout").when["The payment succeeded"];
   assert.equal(succeeded.goTo, "PAID");
   assert.match(succeeded.does, /A receipt is sent/);
-  assert.deepEqual(succeeded.effects, [
+  // IR の語は、仕様を書くときの語と同じ (emits / effect / input / onlyWhen)
+  assert.deepEqual(succeeded.emits, [
     {
-      name: "SendReceipt",
-      payload: { discountPercent: { $ref: "decision:campaign.discountPercent" }, amount: { $ref: "calculation:amountCharged" } },
+      effect: "SendReceipt",
+      input: { discountPercent: { $ref: "decision:campaign.discountPercent" }, amount: { $ref: "calculation:amountCharged" } },
     },
-    { name: "IssueCoupon", payload: { type: { $ref: "decision:campaign.coupon" } }, when: { $ref: "decision:campaign.grantsCoupon" } },
+    { effect: "IssueCoupon", input: { type: { $ref: "decision:campaign.coupon" } }, onlyWhen: { $ref: "decision:campaign.grantsCoupon" } },
   ]);
   assert.deepEqual(find("PlaceOrder").when.otherwise.set, {
     rank: { $ref: "input:customerRank" },
@@ -65,13 +66,13 @@ test("specs/ の IR 出力は実行ごとにバイト一致する", () => {
   // 文だけのコマンド (Cancel): 文は description として出て、構造はすべて解釈から来る
   assert.match(find("Cancel").description, /A pending or paid order can be cancelled/);
   assert.deepEqual(find("Cancel").from, ["PENDING", "PAID"]);
-  assert.deepEqual(find("Cancel").when.otherwise, { goTo: "CANCELLED", effects: [{ name: "Refund", payload: {}, when: { $was: ["PAID"] } }] });
+  assert.deepEqual(find("Cancel").when.otherwise, { goTo: "CANCELLED", emits: [{ effect: "Refund", input: {}, onlyWhen: { $was: ["PAID"] } }] });
   // 遷移先を書かなかった結果 (支払いの失敗) には goTo が無い。状態は変わらない
   assert.ok(!("goTo" in find("Checkout").when.otherwise));
   assert.match(ir.descriptions.component, /^An order:/);
   assert.deepEqual(ir.model.calculations.amountCharged, {
-    is: "price × (100 − discount percent) ÷ 100, rounded down to a whole yen",
-    type: "integer",
+    description: "price × (100 − discount percent) ÷ 100, rounded down to a whole yen",
+    output: "integer",
   });
   // 値の無いセル (null) は、そのまま IR に出る
   assert.deepEqual(ir.decisions.campaign.rows.otherwise, { discountPercent: 0, grantsCoupon: false, coupon: null });
@@ -108,7 +109,8 @@ const messages = async (dir: string) => extract(await loadSpecs(dir)).diagnostic
 
 test("読み込み: data・queries・入力の名前が重なるとエラー (条件から区別できないため)", async () => {
   const dir = specDir(`data: { rank: "string" }, commands: { Place: component(input({ rank: "string" }), ${go}) }`, `commands: { Place: component() }`);
-  await assert.rejects(loadSpecs(dir), /"rank" が重複しています \(data と input\)/);
+  // 読み込みは止めず、ほかの診断と一緒に報告する
+  assert.match((await messages(dir)).join("\n"), /"rank" が重複しています \(data と input\)。条件と計算からは同じ名前に見えるので/);
 });
 
 test("部品: 遷移先が2つ書かれていたらエラー。文は、つなげて1つになる", async () => {
@@ -193,7 +195,7 @@ export const Interpretation = interpretation(Counter, {
   assert.deepEqual(ir.descriptions, { component: "A counter that can be raised by a step. It reports each new total. It can be closed." });
   assert.deepEqual(ir.model?.states, ["OPEN", "CLOSED"]);
   const raise = ir.behaviors.find((b) => b.name === "Raise")!;
-  assert.deepEqual(Object.keys(raise.when.otherwise as object).sort(), ["does", "effects", "set"]);
+  assert.deepEqual(Object.keys(raise.when.otherwise as object).sort(), ["does", "emits", "set"]);
   assert.deepEqual(await selfCheck(spec, { seed: 1, numRuns: 100 }), { ok: true, numRuns: 100 });
   // 解釈が無ければ、語彙が定まらない
   writeFileSync(join(dir, "counter.component.ts"), readFileSync(join(dir, "counter.component.ts"), "utf8").split("export const Interpretation")[0]);

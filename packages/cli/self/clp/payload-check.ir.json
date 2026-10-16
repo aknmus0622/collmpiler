@@ -83,10 +83,10 @@
       "when": {
         "The field's value is still being checked, and the constant does not fit the field": {
           "does": "A bad-value diagnostic is reported for the remembered effect and field.",
-          "effects": [
+          "emits": [
             {
-              "name": "ReportDiagnostic",
-              "payload": {
+              "effect": "ReportDiagnostic",
+              "input": {
                 "code": "bad-value",
                 "effect": {
                   "$ref": "data:effect"
@@ -99,9 +99,7 @@
           ],
           "goTo": "IN_SETTLED_FIELD"
         },
-        "otherwise": {
-          "effects": []
-        }
+        "otherwise": {}
       }
     },
     {
@@ -128,10 +126,10 @@
       "when": {
         "The effect is declared, and the specification gives no value for the declared field": {
           "does": "A missing-field diagnostic is reported for the effect and that field.",
-          "effects": [
+          "emits": [
             {
-              "name": "ReportDiagnostic",
-              "payload": {
+              "effect": "ReportDiagnostic",
+              "input": {
                 "code": "missing-field",
                 "effect": {
                   "$ref": "data:effect"
@@ -143,9 +141,7 @@
             }
           ]
         },
-        "otherwise": {
-          "effects": []
-        }
+        "otherwise": {}
       }
     },
     {
@@ -167,7 +163,6 @@
       "onlyIf": [],
       "when": {
         "The entered effect is not declared": {
-          "effects": [],
           "goTo": "IN_UNKNOWN_EFFECT",
           "set": {
             "effect": {
@@ -176,7 +171,6 @@
           }
         },
         "otherwise": {
-          "effects": [],
           "goTo": "IN_EFFECT",
           "set": {
             "effect": {
@@ -212,7 +206,6 @@
       "when": {
         "The effect is declared and declares the given field": {
           "does": "The walk remembers the field's name.",
-          "effects": [],
           "goTo": "IN_FIELD",
           "set": {
             "field": {
@@ -222,10 +215,10 @@
         },
         "The effect is declared but does not declare the given field": {
           "does": "The walk remembers the field's name. A bad-value diagnostic is reported for the effect and that field.",
-          "effects": [
+          "emits": [
             {
-              "name": "ReportDiagnostic",
-              "payload": {
+              "effect": "ReportDiagnostic",
+              "input": {
                 "code": "bad-value",
                 "effect": {
                   "$ref": "data:effect"
@@ -243,9 +236,7 @@
             }
           }
         },
-        "otherwise": {
-          "effects": []
-        }
+        "otherwise": {}
       }
     },
     {
@@ -259,7 +250,6 @@
       "onlyIf": [],
       "when": {
         "otherwise": {
-          "effects": [],
           "goTo": "OUTSIDE"
         }
       }
@@ -289,10 +279,10 @@
       "when": {
         "The field's value is still being checked, and a value of that type does not fit the field": {
           "does": "A bad-value diagnostic is reported for the remembered effect and field.",
-          "effects": [
+          "emits": [
             {
-              "name": "ReportDiagnostic",
-              "payload": {
+              "effect": "ReportDiagnostic",
+              "input": {
                 "code": "bad-value",
                 "effect": {
                   "$ref": "data:effect"
@@ -305,9 +295,7 @@
           ],
           "goTo": "IN_SETTLED_FIELD"
         },
-        "otherwise": {
-          "effects": []
-        }
+        "otherwise": {}
       }
     },
     {
@@ -322,10 +310,10 @@
       "when": {
         "The field's value is still being checked": {
           "does": "A bad-value diagnostic is reported for the remembered effect and field.",
-          "effects": [
+          "emits": [
             {
-              "name": "ReportDiagnostic",
-              "payload": {
+              "effect": "ReportDiagnostic",
+              "input": {
                 "code": "bad-value",
                 "effect": {
                   "$ref": "data:effect"
@@ -338,9 +326,7 @@
           ],
           "goTo": "IN_SETTLED_FIELD"
         },
-        "otherwise": {
-          "effects": []
-        }
+        "otherwise": {}
       }
     }
   ],
@@ -401,7 +387,7 @@
     "states.IN_UNKNOWN_EFFECT": "In an effect that is not declared. Nothing is checked and nothing is reported until the walk leaves it.",
     "states.OUTSIDE": "Between effects."
   },
-  "irVersion": 5,
+  "irVersion": 6,
   "model": {
     "commands": {
       "Constant": {

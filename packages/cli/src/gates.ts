@@ -198,7 +198,7 @@ function specSentencesIn(ctx: GateContext, files: string[]): Violation[] {
       ...Object.keys(behavior.when),
       ...Object.values(behavior.when).flatMap((outcome) => (outcome.does ? [outcome.does] : [])),
     ]),
-    ...Object.values(ir.model?.calculations ?? {}).map((calculation) => calculation.is),
+    ...Object.values(ir.model?.calculations ?? {}).map((calculation) => calculation.description),
     ...(ir.model?.invariants ?? []),
   ]);
   sentences.delete("otherwise");

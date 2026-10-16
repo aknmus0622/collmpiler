@@ -9,10 +9,10 @@
       "onlyIf": [],
       "when": {
         "otherwise": {
-          "effects": [
+          "emits": [
             {
-              "name": "WriteConstant",
-              "payload": {
+              "effect": "WriteConstant",
+              "input": {
                 "flag": {
                   "$ref": "input:flag"
                 },
@@ -40,10 +40,10 @@
       "onlyIf": [],
       "when": {
         "otherwise": {
-          "effects": [
+          "emits": [
             {
-              "name": "WriteReference",
-              "payload": {
+              "effect": "WriteReference",
+              "input": {
                 "text": {
                   "$ref": "calculation:referenceText"
                 }
@@ -62,10 +62,10 @@
       "onlyIf": [],
       "when": {
         "otherwise": {
-          "effects": [
+          "emits": [
             {
-              "name": "WriteWasState",
-              "payload": {
+              "effect": "WriteWasState",
+              "input": {
                 "state": {
                   "$ref": "input:state"
                 }
@@ -103,12 +103,12 @@
     "effects.WriteReference": "A reference, as one text.",
     "effects.WriteWasState": "One state of a reference to the state before the command."
   },
-  "irVersion": 5,
+  "irVersion": 6,
   "model": {
     "calculations": {
       "referenceText": {
-        "is": "The prefix the reference form gives, followed by what is referred to: the name, or, for a column of a decision table, the table, a dot, and the column. Nothing else is added and nothing is trimmed.",
-        "type": "string"
+        "description": "The prefix the reference form gives, followed by what is referred to: the name, or, for a column of a decision table, the table, a dot, and the column. Nothing else is added and nothing is trimmed.",
+        "output": "string"
       }
     },
     "commands": {

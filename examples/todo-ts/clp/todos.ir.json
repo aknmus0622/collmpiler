@@ -9,14 +9,12 @@
       "onlyIf": [],
       "when": {
         "The title is empty or made only of whitespace, or has more characters than the limit.": {
-          "effects": [],
           "responds": {
             "result": "invalid",
             "todo": null
           }
         },
         "otherwise": {
-          "effects": [],
           "responds": {
             "result": "created",
             "todo": {
@@ -40,15 +38,12 @@
       "onlyIf": [],
       "when": {
         "No item has the given identifier.": {
-          "effects": [],
           "responds": "not-found"
         },
         "The item with the given identifier is already done.": {
-          "effects": [],
           "responds": "already-done"
         },
         "otherwise": {
-          "effects": [],
           "responds": "completed",
           "set": {
             "items": {
@@ -67,7 +62,6 @@
       "when": {
         "otherwise": {
           "does": "The answer is the items in the order they were added, filtered as asked. Nothing changes.",
-          "effects": [],
           "responds": {
             "$ref": "calculation:listedItems"
           }
@@ -83,11 +77,9 @@
       "onlyIf": [],
       "when": {
         "No item has the given identifier.": {
-          "effects": [],
           "responds": "not-found"
         },
         "otherwise": {
-          "effects": [],
           "responds": "removed",
           "set": {
             "items": {
@@ -111,12 +103,12 @@
     "component": "A to-do list behind an HTTP API. Items are added, completed, removed and listed. Each item has an identifier given by the list, a title, and whether it is done.",
     "queries.newId": "A fresh identifier for a new item."
   },
-  "irVersion": 5,
+  "irVersion": 6,
   "model": {
     "calculations": {
       "itemsWithCompleted": {
-        "is": "The items in the same order, with the item having the given identifier marked done.",
-        "type": {
+        "description": "The items in the same order, with the item having the given identifier marked done.",
+        "output": {
           "list": {
             "record": {
               "done": "boolean",
@@ -127,8 +119,8 @@
         }
       },
       "itemsWithNew": {
-        "is": "The items, with the new item added at the end.",
-        "type": {
+        "description": "The items, with the new item added at the end.",
+        "output": {
           "list": {
             "record": {
               "done": "boolean",
@@ -139,8 +131,8 @@
         }
       },
       "itemsWithoutRemoved": {
-        "is": "The items in the same order, without the item having the given identifier.",
-        "type": {
+        "description": "The items in the same order, without the item having the given identifier.",
+        "output": {
           "list": {
             "record": {
               "done": "boolean",
@@ -151,8 +143,8 @@
         }
       },
       "listedItems": {
-        "is": "The items in the order they were added: all of them, only the open ones, or only the done ones, as asked.",
-        "type": {
+        "description": "The items in the order they were added: all of them, only the open ones, or only the done ones, as asked.",
+        "output": {
           "list": {
             "record": {
               "done": "boolean",
@@ -163,8 +155,8 @@
         }
       },
       "newItem": {
-        "is": "An open item with the fresh identifier newId and the given title.",
-        "type": {
+        "description": "An open item with the fresh identifier newId and the given title.",
+        "output": {
           "record": {
             "done": "boolean",
             "id": "string",

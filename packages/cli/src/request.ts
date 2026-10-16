@@ -60,12 +60,12 @@ The IR describes one component by its boundary.
   \`{"type": "string", ...}\` is a string (\`examples\` and \`among\` only say which values the test tries).
   \`{"list": T}\` is a sequence of \`T\`, compared in order. \`{"record": {...}}\` is a value with those
   fields; the fields named in its \`optional\` may be \`null\`. \`{"optional": T}\` is a \`T\` or \`null\`.
-- \`model.calculations\`: named computations. \`is\` describes in natural language how the value is computed,
-  including rounding; implement exactly what it says. \`type\` is the type of the result.
+- \`model.calculations\`: named computations. \`description\` says in natural language how the value is computed,
+  including rounding; implement exactly what it says. \`output\` is the type of the result.
 - \`model.invariants\`: natural-language properties that always hold for the state and the remembered data.
   They are not tested directly; treat them as facts you can rely on.
 - **Conditions are written in natural language** everywhere they appear: as the row keys of decision tables, in
-  \`onlyIf\`, as the keys of \`when\`, and as the \`when\` of an effect. Decide what each condition means in
+  \`onlyIf\`, as the keys of \`when\`, and as the \`onlyWhen\` of an effect. Decide what each condition means in
   terms of the remembered data, the query answers, the input of the command, and the current state. The same
   sentence always means the same thing. Among the conditions of one table (or of one command's \`when\`) at
   most one holds; \`otherwise\` applies when none does.
@@ -82,9 +82,9 @@ The IR describes one component by its boundary.
   (a command that does not branch has only \`otherwise\`):
   - \`goTo\`: the resulting state. If it is absent, the state does not change.
   - \`does\` (if present): what happens, in prose. It explains the intent; the fields below are the precise form.
-  - \`effects\`: the effects to perform, in this order, each with its \`name\` and \`payload\`. An effect with
-    \`when\` is performed only if that holds; \`when\` is either a condition sentence or a reference to a
-    boolean value.
+  - \`emits\`: the effects to perform, in this order, each with the \`effect\` and its \`input\`. An effect with
+    \`onlyWhen\` is performed only if that holds; \`onlyWhen\` is either a condition sentence or a reference to a
+    boolean value. No \`emits\` means no effect.
   - \`set\`: the data to remember.
   - \`responds\` (if present): what the command answers with, given back to whoever executed it. It is a
     single value, or one value per field; \`null\` means the command has no value for that field in this

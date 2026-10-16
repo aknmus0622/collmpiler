@@ -47,7 +47,7 @@ test("clp: 引数の誤りは、何が違うかと使い方を伝えて、終了
 test("clp compile: IR を標準出力に出す。呼び出した場所からの相対パスで読む", () => {
   const fromRoot = clp(["compile", "examples/checkout-ts/specs"]);
   assert.equal(fromRoot.status, 0);
-  assert.equal(JSON.parse(fromRoot.stdout).irVersion, 5);
+  assert.equal(JSON.parse(fromRoot.stdout).irVersion, 6);
   // 別のディレクトリから呼んでも、同じ IR になる
   // 仕様のあるディレクトリ（プロジェクト）から呼べば、既定の specs が使われる
   const fromExample = clp(["compile"], { cwd: join(repoRoot, "examples/checkout-ts") });

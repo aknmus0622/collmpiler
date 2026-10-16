@@ -9,7 +9,6 @@
       "when": {
         "The member already holds at least the policy's maximum number of books, or someone else has reserved the book": {
           "does": "The borrowing is refused; nothing changes.",
-          "effects": [],
           "responds": {
             "dueInDays": null,
             "result": "refused"
@@ -17,10 +16,10 @@
         },
         "otherwise": {
           "does": "The book is due in the policy's loan days. The member is told the due date. The answer is lent, with the number of days until the book is due.",
-          "effects": [
+          "emits": [
             {
-              "name": "DueDateNotice",
-              "payload": {
+              "effect": "DueDateNotice",
+              "input": {
                 "daysUntilDue": {
                   "$ref": "decision:policy.loanDays"
                 }
@@ -52,10 +51,10 @@
       "onlyIf": [],
       "when": {
         "The book is then past its due date by more than the policy's lost-after days": {
-          "effects": [
+          "emits": [
             {
-              "name": "ReplacementCharge",
-              "payload": {}
+              "effect": "ReplacementCharge",
+              "input": {}
             }
           ],
           "goTo": "LOST",
@@ -66,7 +65,6 @@
           }
         },
         "The loan is then past its due date, but not by more than the policy's lost-after days": {
-          "effects": [],
           "goTo": "OVERDUE",
           "set": {
             "daysUntilDue": {
@@ -75,7 +73,6 @@
           }
         },
         "otherwise": {
-          "effects": [],
           "set": {
             "daysUntilDue": {
               "$ref": "calculation:daysUntilDueAfterDaysPass"
@@ -93,15 +90,14 @@
       "when": {
         "The book is reserved by someone else": {
           "does": "The extension is refused; nothing changes.",
-          "effects": [],
           "responds": "refused"
         },
         "otherwise": {
           "does": "The due date moves later by the policy's extension days, counted from the current due date. The member is told the new due date. A loan can be extended any number of times. The answer is extended.",
-          "effects": [
+          "emits": [
             {
-              "name": "DueDateNotice",
-              "payload": {
+              "effect": "DueDateNotice",
+              "input": {
                 "daysUntilDue": {
                   "$ref": "calculation:daysUntilDueAfterExtension"
                 }
@@ -128,24 +124,24 @@
       "when": {
         "otherwise": {
           "does": "The book is returned and becomes available again.",
-          "effects": [
+          "emits": [
             {
-              "name": "LateFeeCharge",
-              "payload": {
+              "effect": "LateFeeCharge",
+              "input": {
                 "amount": {
                   "$ref": "calculation:lateFee"
                 }
               },
-              "when": {
+              "onlyWhen": {
                 "$was": [
                   "OVERDUE"
                 ]
               }
             },
             {
-              "name": "NextMemberNotice",
-              "payload": {},
-              "when": {
+              "effect": "NextMemberNotice",
+              "input": {},
+              "onlyWhen": {
                 "$ref": "query:reservedBySomeoneElse"
               }
             }
@@ -174,20 +170,20 @@
     "effects": "A due-date notice to the member, carrying the number of days until the book is due; a late-fee charge, carrying the amount in yen; a notice to the next member waiting, carrying nothing; and a replacement charge, carrying nothing.",
     "queries": "How many books the member currently has on loan, and whether someone else has reserved the book."
   },
-  "irVersion": 5,
+  "irVersion": 6,
   "model": {
     "calculations": {
       "daysUntilDueAfterDaysPass": {
-        "is": "The days until the loan is due, minus the days that pass",
-        "type": "integer"
+        "description": "The days until the loan is due, minus the days that pass",
+        "output": "integer"
       },
       "daysUntilDueAfterExtension": {
-        "is": "The days until the loan is due, plus the policy's extension days",
-        "type": "integer"
+        "description": "The days until the loan is due, plus the policy's extension days",
+        "output": "integer"
       },
       "lateFee": {
-        "is": "The number of days the book is past its due date, times the fee per day, but at most the fee cap.",
-        "type": "integer"
+        "description": "The number of days the book is past its due date, times the fee per day, but at most the fee cap.",
+        "output": "integer"
       }
     },
     "commands": {

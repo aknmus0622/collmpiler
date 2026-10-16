@@ -10,7 +10,8 @@ import { compatible, conforms, describe, isEnum, isNumberSchema, isRecord, isStr
 // IR のキーは、仕様を書くときの語と同じにしている。
 // あわせて、型チェックをすり抜けた誤りを、分かりやすい文面で報告する。
 
-export const IR_VERSION = 5;
+// 6: キーを、仕様を書くときの語にそろえた（計算の { description, output }、場合の emits: [{ effect, input, onlyWhen }]）
+export const IR_VERSION = 6;
 
 // --- 読み込んだ仕様を、扱いやすい形に正規化したもの (loader が作る) ---
 export type SpecModel = {
@@ -451,10 +452,11 @@ export function extract(
           const problem = mismatch(input, name, effect.when, "boolean");
           if (problem) report("bad-value", name, caseName, `${effect.name} の onlyWhen: ${problem}`);
         }
+        // IR の語は、仕様を書くときの語と同じ: emits("副作用", { 値 }, onlyWhen(条件))
         return {
-          name: effect.name,
-          payload: Object.fromEntries(Object.entries(effect.payload).map(([field, value]) => [field, write(SLOT.payload(name, caseName, index, field), value)])),
-          ...(effect.when === undefined ? {} : { when: typeof effect.when === "string" ? effect.when : write(SLOT.when(name, caseName, index), effect.when) }),
+          effect: effect.name,
+          input: Object.fromEntries(Object.entries(effect.payload).map(([field, value]) => [field, write(SLOT.payload(name, caseName, index, field), value)])),
+          ...(effect.when === undefined ? {} : { onlyWhen: typeof effect.when === "string" ? effect.when : write(SLOT.when(name, caseName, index), effect.when) }),
         };
       });
 
@@ -498,7 +500,7 @@ export function extract(
         ...(outcome.goTo === undefined ? {} : { goTo: outcome.goTo }),
         ...(outcome.does === undefined ? {} : { does: outcome.does }),
         ...(outcome.responds === undefined ? {} : { responds: written.length === 1 && written[0][0] === "" ? written[0][1] : Object.fromEntries(written) }),
-        effects,
+        ...(effects.length > 0 ? { emits: effects } : {}),
         ...(Object.keys(outcome.set).length > 0
           ? { set: Object.fromEntries(Object.entries(outcome.set).map(([field, value]) => [field, write(SLOT.set(name, caseName, field), value)])) }
           : {}),
@@ -512,6 +514,41 @@ export function extract(
       ...(Object.keys(asks).length > 0 ? { asks } : {}),
       when,
     });
+  }
+
+  // 型そのものの誤り: 範囲の矛盾、空の列挙、範囲の外のしきい値。型を書ける所をすべて見る
+  const typeProblems = (schema: FieldSchema): string[] => {
+    if (isEnum(schema)) return schema.length === 0 ? ["列挙が空です。取り得る値を1つ以上書いてください"] : [];
+    if (typeof schema !== "object") return [];
+    if ("list" in schema) return typeProblems(schema.list);
+    if ("optional" in schema && !("record" in schema)) return typeProblems(schema.optional as FieldSchema);
+    if ("record" in schema) return Object.entries(schema.record).flatMap(([field, inner]) => typeProblems(inner).map((problem) => `${field}: ${problem}`));
+    const { min, max, around } = schema as { min?: number; max?: number; around?: readonly number[] };
+    const found: string[] = [];
+    if (min !== undefined && max !== undefined && min > max) found.push(`最小値 (min: ${min}) が、最大値 (max: ${max}) より大きいので、取り得る値がありません`);
+    for (const value of around ?? []) {
+      if ((min !== undefined && value < min) || (max !== undefined && value > max)) found.push(`しきい値 (around) の ${value} が、範囲の外です`);
+    }
+    return found;
+  };
+  const typed: [string, FieldSchema][] = [
+    ...Object.entries(model.data).map(([name, schema]): [string, FieldSchema] => [`data.${name}`, schema]),
+    ...Object.entries(model.commands).flatMap(([command, fields]) => Object.entries(fields).map(([field, schema]): [string, FieldSchema] => [`commands.${command}.input.${field}`, schema])),
+    ...Object.entries(model.queries).flatMap(([query, { input: fields, output }]) => [
+      ...Object.entries(fields).map(([field, schema]): [string, FieldSchema] => [`queries.${query}.input.${field}`, schema]),
+      [`queries.${query}.output`, output] as [string, FieldSchema],
+    ]),
+    ...Object.entries(model.effects).flatMap(([effect, fields]) => Object.entries(fields).map(([field, schema]): [string, FieldSchema] => [`effects.${effect}.input.${field}`, schema])),
+    ...Object.entries(model.calculations ?? {}).map(([name, calculation]): [string, FieldSchema] => [`calculations.${name}.output`, calculation.type]),
+    ...Object.entries(model.outputs ?? {}).map(([command, schema]): [string, FieldSchema] => [`commands.${command}.output`, schema]),
+  ];
+  for (const [where, schema] of typed) for (const problem of typeProblems(schema)) report("bad-type", "", "", `${where}: ${problem}`);
+  // 決定表の列は、どの行でも同じ種類の値（null は「この行では値が無い」）
+  for (const [name, table] of Object.entries(input.decisions)) {
+    for (const column of Object.keys(table.otherwise ?? {})) {
+      const kinds = [...new Set(Object.values(table).map((row) => row[column]).filter((cell) => cell !== null && cell !== undefined).map((cell) => typeof cell))];
+      if (kinds.length > 1) report("bad-decision", "", "", `決定表 ${name} の列 ${column}: 行によって値の種類が違います (${kinds.join(" と ")})。どの行も同じ種類の値にしてください`);
+    }
   }
 
   // 覚えるデータの、はじめの値は、その型に合う
@@ -547,13 +584,24 @@ export function extract(
   // Layer 1 が文で書いた説明（全体と、項目ごと）。構造が正確な形で、こちらは意図を伝える
   const descriptions = input.component?.descriptions ?? {};
   return {
-    ir: { irVersion: IR_VERSION, ...(Object.keys(descriptions).length > 0 ? { descriptions } : {}), model, decisions, behaviors },
+    ir: { irVersion: IR_VERSION, ...(Object.keys(descriptions).length > 0 ? { descriptions } : {}), model: irModel(model), decisions, behaviors },
     diagnostics,
   };
 }
 
+// IR に出す語彙。内部の形と違うのは、計算の書き方だけ（仕様を書くときの語: description と output）
+function irModel(model: SpecModel): unknown {
+  const { calculations, ...rest } = model;
+  return {
+    ...rest,
+    ...(calculations
+      ? { calculations: Object.fromEntries(Object.entries(calculations).map(([name, { is, type }]) => [name, { description: is, output: type }])) }
+      : {}),
+  };
+}
+
 // 境界: アダプターの契約を決める部分（状態・コマンドと入力・問い合わせ・副作用）
-export const boundaryOf = (ir: { model?: Partial<SpecModel> }) => {
+export const boundaryOf = (ir: { model?: Partial<Omit<SpecModel, "calculations">> }) => {
   const { init, states, commands, queries, effects, outputs } = ir.model ?? {};
   return stableStringify({ init, states, commands, queries, effects, ...(outputs ? { outputs } : {}) });
 };

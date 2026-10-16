@@ -10,12 +10,14 @@ import type { Workspace } from "./layout.ts";
 // テスト側ファイルの生成 (TypeScript を対象とするとき)。フレームワークが生成するのはテスト側だけで、本番コードには何も置かない。
 // 出力は IR だけから決まる（日時・CLI バージョンは埋めない）。
 
+// IR の語彙 (model) は、内部の形 (SpecModel) とほぼ同じ。計算だけは、仕様を書くときの語 (description / output) で出る
+export type IrModel = Omit<SpecModel, "calculations"> & { calculations?: Record<string, { description: string; output: FieldSchema }> };
 export type Ir = {
   irVersion: number;
   descriptions?: Record<string, string>;
   behaviors: { name: string; description?: string; from: string[]; onlyIf: string[]; asks?: Record<string, { query: string; input: Record<string, unknown> }>; when: Record<string, { goTo?: string; does?: string }> }[];
   decisions: Record<string, { rows: Record<string, Record<string, unknown>> }>;
-  model?: SpecModel;
+  model?: IrModel;
 };
 
 // 作業場所の中で、依頼文と添付資料を置くディレクトリ
@@ -163,7 +165,7 @@ await runPbt({ specs: fileURLToPath(new URL(${JSON.stringify(specs + "/")}, impo
 // 検証のシード。仕様のハッシュから決める（検証を決定的にするため）
 export const seedOf = (ir: Ir): number => Number.parseInt(specHash(ir).slice("sha256:".length, "sha256:".length + 7), 16);
 
-export function requireModel(ir: Ir): SpecModel {
+export function requireModel(ir: Ir): IrModel {
   if (!ir.model) throw new Error("仕様にコンポーネントがありません（component(...) を export してください）");
   return ir.model;
 }

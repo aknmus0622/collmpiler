@@ -10,11 +10,11 @@
       "onlyIf": [],
       "when": {
         "otherwise": {
-          "effects": [
+          "emits": [
             {
-              "name": "Refund",
-              "payload": {},
-              "when": {
+              "effect": "Refund",
+              "input": {},
+              "onlyWhen": {
                 "$was": [
                   "PAID"
                 ]
@@ -36,10 +36,10 @@
       "when": {
         "The payment succeeded": {
           "does": "A receipt is sent with the campaign's discount percent and the amount charged. Then a coupon is issued if the campaign grants one.",
-          "effects": [
+          "emits": [
             {
-              "name": "SendReceipt",
-              "payload": {
+              "effect": "SendReceipt",
+              "input": {
                 "amount": {
                   "$ref": "calculation:amountCharged"
                 },
@@ -49,13 +49,13 @@
               }
             },
             {
-              "name": "IssueCoupon",
-              "payload": {
+              "effect": "IssueCoupon",
+              "input": {
                 "type": {
                   "$ref": "decision:campaign.coupon"
                 }
               },
-              "when": {
+              "onlyWhen": {
                 "$ref": "decision:campaign.grantsCoupon"
               }
             }
@@ -64,10 +64,10 @@
         },
         "otherwise": {
           "does": "The customer is notified of the payment failure.",
-          "effects": [
+          "emits": [
             {
-              "name": "NotifyPaymentFailure",
-              "payload": {}
+              "effect": "NotifyPaymentFailure",
+              "input": {}
             }
           ]
         }
@@ -82,10 +82,10 @@
       "when": {
         "otherwise": {
           "does": "The order remembers the customer's rank and the list price. An order confirmation is sent.",
-          "effects": [
+          "emits": [
             {
-              "name": "SendOrderConfirmation",
-              "payload": {}
+              "effect": "SendOrderConfirmation",
+              "input": {}
             }
           ],
           "goTo": "PENDING",
@@ -109,10 +109,10 @@
       "when": {
         "otherwise": {
           "does": "The order becomes shipped. A shipping notice is sent, with priority as the shipping decision says.",
-          "effects": [
+          "emits": [
             {
-              "name": "SendShippingNotice",
-              "payload": {
+              "effect": "SendShippingNotice",
+              "input": {
                 "priority": {
                   "$ref": "decision:shipping.priority"
                 }
@@ -161,12 +161,12 @@
     "queries.isMonthEnd": "Whether today is the last day of the month.",
     "queries.paymentResult": "What the payment module answered for this order."
   },
-  "irVersion": 5,
+  "irVersion": 6,
   "model": {
     "calculations": {
       "amountCharged": {
-        "is": "price × (100 − discount percent) ÷ 100, rounded down to a whole yen",
-        "type": "integer"
+        "description": "price × (100 − discount percent) ÷ 100, rounded down to a whole yen",
+        "output": "integer"
       }
     },
     "commands": {
