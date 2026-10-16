@@ -48,7 +48,7 @@ const { values } = parseArgs({
 if (values.accept) {
   const { accepted, problems } = await accept({ specs: values.specs, component: values.component });
   for (const file of accepted) console.error(`確定しました: ${file}`);
-  for (const problem of problems) console.error(`error: ${problem}`);
+  for (const problem of problems) console.error(`error[not-accepted] ${problem}`);
   if (accepted.length === 0 && problems.length === 0) console.error("確定するものはありません（どの解釈も、いまの Layer 1 のものです）");
   if (problems.length > 0) process.exitCode = 1;
 } else {

@@ -5,7 +5,7 @@ import { graphDiagnostics } from "../graph.ts";
 import { listComponents, loadSpecs } from "../loader.ts";
 import { seedOf } from "../generate.ts";
 import type { Ir } from "../generate.ts";
-import { describeUnobservable, observability, selfCheck } from "../runtime.ts";
+import { describeUnobservable, observability, selfCheck, unreachedCases } from "../runtime.ts";
 import { references } from "../stage1.ts";
 import { typecheckSpecs } from "../typecheck.ts";
 
@@ -52,6 +52,13 @@ for (const name of names) {
     console.error(`error[spec-check] ${tag}${checked.message}`);
     console.error(`  再現するコマンド列: ${JSON.stringify(checked.steps)}`);
     process.exitCode = 1;
+  });
+  // 一度も成り立たない場合（事前検査に通ったあとで）。注意にとどめる
+  checks.push(async () => {
+    if (!spec.model || process.exitCode === 1) return;
+    for (const found of await unreachedCases(spec, { seed: seedOf(ir as Ir) })) {
+      console.error(`warning[unreached-case] ${tag}${found.command}.${found.case}: 仕様を実行しても、この場合には一度も当たりませんでした。条件がいつも偽か、入力がそこに届いていません。この場合の結果は検証されません`);
+    }
   });
   // 仕様のミューテーション: 決定表の値が、検証に現れるか（事前検査に通ったあとで）
   checks.push(async () => {

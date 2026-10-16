@@ -1,8 +1,10 @@
 import { isDeepStrictEqual, parseArgs } from "node:util";
 import fc from "fast-check";
-import { activate, matchCondition } from "@clp/core";
+import { RuleConflictError, activate, matchCondition } from "@clp/core";
 import type { BoundSpecification, FieldSchema } from "@clp/core";
-import { isRecordOutput, isReference, respondedValues } from "./extract.ts";
+import { extract, isRecordOutput, isReference, respondedValues, stableStringify } from "./extract.ts";
+import { seedOf } from "./generate.ts";
+import type { Ir } from "./generate.ts";
 import type { Reference, SpecInput, SpecModel, SpecValue } from "./extract.ts";
 import { loadSpecs } from "./loader.ts";
 import { conforms, isEnum, isList, isNumberSchema, isOptional, isRecord, isStringSchema } from "./schema.ts";
@@ -337,7 +339,15 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
       const command = force ?? enabled[raw.pick % enabled.length];
       const context = contextOf(command);
       const cases = input.behaviors[command].when;
-      const matched = matchCondition(binding, Object.keys(cases), context);
+      let matched: string;
+      try {
+        matched = matchCondition(binding, Object.keys(cases), context);
+      } catch (error) {
+        // 衝突した場面（コマンドと入力）を、再現するコマンド列に含める。以前は、最後のコマンドが列に入らなかった
+        if (!(error instanceof RuleConflictError)) throw error;
+        steps.push({ from: state.status, data: plain(state.data), command, input: inputs[command], queries, asks: plain(askedBy(command)), case: `(${error.hits.join(" / ")})` });
+        throw new SpecError(`${command} で、${error.message}（入力 ${JSON.stringify(inputs[command])}）`, steps);
+      }
       const step: Step = { from: state.status, data: plain(state.data), command, input: inputs[command], queries, asks: plain(askedBy(command)), case: matched };
       steps.push(step);
 
@@ -551,6 +561,38 @@ export const mutateCell = (cell: string | number | boolean): string | number | b
 // 検証のシードのほかに確かめるシードの数
 const EXTRA_SEEDS = 2;
 
+// 一度も成り立たない場合: コマンドの場合 (when) のうち、仕様を実行しても一度も当たらないもの。
+// いつも偽の条件、届かない入力、ほかの場合と取り違えた条件の文などで起きる。その場合の結果は検証されない。
+// 届きにくいだけのこともあるので、検証のシードで当たらなければ、ほかの2つのシードでも確かめる。それでも当たらなければ、注意として報告する
+export async function unreachedCases(input: SpecInput, params: { seed?: number; numRuns?: number } = {}): Promise<{ command: string; case: string }[]> {
+  const { model, binding } = input;
+  if (!model || !binding) return [];
+  const sim = simulator(input, model, binding);
+  const seen = new Set<string>();
+  const key = (command: string, name: string) => `${command}\u0000${name}`;
+  const walk = (raw: RawStep[]) => {
+    const steps: Step[] = [];
+    let state = sim.start();
+    try {
+      for (const rawStep of raw) {
+        const planned = sim.next(state, rawStep, steps);
+        if (!planned) continue;
+        seen.add(key(planned.step.command, planned.step.case));
+        state = planned.after;
+      }
+    } catch (error) {
+      if (!(error instanceof SpecError)) throw error;
+    }
+    return true;
+  };
+  const all = Object.entries(input.behaviors).flatMap(([command, behavior]) => Object.keys(behavior.when).map((name) => ({ command, case: name })));
+  const missing = () => all.filter((entry) => !seen.has(key(entry.command, entry.case)));
+  for (let extra = 0; extra <= 2 && missing().length > 0; extra++) {
+    await fc.check(fc.property(sim.sequences, walk), { numRuns: params.numRuns ?? DEFAULT_RUNS, seed: (params.seed ?? 0) + extra });
+  }
+  return missing();
+}
+
 export async function observability(input: SpecInput, params: { seed?: number; numRuns?: number } = {}): Promise<Unobservable[]> {
   const { model, binding } = input;
   if (!model || !binding) return [];
@@ -658,6 +700,8 @@ export async function check(
   if (!input.binding) return { status: "error", message: "コンポーネントの解釈 (interpretation) がありません" };
   const sim = simulator(input, model, input.binding);
   if (sim.commands.length === 0) return { status: "error", message: "検証するコマンドがありません" };
+  // シードの指定が無ければ、clp apply と同じく、仕様のハッシュから決める（同じ仕様とコードなら、いつも同じ結果）
+  if (params.seed === undefined) params = { ...params, seed: seedOf(JSON.parse(stableStringify(extract(input).ir)) as Ir) };
 
   // 1試行を実行し、不一致があればその内容を返す。仕様側の問題は SpecError として投げる
   const trial = async (raw: RawStep[]) => {

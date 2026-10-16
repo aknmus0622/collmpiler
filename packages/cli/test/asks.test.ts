@@ -179,5 +179,6 @@ test("検査: asks の誤り (知らない問い合わせ、引数の漏れ・�
 });
 
 test("読み込み: 尋ねた答えに付けた名前は、data や入力と重ねられない", async () => {
-  await assert.rejects(loadSpecs(specDir(DOOR(`asks("owner", "levelOf", { person: ref.data("owner") }),`))), /"owner" が重複しています \(data と asks\)/);
+  const diagnostics = extract(await loadSpecs(specDir(DOOR(`asks("owner", "levelOf", { person: ref.data("owner") }),`)))).diagnostics;
+  assert.match(diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"), /name-collision: "owner" が重複しています \(data と asks\)/);
 });

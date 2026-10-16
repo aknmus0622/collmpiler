@@ -115,7 +115,7 @@ export async function loadSpecs(
   const input = normalize(exportName, declaration, options.bindings === false ? undefined : bound?.binding);
   input.name = name;
   // 木の検査: 文法に合わない所と、まだ使えない書き方（次の書き方で書かれたものだけ）
-  const grammar = [...(isComponent(written) ? grammarOf(written) : []), ...(bound && options.bindings !== false ? grammarOf(bound.binding) : [])];
+  const grammar = [...(input.grammar ?? []), ...(isComponent(written) ? grammarOf(written) : []), ...(bound && options.bindings !== false ? grammarOf(bound.binding) : [])];
   if (grammar.length > 0) input.grammar = grammar;
   // 添付資料のパスは、コンポーネントのファイルがあるディレクトリからの相対
   input.assets = resolveAssets((declaration as { assets?: readonly AssetDeclaration[] }).assets ?? [], dirname(join(root, file)));
@@ -165,7 +165,8 @@ function normalize(name: string, layer1: object, binding: BoundSpecification | u
   const outputs = Object.fromEntries(Object.entries(component.commands).flatMap(([command, decl]) => (decl.output === undefined ? [] : [[command, decl.output]])));
   if (Object.keys(outputs).length > 0) model.outputs = outputs;
   if (component.initial) model.initial = component.initial;
-  validateModel(name, model, Object.values(component.commands).flatMap((decl) => Object.keys(decl.asks ?? {})));
+  const vocabulary = validateModel(name, model, Object.values(component.commands).flatMap((decl) => Object.keys(decl.asks ?? {})), component.decisions);
+  if (vocabulary.length > 0) return { behaviors: {}, decisions: {}, layer1, binding, grammar: vocabulary };
 
   const behaviors: SpecInput["behaviors"] = {};
   for (const [command, decl] of Object.entries(component.commands)) {
@@ -189,22 +190,29 @@ function normalize(name: string, layer1: object, binding: BoundSpecification | u
     };
   }
 
-  for (const [decision, table] of Object.entries(component.decisions)) {
-    if (!table.otherwise) throw new Error(`決定表 "${decision}" に otherwise がありません`);
-  }
   return { model, behaviors, decisions: component.decisions, layer1, component, binding };
 }
 
-function validateModel(name: string, model: SpecModel, asked: string[]) {
+// 語彙の誤り。読み込みを止めずに、ほかの診断と一緒に報告する（場所と直し方を添える）
+type VocabularyProblem = { code: string; message: string };
+function validateModel(name: string, model: SpecModel, asked: string[], decisions: Record<string, Record<string, unknown>>): VocabularyProblem[] {
+  const problems: VocabularyProblem[] = [];
   if (!model.states.includes(model.init)) {
-    throw new Error(`コンポーネント "${name}" の init "${model.init}" が states にありません`);
+    problems.push({ code: "unknown-state", message: `初期状態 (init) の "${model.init}" が、states にありません` });
+  }
+  for (const [decision, table] of Object.entries(decisions)) {
+    if (!table.otherwise) problems.push({ code: "bad-decision", message: `決定表 "${decision}" に otherwise がありません。どの行にも当たらないときの値を、otherwise の行に書いてください` });
   }
   // 条件と計算からは、data・引数の無い問い合わせ・入力・尋ねた答えに付けた名前が同じ階層で見えるため、名前が重なると区別できない
   const owners = new Map<string, string>([["status", "予約語"]]);
   const claim = (field: string, owner: string, shared = false) => {
     const taken = owners.get(field);
     if (taken !== undefined && !(shared && taken === owner)) {
-      throw new Error(`コンポーネント "${name}" のフィールド "${field}" が重複しています (${taken} と ${owner})`);
+      problems.push({
+        code: "name-collision",
+        message: `"${field}" が重複しています (${taken} と ${owner})。条件と計算からは同じ名前に見えるので、どちらかの名前を変えてください`,
+      });
+      return;
     }
     owners.set(field, owner);
   };
@@ -214,4 +222,5 @@ function validateModel(name: string, model: SpecModel, asked: string[]) {
   for (const alias of asked) claim(alias, "asks", true);
   // 入力どうしはコマンドが違えば同名でよい
   for (const fields of Object.values(model.commands)) for (const field of Object.keys(fields)) claim(field, "input", true);
+  return problems;
 }
