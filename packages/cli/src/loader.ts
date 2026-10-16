@@ -16,6 +16,16 @@ export const DRAFT_SUFFIX = ".draft.ts";
 export const STAMP = "// layer1: ";
 export const stampIn = (text: string): string | undefined => new RegExp(`^${STAMP}(sha256:[0-9a-f]+)$`, "m").exec(text)?.[1];
 
+// 人が確かめるまで確定できない印。解釈した LLM が書くもの (// REVIEW:) と、2つの解釈の食い違いを clp が書くもの (// REVIEW(clp):)。
+// 人は、Layer 1 を詳しくして導き直すか、その読み方でよければ REVIEWED に書き換える（確かめた記録として残る）
+export type OpenReview = { line: number; text: string; by: "interpreter" | "clp" };
+export function openReviews(text: string): OpenReview[] {
+  return text.split("\n").flatMap((line, index) => {
+    const match = /\/\/\s*REVIEW(\(clp\))?:\s*(.*)$/.exec(line);
+    return match ? [{ line: index + 1, text: match[2].trim(), by: match[1] ? ("clp" as const) : ("interpreter" as const) }] : [];
+  });
+}
+
 // Layer 1 のハッシュ。解釈に影響し得るものすべてを含める。
 // 決定表のセルの値は含めない（値は解釈を通らずに IR に届く。含めるのは、行と列の名前と、値の型だけ）。添付資料も含めない
 export function layer1Hash(layer1: object): string {
@@ -155,6 +165,11 @@ export async function loadSpecs(
   if (bound && options.bindings !== false) {
     const stamp = stampIn(readFileSync(join(root, bound.file), "utf8"));
     if (stamp !== undefined && stamp !== layer1Hash(declaration)) input.stale = true;
+    // 確定版に、確かめていない印が残っている（手で書き換えた、など）。下書きは、そもそも確かめていないものなので見ない
+    if (!bound.file.endsWith(DRAFT_SUFFIX)) {
+      const open = openReviews(readFileSync(join(root, bound.file), "utf8"));
+      if (open.length > 0) input.unreviewed = open.map((review) => `${bound.file}:${review.line}`);
+    }
   }
   // このコンポーネントの解釈のファイル（名前で決まる）が読み込めなければ、解釈の誤りとして報告する
   const base = file.replace(/(\.component)?\.ts$/, "");

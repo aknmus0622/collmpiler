@@ -100,6 +100,8 @@ export type SpecInput = {
   grammar?: { code: string; message: string; at?: { file: string; line: number } }[];
   // 解釈を導いたあとで、Layer 1 が変わっている
   stale?: boolean;
+  // 確定版の解釈に、人が確かめていない印 (// REVIEW:) が残っている場所
+  unreviewed?: string[];
   // コンポーネントの assets に宣言された添付資料（ファイルは内容を読み込んだもの）。IR には含めない
   assets?: Asset[];
   // どのファイルのどの export か（解釈の下書きを書くときに使う）
@@ -437,6 +439,9 @@ export function extract(
   for (const problem of input.problems ?? []) report("bad-interpretation", "", "", problem);
   if (input.stale) {
     report("stale-interpretation", "", "", "解釈を導いたあとで、Layer 1 が変わっています。clp interpret で導き直すか、解釈がいまも正しいことを確かめて clp interpret --accept を実行してください");
+  }
+  if (input.unreviewed) {
+    report("unreviewed-interpretation", "", "", `確定した解釈に、確かめていない疑問点・食い違いが残っています (${input.unreviewed.join(", ")})。Layer 1 を詳しくして clp interpret で導き直すか、その読み方でよければ、その行の REVIEW を REVIEWED に書き換えてください`);
   }
   if (!model) return { ir: { irVersion: IR_VERSION, behaviors: [], decisions: {} }, diagnostics };
 

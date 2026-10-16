@@ -286,8 +286,11 @@ It goes to `specs/order.interpretation.draft.ts`, and you are told where the pro
   `--sessions <n>` sets the number of sessions (default 2; `1` skips the comparison). In our trials the
   second session found every command with a disagreement, and a third and fourth added none.
 
-To resolve them, **make Layer 1 more precise** (add a decision table, a state, a `goTo`) and run `interpret`
-again; only what the change affects is redone. When nothing is left to resolve, read the draft and accept it:
+Both are written into the draft, the disagreements as `// REVIEW(clp):` lines, and **the draft cannot be
+accepted while any of them is left**. To resolve one, **make Layer 1 more precise** (add a decision table, a
+state, a `goTo`) and run `interpret` again; only what the change affects is redone. If the draft's reading is
+the one you meant, change that line's `REVIEW` to `REVIEWED`: it stays in the file as the record of what you
+confirmed. When nothing is left to resolve, read the draft and accept it:
 
 ```bash
 pnpm exec clp interpret --accept

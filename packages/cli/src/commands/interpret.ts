@@ -1,6 +1,6 @@
 import { parseArgs } from "node:util";
 import { readAssets } from "../assets.ts";
-import { accept, interpret } from "../interpret.ts";
+import { accept, describeDifference, interpret } from "../interpret.ts";
 import { commandStrategy } from "../strategy.ts";
 
 export const summary = "解釈 (Layer 2) を LLM に導かせる。--accept で確定する";
@@ -12,7 +12,9 @@ clp interpret --accept [--specs <dir>] [--component <name>]
   解釈が無いか、Layer 1 のあとで古くなっているコンポーネントが対象です（どれも新しければ、何もしません）。
 
   --agent "<command>"  エージェントを起動するコマンド
-  --accept             下書きを確定する（下書きが無ければ、いまの解釈が Layer 1 に合うことを確かめて、確定し直す）
+  --accept             下書きを確定する（下書きが無ければ、いまの解釈が Layer 1 に合うことを確かめて、確定し直す）。
+                       確かめていない疑問点・食い違い (// REVIEW:、// REVIEW(clp):) が残っていれば、確定しない。
+                       その読み方でよいと確かめたら、その行の REVIEW を REVIEWED に書き換える
   --specs <dir>        仕様のディレクトリ（既定: specs）
   --component <name>   対象のコンポーネント（既定: 解釈が要る最初のもの。--accept では、すべて）
   --sessions <n>       独立に解釈させるセッションの数（既定: 2）。2 以上なら、1つ目とほかのそれぞれを同じコマンド列で
@@ -21,10 +23,6 @@ clp interpret --accept [--specs <dir>] [--component <name>]
   --asset <file>       依頼に添付する資料（用語集など）。何度でも指定できる
   --transcripts <dir>  エージェントの出力を、試行ごとに保存する
   --agent-timeout <秒> エージェントの1回のセッションの制限時間（既定: 600）`;
-
-// 食い違いの観点の表示
-const label = (aspect: string) =>
-  aspect === "runs" ? "実行できるかどうか" : aspect === "state" ? "遷移先" : aspect === "output" ? "返す値" : aspect === "order" ? "副作用の順序" : `副作用 ${aspect.slice("effect:".length)}`;
 
 export async function main(args: string[]): Promise<void> {
 const { values } = parseArgs({
@@ -74,15 +72,14 @@ if (values.accept) {
     for (const comparison of result.comparisons ?? []) {
       if (comparison.status === "failed") console.error(`\n${comparison.session} つ目の解釈は導けなかったので、比べていません。`);
       else if (comparison.differences.length === 0) console.error(`\n${comparison.session} つ目の解釈は、試したコマンド列のすべてで、1つ目と一致しました。`);
-      for (const difference of comparison.differences) {
-        const path = difference.steps.map((step) => `${step.command} ${JSON.stringify({ ...step.input, ...step.queries })}`).join(" → ");
-        console.error(`\n食い違い (${difference.command}、${label(difference.aspect)}): ${path}\n  1つ目: ${JSON.stringify(difference.first)}\n  ${comparison.session} つ目: ${JSON.stringify(difference.other)}`);
-      }
+      for (const difference of comparison.differences) console.error(`\n${describeDifference(difference, comparison.session)}`);
     }
     for (const question of result.questions) console.error(`疑問点 (${question.line} 行目): ${question.text}`);
     console.error(
-      (result.comparisons ?? []).reduce((count, comparison) => count + comparison.differences.length, 0) + result.questions.length > 0
-        ? "\n食い違いと疑問点は、Layer 1 の記述があいまいな所です。Layer 1 を詳しくして、もう一度 clp interpret を実行してください。"
+      (result.comparisons ?? []).reduce((count, comparison) => count + (comparison.status === "failed" ? 1 : comparison.differences.length), 0) + result.questions.length > 0
+        ? "\n食い違いと疑問点は、Layer 1 の記述があいまいな所です。下書きに // REVIEW: / // REVIEW(clp): として書いてあり、" +
+            "人が確かめるまで確定できません。Layer 1 を詳しくして、もう一度 clp interpret を実行するか、" +
+            "その読み方でよければ、その行の REVIEW を REVIEWED に書き換えてから clp interpret --accept で確定してください。"
         : "\n解釈を読んで確かめ、clp interpret --accept で確定してください。",
     );
   }

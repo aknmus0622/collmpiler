@@ -29,6 +29,8 @@ export const usage = `clp apply (--out <dir> | --src <dir> --tests <dir | path-p
   --runs <n>           検証の試行の回数（既定: 5000）
   --max-rounds <n>     設計からやり直す回数の上限。最初の1周を含む（既定: 2）
   --from <phase>       始める段階を明示する (design / wiring / implementation)
+  --stop-after <phase> その段階が通ったら止める（design なら、人がスケルトンを確かめるため）。
+                       もう一度実行すると、出力先の状態から続きの段階が決まる（スケルトンがあれば配線から）
   --fresh              すでにある本番コードとアダプターを捨てて、設計から始める
   --asset [<phases>=]<file>  依頼に添付する資料。何度でも指定できる。既定では設計と実装の段階に渡す
                        （"wiring,design=docs/x.md" のように段階を指定できる）
@@ -62,6 +64,7 @@ const { values } = parseArgs({
     runs: { type: "string" },
     "max-rounds": { type: "string", default: "2" },
     from: { type: "string" },
+    "stop-after": { type: "string" },
     fresh: { type: "boolean", default: false },
     "keep-sandbox": { type: "boolean", default: false },
     transcripts: { type: "string" },
@@ -77,6 +80,10 @@ const { values } = parseArgs({
 });
 if (values.from !== undefined && !PHASES.includes(values.from as Phase)) {
   console.error(`--from は ${PHASES.join(" / ")} のいずれかです`);
+  process.exit(2);
+}
+if (values["stop-after"] !== undefined && !PHASES.includes(values["stop-after"] as Phase)) {
+  console.error(`--stop-after は ${PHASES.join(" / ")} のいずれかです`);
   process.exit(2);
 }
 if (!values.out && !(values.src && values.tests)) {
@@ -95,6 +102,7 @@ const result = await implement({
   ...(values.runs === undefined ? {} : { runs: Number(values.runs) }),
   maxRounds: Number(values["max-rounds"]),
   from: values.from as Phase | undefined,
+  stopAfter: values["stop-after"] as Phase | undefined,
   fresh: values.fresh,
   keepSandbox: values["keep-sandbox"],
   assets: readAssets(values.asset ?? []),
@@ -106,5 +114,6 @@ const result = await implement({
   log: (line) => console.error(line),
 });
 console.log(JSON.stringify(result, null, 2));
-if (result.status !== "pass") process.exitCode = 1;
+if (result.status === "paused") console.error("\n途中で止めました (--stop-after)。成果を確かめてから、もう一度 clp apply を実行すると、続きから進みます。");
+else if (result.status !== "pass") process.exitCode = 1;
 }

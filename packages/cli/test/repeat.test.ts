@@ -122,3 +122,32 @@ test("繰り返し: 直しきれなくても、すでにあった本番コード
   assert.ok("src/order-service.ts" in of(seen, "design")[0].files);
   assert.ok(existsSync(join(out, "src/order-service.ts")));
 });
+
+test("途中で止める: 設計のあとで止め、人がスケルトンを確かめる。もう一度実行すると、配線から続く", async () => {
+  const first = await run({}, { mutation: null, stopAfter: "design" });
+  assert.equal(first.status, "paused");
+  assert.deepEqual(first.trail, ["design:ok"]);
+  // スケルトンは出力先にあり、アダプターはまだ無い。合格の記録は書かれない
+  const ws = defaultWorkspace(first.out);
+  assert.ok(existsSync(join(first.out, "src")));
+  assert.ok(!existsSync(join(first.out, ws.paths.adapter)));
+  assert.ok(!existsSync(join(first.out, "clp/order.verified.json")));
+
+  // 止めているあいだに、人がスケルトンに手を入れた
+  const skeleton = readdirSync(join(first.out, "src")).find((name) => name.endsWith(".ts"))!;
+  const edited = `// checked by a person\n${readFileSync(join(first.out, "src", skeleton), "utf8")}`;
+  writeFileSync(join(first.out, "src", skeleton), edited);
+
+  const again = scripted({});
+  const result = await implement({ specs: specsDir, out: first.out, strategy: again.strategy, maxAttempts: 2, maxRounds: 1, mutation: null });
+  assert.equal(result.status, "pass");
+  assert.deepEqual(again.seen.map((s) => s.phase), ["wiring", "implementation"]);
+  // 配線の段階は、人が確かめたスケルトンを受け取る
+  assert.equal(again.seen[0].files[`src/${skeleton}`], edited);
+});
+
+test("途中で止める: 最後の段階を指定しても止まらない（そのまま終える）", async () => {
+  const result = await run({}, { mutation: null, stopAfter: "implementation" });
+  assert.equal(result.status, "pass");
+  assert.deepEqual(result.trail, ["design:ok", "wiring:ok", "implementation:ok"]);
+});

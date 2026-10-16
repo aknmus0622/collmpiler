@@ -25,7 +25,7 @@ export const Interpretation = interpretation(ValueWriter, {
         return state.target === "data";
       }),
       // The prefix the reference form gives, followed by what is referred to: the name, or, for a column of a decision table, the table, a dot, and the column. Nothing else is added and nothing is trimmed.
-      // REVIEW: "for a column of a decision table" is read as `target` being "decision"; `name` is then ignored,
+      // REVIEWED: "for a column of a decision table" is read as `target` being "decision"; `name` is then ignored,
       // and `table` and `column` are ignored for every other target, whatever they hold.
       Calc.referenceText.means((state) => {
         const prefix = ReferenceForm.of(state).prefix;

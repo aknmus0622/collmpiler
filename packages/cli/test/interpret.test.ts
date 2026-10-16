@@ -245,6 +245,50 @@ test("2つの解釈: 同じ語彙のもとで独立に導かせ、同じコマ�
   assert.deepEqual(readdirSync(dirname(dir)).filter((name) => name.startsWith(".tmp-clp-interpret-")), []);
 });
 
+test("人の確認: 疑問点が残っていれば確定しない。その読み方でよいと確かめて REVIEWED にすれば確定でき、記録として残る", async () => {
+  const doubtful = reviewed.replace("    Cancel: component(", "    // REVIEW: does a pending order that failed to pay count as paid?\n    Cancel: component(");
+  const dir = specDir();
+  await interpret({ specs: dir, strategy: scripted([doubtful]).strategy });
+  const refused = await accept({ specs: dir });
+  assert.deepEqual(refused.accepted, []);
+  assert.match(refused.problems[0], /order: 確かめていない疑問点・食い違いが 1 件あります[\s\S]*does a pending order/);
+  assert.ok(existsSync(join(dir, DRAFT)));
+
+  writeFileSync(join(dir, DRAFT), readFileSync(join(dir, DRAFT), "utf8").replace("// REVIEW:", "// REVIEWED:"));
+  assert.deepEqual(await accept({ specs: dir }), { accepted: [join(dir, FINAL)], problems: [] });
+  assert.match(readFileSync(join(dir, FINAL), "utf8"), /\/\/ REVIEWED: does a pending order/);
+  assert.equal(compile(dir).status, 0);
+});
+
+test("人の確認: 2つの解釈の食い違いは下書きに REVIEW(clp) として書かれ、確かめるまで確定しない。導き直すと書き直される", async () => {
+  const always = reviewed.replace("Effect.Refund(onlyWhen(was(State.PAID)))", "Effect.Refund()");
+  const dir = specDir();
+  await interpret({ specs: dir, strategy: scripted([reviewed, always]).strategy, sessions: 2 });
+  const marks = readFileSync(join(dir, DRAFT), "utf8").split("\n").filter((line) => line.includes("REVIEW(clp)"));
+  assert.equal(marks.length, 1);
+  assert.match(marks[0], /^\/\/ REVIEW\(clp\): 2 つ目の解釈と食い違う \(Cancel、副作用 Refund\): PlaceOrder .* → Cancel .*1つ目: .*2 つ目: .*Refund/);
+  assert.match((await accept({ specs: dir })).problems[0], /確かめていない疑問点・食い違いが 1 件あります/);
+
+  // Layer 1 を変えて導き直す: 出発点から前の食い違いは消え、新しい比較の結果だけが書かれる
+  const changed = fork(dir, replaced("An order confirmation is sent.", "A confirmation of the order is sent."));
+  const { strategy, seen } = scripted([reviewed, reviewed]);
+  await interpret({ specs: changed, strategy, sessions: 2 });
+  assert.doesNotMatch(seen[0].start, /REVIEW\(clp\)/);
+  assert.doesNotMatch(readFileSync(join(changed, DRAFT), "utf8"), /REVIEW\(clp\)/);
+  assert.deepEqual(await accept({ specs: changed }), { accepted: [join(changed, FINAL)], problems: [] });
+});
+
+test("人の確認: 確定版に確かめていない印が残っていれば、正解として使わない", async () => {
+  const dir = specDir();
+  await interpret({ specs: dir, strategy: scripted([reviewed]).strategy });
+  await accept({ specs: dir });
+  const tampered = fork(dir, (text) => text);
+  writeFileSync(join(tampered, FINAL), readFileSync(join(tampered, FINAL), "utf8").replace("    Cancel: component(", "    // REVIEW: is this right?\n    Cancel: component("));
+  const compiled = compile(tampered);
+  assert.notEqual(compiled.status, 0);
+  assert.match(compiled.stderr, /unreviewed-interpretation.*order\.interpretation\.ts:\d+/);
+});
+
 test("2つの解釈: 一致すれば、食い違いは無い。2つ目が語彙を変えたら差し戻す", async () => {
   const same = await interpret({ specs: specDir(), strategy: scripted([reviewed, reviewed]).strategy, sessions: 2 });
   assert.ok(same.status === "interpreted" && same.comparisons?.[0].status === "compared");

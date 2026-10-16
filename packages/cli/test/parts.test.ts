@@ -193,3 +193,40 @@ test("部品の中の部品: 呼ぶコマンドの入力と、知らない部品
   assert.ok(messages.some((line) => line.startsWith('bad-value Pay: account.Deposit.amount: "ten" は')), messages.join("\n"));
   assert.ok(messages.includes('unknown-command Check: account.Balanse: 部品 "account" (account) に、コマンド Balanse はありません'), messages.join("\n"));
 });
+
+// 経路の path に入る値: "." と ".." は、パーセントエンコードしても URL の正規化で区切りになり、HTTP では送れない
+const THINGS = `import { component, input, output, responds, route, string } from "@clp/core";
+export const GetInput = input({ id: string({ examples: [".", "..", "a"] }), note: string({ examples: [".", ".."] }) });
+export const Things = component({
+  description: "Things by id.",
+  commands: { Get: component(route("GET /things/:id"), GetInput, output("string"), responds(GetInput.id)) },
+});
+`;
+const THINGS_INTERPRETATION = `import { component, interpretation } from "@clp/core";
+import { Things } from "./things.component.ts";
+export const Interpretation = interpretation(Things, { commands: { Get: component() }, meanings: [] });
+`;
+
+test("経路: path に入る値のうち HTTP で送れないもの (\".\"、\"..\") は、仕様の外として生成しない。path でない入力には使う", async () => {
+  const dir = mkdtempSync(join(tmpRoot, "r-"));
+  writeFileSync(join(dir, "things.component.ts"), THINGS);
+  writeFileSync(join(dir, "things.interpretation.ts"), THINGS_INTERPRETATION);
+  const sent = { ids: new Set<string>(), notes: new Set<string>() };
+  const adapter: Adapter = {
+    async setupIsolation() {},
+    async teardownIsolation() {},
+    async executeCommand(command: { name: string; input: { id: string; note: string } }) {
+      sent.ids.add(command.input.id);
+      sent.notes.add(command.input.note);
+      return command.input.id;
+    },
+    async getCurrentState() {
+      return "READY";
+    },
+  };
+  const result = await check(dir, adapter, { drafts: false }, { seed: 1, numRuns: 300 });
+  assert.equal(result.status, "pass");
+  assert.ok(sent.ids.has("a"));
+  assert.ok(!sent.ids.has(".") && !sent.ids.has(".."));
+  assert.ok(sent.notes.has(".") && sent.notes.has(".."));
+});

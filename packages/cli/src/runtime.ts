@@ -344,6 +344,14 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
     }
   };
 
+  // 経路 (route) の path の :name に入る値のうち、HTTP では送れないもの。"." と ".." は、パーセントエンコードしても
+  // URL の正規化で区切りとして扱われる（/todos/./complete は /todos/complete になる）。その入力でのコマンドは、
+  // onlyIf と同じく仕様の外として、生成しない（本番コードに扱いを求めても、検証できない）
+  const pathFields = Object.fromEntries(
+    Object.entries(model.routes ?? {}).map(([command, route]) => [command, [...route.matchAll(/:([A-Za-z_$][\w$]*)/g)].map((match) => match[1])]),
+  );
+  const sendable = (name: string, given: Values) => (pathFields[name] ?? []).every((field) => given[field] !== "." && given[field] !== "..");
+
   // 1手進める。実行できるコマンドが無ければ undefined。仕様の評価に失敗したら SpecError
   // force: そのコマンドを、実行できるかどうか (from / onlyIf) を見ずに実行する（仕様のミューテーションで使う）
   // strict: force したコマンドが、いまの状態で実行できなければ、仕様の誤りにする（外側の部品が呼んだとき）
@@ -377,6 +385,8 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
         const behavior = input.behaviors[name];
         return (
           (behavior.from ?? model.states).includes(state.status) &&
+          // 外側の部品から呼ばれたとき (force) は、経路を通らない
+          (force !== undefined || sendable(name, inputs[name])) &&
           (behavior.onlyIf ?? []).every((text) => {
             const condition = binding.conditions[text];
             if (!condition) throw new Error(`事前条件 "${text}" の意味が、解釈にありません`);

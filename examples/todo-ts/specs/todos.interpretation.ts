@@ -71,8 +71,8 @@ export const Interpretation = interpretation(Todos, {
 
   // Meaning: what each name refers to, as functions attached to its handle.
   meanings: [
-    // REVIEW: "whitespace" is read as any Unicode whitespace (JavaScript's \s), not only spaces and tabs.
-    // REVIEW: "characters" is read as Unicode code points, so an emoji or other character outside the BMP counts
+    // REVIEWED: "whitespace" is read as any Unicode whitespace (JavaScript's \s), not only spaces and tabs.
+    // REVIEWED: "characters" is read as Unicode code points, so an emoji or other character outside the BMP counts
     // once (not as two UTF-16 units, which is what a JavaScript string's length would count).
     IfAdded.titleIsInvalid.means(
       (state) => /^\s*$/u.test(state.title) || [...state.title].length > Limits.of(state).maxTitleLength,

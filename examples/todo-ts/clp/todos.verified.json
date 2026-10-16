@@ -1,5 +1,5 @@
 {
-  "specs": "sha256:1d5f9662b0527de1984f39376d55c8aead13998b3b1265e904eba36115177098",
+  "specs": "sha256:501df1284b722957995811051971fc81c74e0978127d278d7f422bec499dd3f9",
   "code": "sha256:c93dd8a92206e44e78ce0d41efecb96147cbeceed13ae1f97cea3b3549c94595",
   "files": [
     "../src/apiResponses.ts",

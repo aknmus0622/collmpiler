@@ -48,7 +48,7 @@ export const Interpretation = interpretation(PayloadCheck, {
   },
 
   meanings: [
-      // REVIEW: in GivenField, "the effect is declared" is read from the state (the walk is not in
+      // REVIEWED: in GivenField, "the effect is declared" is read from the state (the walk is not in
       // IN_UNKNOWN_EFFECT); the command does not ask `effectDeclared` again.
       If.effectDeclaredDeclaresGivenField.means((state) => {
         return state.status !== "IN_UNKNOWN_EFFECT" && state.declared === true;
@@ -56,7 +56,7 @@ export const Interpretation = interpretation(PayloadCheck, {
       If.effectDeclaredButDoesNot.means((state) => {
         return state.status !== "IN_UNKNOWN_EFFECT" && state.declared === false;
       }),
-      // REVIEW: as in GivenField, "the effect is declared" is read from the state (the walk is in IN_EFFECT).
+      // REVIEWED: as in GivenField, "the effect is declared" is read from the state (the walk is in IN_EFFECT).
       If.effectDeclaredSpecificationGivesNo.means((state) => {
         return state.status === "IN_EFFECT" && state.given === false;
       }),
@@ -66,7 +66,7 @@ export const Interpretation = interpretation(PayloadCheck, {
       ConstantFitIf.fieldTakesBooleanValueBoolean.means((state) => {
         return state.takes === "boolean" && state.kind === "boolean";
       }),
-      // REVIEW: "within the field's bounds" is read as applying to both "an integer" and "a number", not only to
+      // REVIEWED: "within the field's bounds" is read as applying to both "an integer" and "a number", not only to
       // "a number".
       ConstantFitIf.fieldTakesNumberValueInteger.means((state) => {
         if (state.takes !== "number") return false;
@@ -80,7 +80,7 @@ export const Interpretation = interpretation(PayloadCheck, {
       ConstantFitIf.fieldTakesStringValueString.means((state) => {
         return state.takes === "string" && state.kind === "string";
       }),
-      // REVIEW: "the value is an integer" is read as `kind` being "integer". A constant of kind "number" that
+      // REVIEWED: "the value is an integer" is read as `kind` being "integer". A constant of kind "number" that
       // happens to be whole (2.0) does not fit an integer field, and `number` is not checked to be whole.
       ConstantFitIf.fieldTakesIntegerValueInteger.means((state) => {
         if (state.takes !== "integer") return false;

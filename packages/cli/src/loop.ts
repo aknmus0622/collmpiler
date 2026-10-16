@@ -65,6 +65,9 @@ export type ImplementOptions = {
   staticCheck?: StaticCheckStrategy | null;
   // どの段階から始めるか。省略時は、出力先の状態から決める (planOf)
   from?: Phase;
+  // この段階が通ったら、そこで止める（人が成果を確かめるため。設計のあとならスケルトン）。
+  // 続きは、もう一度実行すれば、出力先の状態から決まる（スケルトンがあってアダプターが無ければ、配線から）
+  stopAfter?: Phase;
   // true なら出力先の既存の本番コードとアダプターを捨てて、設計から始める
   fresh?: boolean;
   // true なら作業場所を消さずに残す (調査用)
@@ -175,7 +178,7 @@ export async function implement(options: ImplementOptions) {
   const attempts: Attempt[] = [];
   // コンポーネントごとに、段階の進め方をどちらが決めたか（1: 生成した状態機械、0: 手書きの手続き）
   const stages: Record<string, 0 | 1> = {};
-  let status: "pass" | "fail" = "pass";
+  let status: "pass" | "fail" | "paused" = "pass";
   const chosen = units.filter((candidate) => options.component === undefined || candidate.name === options.component);
   // 合格の記録は、これから確かめ直すので、いったん消す（途中で止まったときに、前の記録が残らないように）
   for (const unit of chosen) clearVerified(unit.ws);
@@ -195,15 +198,16 @@ export async function implement(options: ImplementOptions) {
       incremental: false,
       baseline: "",
       before: {},
-      others: units.filter((other) => other !== unit).map(({ name, ir, ws, seed }) => ({ name, ir, ws, seed })),
+      // ほかのコンポーネントは、それぞれ自身の検証と同じ回数で確かめ直す（部品を含むものは少なく、などが違う）
+      others: units.filter((other) => other !== unit).map(({ name, ir, ws, seed }) => ({ name, ir, ws, seed, runs: options.runs ?? defaultRuns(ir.model) })),
       parts: partsOf(unit),
     };
     // 含む部品のコード: この部品の作業では、使うだけ
     if (ctx.parts!.length > 0) ctx.partFiles = partFilesOf(ctx);
     const tag = units.length > 1 ? `${unit.name} ` : "";
-    const passed = await reconcile(ctx, options, attempts, (line) => log(`${tag}${line}`), stages);
-    if (!passed) {
-      status = "fail";
+    const outcome = await reconcile(ctx, options, attempts, (line) => log(`${tag}${line}`), stages);
+    if (outcome !== "pass") {
+      status = outcome;
       break;
     }
   }
@@ -228,12 +232,13 @@ async function reconcile(
   attempts: Attempt[],
   log: (line: string) => void,
   stages: Record<string, 0 | 1>,
-): Promise<boolean> {
+): Promise<"pass" | "fail" | "paused"> {
   // 始める前の本番コードを覚えておく（ほかのコンポーネントだけが使うコードを書き換えていないかを、あとで確かめる）
   ctx.before = Object.fromEntries(sourceFiles(ctx.ws).map((rel) => [rel, readFileSync(join(ctx.ws.root, rel), "utf8")]));
   const viaStage1 = await reconcileStage1(ctx, options, attempts, log);
   stages[ctx.ws.component] = viaStage1 === undefined ? 0 : 1;
-  return viaStage1 ?? reconcileStage0(ctx, options, attempts, log);
+  if (viaStage1 !== undefined) return viaStage1 ? "pass" : "fail";
+  return reconcileStage0(ctx, options, attempts, log);
 }
 
 const clearOutput = (ws: Workspace) => {
@@ -308,9 +313,9 @@ const CHECKED: Record<Phase, string> = { design: "DesignChecked", wiring: "Wirin
 async function reconcileStage1(ctx: GateContext, options: ImplementOptions, attempts: Attempt[], log: (line: string) => void): Promise<boolean | undefined> {
   const maxAttempts = options.maxAttempts ?? 3;
   const maxRounds = options.maxRounds ?? 2;
-  // 仕様に無い指定: 始める段階の明示 (--from) と、仕様が扱う範囲 (1〜3) の外の回数
+  // 仕様に無い指定: 始める段階の明示 (--from)、途中で止めること (--stop-after)、仕様が扱う範囲 (1〜3) の外の回数
   const inRange = (limit: number) => Number.isInteger(limit) && limit >= 1 && limit <= 3;
-  if (options.from !== undefined || !inRange(maxAttempts) || !inRange(maxRounds)) return undefined;
+  if (options.from !== undefined || options.stopAfter !== undefined || !inRange(maxAttempts) || !inRange(maxRounds)) return undefined;
   const adapter = await stage1Adapter("pipeline");
   if (!adapter) return undefined;
 
@@ -373,7 +378,7 @@ async function reconcileStage1(ctx: GateContext, options: ImplementOptions, atte
 }
 
 // Stage 0: 手書きの手続き
-async function reconcileStage0(ctx: GateContext, options: ImplementOptions, attempts: Attempt[], log: (line: string) => void): Promise<boolean> {
+async function reconcileStage0(ctx: GateContext, options: ImplementOptions, attempts: Attempt[], log: (line: string) => void): Promise<"pass" | "fail" | "paused"> {
   const { ws } = ctx;
 
   // 何が変わったかを見て、動かす段階を決める。新規は「本番コードが無い」場合にすぎない
@@ -409,10 +414,15 @@ async function reconcileStage0(ctx: GateContext, options: ImplementOptions, atte
         log(`[${round}] ${phase}: 上限回数まで直りませんでした`);
         continue rounds;
       }
+      // 人が確かめるために止める（最後の段階なら、止める意味が無いので、そのまま終える）
+      if (phase === options.stopAfter && phase !== PHASES[PHASES.length - 1]) {
+        log(`[${round}] ${phase}: ここで止めます (--stop-after ${phase})。確かめたら、もう一度実行すると続きから進みます`);
+        return "paused";
+      }
     }
-    return true;
+    return "pass";
   }
-  return false;
+  return "fail";
 }
 
 // 動かす段階を、出力先の状態から決める。

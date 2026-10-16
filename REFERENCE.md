@@ -79,7 +79,9 @@ verified with fewer runs by default (500).
 
 With `route("METHOD /path")` on its commands, the component is reached over HTTP: a path segment `:name` is the
 input field `name`, the input field `body` is the JSON body, every other field is a query parameter, and the
-answer's `status` and `body` are the response.
+answer's `status` and `body` are the response. A path field is never given `"."` or `".."`: HTTP cannot carry
+them in a path (URL normalization turns `/todos/./complete` into `/todos/complete`, encoded or not), so such a
+request is outside the specification, like a situation excluded by `onlyIf`.
 
 ## The one rule
 
@@ -207,6 +209,15 @@ input, the command's input, and the names given to asked answers. These names mu
 | a value in a decision table | nothing; run `clp apply` |
 | the wording of a sentence, meaning the same | `clp interpret --accept` (checks, then re-stamps) |
 | anything else in Layer 1 | `clp interpret` (only what changed is redone), read the report, `--accept`, then `clp apply` |
+
+`--accept` refuses a draft that still has a question (`// REVIEW:`, left by the interpreting agent) or a
+disagreement between two readings (`// REVIEW(clp):`, written by `clp`). Resolve each by making Layer 1 more
+precise and running `clp interpret` again, or, if the draft's reading is what you meant, by changing that
+line's `REVIEW` to `REVIEWED` (it stays as the record of what you confirmed).
+
+To look at the design before anything else is written, run `clp apply --stop-after design`: it stops once
+the skeleton passes. Read it (and edit it if you like), then run `clp apply` again; it continues with the
+wiring.
 
 ## What `clp compile` reports
 

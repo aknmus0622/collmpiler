@@ -63,7 +63,8 @@ export type GateContext = {
   // 同じ本番コードを共有する、ほかのコンポーネント。
   // 設計と実装の段階には、その IR も渡す（本番コードは、すべての仕様を満たし続けなければならない）。
   // 実装の段階の採点では、配線済みのものの検証も回す（回帰）
-  others: { name: string; ir: Ir; ws: Workspace; seed: number }[];
+  // runs: そのコンポーネント自身の検証の回数（回帰の確認も、同じ回数で行う）
+  others: { name: string; ir: Ir; ws: Workspace; seed: number; runs?: number }[];
   // 含む部品（さらに中のものも）の名前。設計と実装の段階には、その IR を見せない（入口に判断が入らないように。
   // 中の部品は、本番コードとして見える）
   parts?: string[];
@@ -198,8 +199,8 @@ function settledOthers(ctx: GateContext) {
 
 // PBT を実行する。どう実行するかは対象言語が決める
 // usage: true なら、実行した範囲も調べる（対象言語が調べられるとき）
-function runVerify(ctx: GateContext, unit: { ws: Workspace; seed: number } = ctx, usage = false): { result?: PbtResult; crash?: string; usage?: Usage } {
-  const run = ctx.target.runTests({ ws: unit.ws, seed: unit.seed, runs: ctx.runs, drafts: ctx.drafts, usage });
+function runVerify(ctx: GateContext, unit: { ws: Workspace; seed: number; runs?: number } = ctx, usage = false): { result?: PbtResult; crash?: string; usage?: Usage } {
+  const run = ctx.target.runTests({ ws: unit.ws, seed: unit.seed, runs: unit.runs ?? ctx.runs, drafts: ctx.drafts, usage });
   // 出力に含まれるリポジトリのパスを、差し戻しに載せない
   return run.result ? { result: run.result, ...(run.usage ? { usage: run.usage } : {}) } : { crash: scrub(ctx, run.crash ?? "") };
 }
