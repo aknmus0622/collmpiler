@@ -52,7 +52,7 @@ function specVariant(file: string, from: string, to: string) {
   return dir;
 }
 // シルバー会員の割引が 50% だった版（fixture の "buggy" は、この版の正しい実装）
-const silverFifty = () => specVariant("order.decisions.ts", "when(CampaignIf.customerSilverMember, { discountPercent: 5,", "when(CampaignIf.customerSilverMember, { discountPercent: 50,");
+const silverFifty = () => specVariant("order.decisions.ts", "CampaignIf.customerSilverMember.then({ discountPercent: 5,", "CampaignIf.customerSilverMember.then({ discountPercent: 50,");
 // 使われていない副作用が1つ多かった版（契約が違う）
 const extraEffect = () => specVariant("order.component.ts", "  NotifyPaymentFailure: input({}),", "  NotifyPaymentFailure: input({}),\n  Audit: input({}),");
 

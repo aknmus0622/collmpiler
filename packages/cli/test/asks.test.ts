@@ -17,42 +17,35 @@ after(() => rmSync(tmpRoot, { recursive: true, force: true }));
 
 // 扉: ノックした人が会員なら開く。会員かどうかは、名前を渡して尋ねる。
 // Layer 1 が尋ねることを決めたコマンド (Knock) と、解釈が決めたコマンド (Ring) がある
-const DOOR = (ringAsks = `Query.levelOf({ person: Data.owner }).as("level"),`) => `import { component, conditions, data, description, effects, from, goTo, input, interpretation, onlyWhen, otherwise, output, queries, states, when } from "@clp/core";
-const State = states("CLOSED", "OPEN");
+const DOOR = (ringAsks = `Query.levelOf({ person: Data.owner }).as("level")`, knock = "") => `import { commands, conditions, data, effects, input, interpretation, otherwise, queries, service, states } from "@clp/core";
+const State = states(["CLOSED", "OPEN"]);
 const If = conditions({ visitorFriendBothMembers: "The visitor and the friend are both members", notHoliday: "It is not a holiday" });
 const Data = data({ owner: "string" });
-const Query = queries({ levelOf: "string", isMember: "string", level: "string", levelOff: "string", isHoliday: "string" });
-const Effect = effects({ Greet: input({}) });
+const Query = queries({
+  isMember: { description: "Whether this person is a member.", input: input({ person: "string" }), output: "boolean" },
+  isHoliday: "boolean",
+  levelOf: { input: input({ person: "string" }), output: ["guest", "staff"] },
+});
+// 宣言していない問い合わせ（誤りの検査のため）と、尋ねた答えの名前
+const Other = queries({ levelOff: "string", level: "string" });
+const Effect = effects({ Greet: input({ level: ["guest", "staff"] }) });
 const In = input({ visitor: "string", friend: "string" });
-export const Door = component({
-  states: ["CLOSED", "OPEN"],
-  init: State.CLOSED,
-  data: { owner: "string" },
-  queries: {
-    isMember: component(description("Whether this person is a member."), input({ person: "string" }), output("boolean")),
-    isHoliday: "boolean",
-    levelOf: component(input({ person: "string" }), output(["guest", "staff"])),
+const Command = commands({
+  Knock: {
+    input: In,
+    from: State.CLOSED,
+    asks: [Query.isMember({ person: In.visitor }).as("member"), Query.isMember({ person: In.friend }).as("friendIsMember")],
+    cases: [If.visitorFriendBothMembers.then({ goTo: State.OPEN }), otherwise],
   },
-  effects: { Greet: input({ level: ["guest", "staff"] }) },
-  commands: {
-    Knock: component(
-      input({ visitor: "string", friend: "string" }),
-      from(State.CLOSED),
-      Query.isMember({ person: In.visitor }).as("member"),
-      Query.isMember({ person: In.friend }).as("friendIsMember"),
-      when(If.visitorFriendBothMembers, goTo(State.OPEN)),
-      otherwise(),
-    ),
-    Ring: description("The owner rings; the door closes and greets them by their level, except on holidays."),
-  },
+  Ring: "The owner rings; the door closes and greets them by their level, except on holidays.",
 });
-export const Interpretation = interpretation(Door, {
-  commands: {
-    Knock: component(when(If.visitorFriendBothMembers, Data.owner.set(In.visitor)), otherwise()),
-    Ring: component(from(State.OPEN), goTo(State.CLOSED), ${ringAsks} Effect.Greet({ level: Query.level }, onlyWhen(If.notHoliday))),
-  },
-  meanings: [If.visitorFriendBothMembers.means((state) => state.member === true && state.friendIsMember === true), If.notHoliday.means((state) => !state.isHoliday)],
-});
+export const Door = service({ init: State.CLOSED, uses: [State, Data, Query, Effect, If, Command] });
+export const Interpretation = interpretation(Door, [
+  Command.Knock.with({ ${knock}cases: [If.visitorFriendBothMembers.then({ set: [Data.owner.set(In.visitor)] })] }),
+  Command.Ring.with({ from: State.OPEN, goTo: State.CLOSED, asks: [${ringAsks}], emits: [Effect.Greet({ level: Other.level }).onlyWhen(If.notHoliday)] }),
+  If.visitorFriendBothMembers.means((state) => state.member === true && state.friendIsMember === true),
+  If.notHoliday.means((state) => !state.isHoliday),
+]);
 `;
 function specDir(source = DOOR()) {
   const dir = mkdtempSync(join(tmpRoot, "s-"));
@@ -168,18 +161,18 @@ test("検証: 引数の無い問い合わせと、覚えているデータを引
 
 test("検査: asks の誤り (知らない問い合わせ、引数の漏れ・型違い、引数つきの問い合わせを尋ねずに読む)", async () => {
   const messages = async (ringAsks: string) => extract(await loadSpecs(specDir(DOOR(ringAsks)))).diagnostics.map((d) => d.message).join("\n");
-  assert.match(await messages(`Query.levelOff({ person: Data.owner }).as("level"),`), /asks\.level: 問い合わせ "levelOff" は queries にありません/);
-  assert.match(await messages(`Query.levelOf().as("level"),`), /asks\.level: 問い合わせ levelOf に、引数 "person" がありません/);
-  assert.match(await messages(`Query.levelOf({ person: 1 }).as("level"),`), /asks\.level\.person: 1 は string に入りません/);
-  assert.match(await messages(`Query.levelOf({ person: Query.isHoliday }).as("level"),`), /asks\.level\.person: 引数に書けるのは、定数か、ref\.input \/ ref\.data です/);
+  assert.match(await messages(`Other.levelOff({ person: Data.owner }).as("level")`), /asks\.level: 問い合わせ "levelOff" は queries にありません/);
+  assert.match(await messages(`Query.levelOf().as("level")`), /asks\.level: 問い合わせ levelOf に、引数 "person" がありません/);
+  assert.match(await messages(`Query.levelOf({ person: 1 }).as("level")`), /asks\.level\.person: 1 は string に入りません/);
+  assert.match(await messages(`Query.levelOf({ person: Query.isHoliday }).as("level")`), /asks\.level\.person: 引数に書けるのは、定数か、ref\.input \/ ref\.data です/);
   assert.match(await messages(""), /"level" は、queries にも、コマンド Ring の asks にもありません/);
   // Layer 1 が尋ねることを書いたコマンドには、解釈は asks を書けない
-  const overriding = DOOR().replace("Knock: component(when(", 'Knock: component(Query.isMember({ person: "x" }).as("other"), when(');
+  const overriding = DOOR(undefined, 'asks: [Query.isMember({ person: "x" }).as("other")], ');
   assert.notEqual(overriding, DOOR());
   assert.match(extract(await loadSpecs(specDir(overriding))).diagnostics.map((d) => d.message).join("\n"), /コマンド "Knock" の asks は Layer 1 に書かれているので、解釈では書けません/);
 });
 
 test("読み込み: 尋ねた答えに付けた名前は、data や入力と重ねられない", async () => {
-  const diagnostics = extract(await loadSpecs(specDir(DOOR(`Query.levelOf({ person: Data.owner }).as("owner"),`)))).diagnostics;
+  const diagnostics = extract(await loadSpecs(specDir(DOOR(`Query.levelOf({ person: Data.owner }).as("owner")`)))).diagnostics;
   assert.match(diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"), /name-collision: "owner" が重複しています \(data と asks\)/);
 });

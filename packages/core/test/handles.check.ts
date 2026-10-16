@@ -1,29 +1,23 @@
 // 取っ手の型: 書き間違いは、エディタで型エラーになる（pnpm typecheck が確かめる。実行はしない）
-import { by, component, conditions, data, decisionTable, effects, goTo, input, many, output, parts, queries, states, when, otherwise, from, onlyIf } from "../index.ts";
+import { by, commands, conditions, data, decisions, effects, input, many, otherwise, parts, queries, service, states } from "../index.ts";
 
-const State = states("DRAFT", "PAID");
+const State = states(["DRAFT", "PAID"]);
 const If = conditions({ paid: "The payment succeeded" });
 const Data = data({ price: "integer" });
 const Query = queries({ isMonthEnd: "boolean" });
 const Effect = effects({ SendReceipt: input({ amount: "integer" }) });
 const Place = input({ listPrice: "integer" });
-const Campaign = decisionTable(when(If.paid, { discount: 1 }), otherwise({ discount: 0 }));
+const Decision = decisions({ campaign: [If.paid.then({ discount: 1 }), otherwise({ discount: 0 })] });
 
-goTo(State.PAID);
-from(State.DRAFT, State.PAID);
-onlyIf(If.paid);
 Data.price.set(Place.listPrice);
-Effect.SendReceipt({ amount: Campaign.discount });
+Effect.SendReceipt({ amount: Decision.campaign.discount });
+If.paid.then({ goTo: State.PAID });
 void Query.isMonthEnd;
 
 // @ts-expect-error 状態の名前の書き間違い
-goTo(State.PAYED);
-// @ts-expect-error 文字列では書けない
-goTo("PAID");
+void State.PAYED;
 // @ts-expect-error 条件の名前の書き間違い
-when(If.payd);
-// @ts-expect-error 文では書けない（条件は宣言してから使う）
-onlyIf("The payment succeeded");
+If.payd.then({});
 // @ts-expect-error データの名前の書き間違い
 Data.prise.set(1);
 // @ts-expect-error 副作用の名前の書き間違い
@@ -32,9 +26,12 @@ Effect.SendReciept({ amount: 1 });
 void Place.listPrise;
 // @ts-expect-error 問い合わせの名前の書き間違い
 void Query.isMonthEnds;
+// @ts-expect-error 決定表の名前の書き間違い
+void Decision.campain;
 
-// 含む部品: コマンドの名前は、その部品の commands から決まる
-const Account = component({ commands: { Deposit: component(input({ amount: "integer" })), Balance: component(output("integer")) } });
+// 含む部品: コマンドの名前は、その部品の commands のまとまりから決まる
+const AccountCommand = commands({ Deposit: { input: input({ amount: "integer" }) }, Balance: { output: "integer" } });
+const Account = service({ uses: [AccountCommand] });
 const Part = parts({ account: Account });
 Part.account.Deposit({ amount: Place.listPrice });
 void Part.account.Balance.answer;
@@ -42,6 +39,8 @@ void Part.account.Balance.answer;
 Part.account.Deposite({ amount: 1 });
 // @ts-expect-error 含む部品の名前の書き間違い
 void Part.acount;
+// @ts-expect-error コマンドの取っ手の名前の書き間違い
+AccountCommand.Deposite.with({});
 
 // 多数ある部品: キーで選んでから呼ぶ
 const Items = parts({ items: many(Account, by("id")) });

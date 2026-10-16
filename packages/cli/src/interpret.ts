@@ -105,7 +105,7 @@ function markComparisons(draft: string, comparisons: Comparison[]) {
   const at = text.indexOf("\n", text.indexOf(STAMP)) + 1;
   writeFileSync(draft, text.slice(0, at) + lines.join("\n") + "\n" + text.slice(at));
 }
-const TODO = `{\n      throw new Error("TODO");\n    }`;
+const TODO = `{\n    throw new Error("TODO");\n  }`;
 const literal = (value: unknown, indent: string) => JSON.stringify(value, null, 2).split("\n").join(`\n${indent}`);
 
 // Layer 1 に書かれたコマンド（文だけなら description だけを持つ）。コマンドが並べられていなければ undefined
@@ -150,8 +150,8 @@ function typeText(type: FieldSchema): string {
   return `${String(given.type)}({ ${Object.entries(given).filter(([key]) => key !== "type").map(([key, value]) => `${key}: ${JSON.stringify(value)}`).join(", ")} })`;
 }
 const fieldsText = (fields: Fields) => `{ ${Object.entries(fields).map(([name, type]) => `${name}: ${typeText(type)}`).join(", ")} }`.replace("{  }", "{}");
-// 部品を並べたもの: 1つならそのまま、複数なら component(...) で束ねる。無ければ component()
-const bundle = (parts: string[]) => (parts.length === 1 ? parts[0] : `component(${parts.join(", ")})`);
+// 席を並べた {}。無ければ {}
+const fieldsOf = (fields: string[]) => (fields.length === 0 ? "{}" : `{ ${fields.join(", ")} }`);
 
 // Layer 1 の取っ手: 部品のファイルと、それが import する仕様のファイルが export するもの。
 // 解釈の雛形は、これを import して参照に使う（文字列では参照しない）
@@ -184,10 +184,11 @@ const member = (group: string, key: string) => (/^[A-Za-z_$][\w$]*$/.test(key) ?
 const keyText = (key: string) => (/^[A-Za-z_$][\w$]*$/.test(key) ? key : quote(key));
 
 const CORE_WORDS =
-  "among, calculations, component, conditions, data, description, does, effects, fresh, from, goTo, increasing, initially, input, integer, interpretation, invariants, list, number, onlyIf, onlyWhen, optional, otherwise, output, queries, record, responds, states, string, was, when";
+  "among, calculations, commands, conditions, data, effects, input, integer, interpretation, invariants, list, number, optional, otherwise, queries, record, states, string, was";
 
 // 出発点: Layer 1 に書かれたコマンドと名前を並べ、中身は空にしておく。参照は、Layer 1 が export する取っ手で書く。
-// pinned があれば（2つ目の解釈）、境界（状態・コマンドの入力・問い合わせ・副作用）を、それで埋めておく
+// 解釈は、足すものを名前を持つノードとして並べる（DSL.md §16.0）。pinned があれば（2つ目の解釈）、
+// 境界（状態・コマンドの入力・問い合わせ・副作用）を、それで埋めておく
 function skeleton(layer1: Layer1, componentFile: string, exportName: string, exported: Exported[], pinned?: SpecModel): string {
   const taken = new Set([exportName, ...exported.map((entry) => entry.name)]);
   const fresh = (base: string) => {
@@ -200,8 +201,10 @@ function skeleton(layer1: Layer1, componentFile: string, exportName: string, exp
   // 名前（状態の名前、条件・不変条件の文、計算の名前）→ 取っ手
   const handleOf = (kind: string) => new Map(groupsOf(kind).flatMap((group) => group.handles.entries.map(([key, target]): [string, string] => [target, member(group.name, key)])));
   const declarations: string[] = [];
-  const groups: string[] = [];
-  const todo = (text: string) => groups.push(`  // TODO: ${text}`);
+  // 解釈に並べるもの（構造）
+  const items: string[] = [];
+  const todo = (text: string) => items.push(`  // TODO: ${text}`);
+  const service: string[] = [];
 
   // 状態
   const stateNames = structured(layer1.states) ? (Array.isArray(layer1.states) ? (layer1.states as string[]) : Object.keys(layer1.states as object)) : (pinned?.states ?? []);
@@ -209,17 +212,20 @@ function skeleton(layer1: Layer1, componentFile: string, exportName: string, exp
   if (states.size === 0 && stateNames.length > 0) {
     const name = fresh("State");
     const placed = !structured(layer1.states);
-    declarations.push(`${placed ? "export " : "// The states Layer 1 names, to refer to them (not placed again)\n"}const ${name} = states(${stateNames.map(quote).join(", ")});`);
-    if (placed) groups.push(`  states: ${name},`);
+    declarations.push(`${placed ? "export " : "// The states Layer 1 names, to refer to them (not listed again)\n"}const ${name} = states([${stateNames.map(quote).join(", ")}]);`);
+    if (placed) items.push(`  ${name},`);
     states = new Map(stateNames.map((state) => [state, member(name, state)]));
   } else if (!structured(layer1.states)) {
     const name = fresh("State");
-    declarations.push(`// TODO: the state names. Leave out ${name}, states and init if the component has no states\nexport const ${name} = states("A", "B");`);
-    groups.push(`  states: ${name},`);
+    declarations.push(`// TODO: the state names. Leave out ${name} and init if the component has no states\nexport const ${name} = states(["A", "B"]);`);
+    items.push(`  ${name},`);
     states = new Map([["A", member(name, "A")]]);
   }
   const stateRef = (state: string) => states.get(state) ?? `/* TODO: ${state} */`;
-  if (layer1.init === undefined) pinned ? groups.push(`  init: ${stateRef(pinned.init)},`) : todo(`init: ${[...states.values()][0] ?? "State.A"} (the initial state)`);
+  if (layer1.init === undefined) {
+    if (pinned) service.push(`init: ${stateRef(pinned.init)}`);
+    else todo(`${exportName}.with({ init: ${[...states.values()][0] ?? "State.A"} }) (the initial state)`);
+  }
 
   // 条件: Layer 1 の文には、その取っ手を使う。取っ手の無い文には、ここで名前を付ける
   const conditionOf = handleOf("conditions");
@@ -237,25 +243,25 @@ function skeleton(layer1: Layer1, componentFile: string, exportName: string, exp
   const added = fresh("IfAdded");
   declarations.push(`// New condition sentences you need (for onlyWhen, or cases Layer 1 does not list), each as key: "sentence"\nexport const ${added} = conditions({});`);
 
-  // 語彙のまとまり: Layer 1 が項目を並べていれば、足りない部品だけを、項目ごとに。並べていなければ、まとまりごと
+  // 語彙のまとまり: Layer 1 が項目を並べていれば、足りない席だけを、項目ごとに。並べていなければ、まとまりごと
   const WHAT = {
     data: "what the component remembers between commands, each as name: type. Remove it if nothing",
-    queries: "what it asks its dependencies, each as name: output(type), with input({...}) if it is asked about something. Remove it if nothing",
-    effects: "the effects it has on its dependencies, each as name: input({...}) or name: component(). Remove it if none",
+    queries: "what it asks its dependencies, each as name: type, or name: { input: input({...}), output: type } if it is asked about something. Remove it if nothing",
+    effects: "the effects it has on its dependencies, each as name: input({...}) or name: {}. Remove it if none",
   };
   const MAKER = { data: "data", queries: "queries", effects: "effects", calculations: "calculations" };
   const BASE = { data: "Data", queries: "Query", effects: "Effect", calculations: "Calc" };
   const fromPinned = (key: "queries" | "effects", name: string, lacks: (part: string) => boolean): string[] => {
     const parts: string[] = [];
     const fields = key === "queries" ? pinned!.queries[name]?.input : pinned!.effects[name];
-    if (lacks("input") && Object.keys(fields ?? {}).length > 0) parts.push(`input(${fieldsText(fields!)})`);
-    if (key === "queries" && lacks("output")) parts.push(`output(${typeText(pinned!.queries[name]!.output)})`);
+    if (lacks("input") && Object.keys(fields ?? {}).length > 0) parts.push(`input: input(${fieldsText(fields!)})`);
+    if (key === "queries" && lacks("output")) parts.push(`output: ${typeText(pinned!.queries[name]!.output)}`);
     return parts;
   };
   const declareGroup = (key: keyof typeof MAKER, lines: string[], note?: string) => {
     const name = fresh(BASE[key]);
     declarations.push(`${note ? `// TODO: ${note}\n` : ""}export const ${name} = ${MAKER[key]}({${lines.length > 0 ? `\n${lines.join("\n")}\n` : ""}});`);
-    groups.push(`  ${key}: ${name},`);
+    items.push(`  ${name},`);
     return name;
   };
   const calculationOf = handleOf("calculations");
@@ -263,7 +269,7 @@ function skeleton(layer1: Layer1, componentFile: string, exportName: string, exp
     const given = layer1[key];
     if (given === undefined || isDescription(given)) {
       if (key === "calculations") continue;
-      if (pinned && key !== "data") declareGroup(key, Object.keys(pinned[key]).map((name) => `  ${keyText(name)}: ${bundle(fromPinned(key, name, () => true))},`));
+      if (pinned && key !== "data") declareGroup(key, Object.keys(pinned[key]).map((name) => `  ${keyText(name)}: ${fieldsOf(fromPinned(key, name, () => true))},`));
       else declareGroup(key, [], WHAT[key]);
       continue;
     }
@@ -272,14 +278,14 @@ function skeleton(layer1: Layer1, componentFile: string, exportName: string, exp
       const shape = partsOf(written);
       const note = shape.description ? `  // ${shape.description}\n` : "";
       if (key === "data" && shape.type === undefined) lines.push(`${note}  ${keyText(name)}: "TODO",`);
-      if (key === "calculations" && shape.output === undefined) lines.push(`${note}  ${keyText(name)}: output("TODO"),`);
+      if (key === "calculations" && shape.output === undefined) lines.push(`${note}  ${keyText(name)}: { output: "TODO" },`);
       if (key === "queries" || key === "effects") {
         const lacks = (part: string) => (shape as Record<string, unknown>)[part] === undefined;
         if (pinned) {
           const parts = fromPinned(key, name, lacks);
-          if (parts.length > 0) lines.push(`  ${keyText(name)}: ${bundle(parts)},`);
-        } else if (key === "queries" && lacks("output")) lines.push(`${note}  ${keyText(name)}: output("TODO"),`);
-        else if (lacks("input") && shape.description !== undefined) lines.push(`${note}  ${keyText(name)}: component(),`);
+          if (parts.length > 0) lines.push(`  ${keyText(name)}: ${fieldsOf(parts)},`);
+        } else if (key === "queries" && lacks("output")) lines.push(`${note}  ${keyText(name)}: { output: "TODO" },`);
+        else if (key === "effects" && lacks("input") && shape.description !== undefined) lines.push(`${note}  ${keyText(name)}: {},`);
       }
     }
     if (lines.length === 0) continue;
@@ -287,14 +293,16 @@ function skeleton(layer1: Layer1, componentFile: string, exportName: string, exp
     if (key === "calculations") for (const calculation of Object.keys(given)) if (!calculationOf.has(calculation)) calculationOf.set(calculation, member(name, calculation));
   }
 
-  // コマンド
+  // コマンド: Layer 1 のコマンドのまとまりの取っ手に、足す席を書く（Command.X.with({...})）。
+  // Layer 1 がコマンドを並べていなければ、まとまりを宣言する
   const inputs = exported.filter((entry) => entry.handles?.kind === "input") as Required<Exported>[];
   const sameFields = (a: string[], b: string[]) => a.length === b.length && a.every((field) => b.includes(field));
   const known = sketched(layer1);
   const names = known ? Object.keys(known) : Object.keys(pinned?.commands ?? {});
-  const commands = names.map((name) => {
+  const layer1Commands = known ? groupsOf("commands")[0]?.name : undefined;
+  const bodies = names.map((name) => {
     const shape = known?.[name] ?? {};
-    const notes = [shape.description, shape.does].filter((text): text is string => text !== undefined).map((text) => `    // ${text}\n`).join("");
+    const notes = [shape.description, shape.does].filter((text): text is string => text !== undefined).map((text) => `  // ${text}\n`).join("");
     const parts: string[] = [];
     const fields = shape.input ?? (pinned ? (pinned.commands[name] ?? {}) : undefined);
     if (fields && Object.keys(fields).length > 0 && !inputs.some((entry) => sameFields(entry.handles.entries.map(([field]) => field), Object.keys(fields)))) {
@@ -302,18 +310,31 @@ function skeleton(layer1: Layer1, componentFile: string, exportName: string, exp
       if (shape.input) declarations.push(`// The input Layer 1 gives ${name}, to refer to its fields (not placed again)\nconst ${handle} = input(${fieldsText(fields)});`);
       else {
         declarations.push(`export const ${handle} = input(${fieldsText(fields)});`);
-        parts.push(handle);
+        parts.push(`input: ${handle}`);
       }
-    } else if (pinned && !shape.input && fields) parts.push(inputs.find((entry) => sameFields(entry.handles.entries.map(([field]) => field), Object.keys(fields)))?.name ?? `input({})`);
-    if (!shape.when) return `${notes}    ${name}: component(${parts.join(", ")}),`;
-    const branches: Record<string, { does?: string }> = { ...shape.when, ...(shape.when.otherwise ? {} : { otherwise: {} }) };
-    const cases = Object.entries(branches)
-      .map(([condition, outcome]) => `${outcome.does ? `      // ${outcome.does}\n` : ""}      ${condition === "otherwise" ? "otherwise()" : `when(${conditionOf.get(condition)})`},`)
-      .join("\n");
-    return `${notes}    ${name}: component(\n${parts.map((part) => `      ${part},\n`).join("")}${cases}\n    ),`;
+    } else if (pinned && !shape.input && fields) parts.push(`input: ${inputs.find((entry) => sameFields(entry.handles.entries.map(([field]) => field), Object.keys(fields)))?.name ?? `input({})`}`);
+    if (shape.when) {
+      const branches: Record<string, { does?: string }> = { ...shape.when, ...(shape.when.otherwise ? {} : { otherwise: {} }) };
+      const cases = Object.entries(branches)
+        .map(([condition, outcome]) => `${outcome.does ? `      // ${outcome.does}\n` : ""}      ${condition === "otherwise" ? "otherwise({})" : `${conditionOf.get(condition)}.then({})`},`)
+        .join("\n");
+      parts.push(`cases: [\n${cases}\n    ]`);
+    }
+    const body = parts.length === 0 ? "{}" : parts.some((part) => part.includes("\n")) ? `{\n    ${parts.join(",\n    ")},\n  }` : `{ ${parts.join(", ")} }`;
+    return { name, notes, body };
   });
-  if (known || pinned) groups.push(`  commands: {\n${commands.join("\n")}\n  },`);
-  else groups.push("  // TODO: commands — every command, with its input, where it applies, where it leads, and what it does\n  commands: {},");
+  if (layer1Commands) {
+    for (const { name, notes, body } of bodies) items.push(`${notes}  ${member(layer1Commands, name)}.with(${body}),`);
+  } else if (known || pinned) {
+    const group = fresh("Command");
+    declarations.push(`export const ${group} = commands({\n${bodies.map(({ name, notes, body }) => `${notes}  ${keyText(name)}: ${body},`).join("\n")}\n});`);
+    items.push(`  ${group},`);
+  } else {
+    const group = fresh("Command");
+    declarations.push(`// TODO: commands — every command, with its input, where it applies, where it leads, and what it does\nexport const ${group} = commands({});`);
+    items.push(`  ${group},`);
+  }
+  if (service.length > 0) items.unshift(`  ${exportName}.with({ ${service.join(", ")} }),`);
 
   // 意味: 文と計算の名前ごとに、取っ手に付ける関数
   const invariantOf = handleOf("invariants");
@@ -330,9 +351,9 @@ function skeleton(layer1: Layer1, componentFile: string, exportName: string, exp
   const calculations = layer1.calculations;
   const declared = calculations === undefined || isDescription(calculations) ? {} : calculations;
   const meanings = [
-    ...sentences(layer1).map((sentence) => `    ${conditionOf.get(sentence)}.means((state) => ${TODO}),`),
-    ...Object.entries(declared).map(([name, entry]) => `    // ${partsOf(entry).description ?? ""}\n    ${calculationOf.get(name) ?? `/* TODO: ${name} */`}.means((state) => ${TODO}),`),
-    ...(layer1.invariants ?? []).map((sentence) => `    ${invariantOf.get(sentence)}.means((state) => ${TODO}),`),
+    ...sentences(layer1).map((sentence) => `  ${conditionOf.get(sentence)}.means((state) => ${TODO}),`),
+    ...Object.entries(declared).map(([name, entry]) => `  // ${partsOf(entry).description ?? ""}\n  ${calculationOf.get(name) ?? `/* TODO: ${name} */`}.means((state) => ${TODO}),`),
+    ...(layer1.invariants ?? []).map((sentence) => `  ${invariantOf.get(sentence)}.means((state) => ${TODO}),`),
   ];
 
   // import: Layer 1 のファイルが export するもの（使わないものがあってもよい）
@@ -345,15 +366,13 @@ ${imports}
 
 ${declarations.join("\n\n")}
 
-export const Interpretation = interpretation(${exportName}, {
-  // Structure: what Layer 1 left as prose, as declarations. No functions.
-${groups.join("\n")}
+export const Interpretation = interpretation(${exportName}, [
+  // Structure: what Layer 1 left as prose, as named nodes. No functions.
+${items.join("\n")}
 
   // Meaning: what each name refers to, as functions attached to its handle.
-  meanings: [
 ${meanings.join("\n")}
-  ],
-});
+]);
 `;
 }
 
@@ -363,7 +382,7 @@ function request(draftFile: string, componentFile: string, attempt: number, asse
   return `# ${update ? "Update" : "Write"} the interpretation of a specification (attempt ${attempt})
 
 The files under \`${SPEC_DIR}/\` are a specification. \`${componentFile}\` is **Layer 1**, written by a person: it describes
-a component partly as structure and partly as prose (\`description("...")\`, \`does("...")\`, condition sentences). ${
+a component partly as structure and partly as prose (\`description\`, \`does\`, condition sentences). ${
     update
       ? `The **interpretation** says what the prose means. Layer 1 has changed since the interpretation was
 written. Your task is to bring the interpretation up to date. A person will review what you changed before it is used.`
@@ -381,7 +400,7 @@ remove what is no longer used, and correct an entry only if the prose it interpr
 entry exactly as it is, including its formatting. Any problems the current interpretation has are listed at the
 end of this request.`
       : "It lists what Layer 1 already names, with empty\nplaceholders, and marks what is missing with `TODO`."
-  } It has two parts: the structure, and \`meanings\`.${
+  } It lists two kinds of things: the structure, and the meanings.${
     pinned
       ? `
 
@@ -399,103 +418,109 @@ clear, follow it exactly: a difference that the prose does not allow is noise.`
       : ""
   }
 
-### 1. Handles: how everything is referred to
+### 1. The shape of the file, and handles
+
+The interpretation is \`interpretation(Component, [ ... ])\`: a list of what you add. Every element has a name of its
+own, and is matched by that name with what Layer 1 wrote:
+
+- a **group** you declare (\`export const Data = data({ count: "integer" })\`), listed as \`Data\`;
+- **what a command gains**: \`Command.Checkout.with({ ... })\`, where \`Command\` is the commands group Layer 1 exports;
+- **what the component gains**: \`Order.with({ init: State.DRAFT })\` (an initial state, or groups in \`uses\`);
+- **a meaning**: \`If.paid.means((state) => ...)\` (section 3).
+
+Inside \`{ ... }\` every key is a **field** with a fixed meaning (\`input\`, \`from\`, \`goTo\`, \`cases\`, ...). New names
+are born only as the keys of a group declaration (\`states([...])\`, \`data({...})\`, \`commands({...})\`, ...).
+\`[ ... ]\` is a list of things that name themselves (\`[State.A, State.B]\`, \`[If.x.then({...}), otherwise]\`).
+A command or case you do not mention gains nothing; mention only what you add.
 
 Nothing is referred to by a string. Layer 1 declares its vocabulary as **handles** and exports them; the draft
 already imports them. A handle is used as a value:
 
-- \`State.PAID\`: a state (in \`from(...)\`, \`goTo(...)\`, \`was(...)\`, \`init\`).
-- \`If.paymentSucceeded\`: a condition sentence (in \`when(...)\`, \`onlyIf(...)\`, \`onlyWhen(...)\`, and the rows
-  of a decision table). A group of conditions is \`conditions({ key: "<sentence>" })\`.
-- \`Data.price\`: remembered data, as a value; \`Data.price.set(value)\` stores a value.
+- \`State.PAID\`: a state (in \`from\`, \`goTo\`, \`was(...)\`, \`init\`).
+- \`If.paymentSucceeded\`: a condition sentence. \`If.paymentSucceeded.then({ ... })\` is the case where it holds
+  (in \`cases\`, and as a row of a decision table). A group of conditions is \`conditions({ key: "<sentence>" })\`.
+- \`Data.price\`: remembered data, as a value; \`Data.price.set(value)\` stores a value (in \`set: [...]\`).
 - \`Query.isMonthEnd\`: the answer of a query without input.
-- \`Effect.SendReceipt({ field: value })\`: performs an effect (\`Effect.Refund()\` when it carries nothing).
+- \`Effect.SendReceipt({ field: value })\`: performs an effect (\`Effect.Refund()\` when it carries nothing), in
+  \`emits: [...]\`. \`Effect.IssueCoupon({ type: ... }).onlyWhen(handle)\` performs it only sometimes.
 - \`Calc.amountCharged\`: the result of a calculation.
-- \`Campaign.discountPercent\`: a decision table's column, in the row that applies.
+- \`Decision.campaign.discountPercent\`: a column of the decision table \`campaign\`, in the row that applies.
 - \`PlaceOrderInput.listPrice\`: a field of a command's input. An input is declared as a handle,
-  \`const PlaceOrderInput = input({ customerRank: Rank, listPrice: Yen })\`, and placed in the command.
-- \`Part.todos.Add({ title: AddInput.title })\`: if Layer 1 has \`parts\` (components this one contains),
-  placed in a command, this executes a command of a contained component, before the command's case is decided.
-  Its answer is \`Part.todos.Add.answer\` (one field: \`Part.todos.Add.answer.todo\`); functions read it as
+  \`const PlaceOrderInput = input({ customerRank: Rank, listPrice: Yen })\`, and given as the command's \`input\`.
+- \`Part.todos.Add({ title: AddInput.title })\`: if Layer 1 has \`parts\` (components this one contains), listed in
+  a command's \`calls: [...]\`, this executes a command of a contained component, before the command's case is
+  decided. Its answer is \`Part.todos.Add.answer\` (one field: \`Part.todos.Add.answer.todo\`); functions read it as
   \`state.todos.Add\`. The contained component's own specification decides what that command does.
   A part declared with \`many(Todo, by("id"))\` has one contained component per key: \`Part.items.at(key).Complete()\`
   executes a command on the one with that key (if there is none, nothing happens and the answer is \`null\`), and
   \`Part.items.add(key, { title: ... })\` / \`Part.items.remove(key)\` create one (in its initial state, with that
-  data) or remove one; these two are written where things happen (directly, or in a case). Functions read
-  \`state.items\` as the list of the existing ones, in the order they were created, each with its key, \`status\`
-  and data.
+  data) or remove one; these two are written in \`adds: [...]\` / \`removes: [...]\`. Functions read \`state.items\`
+  as the list of the existing ones, in the order they were created, each with its key, \`status\` and data.
 
-To add vocabulary, declare a group in the draft, export it, place it under its key in the interpretation
-(\`data: Data\`), and refer to its entries through it: \`export const Data = data({ count: "integer" })\`,
-\`queries({...})\`, \`effects({...})\`, \`calculations({...})\`, \`invariants({ key: "<sentence>" })\`,
-\`states("A", "B")\` (then \`init: State.A\`). Condition groups are only declared, never placed.
 If you need to refer to something Layer 1 wrote but does not export (an input written inline, for example),
-declare a group with the same names in the draft without placing it: a reference is by name.
+declare a group with the same names in the draft without listing it: a reference is by name.
 
 ### 2. The structure: declarations, no functions
 
-Everything in the file except \`meanings\` is structure. It is written with the same words as Layer 1.
+Everything in the list except the meanings is structure, written with the same words as Layer 1.
 
 **You cannot override what Layer 1 wrote as structure.** Where Layer 1 gives states, an input, \`from\`, \`onlyIf\`,
-a \`goTo\`, a \`responds\`, an \`output\`, or the cases of a \`when\`, do not repeat or change it; write only what is missing.
+a \`goTo\`, a \`responds\`, an \`output\`, or the cases of a command, do not repeat or change it; write only what is
+missing.
 
-- An entry is one part, or several parts bundled with \`component(part, part, ...)\`. An entry you add nothing
-  to is \`component()\`.
-- Vocabulary. Layer 1 gives each group (\`states\`, \`data\`, \`queries\`, \`effects\`, \`calculations\`) either
-  as prose, or as a list of entries, each of which may itself be prose or parts.
-  - A group given as prose or not at all: declare it (see above).
+- Vocabulary. Layer 1 gives each group (\`states\`, \`data\`, \`queries\`, \`effects\`, \`calculations\`, \`commands\`)
+  either as prose (\`queries("...")\`), or as a list of entries, each of which may itself be prose or fields.
+  - A group given as prose or not at all: declare it, export it, and list it.
   - A group given as a list of entries: do not add entries (except to \`calculations\`); for each entry, declare
-    only the parts Layer 1 does not give, in a group of your own placed under the same key (the draft has one
-    where something is missing).
-  - The parts: \`data\` (what the component remembers between commands; everything is unset at the start):
-    its type, written as it is (\`count: "integer"\`). \`queries\` (what it asks its dependencies: a clock, a
-    setting, an external service's response): \`output(type)\` for the type of the answer (or just the type, when
-    that is all), plus \`input({ field: type })\` if it is a question about something. \`effects\` (what it does
-    to its dependencies): \`input({ field: type })\` for what it carries, or \`component()\`. \`calculations\`:
-    \`component(description("<how it is computed>"), output(type))\`; for one Layer 1 describes in prose, only
-    \`output(type)\`. You may also add invariants (sentences that must hold after every command).
-- Field types: \`"boolean"\`, \`"integer"\`, \`"number"\`, \`"string"\`, an array of allowed strings,
+    only the fields Layer 1 does not give, in a group of your own with the same entry names, and list it (the
+    draft has one where something is missing).
+  - The entries: \`data\` (what the component remembers between commands; everything is unset at the start): its
+    type (\`count: "integer"\`), or \`{ type, initially }\` when it starts with a value. \`queries\` (what it asks its
+    dependencies: a clock, a setting, an external service's response): the type of the answer, or
+    \`{ input: input({ field: type }), output: type }\` if it is a question about something. \`effects\` (what it
+    does to its dependencies): \`input({ field: type })\` for what it carries, or \`{}\`. \`calculations\`:
+    \`{ description: "<how it is computed>", output: type }\`; for one Layer 1 describes in prose, only
+    \`{ output: type }\`. \`invariants({ key: "<sentence>" })\`: sentences that must hold after every command.
+  - States: \`export const State = states(["A", "B"])\`, listed, with \`Order.with({ init: State.A })\`.
+- Field types: \`"boolean"\`, \`"integer"\`, \`"number"\`, \`"string"\`, an array of allowed values,
   \`integer({ min, max })\` / \`number({ min, max })\`, \`list(type)\` (a sequence, compared in order),
-  \`record({ field: type })\` (a value with fields), and \`optional(type)\` (the value, or \`null\` when there
-  is none). A bare \`{ ... }\` is never a type. Thresholds and strings that appear in your functions and in
-  the decision tables are tried by the test automatically; do not copy them into \`around\`.
-  A \`data\` field that starts with a value is \`component(type, initially(value))\`; otherwise it is unset
-  (\`undefined\`) until a command stores it. To change a list or a record, describe the new value as a
-  calculation and store its result (\`Data.items.set(Calc.itemsWithNew)\`).
-- A query's answers can be promised to be \`fresh()\` (never the same value twice: an identifier) or
-  \`increasing()\` (never less than before: a clock): \`newId: component(output("string"), fresh())\`.
+  \`record({ field: type })\` (a value with fields), and \`optional(type)\` (the value, or \`null\` when there is
+  none). A bare \`{ ... }\` is never a type. Thresholds and strings that appear in your functions and in the
+  decision tables are tried by the test automatically; do not copy them into \`around\`. To change a list or a
+  record, describe the new value as a calculation and store its result (\`set: [Data.items.set(Calc.itemsWithNew)]\`).
+- A query's answers can be promised to be \`fresh: true\` (never the same value twice: an identifier) or
+  \`increasing: true\` (never less than before: a clock): \`newId: { output: "string", fresh: true }\`.
   An input field whose value should usually be one the component already remembers is
   \`among(Data.items, "id")\` (one of the \`id\`s of the remembered list \`items\`) instead of \`"string"\`.
-- A component with no states at all has neither \`states\` nor \`init\`. Use whole numbers for money. The names of \`data\`
-  fields, queries without input, command inputs, and the names given to asked answers share one namespace and must
-  not collide (inputs, and answer names, of different commands may).
-- \`commands\`: one entry for **every** command, even if you add nothing (\`component()\`). An entry may hold,
-  where Layer 1 does not: an input handle, \`from(State.A, State.B)\` (the states in which the command can be
-  executed), \`onlyIf(If.x)\` (a condition that must hold), asked queries (below), and what happens:
-  - \`goTo(State.X)\`: the resulting state. **Omit it when the state does not change.**
-  - \`Effect.Name({ field: value, ... })\`: an effect to perform, in order. Add \`onlyWhen(...)\` as the last
-    argument to perform an effect only sometimes.
-  - \`Data.field.set(value)\`: the data to store.
-  - \`responds(value)\` or \`responds({ field: value })\`: what the command answers with. A command that
-    declares \`output(...)\` must respond in every case, and only such a command may respond. If Layer 1 does
-    not declare what a command answers with and the prose says it answers something, add
-    \`output(type)\` or \`output(record({ field: type }))\` to the command; a field that is absent in some
-    cases is \`optional(type)\`, and its value there is \`null\`.
-  - If the command branches, put what happens inside \`when(If.x, ...)\` and \`otherwise(...)\` instead. If
-    Layer 1 already lists the cases, write each of them again with what you add (\`when(If.x)\` when you add
-    nothing); you may add only \`otherwise(...)\`. \`otherwise\` is mandatory.
-  - For a command Layer 1 only describes in prose, you may add \`does("<what happens>")\`.
+- A component with no states at all has no states and no \`init\`. Use whole numbers for money. The names of
+  \`data\` fields, queries without input, command inputs, and the names given to asked answers share one namespace
+  and must not collide (inputs, and answer names, of different commands may).
+- Commands: \`Command.Name.with({ ... })\` gives a command, where Layer 1 does not: \`input\` (a handle),
+  \`from: [State.A, State.B]\` (the states in which it can be executed), \`onlyIf: If.x\` (a condition that must
+  hold), \`asks: [...]\` (below), and what happens:
+  - \`goTo: State.X\`: the resulting state. **Omit it when the state does not change.**
+  - \`emits: [Effect.Name({ field: value, ... }), ...]\`: the effects to perform, in order.
+  - \`set: [Data.field.set(value), ...]\`: the data to store.
+  - \`responds: value\` or \`responds: { field: value }\`: what the command answers with. A command that declares
+    \`output\` must respond in every case, and only such a command may respond. If Layer 1 does not declare what a
+    command answers with and the prose says it answers something, add \`output: type\` or
+    \`output: record({ field: type })\`; a field that is absent in some cases is \`optional(type)\`, and its value
+    there is \`null\`.
+  - If the command branches, put what happens in \`cases: [If.x.then({ ... }), otherwise({ ... })]\` instead.
+    If Layer 1 already lists the cases, add to each of them by its condition (\`If.x.then({ emits: [...] })\`); you
+    may add only \`otherwise\` (\`otherwise\` alone when nothing happens). \`otherwise\` is mandatory.
+  - For a command Layer 1 only describes in prose, you may add \`does: "<what happens>"\`.
+  If Layer 1 gives the commands only as prose, declare them: \`export const Command = commands({ Name: { ... } })\`.
 
 A query that takes an \`input\` cannot be read by its name: the command must say what it asks about.
-\`Query.name({ field: value }).as("answerName")\` placed in the command asks that query with that input and names
-the answer. The input values are constants, input fields or data. Functions read the answer as
-\`state.answerName\`, and the structure refers to it as \`Query.name({ ... }).as("answerName").answer\`, or, more
-simply, by keeping the asked part in a variable and using its \`.answer\`. The implementation is tested against
-this: it may ask that query only with the inputs listed here.
+\`asks: [Query.name({ field: value }).as("answerName")]\` asks that query with that input and names the answer.
+The input values are constants, input fields or data. Functions read the answer as \`state.answerName\`, and the
+structure refers to it by keeping the asked node in a variable and using its \`.answer\`. The implementation is
+tested against this: it may ask that query only with the inputs listed here.
 
 A value is a constant or a handle (a state is not a value). A decision-table cell written as \`null\` has no value
 in that row, so a reference to it must only be reached when another row applies (for example behind an
-\`onlyWhen\`). \`onlyWhen(...)\` takes a boolean handle (a decision-table column, a query answer, data, or
+\`.onlyWhen(...)\`). \`.onlyWhen(...)\` takes a boolean handle (a decision-table column, a query answer, data, or
 \`was(State.A, ...)\` for "the state before the command was one of these"), or a condition handle, whose sentence
 you must then also give a meaning. Prefer a boolean handle when one fits.
 
@@ -504,15 +529,15 @@ you must then also give a meaning. Prefer a boolean handle when one fits.
 \`meanings\` is a list. Each element attaches a function to a handle: \`If.x.means((state) => ...)\`,
 \`Calc.x.means(...)\`, \`Inv.x.means(...)\`.
 
-- One function per condition sentence (decision-table rows, \`onlyIf\`, \`when\`, and the conditions given to
-  \`onlyWhen\`), returning a boolean; one per calculation, returning a value of its type; one per invariant,
+- One function per condition sentence (decision-table rows, \`onlyIf\`, cases, and the conditions given to
+  \`.onlyWhen\`), returning a boolean; one per calculation, returning a value of its type; one per invariant,
   returning a boolean that must always be true.
 - Conditions and calculations receive \`state\` with: \`status\` (the current state name); the remembered data,
   each possibly \`undefined\` before it is set; the answers of queries without input; and the inputs and the
   asked answers of the command being executed, \`undefined\` during other commands. Invariant functions receive
   only \`status\` and the remembered data.
-- Inside a function, \`Table.of(state)\` gives the row of a decision table that applies, and \`Calc.x.of(state)\`
-  gives the result of another calculation.
+- Inside a function, \`Decision.campaign.of(state)\` gives the row of a decision table that applies, and
+  \`Calc.x.of(state)\` gives the result of another calculation.
 
 ## Rules
 
@@ -525,7 +550,7 @@ you must then also give a meaning. Prefer a boolean handle when one fits.
 - \`onlyIf\` (and \`from\`) put a situation **outside** the specification: nothing about it is tested, and
   the production code need not handle it. Use them only for situations that cannot arise or that someone else
   rules out. When the prose says something is refused, not allowed, or has no effect, write that as an outcome
-  (a \`when(If.x)\` case with no \`goTo\` and no effect), so that the refusal itself is verified.
+  (a case \`If.x.then({})\` with no \`goTo\` and no effect), so that the refusal itself is verified.
 - Calculations over money use whole numbers; apply the rounding the description states.
 - Do not change any other file, and do not read anything outside this directory.
 
@@ -534,7 +559,7 @@ you must then also give a meaning. Prefer a boolean handle when one fits.
 After you finish, the file is type-checked, and the specification is run on its own over many random sequences
 of commands. The interpretation is rejected if it has a type error, if a part is written where it does not
 belong, if it overrides structure written in
-Layer 1, if a command or a case is missing, if a reference does not fit the field it is used for, if a name is
+Layer 1, if a case is missing (\`otherwise\`), if a reference does not fit the field it is used for, if a name is
 left without a meaning, if two conditions of the same table or command hold at once, if an invariant is broken,
 or if a value does not fit its declared type. Passing this check does not mean the interpretation is right; that
 is what the review is for.

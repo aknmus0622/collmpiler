@@ -29,32 +29,22 @@ function broken() {
   const dir = mkdtempSync(join(tmpRoot, "s-"));
   writeFileSync(
     join(dir, "x.component.ts"),
-    `import { calculations, component, conditions, data, effects, from, goTo, input, interpretation, otherwise, output, queries, states, was, when } from "@clp/core";
-const State = states("A", "Z", "Y", "B", "Q", "C D");
+    `import { commands, conditions, effects, input, interpretation, otherwise, service, states } from "@clp/core";
+// 参照のための取っ手（宣言していない名前も含む）。宣言は、uses に並べたもの
+const State = states(["A", "Z", "Y", "B", "Q", "C D"]);
 const If = conditions({ big: "It is big" });
-const Data = data({ memo: "string", total: "string", on: "string", level: "string", amount: "string", ratio: "string", wide: "string" });
-const Query = queries({ lookUp: "string", found: "string", flag: "string", mode: "string" });
-const Effect = effects({ Notify: input({}), Refund: input({}), Audit: input({}), Ping: input({}), Grade: input({}), Weigh: input({}), Mark: input({}) });
-const Calc = calculations({ "sum:all": output("integer"), title: output("integer") });
-const In = input({ note: "string", n: "string", nota: "string" });
-export const Thing = component({
-  states: ["A", "B"],
-  init: State.A,
-  effects: { Notify: input({}) },
-  commands: {
-    Place: component(from(State.A, State.Z), when(If.big, goTo(State.Y)), otherwise(goTo(State.B))),
-    Back: component(from(State.Q), goTo(State.A)),
-    Stay: component(from(State.B)),
-  },
+const Effect = effects({ Notify: input({}), Refund: input({}), Audit: input({}) });
+const Command = commands({
+  Place: { from: [State.A, State.Z], cases: [If.big.then({ goTo: State.Y }), otherwise({ goTo: State.B })] },
+  Back: { from: State.Q, goTo: State.A },
+  Stay: { from: State.B },
 });
-export const Interpretation = interpretation(Thing, {
-  commands: {
-    Place: component(when(If.big, Effect.Notify(), Effect.Refund()), otherwise(Effect.Audit())),
-    Back: component(Effect.Refund()),
-    Stay: component(),
-  },
-  meanings: [If.big.means(() => true)],
-});
+export const Thing = service({ init: State.A, uses: [states(["A", "B"]), effects({ Notify: input({}) }), If, Command] });
+export const Interpretation = interpretation(Thing, [
+  Command.Place.with({ cases: [If.big.then({ emits: [Effect.Notify(), Effect.Refund()] }), otherwise({ emits: [Effect.Audit()] })] }),
+  Command.Back.with({ emits: [Effect.Refund()] }),
+  If.big.means(() => true),
+]);
 `,
   );
   return dir;
@@ -107,39 +97,34 @@ test("Stage 1: 値の直列化は、手書きの版 (Stage 0) と同じものを
   const dir = mkdtempSync(join(tmpRoot, "v-"));
   writeFileSync(
     join(dir, "x.component.ts"),
-    `import { calculations, component, conditions, data, decisionTable, description, effects, goTo, input, interpretation, onlyWhen, otherwise, output, queries, states, was, when } from "@clp/core";
-const State = states("A", "Z", "Y", "B", "Q", "C D");
+    `import { calculations, commands, conditions, data, decisions, effects, input, interpretation, otherwise, queries, service, states, was } from "@clp/core";
+const State = states(["A", "B", "C D"]);
 const If = conditions({ big: "It is big" });
-const Data = data({ memo: "string", total: "string", on: "string", level: "string", amount: "string", ratio: "string", wide: "string" });
-const Query = queries({ lookUp: "string", found: "string", flag: "string", mode: "string" });
-const Effect = effects({ Notify: input({}), Refund: input({}), Audit: input({}), Ping: input({}), Grade: input({}), Weigh: input({}), Mark: input({}) });
-const Calc = calculations({ "sum:all": output("integer"), title: output("integer") });
-const In = input({ note: "string", n: "string", nota: "string" });
-const Size = decisionTable(when(If.big, { "count.max": 10, urgent: true }), otherwise({ "count.max": 1, urgent: false }));
-export const Thing = component({
-  states: ["A", "B", "C D"],
-  init: State.A,
-  data: { memo: "string", total: "number", on: "boolean" },
-  queries: { flag: "boolean", lookUp: component(input({ key: "string", depth: "integer" }), output("string")) },
-  effects: { Notify: input({ text: "string", count: "integer", ratio: "number", sure: "boolean" }), Ping: input({}) },
-  decisions: { "the size": Size },
-  calculations: { "sum:all": component(description("the total"), output("integer")) },
-  commands: { Place: component(input({ note: "string", n: "integer" }), goTo(State.B)), Back: component(goTo(State.A)) },
-});
-export const Interpretation = interpretation(Thing, {
-  commands: {
-    Place: component(
-      Query.lookUp({ key: In.note, depth: 3 }).as("found"),
-      Query.lookUp({ key: "a:b.c", depth: In.n }).as("again"),
-      Data.memo.set(Query.found), Data.total.set(-0.5), Data.on.set(false),
-      Effect.Notify({ text: "", count: Size["count.max"], ratio: 1e21, sure: Size["urgent"] }, onlyWhen(was(State.A, State["C D"]))),
-      Effect.Notify({ text: Data.memo, count: Calc["sum:all"], ratio: Data.total, sure: true }, onlyWhen(Query.flag)),
-      Effect.Ping(onlyWhen(If.big)),
-    ),
-    Back: component(Effect.Ping(onlyWhen(was())), Data.memo.set(" spaced  text ")),
-  },
-  meanings: [If.big.means(() => true), Calc["sum:all"].means(() => 1)],
-});
+const Data = data({ memo: "string", total: "number", on: "boolean" });
+const Query = queries({ flag: "boolean", lookUp: { input: input({ key: "string", depth: "integer" }), output: "string" } });
+// 尋ねた答えの名前
+const Asked = queries({ found: "string" });
+const Effect = effects({ Notify: input({ text: "string", count: "integer", ratio: "number", sure: "boolean" }), Ping: input({}) });
+const Calc = calculations({ "sum:all": { description: "the total", output: "integer" } });
+const In = input({ note: "string", n: "integer" });
+const Decision = decisions({ "the size": [If.big.then({ "count.max": 10, urgent: true }), otherwise({ "count.max": 1, urgent: false })] });
+const Size = Decision["the size"];
+const Command = commands({ Place: { input: In, goTo: State.B }, Back: { goTo: State.A } });
+export const Thing = service({ init: State.A, uses: [State, Data, Query, Effect, Decision, Calc, If, Command] });
+export const Interpretation = interpretation(Thing, [
+  Command.Place.with({
+    asks: [Query.lookUp({ key: In.note, depth: 3 }).as("found"), Query.lookUp({ key: "a:b.c", depth: In.n }).as("again")],
+    set: [Data.memo.set(Asked.found), Data.total.set(-0.5), Data.on.set(false)],
+    emits: [
+      Effect.Notify({ text: "", count: Size["count.max"], ratio: 1e21, sure: Size["urgent"] }).onlyWhen(was(State.A, State["C D"])),
+      Effect.Notify({ text: Data.memo, count: Calc["sum:all"], ratio: Data.total, sure: true }).onlyWhen(Query.flag),
+      Effect.Ping().onlyWhen(If.big),
+    ],
+  }),
+  Command.Back.with({ emits: [Effect.Ping().onlyWhen(was())], set: [Data.memo.set(" spaced  text ")] }),
+  If.big.means(() => true),
+  Calc["sum:all"].means(() => 1),
+]);
 `,
   );
   const spec = await loadSpecs(dir);
@@ -158,36 +143,41 @@ function payloads(effects: string) {
   const dir = mkdtempSync(join(tmpRoot, "p-"));
   writeFileSync(
     join(dir, "x.component.ts"),
-    `import { calculations, component, conditions, data, decisionTable, description, effects, goTo, input, integer, interpretation, number, otherwise, output, queries, states, was, when } from "@clp/core";
-const State = states("A", "Z", "Y", "B", "Q", "C D");
+    `import { calculations, commands, conditions, data, decisions, effects, input, integer, interpretation, number, otherwise, queries, service, states, was } from "@clp/core";
+const State = states(["A", "B"]);
 const If = conditions({ big: "It is big" });
-const Data = data({ memo: "string", total: "string", on: "string", level: "string", amount: "string", ratio: "string", wide: "string" });
-const Query = queries({ lookUp: "string", found: "string", flag: "string", mode: "string" });
-const Effect = effects({ Notify: input({}), Refund: input({}), Audit: input({}), Ping: input({}), Grade: input({}), Weigh: input({}), Mark: input({}) });
-const Calc = calculations({ "sum:all": output("integer"), title: output("integer") });
+const Data = data({ memo: "string", level: ["low", "high"], wide: ["low", "high", "top"], amount: "integer", ratio: "number" });
+const Query = queries({ flag: "boolean", mode: ["x", "y"] });
+const Effect = effects({
+  Notify: input({ text: "string", count: "integer" }),
+  Grade: input({ level: ["low", "high"] }),
+  Weigh: input({ grams: integer({ min: 0, max: 10 }), ratio: number({ min: 0.5 }) }),
+  Mark: input({ done: "boolean" }),
+  Ping: input({}),
+  // 宣言していない副作用（参照のための取っ手。uses には並べない）
+  Refund: input({}),
+});
+const Calc = calculations({ title: { description: "the memo, upper-cased", output: "string" } });
+// 参照のための取っ手（nota は宣言していない）
 const In = input({ note: "string", n: "string", nota: "string" });
-const Size = decisionTable(when(If.big, { count: 10, urgent: true, label: "big", gap: null }), otherwise({ count: 1, urgent: false, label: "small", gap: 99 }));
-const Unplaced = decisionTable(otherwise({ count: 1 }));
-export const Thing = component({
-  states: ["A", "B"],
-  init: State.A,
-  data: { memo: "string", level: ["low", "high"], wide: ["low", "high", "top"], amount: "integer", ratio: "number" },
-  queries: { flag: "boolean", mode: ["x", "y"] },
-  effects: {
-    Notify: input({ text: "string", count: "integer" }),
-    Grade: input({ level: ["low", "high"] }),
-    Weigh: input({ grams: integer({ min: 0, max: 10 }), ratio: number({ min: 0.5 }) }),
-    Mark: input({ done: "boolean" }),
-    Ping: input({}),
-  },
-  decisions: { size: Size },
-  calculations: { title: component(description("the memo, upper-cased"), output("string")) },
-  commands: { Place: component(input({ note: "string", n: "integer" }), goTo(State.B)) },
+const Decision = decisions({ size: [If.big.then({ count: 10, urgent: true, label: "big", gap: null }), otherwise({ count: 1, urgent: false, label: "small", gap: 99 })] });
+const Size = Decision.size;
+// どこにも置かない決定表
+const Unplaced = decisions({ unplaced: [otherwise({ count: 1 })] }).unplaced;
+const Command = commands({ Place: { input: input({ note: "string", n: "integer" }), goTo: State.B } });
+const Declared = effects({
+  Notify: input({ text: "string", count: "integer" }),
+  Grade: input({ level: ["low", "high"] }),
+  Weigh: input({ grams: integer({ min: 0, max: 10 }), ratio: number({ min: 0.5 }) }),
+  Mark: input({ done: "boolean" }),
+  Ping: input({}),
 });
-export const Interpretation = interpretation(Thing, {
-  commands: { Place: component(${effects}) },
-  meanings: [If.big.means(() => true), Calc["title"].means(() => "t")],
-});
+export const Thing = service({ init: State.A, uses: [State, Data, Query, Declared, Decision, Calc, If, Command] });
+export const Interpretation = interpretation(Thing, [
+  Command.Place.with({ emits: [${effects}] }),
+  If.big.means(() => true),
+  Calc["title"].means(() => "t"),
+]);
 `,
   );
   return dir;
@@ -471,7 +461,7 @@ async function bothOnExisting(
     else process.env.CLP_STAGE = previous;
   }
 }
-const silverFifty = () => specVariant("order.decisions.ts", "when(CampaignIf.customerSilverMember, { discountPercent: 5,", "when(CampaignIf.customerSilverMember, { discountPercent: 50,");
+const silverFifty = () => specVariant("order.decisions.ts", "CampaignIf.customerSilverMember.then({ discountPercent: 5,", "CampaignIf.customerSilverMember.then({ discountPercent: 50,");
 const extraEffect = () => specVariant("order.component.ts", "  NotifyPaymentFailure: input({}),", "  NotifyPaymentFailure: input({}),\n  Audit: input({}),");
 
 test("パイプライン: すでにあるコードを直す経路でも、Stage 0 と同じ順に、同じ段階を動かす", async () => {

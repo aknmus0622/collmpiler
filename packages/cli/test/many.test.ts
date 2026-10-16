@@ -16,71 +16,55 @@ const tmpRoot = join(import.meta.dirname, ".tmp-many");
 mkdirSync(tmpRoot, { recursive: true });
 after(() => rmSync(tmpRoot, { recursive: true, force: true }));
 
-const TODO = `import { component, conditions, data, goTo, otherwise, output, responds, states, when } from "@clp/core";
-export const State = states("OPEN", "DONE");
+const TODO = `import { commands, conditions, data, interpretation, otherwise, service, states } from "@clp/core";
+export const State = states(["OPEN", "DONE"]);
 export const If = conditions({ alreadyDone: "The item is already done" });
 export const Data = data({ title: "string" });
-export const Todo = component({
-  description: "One item of a to-do list.",
-  states: State,
-  init: State.OPEN,
-  data: Data,
-  commands: {
-    Complete: component(output(["completed", "already-done"]), when(If.alreadyDone, responds("already-done")), otherwise(goTo(State.DONE), responds("completed"))),
-  },
+export const Command = commands({
+  Complete: { output: ["completed", "already-done"], cases: [If.alreadyDone.then({ responds: "already-done" }), otherwise({ goTo: State.DONE, responds: "completed" })] },
 });
+export const Todo = service({ description: "One item of a to-do list.", init: State.OPEN, uses: [State, If, Data, Command] });
 `;
-const TODO_INTERPRETATION = `import { component, interpretation, otherwise, when } from "@clp/core";
+const TODO_INTERPRETATION = `import { interpretation } from "@clp/core";
 import { If, Todo } from "./todo.component.ts";
-export const Interpretation = interpretation(Todo, {
-  commands: { Complete: component(when(If.alreadyDone), otherwise()) },
-  meanings: [If.alreadyDone.means((state) => state.status === "DONE")],
-});
+export const Interpretation = interpretation(Todo, [If.alreadyDone.means((state) => state.status === "DONE")]);
 `;
-const LIST = `import { among, by, component, description, does, fresh, input, list, many, output, parts, queries, record } from "@clp/core";
+const LIST = `import { among, by, calculations, commands, conditions, input, list, many, parts, queries, record, service, types } from "@clp/core";
 import { Todo } from "./todo.component.ts";
 export const Part = parts({ items: many(Todo, by("id")) });
-export const Query = queries({ newId: component(description("A fresh identifier."), output("string"), fresh()) });
+export const Query = queries({ newId: { description: "A fresh identifier.", output: "string", fresh: true } });
 export const AddInput = input({ title: "string" });
 export const CompleteInput = input({ id: among(Part.items) });
 export const RemoveInput = input({ id: among(Part.items) });
 export const Completing = Part.items.at(CompleteInput.id).Complete();
-export const Item = record({ id: "string", title: "string", done: "boolean" });
-export const TodoList = component({
-  description: "A to-do list.",
-  parts: Part,
-  queries: Query,
-  commands: {
-    Add: component(AddInput, output(["created", "invalid"]), does("A blank title is invalid. Otherwise a new item with a fresh identifier is created.")),
-    Complete: component(CompleteInput, Completing, output(["completed", "already-done", "not-found"]), does("The item completes; an unknown identifier is not found.")),
-    Remove: component(RemoveInput, output(["removed", "not-found"]), does("The item is removed; an unknown identifier is not found.")),
-    List: component(output(list(Item)), does("The items, in the order they were added.")),
-  },
+export const Type = types({ Item: record({ id: "string", title: "string", done: "boolean" }) });
+export const Command = commands({
+  Add: { input: AddInput, output: ["created", "invalid"], does: "A blank title is invalid. Otherwise a new item with a fresh identifier is created." },
+  Complete: { input: CompleteInput, calls: [Completing], output: ["completed", "already-done", "not-found"], does: "The item completes; an unknown identifier is not found." },
+  Remove: { input: RemoveInput, output: ["removed", "not-found"], does: "The item is removed; an unknown identifier is not found." },
+  List: { output: list(Type.Item), does: "The items, in the order they were added." },
 });
+export const TodoList = service({ description: "A to-do list.", uses: [Part, Query, Command] });
 `;
-const LIST_INTERPRETATION = `import { calculations, component, conditions, description, interpretation, list, otherwise, output, responds, when } from "@clp/core";
-import { AddInput, Completing, Item, Part, Query, RemoveInput, TodoList } from "./todo-list.component.ts";
+const LIST_INTERPRETATION = `import { calculations, conditions, interpretation, list, otherwise } from "@clp/core";
+import { AddInput, Command, Completing, Part, Query, RemoveInput, TodoList, Type } from "./todo-list.component.ts";
 export const IfAdded = conditions({
   blank: "The title is blank",
   missing: "No item has the given identifier (the list answered nothing)",
   unknown: "No item has the given identifier",
 });
-export const Calc = calculations({ listed: component(description("Each item as a record, done when it is in DONE"), output(list(Item))) });
-export const Interpretation = interpretation(TodoList, {
-  calculations: Calc,
-  commands: {
-    Add: component(when(IfAdded.blank, responds("invalid")), otherwise(Part.items.add(Query.newId, { title: AddInput.title }), responds("created"))),
-    Complete: component(when(IfAdded.missing, responds("not-found")), otherwise(responds(Completing.answer))),
-    Remove: component(when(IfAdded.unknown, responds("not-found")), otherwise(Part.items.remove(RemoveInput.id), responds("removed"))),
-    List: component(responds(Calc.listed)),
-  },
-  meanings: [
-    IfAdded.blank.means((state) => state.title.trim() === ""),
-    IfAdded.missing.means((state) => state.items.Complete === null),
-    IfAdded.unknown.means((state) => !state.items.some((item) => item.id === state.id)),
-    Calc.listed.means((state) => state.items.map((item) => ({ id: item.id, title: item.title, done: item.status === "DONE" }))),
-  ],
-});
+export const Calc = calculations({ listed: { description: "Each item as a record, done when it is in DONE", output: list(Type.Item) } });
+export const Interpretation = interpretation(TodoList, [
+  Calc,
+  Command.Add.with({ cases: [IfAdded.blank.then({ responds: "invalid" }), otherwise({ adds: [Part.items.add(Query.newId, { title: AddInput.title })], responds: "created" })] }),
+  Command.Complete.with({ cases: [IfAdded.missing.then({ responds: "not-found" }), otherwise({ responds: Completing.answer })] }),
+  Command.Remove.with({ cases: [IfAdded.unknown.then({ responds: "not-found" }), otherwise({ removes: [Part.items.remove(RemoveInput.id)], responds: "removed" })] }),
+  Command.List.with({ responds: Calc.listed }),
+  IfAdded.blank.means((state) => state.title.trim() === ""),
+  IfAdded.missing.means((state) => state.items.Complete === null),
+  IfAdded.unknown.means((state) => !state.items.some((item) => item.id === state.id)),
+  Calc.listed.means((state) => state.items.map((item) => ({ id: item.id, title: item.title, done: item.status === "DONE" }))),
+]);
 `;
 
 function specDir() {

@@ -15,29 +15,25 @@ import { harness, repoRoot, specsDir, unstamped } from "./support.ts";
 const { tmpRoot, workdir } = harness("components");
 
 // 2つ目のコンポーネント（ランプ）。解釈も同じファイルに書いてある
-const LAMP = `import { component, conditions, does, effects, goTo, input, interpretation, otherwise, states, when } from "@clp/core";
-const State = states("OFF", "ON");
+const LAMP = `import { commands, conditions, effects, input, interpretation, otherwise, service, states } from "@clp/core";
+const State = states(["OFF", "ON"]);
 const If = conditions({ lampOn: "The lamp is on" });
-const Effect = effects({ Notify: input({}) });
-
-export const Lamp = component({
-  states: ["OFF", "ON"],
-  init: State.OFF,
-  effects: { Notify: input({ on: "boolean" }) },
-  commands: {
-    Flip: component(
-      when(If.lampOn, goTo(State.OFF), does("The lamp turns off and a notice says so.")),
-      otherwise(goTo(State.ON), does("The lamp turns on and a notice says so.")),
-    ),
+const Effect = effects({ Notify: input({ on: "boolean" }) });
+const Command = commands({
+  Flip: {
+    cases: [
+      If.lampOn.then({ goTo: State.OFF, does: "The lamp turns off and a notice says so." }),
+      otherwise({ goTo: State.ON, does: "The lamp turns on and a notice says so." }),
+    ],
   },
 });
 
-export const LampInterpretation = interpretation(Lamp, {
-  commands: {
-    Flip: component(when(If.lampOn, Effect.Notify({ on: false })), otherwise(Effect.Notify({ on: true }))),
-  },
-  meanings: [If.lampOn.means((state) => state.status === "ON")],
-});
+export const Lamp = service({ init: State.OFF, uses: [State, Effect, If, Command] });
+
+export const LampInterpretation = interpretation(Lamp, [
+  Command.Flip.with({ cases: [If.lampOn.then({ emits: [Effect.Notify({ on: false })] }), otherwise({ emits: [Effect.Notify({ on: true })] })] }),
+  If.lampOn.means((state) => state.status === "ON"),
+]);
 `;
 
 // 例の仕様 (注文) に、ランプを足した仕様。edit で注文の側を書き換えられる
@@ -187,7 +183,7 @@ test("複数: あるコンポーネントのための変更が、ほかのコン
 test("範囲: ほかのコンポーネントだけが使っているコードを書き換えたら、元に戻して差し戻す。ミューテーションは、実行した範囲だけ", async () => {
   const out = workdir();
   // ランプが通知しない仕様だった版から始める
-  const silent = LAMP.replace('when(If.lampOn, Effect.Notify({ on: false }))', "when(If.lampOn)").replace('otherwise(Effect.Notify({ on: true }))', "otherwise()");
+  const silent = LAMP.replace("  Command.Flip.with({ cases: [If.lampOn.then({ emits: [Effect.Notify({ on: false })] }), otherwise({ emits: [Effect.Notify({ on: true })] })] }),\n", "");
   assert.notEqual(silent, LAMP);
   const first = await implement({ specs: specs(undefined, silent), out, strategy: scripted({ silentLamp: true }).strategy, maxAttempts: 1 });
   assert.equal(first.status, "pass");

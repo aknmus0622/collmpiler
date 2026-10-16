@@ -105,7 +105,7 @@ export const boolean = () => make("type", { value: "boolean" });
 export const list = (of: TypeLike) => make("list", { children: [type(of)] });
 export const optional = (of: TypeLike) => make("optional", { children: [type(of)] });
 // フィールド: 名前つきの、型か値。どちらなのかは、受け取る語が決める（record なら型、set や responds なら値）
-export const field = (name: string, content: unknown) => make("field", { name, value: content });
+const field = (name: string, content: unknown) => make("field", { name, value: content });
 const typedField = (name: string, content: unknown) => make("field", { name, children: [type(content)] });
 const valueField = (name: string, value: unknown) => make("field", { name, children: [make("value", { value })] });
 const typedFields = (given: Record<string, unknown>) => Object.entries(given).map(([name, content]) => typedField(name, content));
@@ -125,10 +125,10 @@ export function record(...given: unknown[]): Node {
 
 // --- 説明と、場面を言う節 ---
 
-export const description = (text: string) => make("description", { value: text });
+const description = (text: string) => make("description", { value: text });
 // input({...}) は、input(record({...})) の短い書き方
 const inputNode = (shape: Record<string, TypeLike> | Node = {}) => make("input", { children: [isDict(shape) ? record(shape) : shape] });
-export const output = (shape: TypeLike) => make("output", { children: [type(shape)] });
+const output = (shape: TypeLike) => make("output", { children: [type(shape)] });
 const fromNode = (...states: string[]) => make("from", { value: states });
 // 条件を複数書くと、その数だけの事前条件になる
 const onlyIfNode = (...conditions: string[]) =>
@@ -143,12 +143,12 @@ const values = (given: unknown[]): unknown[] =>
   given.flatMap((item) => (isDict(item) ? valueFields(item) : [pending(item) ? valueField(item.name!, item.value) : item]));
 
 const goToNode = (state: string) => make("goTo", { value: state });
-export const does = (text: string) => make("does", { value: text });
+const does = (text: string) => make("does", { value: text });
 /**
  * 経路: このコマンドが、外からどう届くか（"POST /todos"、"DELETE /todos/:id"）。意味は持たない境界の約束で、
  * 契約に出る。本番コードと、それにリクエストを送るアダプターが、同じ経路を使うため
  */
-export const route = (text: string) => make("route", { value: text });
+const route = (text: string) => make("route", { value: text });
 const set = (...given: unknown[]) => make("set", { children: values(given) });
 const asks = (alias: string, query: string, ...given: unknown[]) => make("asks", { name: alias, value: query, children: values(given) });
 const calls = (alias: string, part: string, command: string, key: unknown, ...given: unknown[]) =>
@@ -159,14 +159,14 @@ const removes = (part: string, key: unknown) => make("removes", { name: part, va
 const emits = (effect: string, ...given: unknown[]) => make("emits", { value: effect, children: values(given) });
 const onlyWhenNode = (condition: unknown) => make("onlyWhen", { value: condition });
 // 結果を返す。値1つか、フィールドの並び
-export const responds = (...given: unknown[]) =>
+const responds = (...given: unknown[]) =>
   make("responds", { children: given.length === 1 && !isDict(given[0]) && !isNode(given[0]) ? [make("value", { value: given[0] })] : values(given) });
 
 // --- 性質を言う節 ---
 
-export const initially = (value: unknown) => make("initially", { value: value === undefined ? null : value });
-export const fresh = () => make("fresh");
-export const increasing = () => make("increasing");
+const initially = (value: unknown) => make("initially", { value: value === undefined ? null : value });
+const fresh = () => make("fresh");
+const increasing = () => make("increasing");
 const meaning = (fn: (...args: never[]) => unknown) => make("meaning", { value: fn });
 
 // --- 宣言する節（名詞） ---
@@ -195,13 +195,13 @@ export type Ref = { readonly $ref: string; readonly path: unknown };
 // 意味の関数を、条件・計算・不変条件の取っ手に付けたもの。解釈の meanings に並べる
 export type Meaning = { readonly $meaning: "conditions" | "calculations" | "invariants"; readonly name: string; readonly fn: (state: any) => unknown };
 export type StateHandle<N extends string = string> = { readonly $state: N };
-export type ConditionHandle = { readonly $condition: string; means(fn: (state: any) => boolean): Meaning };
+export type ConditionHandle = { readonly $condition: string; means(fn: (state: any) => boolean): Meaning; then(fields: Record<string, unknown>): unknown };
 export type InvariantHandle = { readonly $invariant: string; means(fn: (state: any) => boolean): Meaning };
 export type DataHandle = Ref & { set(value: unknown): Node };
 export type CalculationHandle = Ref & { means(fn: (state: any) => unknown): Meaning; of(state: object): any };
 export type AskNode = Node & { readonly answer: Ref; as(alias: string): AskNode };
 export type QueryHandle = Ref & { (input?: Record<string, unknown>): AskNode; readonly answer: Ref };
-export type EffectHandle = (...given: unknown[]) => Node;
+export type EffectHandle = ((...given: unknown[]) => Node & { onlyWhen(condition: ConditionHandle | Ref): Node });
 // 含む部品のコマンドの答え。フィールドは、そのまま続けて指す（Part.todos.Add.answer.todo）
 export type AnswerRef = Ref & { readonly [field: string]: any };
 export type CallNode = Node & { readonly answer: AnswerRef; as(alias: string): CallNode };
@@ -272,31 +272,45 @@ function valueOf(value: unknown): unknown {
   }
   return value;
 }
+// まとまりを文だけで書いたとき（queries("...")）: 項目は無く、文が、まとまりの説明
+const proseFree = (shape: unknown): Record<string, unknown> => (typeof shape === "string" ? {} : (shape as Record<string, unknown>));
+const proseOr = (shape: unknown): unknown => (typeof shape === "string" ? description(shape) : shape);
 const nameOfState = (value: StateHandle | string): string => (typeof value === "string" ? value : value.$state);
 const sentenceOf = (value: ConditionHandle | string): string => (typeof value === "string" ? value : value.$condition);
 
-/** 状態の宣言。`State.PAID` で指す */
-export function states<const N extends readonly string[]>(...names: N): { readonly [K in N[number]]: StateHandle<K> } & Group<"states">;
-/** 説明を添えるとき: states({ DRAFT: description("..."), ... }) */
-export function states<const S extends Record<string, Node>>(described: S): { readonly [K in keyof S & string]: StateHandle<K> } & Group<"states">;
-export function states(...given: unknown[]): unknown {
-  const described = given.length === 1 && isDict(given[0]) ? (given[0] as Record<string, Node>) : undefined;
+/** 状態の宣言。`State.PAID` で指す。説明の無い状態の並び: states(["IDLE", "DONE"]) */
+export function states<const N extends readonly string[]>(names: N): { readonly [K in N[number]]: StateHandle<K> } & Group<"states">;
+/** 説明を添えるとき: states({ DRAFT: "Before the order is placed.", ... }) */
+export function states<const S extends Record<string, string>>(described: S): { readonly [K in keyof S & string]: StateHandle<K> } & Group<"states">;
+/** 文だけのまとまり: 状態は解釈が決める */
+export function states(prose: string): Group<"states">;
+export function states(given: unknown): unknown {
+  if (typeof given === "string") return groupOf({}, "states", description(given));
+  // 生の文字列は、状態の説明（§16.0 の略記）
+  const described = isDict(given) ? Object.fromEntries(Object.entries(given).map(([name, text]) => [name, typeof text === "string" ? description(text) : text])) : undefined;
   const names = described ? Object.keys(described) : (given as string[]);
   return groupOf(Object.fromEntries(names.map((name) => [name, { $state: name }])), "states", described ?? names);
 }
 /** 実行前の状態が、挙げたどれかであること（真偽値の参照） */
 export const was = (...given: StateHandle[]): Ref => ref("was", given.map(nameOfState));
-export const goTo = (target: StateHandle) => goToNode(nameOfState(target));
-export const from = (...given: StateHandle[]) => fromNode(...given.map(nameOfState));
-export const onlyIf = (...given: ConditionHandle[]) => onlyIfNode(...given.map(sentenceOf));
-export const onlyWhen = (given: ConditionHandle | Ref) => onlyWhenNode(valueOf(given));
+const goTo = (target: StateHandle) => goToNode(nameOfState(target));
+const from = (...given: StateHandle[]) => fromNode(...given.map(nameOfState));
+const onlyIf = (...given: ConditionHandle[]) => onlyIfNode(...given.map(sentenceOf));
+const onlyWhen = (given: ConditionHandle | Ref) => onlyWhenNode(valueOf(given));
 /** 場合（コマンドの中）。決定表の行（decisionTable の中）にも使う: when(If.x, { 列: 値 }) */
-export const when = (given: ConditionHandle, ...children: unknown[]) => whenNode(sentenceOf(given), ...children);
+const when = (given: ConditionHandle, ...children: unknown[]) => whenNode(sentenceOf(given), ...children);
 
 /** 条件の宣言。文は、ここに1回だけ書く。`If.paid` で指し、`If.paid.means(関数)` で意味を付ける */
 export function conditions<const S extends Record<string, string>>(shape: S): { readonly [K in keyof S]: ConditionHandle } & Group<"conditions"> {
   const handles = Object.fromEntries(
-    Object.entries(shape).map(([name, sentence]) => [name, hidden({ $condition: sentence }, { means: (fn: (state: any) => boolean): Meaning => ({ $meaning: "conditions", name: sentence, fn }) })]),
+    Object.entries(shape).map(([name, sentence]) => [
+      name,
+      hidden({ $condition: sentence }, {
+        means: (fn: (state: any) => boolean): Meaning => ({ $meaning: "conditions", name: sentence, fn }),
+        // 場合と決定表の行（§16.0）: 名前は、条件の名前
+        then: (fields: Record<string, unknown> = {}) => makeThen(sentence, fields),
+      }),
+    ]),
   );
   return groupOf(handles, "conditions", shape) as never;
 }
@@ -308,32 +322,47 @@ export function invariants<const S extends Record<string, string>>(shape: S): { 
   return groupOf(handles, "invariants", Object.values(shape)) as never;
 }
 /** 覚えるデータの宣言。`Data.price` で値を指し、`Data.price.set(値)` で覚える */
-export function data<const S extends Record<string, unknown>>(shape: S): { readonly [K in keyof S]: DataHandle } & Group<"data"> {
-  const handles = Object.fromEntries(Object.keys(shape).map((name) => [name, hidden(ref("data", name), { set: (value: unknown) => set({ [name]: value }) })]));
-  return groupOf(handles, "data", shape) as never;
+/** 文だけのまとまり: 項目は解釈が決める */
+export function data(prose: string): Group<"data">;
+export function data<const S extends Record<string, unknown>>(shape: S): { readonly [K in keyof S]: DataHandle } & Group<"data">;
+export function data(shape: unknown): unknown {
+  const handles = Object.fromEntries(Object.keys(proseFree(shape)).map((name) => [name, hidden(ref("data", name), { set: (value: unknown) => set({ [name]: value }) })]));
+  return groupOf(handles, "data", proseOr(shape)) as never;
 }
 /** 問い合わせの宣言。引数の無いものは `Query.x` が答え。引数つきは `Query.x({ 引数 })` で尋ね、`Query.x.answer` が答え */
-export function queries<const S extends Record<string, unknown>>(shape: S): { readonly [K in keyof S]: QueryHandle } & Group<"queries"> {
+/** 文だけのまとまり: 項目は解釈が決める */
+export function queries(prose: string): Group<"queries">;
+export function queries<const S extends Record<string, unknown>>(shape: S): { readonly [K in keyof S]: QueryHandle } & Group<"queries">;
+export function queries(shape: unknown): unknown {
   const ask = (query: string, alias: string, given: Record<string, unknown>): AskNode =>
     hidden(asks(alias, query, given), { answer: ref("query", alias), as: (other: string) => ask(query, other, given) }) as AskNode;
   const handles = Object.fromEntries(
-    Object.keys(shape).map((name) => {
+    Object.keys(proseFree(shape)).map((name) => {
       const handle = (given: Record<string, unknown> = {}) => ask(name, name, given);
       Object.defineProperty(handle, "name", { value: name });
       return [name, hidden(Object.assign(handle, { $ref: "query", path: name }), { answer: ref("query", name) })];
     }),
   );
-  return groupOf(handles, "queries", shape) as never;
+  return groupOf(handles, "queries", proseOr(shape)) as never;
 }
 /** 副作用の宣言。`Effect.Send({ 値 }, onlyWhen(...))` で起こす */
-export function effects<const S extends Record<string, unknown>>(shape: S): { readonly [K in keyof S]: EffectHandle } & Group<"effects"> {
-  const handles = Object.fromEntries(Object.keys(shape).map((name) => [name, (...given: unknown[]) => emits(name, ...given)]));
-  return groupOf(handles, "effects", shape) as never;
+/** 文だけのまとまり: 項目は解釈が決める */
+export function effects(prose: string): Group<"effects">;
+export function effects<const S extends Record<string, unknown>>(shape: S): { readonly [K in keyof S]: EffectHandle } & Group<"effects">;
+export function effects(shape: unknown): unknown {
+  // 修飾は、続けて呼ぶ: Effect.IssueCoupon({ type }).onlyWhen(If.gold)（入力と、同じ {} に混ぜない）
+  const emitted = (name: string, given: unknown[]): Node =>
+    hidden(emits(name, ...given), { onlyWhen: (condition: ConditionHandle | Ref) => emitted(name, [...given, onlyWhen(condition)]) });
+  const handles = Object.fromEntries(Object.keys(proseFree(shape)).map((name) => [name, hidden((...given: unknown[]) => emitted(name, given), { [EFFECT]: name })]));
+  return groupOf(handles, "effects", proseOr(shape)) as never;
 }
 /** 計算の宣言。`Calc.x` が結果。`Calc.x.means(関数)` で意味を付け、意味の関数の中では `Calc.x.of(state)` で結果を使う */
-export function calculations<const S extends Record<string, unknown>>(shape: S): { readonly [K in keyof S]: CalculationHandle } & Group<"calculations"> {
+/** 文だけのまとまり: 項目は解釈が決める */
+export function calculations(prose: string): Group<"calculations">;
+export function calculations<const S extends Record<string, unknown>>(shape: S): { readonly [K in keyof S]: CalculationHandle } & Group<"calculations">;
+export function calculations(shape: unknown): unknown {
   const handles = Object.fromEntries(
-    Object.keys(shape).map((name) => [
+    Object.keys(proseFree(shape)).map((name) => [
       name,
       hidden(ref("calculation", name), {
         means: (fn: (state: any) => unknown): Meaning => ({ $meaning: "calculations", name, fn }),
@@ -345,7 +374,7 @@ export function calculations<const S extends Record<string, unknown>>(shape: S):
       }),
     ]),
   );
-  return groupOf(handles, "calculations", shape) as never;
+  return groupOf(handles, "calculations", proseOr(shape)) as never;
 }
 /** コマンドの入力（問い合わせの引数、副作用のペイロードにも使う）。`PlaceInput.listPrice` で、そのコマンドの入力を指す */
 export function input<const S extends Record<string, TypeLike>>(shape: S = {} as S): InputHandles<S> {
@@ -411,7 +440,7 @@ export function parts<const S extends Record<string, Node | Many>>(
  * 決定表。行は、条件の取っ手で書く: decisionTable(when(If.gold, { discount: 20 }), otherwise({ discount: 0 }))。
  * 列は `Campaign.discount` で指す。意味の関数の中では `Campaign.of(state)` で、当たった行を引く
  */
-export function decisionTable<const R extends readonly Node[]>(...rows: R): Table & { readonly [column: string]: Ref } & { of(state: object): Record<string, any> } {
+function decisionTable<const R extends readonly Node[]>(...rows: R): Table & { readonly [column: string]: Ref } & { of(state: object): Record<string, any> } {
   const table: Table = {};
   for (const row of rows) {
     const cells = (row.children[0]?.value ?? {}) as Record<string, never>;
@@ -434,7 +463,7 @@ export function decisionTable<const R extends readonly Node[]>(...rows: R): Tabl
 }
 
 // dict 形式のまとまり。キーは、節の種類のまとまりの名前
-export type ComponentShape = {
+type ComponentShape = {
   description?: string | Node;
   states?: readonly string[] | Record<string, Node> | Node | Group<"states">;
   init?: StateHandle;
@@ -455,6 +484,9 @@ const GROUPS: Record<string, string> = { data: "data", queries: "query", effects
 // 名前つきの項目の中身: 名前の無い component（溶け込む）、節1つ、または裸の型
 function entry(kind: string, name: string, given: unknown): Node {
   const content = nodeOf(given) ?? given;
+  // §16.0 の形: 席の {}。副作用の生の文字列は、説明
+  if (isDict(content) && kind in ENTRY_KIND) return make(kind, { name, children: [entryBody(ENTRY_KIND[kind], content)] });
+  if (kind === "effect" && typeof content === "string") return make(kind, { name, children: [description(content)] });
   if (isNode(content)) {
     // 型の節をそのまま書いたとき: データならその形、問い合わせと計算なら、返すものの形
     const bare = ["type", "enum", "record", "list", "optional"].includes(content.kind);
@@ -497,42 +529,89 @@ function fromShape(given: ComponentShape): Node[] {
   return children;
 }
 
-// 節を束ねる。3つの書き方:
-//   component({ ... })          dict 形式（糖衣構文）
-//   component("Name", ...節)     名前のある部品（正規形）
+// 節を束ねる（内部の形）。component は基底の種類で、書き手は別名（service、command など）で書く（DSL.md §16.0）。
 //   component(...節)             名前の無い束。置いた先に、溶け込む
-export function component<const S extends ComponentShape>(shape: S): Component<CommandsOf<S>>;
-export function component(name: string, ...children: unknown[]): Node;
-export function component(...children: unknown[]): Node;
-export function component(...given: unknown[]): Node {
-  if (given.length === 1 && isDict(given[0])) return make("component", { children: fromShape(given[0] as ComponentShape) });
-  if (typeof given[0] === "string") return make("component", { name: given[0], children: given.slice(1) });
+function component(...given: unknown[]): Node {
   return make("component", { children: given });
 }
 
+/** 種類の定義。fields: 席の名前 → その席が受け取るもの。entries: 項目の種類。expand: 利用者の語（L2）の展開 */
+export type KindDefinition = {
+  fields?: Readonly<Record<string, string>>;
+  entries?: string;
+  expand?: (fields: Record<string, any>) => unknown;
+};
+
+// 起きること（場合の席。コマンドに書けば、どの場合でも起きる）
+const OUTCOME_FIELDS = { goTo: "state", does: "text", set: "list of set", emits: "list of effects", responds: "value", adds: "list of add", removes: "list of remove" } as const;
+
+/** 組み込みの種類。利用者の種類（kind(...)）も、同じ形で定義する */
+export const KINDS: Record<string, KindDefinition> = {
+  service: { fields: { description: "text", init: "state", uses: "list of groups", assets: "assets" } },
+  command: {
+    fields: {
+      description: "text", input: "input", output: "type", route: "text", from: "list of states", onlyIf: "list of conditions",
+      asks: "list of asks", calls: "list of calls", cases: "list of cases", ...OUTCOME_FIELDS,
+    },
+  },
+  case: { fields: OUTCOME_FIELDS },
+  datum: { fields: { description: "text", type: "type", initially: "value" } },
+  query: { fields: { description: "text", input: "input", output: "type", fresh: "flag", increasing: "flag" } },
+  effect: { fields: { description: "text", input: "input" } },
+  calculation: { fields: { description: "text", output: "type" } },
+  states: { entries: "state" },
+  data: { entries: "datum" },
+  queries: { entries: "query" },
+  effects: { entries: "effect" },
+  calculations: { entries: "calculation" },
+  conditions: { entries: "condition" },
+  invariants: { entries: "invariant" },
+  commands: { entries: "command" },
+  decisions: { entries: "decision" },
+  types: { entries: "type" },
+  parts: { entries: "part" },
+};
+
+
 // --- 文法: 親の種類 × 子の種類 → いくつまで書けるか ---
-// 表に無い組み合わせは、書けない。"#type" は、型の節（type / enum / record / list / optional）のどれか
+// 書き手が書く種類（KINDS: service、command、場合、データ・問い合わせ・副作用・計算）の行は、その席の定義から組み立てる。
+// 席は、変換したあとの節の種類に対応する。表に無い組み合わせは、書けない。"#type" は、型の節のどれか
 
 const MANY = Number.POSITIVE_INFINITY;
-// 文 (description / does) は、いくつ書いても、つながって1つになる
-const HAPPENS = { goTo: 1, set: MANY, emits: MANY, adds: MANY, removes: MANY, responds: 1, does: MANY };
+// 席 → 変換したあとの節の種類と、いくつまで書けるか（文 (description / does) は、つながって1つになる）
+const FIELD_NODES: Record<string, Record<string, number>> = {
+  description: { description: MANY }, does: { does: MANY }, input: { input: 1 }, output: { output: 1 }, route: { route: 1 },
+  from: { from: 1 }, onlyIf: { onlyIf: MANY }, asks: { asks: MANY }, calls: { calls: MANY }, cases: { when: MANY, otherwise: 1 },
+  goTo: { goTo: 1 }, set: { set: MANY }, emits: { emits: MANY }, responds: { responds: 1 }, adds: { adds: MANY }, removes: { removes: MANY },
+  type: { "#type": 1 }, initially: { initially: 1 }, fresh: { fresh: 1 }, increasing: { increasing: 1 }, init: { init: 1 }, assets: { assets: 1 },
+};
+const rowOf = (kind: string, extra: Record<string, number> = {}): Record<string, number> =>
+  Object.assign({}, ...Object.keys(KINDS[kind].fields ?? {}).map((field) => FIELD_NODES[field] ?? {}), extra);
+// 1つしか書けない文（項目の説明）
+const single = (row: Record<string, number>) => ({ ...row, ...("description" in row ? { description: 1 } : {}) });
+const HAPPENS = rowOf("case");
+// まとまりの項目 → 変換したあとの節の種類
+const ENTRY_NODES: Record<string, string> = { states: "state", data: "data", queries: "query", effects: "effect", calculations: "calculation", conditions: "condition", invariants: "invariant", commands: "command", decisions: "decision", parts: "part" };
 export const GRAMMAR: Record<string, Record<string, number>> = {
+  // 部品: service の席と、まとまりの項目（uses に並べたもの）
   component: {
-    description: 1, state: MANY, init: 1, data: MANY, query: MANY, effect: MANY, decision: MANY, calculation: MANY,
-    condition: MANY, invariant: MANY, command: MANY, group: MANY, component: MANY, part: MANY, assets: 1,
+    ...single(rowOf("service")),
+    ...Object.fromEntries(Object.values(ENTRY_NODES).map((node) => [node, MANY])),
+    group: MANY,
   },
+  command: rowOf("command"),
+  when: HAPPENS,
+  otherwise: HAPPENS,
+  data: single(rowOf("datum")),
+  query: single(rowOf("query")),
+  effect: single(rowOf("effect")),
+  calculation: { ...single(rowOf("calculation")), meaning: 1 },
+  // 内部の節（書き手は、席と取っ手を通してだけ書く）
   part: {},
   group: { description: 1 },
   state: { description: 1 },
-  data: { description: 1, "#type": 1, initially: 1 },
-  query: { description: 1, input: 1, output: 1, fresh: 1, increasing: 1 },
-  effect: { description: 1, input: 1 },
-  calculation: { description: 1, output: 1, meaning: 1 },
   condition: { description: 1, meaning: 1 },
   invariant: { description: 1, meaning: 1 },
-  command: { description: MANY, input: 1, output: 1, route: 1, from: 1, onlyIf: MANY, asks: MANY, calls: MANY, when: MANY, otherwise: 1, ...HAPPENS },
-  when: HAPPENS,
-  otherwise: HAPPENS,
   input: { "#type": 1 },
   output: { "#type": 1 },
   record: { field: MANY },
@@ -561,6 +640,7 @@ const LABEL: Record<string, string> = {
   command: "コマンド", input: "入力 (input)", output: "返すものの形 (output)", from: "from", onlyIf: "onlyIf", when: "場合 (when)",
   otherwise: "otherwise", goTo: "goTo", set: "set", asks: "asks", calls: "呼ぶ部品のコマンド", part: "含む部品", adds: "部品を作る (add)", removes: "部品を消す (remove)", route: "経路 (route)", emits: "emits", responds: "responds", does: "does",
   initially: "initially", fresh: "fresh", increasing: "increasing", onlyWhen: "onlyWhen", meaning: "意味の関数", field: "フィールド",
+  service: "部品 (service)", case: "場合", datum: "データ",
   value: "値", "#type": "型", type: "型", enum: "列挙", record: "record", list: "list", optional: "optional", setting: "設定",
 };
 const label = (node: Node) => `${LABEL[node.kind] ?? node.kind}${node.name !== undefined && node.kind !== "when" ? ` "${node.name}"` : ""}`;
@@ -576,6 +656,10 @@ export function check(root: Node): Diagnostic[] {
     const counts = new Map<string, number>();
     const names = new Map<string, Node>();
     for (const node of parent.children) {
+      if (node.kind === "badField") {
+        report("unknown-field", node.at ? node : parent, `${LABEL[(node.value as { kind: string }).kind] ?? (node.value as { kind: string }).kind}に、"${node.name}" という席はありません`);
+        continue;
+      }
       if (node.kind === "unknown") {
         const what = node.name !== undefined ? `"${node.name}" というまとまり` : typeof node.value === "object" ? "裸の {}（受け取る語の無いもの）" : JSON.stringify(node.value);
         report("unknown", node.at ? node : parent, `${label(parent)}の中に、${what}は書けません`);
@@ -857,7 +941,9 @@ const TREES = new WeakMap<object, { tree: Node; problems: Diagnostic[] }>();
  * 解釈: Layer 1 と同じ語で、構造を足したもの。意味の関数は、条件・計算・不変条件の取っ手に付けて、meanings に並べる
  * （`If.paid.means((state) => ...)`）
  */
-export function interpretation(target: Node, written: ComponentShape & { meanings?: readonly Meaning[] }): BoundSpecification {
+export function interpretation(target: Node, given: readonly unknown[]): BoundSpecification {
+  // §16.0 の形: 足すものを、名前を持つノードとして並べる
+  const written = interpretationFromList(target, Array.isArray(given) ? given : [make("unknown", { name: "解釈は並び ([...]) で書きます", value: given })]);
   const tree = make("interpretation", { children: fromShape(written) });
   const into: Collected = { problems: [] };
   const structure: Shape = {};
@@ -921,3 +1007,325 @@ export function grammarOf(value: object): Diagnostic[] {
 }
 
 
+// --- 1.0 の書き方 (DSL.md §16.0): 種類と、席・項目・並び、略記 ---
+//
+// ノードは「種類 + 名前つきの子」。種類は、決まった名前の子（席）か、自由な名前の子（項目）の、どちらか一方を持つ。
+// 名前が生まれるのは、項目を持つ種類（まとまり）の宣言のキーだけ。ほかの `{}` のキーは、すべて席。
+// `[]` は、名前を持つノードの並び（取っ手から作ったノードは、名前を自分で持つ）。
+// 書いた値は、その位置の種類に変換する（略記）。
+//
+// 書かれた木は、ここで、これまでの節の木（component / command / when ...）に変換する。内部の形と IR は、そこから作る。
+
+
+const KIND = Symbol.for("clp.kind");
+type KindInstance = { readonly [KIND]: string; readonly fields: Record<string, unknown> };
+const kindOf = (value: unknown): KindInstance | undefined =>
+  typeof value === "object" && value !== null && KIND in value ? (value as KindInstance) : undefined;
+
+/**
+ * 利用者の語（L2）: 種類を定義する。席（fields）の決まりと、中身をコアの語に展開する関数（expand）を持つ。
+ * expand が走るのは仕様を読み込むときだけで、IR と正解に入るのは、展開した結果のデータだけ
+ */
+export function kind<F extends Record<string, unknown> = Record<string, unknown>>(name: string, definition: KindDefinition): (fields: F) => KindInstance {
+  if (name in KINDS && !KINDS[name].expand) throw new Error(`種類 "${name}" は、組み込みの種類と同じ名前です`);
+  KINDS[name] = definition;
+  return (fields: F) => ({ [KIND]: name, fields });
+}
+
+// 利用者の語を、コアの語になるまで展開する。展開は決定的でなければならない（2回展開して比べる）
+function expanded(value: unknown): unknown {
+  let current = value;
+  for (let depth = 0; depth < 20; depth++) {
+    const instance = kindOf(current);
+    if (!instance) return current;
+    const definition = KINDS[instance[KIND]];
+    const once = definition.expand!(instance.fields);
+    const twice = definition.expand!(instance.fields);
+    if (JSON.stringify(plainValue(once)) !== JSON.stringify(plainValue(twice))) {
+      return make("unknown", { name: `${instance[KIND]} (展開が決定的でない)`, value: instance.fields });
+    }
+    current = once;
+  }
+  return current;
+}
+const plainValue = (value: unknown): unknown =>
+  isNode(value) ? plain(value) : Array.isArray(value) ? value.map(plainValue) : isDict(value) ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k, plainValue(v)])) : typeof value === "function" ? "(function)" : value;
+
+// 席の誤り: その種類に無い席
+const badField = (kind: string, name: string, value: unknown) => make("badField", { name, value: { kind } });
+const asList = (value: unknown): unknown[] => (Array.isArray(value) ? value : [value]);
+
+// 起きることの席 → 節
+function outcomeNodes(kind: string, given: Record<string, unknown>): Node[] {
+  const out: Node[] = [];
+  for (const [key, value] of Object.entries(given)) {
+    if (value === undefined || key in (KINDS[kind].fields ?? {}) === false) continue;
+    switch (key) {
+      case "goTo":
+        out.push(isNode(value) ? value : goTo(value as StateHandle));
+        break;
+      case "does":
+        out.push(does(String(value)));
+        break;
+      case "responds":
+        out.push(responds(value));
+        break;
+      case "emits":
+        // 取っ手をそのまま置いたら、入力のまだ無い副作用
+        out.push(...asList(value).map((item) => (typeof item === "function" && EFFECT in item ? (item as unknown as EffectHandle)() : (item as Node))));
+        break;
+      case "set":
+      case "adds":
+      case "removes":
+        out.push(...(asList(value) as Node[]));
+        break;
+    }
+  }
+  return out;
+}
+
+// 席の名前を確かめる
+function checkFields(kind: string, given: Record<string, unknown>): Node[] {
+  const fields = KINDS[kind].fields ?? {};
+  return Object.keys(given).filter((key) => !(key in fields)).map((key) => badField(kind, key, given[key]));
+}
+
+// 場合の並びの要素 → when / otherwise の節
+function caseNode(item: unknown): Node {
+  if (item === otherwise) return make("otherwise");
+  const then = thenOf(item);
+  if (then) {
+    const children = [...checkFields("case", then.fields), ...outcomeNodes("case", then.fields)];
+    return then.condition === undefined ? make("otherwise", { children }) : make("when", { name: then.condition, children });
+  }
+  // otherwise({ 席 })
+  if (isNode(item) && item.kind === "otherwise" && item.children.length === 1 && item.children[0].kind === "unknown" && isDict(item.children[0].value)) {
+    const fields = item.children[0].value as Record<string, unknown>;
+    return make("otherwise", { children: [...checkFields("case", fields), ...outcomeNodes("case", fields)] });
+  }
+  return isNode(item) ? item : make("unknown", { value: item });
+}
+
+// コマンドの中身: 席の {}、文だけ（生の文字列）、利用者の語。これまでの書き方の節も、そのまま受け取る
+function commandBody(given: unknown): Node {
+  const value = expanded(given);
+  if (typeof value === "string") return make("component", { children: [description(value)] });
+  if (isNode(value)) return value;
+  if (!isDict(value)) return make("component", { children: [make("unknown", { value })] });
+  const children: Node[] = [...checkFields("command", value)];
+  for (const [key, item] of Object.entries(value)) {
+    if (item === undefined || !(key in KINDS.command.fields!)) continue;
+    switch (key) {
+      case "description":
+        children.push(description(String(item)));
+        break;
+      case "input":
+        children.push(nodeOf(item) ?? inputNode(item as Record<string, TypeLike>));
+        break;
+      case "output":
+        children.push(output(item as TypeLike));
+        break;
+      case "route":
+        children.push(route(String(item)));
+        break;
+      case "from":
+        children.push(from(...(asList(item) as StateHandle[])));
+        break;
+      case "onlyIf":
+        children.push(onlyIf(...(asList(item) as ConditionHandle[])));
+        break;
+      case "asks":
+      case "calls":
+        children.push(...(asList(item) as Node[]));
+        break;
+      case "cases":
+        children.push(...asList(item).map(caseNode));
+        break;
+    }
+  }
+  children.push(...outcomeNodes("command", value));
+  return make("component", { children });
+}
+
+// 項目（データ・問い合わせ・副作用・計算）の、席の {} → これまでの子の並び
+function entryBody(kind: string, given: Record<string, unknown>): Node {
+  const children: Node[] = [...checkFields(kind, given)];
+  for (const [key, item] of Object.entries(given)) {
+    if (item === undefined || !(key in (KINDS[kind].fields ?? {}))) continue;
+    switch (key) {
+      case "description":
+        children.push(description(String(item)));
+        break;
+      case "type":
+        children.push(type(item));
+        break;
+      case "initially":
+        children.push(initially(item));
+        break;
+      case "input":
+        children.push(nodeOf(item) ?? inputNode(item as Record<string, TypeLike>));
+        break;
+      case "output":
+        children.push(output(item as TypeLike));
+        break;
+      case "fresh":
+        if (item === true) children.push(fresh());
+        break;
+      case "increasing":
+        if (item === true) children.push(increasing());
+        break;
+    }
+  }
+  return make("component", { children });
+}
+const ENTRY_KIND: Record<string, string> = { data: "datum", query: "query", effect: "effect", calculation: "calculation" };
+
+// 場合・決定表の行: 条件の取っ手から作る（If.paid.then({...})）。名前は条件の名前
+const THEN = Symbol.for("clp.then");
+type Then = { readonly [THEN]: true; readonly condition?: string; readonly fields: Record<string, unknown> };
+const thenOf = (value: unknown): Then | undefined => (typeof value === "object" && value !== null && THEN in value ? (value as Then) : undefined);
+const makeThen = (condition: string | undefined, fields: Record<string, unknown>): Then => ({ [THEN]: true, ...(condition === undefined ? {} : { condition }), fields });
+
+// 副作用の取っ手の印（emits の並びに、取っ手をそのまま置けるように）
+const EFFECT = Symbol.for("clp.effect");
+
+/** 共有する型のまとまり。`Type.Todo` で、その型を指す */
+export function types<const S extends Record<string, TypeLike>>(shape: S): { readonly [K in keyof S]: S[K] } & Group<"types"> {
+  return groupOf({ ...shape }, "types", shape) as never;
+}
+
+/** 決定表のまとまり: decisions({ campaign: [If.gold.then({ discount: 20 }), otherwise({ discount: 0 })] })。列は `Decision.campaign.discount` */
+export function decisions<const S extends Record<string, readonly unknown[]>>(
+  shape: S,
+): { readonly [K in keyof S]: Table & { readonly [column: string]: Ref } & { of(state: object): Record<string, any> } } & Group<"decisions"> {
+  const tables = Object.fromEntries(
+    Object.entries(shape).map(([name, rows]) => {
+      const nodes = rows.map((row) => {
+        const then = thenOf(row);
+        if (then) return then.condition === undefined ? otherwise(then.fields) : whenNode(then.condition, then.fields);
+        if (row === otherwise) return otherwise({});
+        return row as Node;
+      });
+      const table = decisionTable(...nodes);
+      TABLE_NAMES.set(table, name);
+      return [name, table];
+    }),
+  );
+  return groupOf(tables, "decisions", tables) as never;
+}
+
+// コマンドの取っ手: 解釈で、そのコマンドに席を足す（Command.Checkout.with({ cases: [...] })）
+const WITH = Symbol.for("clp.with");
+type With = { readonly [WITH]: "command" | "service"; readonly name?: string; readonly fields: Record<string, unknown> };
+const withOf = (value: unknown): With | undefined => (typeof value === "object" && value !== null && WITH in value ? (value as With) : undefined);
+export type CommandHandle = { with(fields: Record<string, unknown>): With };
+
+/** コマンドのまとまり。名前が生まれるのは、ここのキー。中身は席の {}（または、文だけの文字列、利用者の語） */
+export function commands(prose: string): Group<"commands">;
+export function commands<const S extends Record<string, unknown>>(shape: S): { readonly [K in keyof S]: CommandHandle } & Group<"commands">;
+export function commands(shape: Record<string, unknown> | string): unknown {
+  // 文だけのまとまり: コマンドは解釈が決める
+  if (typeof shape === "string") return groupOf({}, "commands", description(shape));
+  const handles = Object.fromEntries(
+    Object.keys(shape).map((name) => [name, { with: (fields: Record<string, unknown>): With => ({ [WITH]: "command", name, fields }) }]),
+  );
+  return groupOf(handles, "commands", Object.fromEntries(Object.entries(shape).map(([name, body]) => [name, commandBody(body)]))) as never;
+}
+
+type CommandNamesIn<U> = U extends readonly (infer E)[] ? (E extends Group<"commands"> ? Exclude<keyof E, symbol> & string : never) : never;
+export type ServiceShape = {
+  description?: string;
+  init?: StateHandle;
+  uses?: readonly unknown[];
+  assets?: readonly unknown[];
+};
+// まとまりの種類 → これまでの dict 形式のキー
+const USES_KEY: Record<string, keyof ComponentShape> = {
+  states: "states", data: "data", queries: "queries", effects: "effects", calculations: "calculations", conditions: "conditions",
+  invariants: "invariants", commands: "commands", decisions: "decisions", parts: "parts",
+};
+
+// まとまりを、これまでの dict 形式に重ねる（同じ種類のまとまりが2つあれば、項目を合わせる）
+function legacyOf(shape: Record<string, unknown>, into: ComponentShape & Record<string, unknown>, extra: Node[]) {
+  for (const used of asList(shape.uses ?? [])) {
+    const group = groupIn(used);
+    if (!group) {
+      extra.push(make("unknown", { name: "uses", value: used }));
+      continue;
+    }
+    // 型と条件のまとまりは、構造を何も足さない（条件は、使う所から集まる）。いくつ並べてもよい
+    if (group.kind === "types" || group.kind === "conditions") continue;
+    const key = USES_KEY[group.kind];
+    if (key === undefined) continue;
+    const content = group.kind === "decisions" || group.kind === "parts" ? used : group.shape;
+    const previous = into[key];
+    if (previous === undefined) into[key] = content as never;
+    else if (isDict(previous) && isDict(content)) into[key] = { ...previous, ...content } as never;
+    else if (groupIn(previous) && isDict(content)) into[key] = { ...(groupIn(previous)!.shape as object), ...content } as never;
+    else extra.push(make("unknown", { name: `uses (${group.kind} が2つ)`, value: used }));
+  }
+}
+
+/**
+ * いちばん外側の部品（§16.0）。席は description、init、uses（まとまりの並び）、assets。
+ * 返すのは、これまでの部品の木と同じもの（検証の単位）
+ */
+export function service<const S extends ServiceShape>(
+  shape: S,
+): Component<[CommandNamesIn<S["uses"]>] extends [never] ? string : CommandNamesIn<S["uses"]>> & { with(fields: Record<string, unknown>): With } {
+  const legacy: ComponentShape & Record<string, unknown> = {};
+  const extra: Node[] = checkFields("service", shape as Record<string, unknown>);
+  if (shape.description !== undefined) legacy.description = shape.description;
+  if (shape.init !== undefined) legacy.init = shape.init;
+  if (shape.assets !== undefined) legacy.assets = shape.assets;
+  legacyOf(shape as Record<string, unknown>, legacy, extra);
+  const node = make("component", { children: [...fromShape(legacy), ...extra] });
+  return hidden(node, { with: (fields: Record<string, unknown>): With => ({ [WITH]: "service", fields }) }) as never;
+}
+
+// 解釈（§16.0）: 足すものを、名前を持つノードとして並べる。Layer 1 と同じ名前の所に重ねる
+function interpretationFromList(target: Node, items: readonly unknown[]): ComponentShape & { meanings: Meaning[] } {
+  const legacy: ComponentShape & Record<string, unknown> & { meanings: Meaning[] } = { meanings: [] };
+  const groups: unknown[] = [];
+  const refined: Record<string, Node> = {};
+  for (const item of items) {
+    const refinement = withOf(item);
+    if (refinement?.[WITH] === "command") {
+      refined[refinement.name!] = commandBody(refinement.fields);
+      continue;
+    }
+    if (refinement?.[WITH] === "service") {
+      const fields = refinement.fields as ServiceShape;
+      if (fields.init !== undefined) legacy.init = fields.init;
+      if (fields.description !== undefined) legacy.description = fields.description;
+      if (fields.uses !== undefined) groups.push(...fields.uses);
+      continue;
+    }
+    if (typeof item === "object" && item !== null && "$meaning" in item) {
+      legacy.meanings.push(item as Meaning);
+      continue;
+    }
+    groups.push(item);
+  }
+  const extra: Node[] = [];
+  legacyOf({ uses: groups }, legacy, extra);
+  // Layer 1 が並べたコマンドと場合のうち、解釈が触れなかったものは、何も足さない（単一化: 無いものは足さない）
+  const layer1 = layer1Of(target) as { commands?: Record<string, { $fragment?: { when?: Record<string, unknown> } }> };
+  const declared = legacy.commands as Record<string, Node> | undefined;
+  if (layer1.commands !== undefined && !("$description" in layer1.commands)) {
+    const commandsShape: Record<string, Node> = { ...(declared ?? {}) };
+    for (const [name, written] of Object.entries(layer1.commands)) {
+      const body = refined[name] ?? commandsShape[name] ?? make("component");
+      const cases = Object.keys(written?.$fragment?.when ?? {});
+      const mentioned = new Set(body.children.filter((node) => node.kind === "when" || node.kind === "otherwise").map((node) => (node.kind === "when" ? node.name : "otherwise")));
+      const missing = cases.filter((sentence) => !mentioned.has(sentence)).map((sentence) => (sentence === "otherwise" ? make("otherwise") : make("when", { name: sentence })));
+      commandsShape[name] = missing.length === 0 ? body : make("component", { children: [...body.children, ...missing] });
+    }
+    for (const [name, body] of Object.entries(refined)) if (!(name in commandsShape)) commandsShape[name] = body;
+    legacy.commands = commandsShape;
+  } else if (Object.keys(refined).length > 0) {
+    legacy.commands = { ...(declared ?? {}), ...refined };
+  }
+  if (extra.length > 0) (legacy as Record<string, unknown>).unknown = extra;
+  return legacy;
+}

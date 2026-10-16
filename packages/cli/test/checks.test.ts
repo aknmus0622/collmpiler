@@ -13,28 +13,20 @@ const tmpRoot = join(import.meta.dirname, ".tmp-checks");
 mkdirSync(tmpRoot, { recursive: true });
 after(() => rmSync(tmpRoot, { recursive: true, force: true }));
 
-function specDir(options: { vocabulary?: string; table?: string; command?: string; added?: string; conditions?: string }) {
+function specDir(options: { vocabulary?: string; table?: string; command?: string; conditions?: string }) {
   const dir = mkdtempSync(join(tmpRoot, "s-"));
   writeFileSync(
     join(dir, "x.component.ts"),
-    `import { component, conditions, decisionTable, does, goTo, input, integer, interpretation, otherwise, output, responds, states, when } from "@clp/core";
-const State = states("OPEN", "CLOSED");
+    `import { commands, conditions, data, decisions, input, integer, interpretation, otherwise, queries, service, states } from "@clp/core";
+const State = states(["OPEN", "CLOSED"]);
 const If = conditions({ amountBig: "The amount is big", amountOdd: "The amount is odd" });
-const Rules = decisionTable(${options.table ?? `otherwise({ fee: 1 })`});
-export const Desk = component({
-  states: ["OPEN", "CLOSED"],
-  init: State.OPEN,
-  ${options.vocabulary ?? ""}
-  decisions: { rules: Rules },
-  commands: {
-    Place: component(input({ amount: integer({ min: 0, max: 10 }) }), ${options.command ?? `output(["ok", "big"]), when(If.amountBig, responds("big")), otherwise(responds("ok"))`}),
-    Close: component(goTo(State.CLOSED)),
-  },
+const Decision = decisions({ rules: [${options.table ?? `otherwise({ fee: 1 })`}] });
+const Command = commands({
+  Place: { input: input({ amount: integer({ min: 0, max: 10 }) }), ${options.command ?? `output: ["ok", "big"], cases: [If.amountBig.then({ responds: "big" }), otherwise({ responds: "ok" })]`} },
+  Close: { goTo: State.CLOSED },
 });
-export const Interpretation = interpretation(Desk, {
-  commands: { Place: component(${options.added ?? `when(If.amountBig), otherwise()`}), Close: component() },
-  meanings: [${options.conditions ?? `If.amountBig.means((state) => state.amount > Rules.of(state).fee)`}],
-});
+export const Desk = service({ init: State.OPEN, uses: [State, ${options.vocabulary ?? ""} Decision, If, Command] });
+export const Interpretation = interpretation(Desk, [${options.conditions ?? `If.amountBig.means((state) => state.amount > Decision.rules.of(state).fee)`}]);
 `,
   );
   return dir;
@@ -44,7 +36,7 @@ const messages = async (dir: string) => extract(await loadSpecs(dir)).diagnostic
 test("型の誤り: 範囲の矛盾、空の列挙、範囲の外のしきい値。どこに書いた型でも報告する", async () => {
   const found = await messages(
     specDir({
-      vocabulary: `data: { level: [], score: integer({ min: 10, max: 1 }) }, queries: { limit: integer({ min: 0, max: 5, around: [50] }) },`,
+      vocabulary: `data({ level: [], score: integer({ min: 10, max: 1 }) }), queries({ limit: integer({ min: 0, max: 5, around: [50] }) }),`,
     }),
   );
   assert.deepEqual(found.filter((line) => line.startsWith("bad-type")), [
@@ -55,12 +47,12 @@ test("型の誤り: 範囲の矛盾、空の列挙、範囲の外のしきい値
 });
 
 test("決定表: 行によって値の種類が違う列は、誤り", async () => {
-  const found = await messages(specDir({ table: `when(If.amountBig, { fee: 1, label: "x" }), otherwise({ fee: 2, label: 0 })` }));
+  const found = await messages(specDir({ table: `If.amountBig.then({ fee: 1, label: "x" }), otherwise({ fee: 2, label: 0 })` }));
   assert.ok(found.includes("bad-decision: 決定表 rules の列 label: 行によって値の種類が違います (string と number)。どの行も同じ種類の値にしてください"), found.join("\n"));
 });
 
 test("語彙: 初期状態が無い、決定表に otherwise が無い。読み込みを止めずに、診断として報告する", async () => {
-  const dir = specDir({ table: `when(If.amountBig, { fee: 1 })` });
+  const dir = specDir({ table: `If.amountBig.then({ fee: 1 })` });
   assert.ok((await messages(dir)).includes("bad-decision: 決定表 \"rules\" に otherwise がありません。どの行にも当たらないときの値を、otherwise の行に書いてください"));
 });
 
@@ -73,8 +65,7 @@ test("一度も当たらない場合: いつも偽の条件は、注意として
 
 test("条件の衝突: 衝突したコマンドと入力を、再現するコマンド列に含める", async () => {
   const dir = specDir({
-    command: `output(["ok", "big", "odd"]), when(If.amountBig, responds("big")), when(If.amountOdd, responds("odd")), otherwise(responds("ok"))`,
-    added: `when(If.amountBig), when(If.amountOdd), otherwise()`,
+    command: `output: ["ok", "big", "odd"], cases: [If.amountBig.then({ responds: "big" }), If.amountOdd.then({ responds: "odd" }), otherwise({ responds: "ok" })]`,
     conditions: `If.amountBig.means((state) => state.amount > 5), If.amountOdd.means((state) => state.amount % 2 === 1)`,
   });
   const result = await selfCheck(await loadSpecs(dir), { seed: 1 });

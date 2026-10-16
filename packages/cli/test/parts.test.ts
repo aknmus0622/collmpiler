@@ -17,76 +17,60 @@ mkdirSync(tmpRoot, { recursive: true });
 after(() => rmSync(tmpRoot, { recursive: true, force: true }));
 
 // 中の部品: 口座。上限を超える入金は断る。入金のたびに監査に記録する
-const ACCOUNT = `import { component, conditions, data, decisionTable, does, effects, initially, input, integer, otherwise, output, responds, when } from "@clp/core";
-export const Limits = decisionTable(otherwise({ max: 300 }));
+const ACCOUNT = `import { commands, conditions, data, decisions, effects, input, integer, otherwise, service } from "@clp/core";
+export const Decision = decisions({ limits: [otherwise({ max: 300 })] });
 export const If = conditions({ overLimit: "The balance would go over the limit" });
-export const Data = data({ balance: component(integer({ min: 0, max: 1000 }), initially(0)) });
+export const Data = data({ balance: { type: integer({ min: 0, max: 1000 }), initially: 0 } });
 export const Effect = effects({ Audit: input({ amount: "integer" }) });
 export const DepositInput = input({ amount: integer({ min: 1, max: 100 }) });
-export const Account = component({
-  description: "A bank account.",
-  data: Data,
-  effects: Effect,
-  decisions: { limits: Limits },
-  commands: {
-    Deposit: component(DepositInput, output(["ok", "refused"]), when(If.overLimit, does("Refused."), responds("refused")), otherwise(does("The balance grows; the deposit is audited."), responds("ok"))),
-    Balance: component(output("integer"), does("The answer is the balance.")),
+export const Command = commands({
+  Deposit: {
+    input: DepositInput,
+    output: ["ok", "refused"],
+    cases: [If.overLimit.then({ does: "Refused.", responds: "refused" }), otherwise({ does: "The balance grows; the deposit is audited.", responds: "ok" })],
   },
+  Balance: { output: "integer", does: "The answer is the balance." },
 });
+export const Account = service({ description: "A bank account.", uses: [Data, Effect, Decision, If, Command] });
 `;
-const ACCOUNT_INTERPRETATION = `import { calculations, component, description, interpretation, output, responds, when, otherwise } from "@clp/core";
-import { Account, Data, DepositInput, Effect, If, Limits } from "./account.component.ts";
-export const Calc = calculations({ grown: component(description("balance + amount"), output("integer")) });
-export const Interpretation = interpretation(Account, {
-  calculations: Calc,
-  commands: {
-    Deposit: component(when(If.overLimit), otherwise(Data.balance.set(Calc.grown), Effect.Audit({ amount: DepositInput.amount }))),
-    Balance: component(responds(Data.balance)),
-  },
-  meanings: [
-    If.overLimit.means((state) => state.balance + state.amount > Limits.of(state).max),
-    Calc.grown.means((state) => state.balance + state.amount),
-  ],
-});
+const ACCOUNT_INTERPRETATION = `import { calculations, interpretation, otherwise } from "@clp/core";
+import { Account, Command, Data, Decision, DepositInput, Effect, If } from "./account.component.ts";
+export const Calc = calculations({ grown: { description: "balance + amount", output: "integer" } });
+export const Interpretation = interpretation(Account, [
+  Calc,
+  Command.Deposit.with({ cases: [otherwise({ set: [Data.balance.set(Calc.grown)], emits: [Effect.Audit({ amount: DepositInput.amount })] })] }),
+  Command.Balance.with({ responds: Data.balance }),
+  If.overLimit.means((state) => state.balance + state.amount > Decision.limits.of(state).max),
+  Calc.grown.means((state) => state.balance + state.amount),
+]);
 `;
 // 外側の部品: 窓口。支払いを口座に入金し、受け付けたら領収書を出す。閉じたら受け付けない
-const TELLER = `import { component, conditions, effects, from, goTo, input, integer, output, parts, record, responds, states, when, otherwise, does } from "@clp/core";
+const TELLER = `import { commands, conditions, effects, input, integer, otherwise, parts, record, service, states } from "@clp/core";
 import { Account } from "./account.component.ts";
-export const State = states("OPEN", "CLOSED");
+export const State = states(["OPEN", "CLOSED"]);
 export const Part = parts({ account: Account });
 export const If = conditions({ accepted: "The account accepted the deposit" });
 export const Effect = effects({ Receipt: input({ amount: "integer" }) });
 export const PayInput = input({ amount: integer({ min: 1, max: 100 }) });
-export const Teller = component({
-  description: "A teller in front of an account.",
-  states: State,
-  init: State.OPEN,
-  parts: Part,
-  effects: Effect,
-  commands: {
-    Pay: component(
-      PayInput,
-      from(State.OPEN),
-      Part.account.Deposit({ amount: PayInput.amount }),
-      output(record({ status: integer({ min: 100, max: 599 }) })),
-      when(If.accepted, responds({ status: 201 }), does("A receipt is given.")),
-      otherwise(responds({ status: 422 })),
-    ),
-    Check: component(Part.account.Balance(), output("integer"), responds(Part.account.Balance.answer)),
-    Close: component(from(State.OPEN), goTo(State.CLOSED)),
+export const Command = commands({
+  Pay: {
+    input: PayInput,
+    from: State.OPEN,
+    calls: [Part.account.Deposit({ amount: PayInput.amount })],
+    output: record({ status: integer({ min: 100, max: 599 }) }),
+    cases: [If.accepted.then({ responds: { status: 201 }, does: "A receipt is given." }), otherwise({ responds: { status: 422 } })],
   },
+  Check: { calls: [Part.account.Balance()], output: "integer", responds: Part.account.Balance.answer },
+  Close: { from: State.OPEN, goTo: State.CLOSED },
 });
+export const Teller = service({ description: "A teller in front of an account.", init: State.OPEN, uses: [State, Part, Effect, If, Command] });
 `;
-const TELLER_INTERPRETATION = `import { component, interpretation, when, otherwise } from "@clp/core";
-import { Effect, If, PayInput, Teller } from "./teller.component.ts";
-export const Interpretation = interpretation(Teller, {
-  commands: {
-    Pay: component(when(If.accepted, Effect.Receipt({ amount: PayInput.amount })), otherwise()),
-    Check: component(),
-    Close: component(),
-  },
-  meanings: [If.accepted.means((state) => state.account.Deposit === "ok")],
-});
+const TELLER_INTERPRETATION = `import { interpretation } from "@clp/core";
+import { Command, Effect, If, PayInput, Teller } from "./teller.component.ts";
+export const Interpretation = interpretation(Teller, [
+  Command.Pay.with({ cases: [If.accepted.then({ emits: [Effect.Receipt({ amount: PayInput.amount })] })] }),
+  If.accepted.means((state) => state.account.Deposit === "ok"),
+]);
 `;
 
 function specDir() {
@@ -195,16 +179,16 @@ test("部品の中の部品: 呼ぶコマンドの入力と、知らない部品
 });
 
 // 経路の path に入る値: "." と ".." は、パーセントエンコードしても URL の正規化で区切りになり、HTTP では送れない
-const THINGS = `import { component, input, output, responds, route, string } from "@clp/core";
+const THINGS = `import { commands, input, service, string } from "@clp/core";
 export const GetInput = input({ id: string({ examples: [".", "..", "a"] }), note: string({ examples: [".", ".."] }) });
-export const Things = component({
+export const Things = service({
   description: "Things by id.",
-  commands: { Get: component(route("GET /things/:id"), GetInput, output("string"), responds(GetInput.id)) },
+  uses: [commands({ Get: { route: "GET /things/:id", input: GetInput, output: "string", responds: GetInput.id } })],
 });
 `;
-const THINGS_INTERPRETATION = `import { component, interpretation } from "@clp/core";
+const THINGS_INTERPRETATION = `import { interpretation } from "@clp/core";
 import { Things } from "./things.component.ts";
-export const Interpretation = interpretation(Things, { commands: { Get: component() }, meanings: [] });
+export const Interpretation = interpretation(Things, []);
 `;
 
 test("経路: path に入る値のうち HTTP で送れないもの (\".\"、\"..\") は、仕様の外として生成しない。path でない入力には使う", async () => {

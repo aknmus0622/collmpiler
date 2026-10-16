@@ -22,24 +22,18 @@ function specDir(options: { table: string; place: string; structure: string; con
   const dir = mkdtempSync(join(tmpRoot, "s-"));
   writeFileSync(
     join(dir, "desk.component.ts"),
-    `import { component, conditions, decisionTable, does, effects, from, goTo, input, integer, interpretation, onlyIf, otherwise, output, states, when } from "@clp/core";
-const State = states("OPEN");
+    `import { commands, conditions, data, decisions, effects, input, integer, interpretation, otherwise, queries, service, states } from "@clp/core";
+const State = states(["OPEN"]);
 const If = conditions({ holderBelowLimit: "The holder is below the limit", holderAtLimit: "The holder is at the limit" });
-const Effect = effects({ Accept: input({}), Tag: input({}) });
-const Rules = decisionTable(otherwise({ ${options.table} }));
-export const Desk = component({
-  states: ["OPEN"],
+const Effect = effects({ Accept: input({ fee: "integer" }), Tag: input({ urgent: "boolean" }) });
+const Decision = decisions({ rules: [otherwise({ ${options.table} })] });
+const Rules = Decision.rules;
+const Command = commands({ Place: { ${options.place} } });
+export const Desk = service({
   init: State.OPEN,
-  data: { held: integer({ min: 0, max: 20 }) },
-  queries: { holding: integer({ min: 0, max: 10 }) },
-  effects: { Accept: input({ fee: "integer" }), Tag: input({ urgent: "boolean" }) },
-  decisions: { rules: Rules },
-  commands: { Place: component(${options.place}) },
+  uses: [State, data({ held: integer({ min: 0, max: 20 }) }), queries({ holding: integer({ min: 0, max: 10 }) }), Effect, Decision, If, Command],
 });
-export const Interpretation = interpretation(Desk, {
-  commands: { Place: component(${options.structure}) },
-  meanings: [${options.conditions}],
-});
+export const Interpretation = interpretation(Desk, [Command.Place.with({ ${options.structure} }), ${options.conditions}]);
 `,
   );
   return dir;
@@ -49,16 +43,16 @@ const accept = `Effect.Accept({ fee: Rules["fee"] })`;
 const asPrecondition = () =>
   specDir({
     table: "limit: 3, fee: 100",
-    place: `onlyIf(If.holderBelowLimit)`,
-    structure: accept,
+    place: `onlyIf: If.holderBelowLimit`,
+    structure: `emits: [${accept}]`,
     conditions: `If.holderBelowLimit.means((state: any) => state.holding < Rules.of(state).limit)`,
   });
 // 同じ上限を、断るという結果で書いた仕様
 const asOutcome = () =>
   specDir({
     table: "limit: 3, fee: 100",
-    place: `when(If.holderAtLimit, does("It is refused.")), otherwise()`,
-    structure: `when(If.holderAtLimit), otherwise(${accept})`,
+    place: `cases: [If.holderAtLimit.then({ does: "It is refused." }), otherwise]`,
+    structure: `cases: [otherwise({ emits: [${accept}] })]`,
     conditions: `If.holderAtLimit.means((state: any) => state.holding >= Rules.of(state).limit)`,
   });
 const found = async (dir: string) => (await observability(await loadSpecs(dir), { seed: 1 })).map((v) => `${v.column}:${v.verdict}:${v.severity}`);
@@ -71,10 +65,10 @@ test("事前条件にしか現れない値は、エラー。断ることを結�
 });
 
 test("どこからも使われていない値は、エラー。真偽値は、警告にとどめる（ゲートが合否に使わないため）", async () => {
-  const unused = specDir({ table: "fee: 100, spare: 7, label: \"x\", urgent: true", place: "goTo(\"OPEN\")", structure: accept, conditions: "" });
+  const unused = specDir({ table: "fee: 100, spare: 7, label: \"x\", urgent: true", place: "goTo: State.OPEN", structure: `emits: [${accept}]`, conditions: "" });
   assert.deepEqual(await found(unused), ["spare:unobserved:error", "label:unobserved:error", "urgent:unobserved:warning"]);
   // 使えば、現れる
-  const used = specDir({ table: "fee: 100, urgent: true", place: "goTo(\"OPEN\")", structure: `${accept}, Effect.Tag({ urgent: Rules["urgent"] })`, conditions: "" });
+  const used = specDir({ table: "fee: 100, urgent: true", place: "goTo: State.OPEN", structure: `emits: [${accept}, Effect.Tag({ urgent: Rules["urgent"] })]`, conditions: "" });
   assert.deepEqual(await found(used), []);
 });
 
@@ -82,8 +76,8 @@ test("生成される入力が届かないしきい値は、エラー。null の
   // holding は 0〜10 なので、50 以上になることは無い
   const unreachable = specDir({
     table: "limit: 50, fee: 100, gap: null",
-    place: `when(If.holderAtLimit, does("It is refused.")), otherwise()`,
-    structure: `when(If.holderAtLimit), otherwise(${accept})`,
+    place: `cases: [If.holderAtLimit.then({ does: "It is refused." }), otherwise]`,
+    structure: `cases: [otherwise({ emits: [${accept}] })]`,
     conditions: `If.holderAtLimit.means((state: any) => state.holding >= Rules.of(state).limit)`,
   });
   assert.deepEqual(await found(unreachable), ["limit:unobserved:error"]);

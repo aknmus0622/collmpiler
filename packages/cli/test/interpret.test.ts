@@ -75,14 +75,14 @@ test("解釈: Layer 1 が名前を挙げたものを並べた雛形から始め�
   // エージェントには Layer 1 のファイルと、書くべきファイルが渡る
   assert.deepEqual(seen[0].files, ["order.component.ts", "order.decisions.ts", DRAFT]);
   // 雛形: コマンドは、文をコメントに添えた空の宣言。Layer 1 が場合分けを書いたコマンドは、場合ごと
-  assert.match(seen[0].start, /\/\/ A pending or paid order can be cancelled\. If the order had been paid, a refund is issued\.\n    Cancel: component\(\),/);
-  assert.match(seen[0].start, /Checkout: component\(\n      \/\/ A receipt is sent[^\n]*\n      when\(If\.paymentSucceeded\),\n      \/\/ The customer is notified[^\n]*\n      otherwise\(\),/);
+  assert.match(seen[0].start, /\/\/ A pending or paid order can be cancelled\. If the order had been paid, a refund is issued\.\n  Command\.Cancel\.with\(\{\}\),/);
+  assert.match(seen[0].start, /Command\.Checkout\.with\(\{\n    cases: \[\n      \/\/ A receipt is sent[^\n]*\n      If\.paymentSucceeded\.then\(\{\}\),\n      \/\/ The customer is notified[^\n]*\n      otherwise\(\{\}\),/);
   // Layer 1 が構造で書いた語彙 (states など) は、雛形に出ない
   assert.doesNotMatch(seen[0].start, /\/\/ TODO:/);
-  assert.match(seen[0].start, /CampaignIf\.customerSilverMember\.means\(\(state\) => \{\n      throw new Error\("TODO"\);/);
-  assert.match(seen[0].start, /\/\/ price × \(100 − discount percent\) ÷ 100, rounded down to a whole yen\n    Calc\.amountCharged\.means\(\(state\) =>/);
+  assert.match(seen[0].start, /CampaignIf\.customerSilverMember\.means\(\(state\) => \{\n    throw new Error\("TODO"\);/);
+  assert.match(seen[0].start, /\/\/ price × \(100 − discount percent\) ÷ 100, rounded down to a whole yen\n  Calc\.amountCharged\.means\(\(state\) =>/);
   // 参照は、Layer 1 が export する取っ手で書く
-  assert.match(seen[0].start, /import \{ Calc, Data, Effect, If, Inv, Order, PlaceOrderInput, Query, State \} from "\.\/order\.component\.ts";/);
+  assert.match(seen[0].start, /import \{ Calc, Command, Data, Effect, If, Inv, Order, PlaceOrderInput, Query, State \} from "\.\/order\.component\.ts";/);
   assert.match(seen[0].request, /Nothing is referred to by a string/);
   assert.match(seen[0].request, /^# Write the interpretation of a specification \(attempt 1\)/);
   assert.match(seen[0].request, /You cannot override what Layer 1 wrote as structure/);
@@ -117,7 +117,7 @@ test("解釈: 検査に落ちたら、書き直させる (仕様に無い名前�
   // シルバー会員の条件を「常に真」にすると、ゴールド会員かつ月末の条件と同時に成り立つ
   const conflicting = reviewed.replace('(state) => state.rank === "Silver"', "() => true");
   // Layer 1 が決めた遷移先 (PAID) を、解釈が書き換えている
-  const overriding = reviewed.replace("        If.paymentSucceeded,\n        Effect.SendReceipt(", "        If.paymentSucceeded,\n        goTo(State.SHIPPED),\n        Effect.SendReceipt(");
+  const overriding = reviewed.replace("      If.paymentSucceeded.then({\n        emits: [", "      If.paymentSucceeded.then({\n        goTo: State.SHIPPED,\n        emits: [");
   assert.ok(typo !== reviewed && conflicting !== reviewed && overriding !== reviewed);
   const dir = specDir();
   const { strategy, seen } = scripted([typo, conflicting, overriding, reviewed]);
@@ -151,7 +151,7 @@ test("解釈: 上限回数まで直らなければ失敗で終わり、問題を
 });
 
 test("解釈: 疑問点 (// REVIEW:) を集めて返す。添付資料を渡せる", async () => {
-  const doubtful = reviewed.replace("    Cancel: component(", "    // REVIEW: does a pending order that failed to pay count as paid?\n    Cancel: component(");
+  const doubtful = reviewed.replace("  Command.Cancel.with(", "  // REVIEW: does a pending order that failed to pay count as paid?\n  Command.Cancel.with(");
   assert.notEqual(doubtful, reviewed);
   const { strategy, seen } = scripted([doubtful]);
   const result = await interpret({
@@ -179,7 +179,7 @@ test("解釈: Layer 1 の文が変わったら、いまの解釈を出発点に�
   // 古い解釈は、正解として使われない
   assert.match(compile(dir).stderr, /stale-interpretation/);
 
-  const updated = reviewed.replace("Effect.Refund(onlyWhen(was(State.PAID)))", "Effect.Refund()");
+  const updated = reviewed.replace("Effect.Refund().onlyWhen(was(State.PAID))", "Effect.Refund()");
   assert.notEqual(updated, reviewed);
   const { strategy, seen } = scripted([updated]);
   const result = await interpret({ specs: dir, strategy });
@@ -215,7 +215,7 @@ test("確定: 文を直したが解釈はそのままでよいとき、導き直
   assert.equal(compile(dir).status, 0);
 
   // 解釈が使っている副作用を、Layer 1 から消す
-  const broken = fork(accepted, replaced('  Refund: description("What the customer paid is returned."),\n', ""));
+  const broken = fork(accepted, replaced('  Refund: "What the customer paid is returned.",\n', ""));
   const refused = await accept({ specs: broken });
   assert.deepEqual(refused.accepted, []);
   assert.match(refused.problems[0], /order: 解釈が、いまの Layer 1 に合いません/);
@@ -223,7 +223,7 @@ test("確定: 文を直したが解釈はそのままでよいとき、導き直
 
 test("2つの解釈: 同じ語彙のもとで独立に導かせ、同じコマンド列で実行して、食い違う所を報告する", async () => {
   // 2つ目は、払い戻しを「支払い済みのときだけ」ではなく「常に」と読んだ
-  const always = reviewed.replace("Effect.Refund(onlyWhen(was(State.PAID)))", "Effect.Refund()");
+  const always = reviewed.replace("Effect.Refund().onlyWhen(was(State.PAID))", "Effect.Refund()");
   const dir = specDir();
   const { strategy, seen } = scripted([reviewed, always]);
   const result = await interpret({ specs: dir, strategy, sessions: 2 });
@@ -232,7 +232,7 @@ test("2つの解釈: 同じ語彙のもとで独立に導かせ、同じコマ�
   // 2つ目のセッションは、1つ目の下書きを見ない。Layer 1 が書かなかった入力が、埋めてある
   assert.equal(seen.length, 2);
   assert.match(seen[1].request, /The vocabulary is fixed/);
-  assert.match(seen[1].start, /Cancel: component\(input\(\{\}\)\),/);
+  assert.match(seen[1].start, /Command\.Cancel\.with\(\{ input: input\(\{\}\) \}\),/);
   assert.doesNotMatch(seen[1].start, /Refund/);
   // 食い違いは Cancel にだけある。最短のコマンド列（保留中の注文のキャンセル）で示される
   assert.deepEqual(result.comparisons?.[0].differences.map((d) => d.command), ["Cancel"]);
@@ -246,7 +246,7 @@ test("2つの解釈: 同じ語彙のもとで独立に導かせ、同じコマ�
 });
 
 test("人の確認: 疑問点が残っていれば確定しない。その読み方でよいと確かめて REVIEWED にすれば確定でき、記録として残る", async () => {
-  const doubtful = reviewed.replace("    Cancel: component(", "    // REVIEW: does a pending order that failed to pay count as paid?\n    Cancel: component(");
+  const doubtful = reviewed.replace("  Command.Cancel.with(", "  // REVIEW: does a pending order that failed to pay count as paid?\n  Command.Cancel.with(");
   const dir = specDir();
   await interpret({ specs: dir, strategy: scripted([doubtful]).strategy });
   const refused = await accept({ specs: dir });
@@ -261,7 +261,7 @@ test("人の確認: 疑問点が残っていれば確定しない。その読み
 });
 
 test("人の確認: 2つの解釈の食い違いは下書きに REVIEW(clp) として書かれ、確かめるまで確定しない。導き直すと書き直される", async () => {
-  const always = reviewed.replace("Effect.Refund(onlyWhen(was(State.PAID)))", "Effect.Refund()");
+  const always = reviewed.replace("Effect.Refund().onlyWhen(was(State.PAID))", "Effect.Refund()");
   const dir = specDir();
   await interpret({ specs: dir, strategy: scripted([reviewed, always]).strategy, sessions: 2 });
   const marks = readFileSync(join(dir, DRAFT), "utf8").split("\n").filter((line) => line.includes("REVIEW(clp)"));
@@ -283,7 +283,7 @@ test("人の確認: 確定版に確かめていない印が残っていれば、
   await interpret({ specs: dir, strategy: scripted([reviewed]).strategy });
   await accept({ specs: dir });
   const tampered = fork(dir, (text) => text);
-  writeFileSync(join(tampered, FINAL), readFileSync(join(tampered, FINAL), "utf8").replace("    Cancel: component(", "    // REVIEW: is this right?\n    Cancel: component("));
+  writeFileSync(join(tampered, FINAL), readFileSync(join(tampered, FINAL), "utf8").replace("  Command.Cancel.with(", "  // REVIEW: is this right?\n  Command.Cancel.with("));
   const compiled = compile(tampered);
   assert.notEqual(compiled.status, 0);
   assert.match(compiled.stderr, /unreviewed-interpretation.*order\.interpretation\.ts:\d+/);
@@ -295,7 +295,7 @@ test("2つの解釈: 一致すれば、食い違いは無い。2つ目が語彙�
   assert.deepEqual(same.comparisons?.[0].differences, []);
 
   // 2つ目が、キャンセルに入力を足した（境界が変わる）
-  const widened = reviewed.replace("Cancel: component(from(State.PENDING, State.PAID),", 'Cancel: component(input({ reason: "string" }), from(State.PENDING, State.PAID),').replace("import { component,", "import { input, component,");
+  const widened = reviewed.replace("Command.Cancel.with({ from: [State.PENDING, State.PAID],", 'Command.Cancel.with({ input: input({ reason: "string" }), from: [State.PENDING, State.PAID],').replace("import { interpretation,", "import { input, interpretation,");
   assert.notEqual(widened, reviewed);
   const { strategy, seen } = scripted([reviewed, widened, reviewed]);
   const result = await interpret({ specs: specDir(), strategy, sessions: 2 });
@@ -304,9 +304,9 @@ test("2つの解釈: 一致すれば、食い違いは無い。2つ目が語彙�
 });
 
 test("3つ以上の解釈: 1つ目と、ほかのそれぞれを比べる。どれも互いの下書きを見ない", async () => {
-  const always = reviewed.replace("Effect.Refund(onlyWhen(was(State.PAID)))", "Effect.Refund()");
+  const always = reviewed.replace("Effect.Refund().onlyWhen(was(State.PAID))", "Effect.Refund()");
   // 3つ目は、失敗した支払いのあとも通知しないと読んだ
-  const silent = reviewed.replace("otherwise(Effect.NotifyPaymentFailure()),", "otherwise(),");
+  const silent = reviewed.replace("otherwise({ emits: [Effect.NotifyPaymentFailure()] }),", "otherwise,");
   assert.notEqual(silent, reviewed);
   const dir = specDir();
   const { strategy, seen } = scripted([reviewed, always, silent, reviewed]);
@@ -327,18 +327,16 @@ test("比較: 意味の関数に書かれた定数を、入力の生成に混ぜ
   const dir = mkdtempSync(join(mkdtempSync(join(tmpRoot, "d-")), "specs-"));
   writeFileSync(
     join(dir, "gate.component.ts"),
-    `import { component, description } from "@clp/core";\nexport const Gate = component(description("A gate that opens for gold members."));\n`,
+    `import { service } from "@clp/core";\nexport const Gate = service({ description: "A gate that opens for gold members." });\n`,
   );
-  const gate = (rank: string) => `import { component, conditions, from, goTo, input, interpretation, otherwise, states, when } from "@clp/core";
+  const gate = (rank: string) => `import { commands, conditions, input, interpretation, otherwise, states } from "@clp/core";
 import { Gate } from "./gate.component.ts";
-export const State = states("CLOSED", "OPEN");
+export const State = states(["CLOSED", "OPEN"]);
 export const If = conditions({ memberGold: "The member is gold" });
-export const Interpretation = interpretation(Gate, {
-  states: State,
-  init: State.CLOSED,
-  commands: { Arrive: component(input({ rank: "string" }), from(State.CLOSED), when(If.memberGold, goTo(State.OPEN)), otherwise()) },
-  meanings: [If.memberGold.means((state) => state.rank === "${rank}")],
+export const Command = commands({
+  Arrive: { input: input({ rank: "string" }), from: State.CLOSED, cases: [If.memberGold.then({ goTo: State.OPEN }), otherwise] },
 });
+export const Interpretation = interpretation(Gate, [Gate.with({ init: State.CLOSED }), State, Command, If.memberGold.means((state) => state.rank === "${rank}")]);
 `;
   const result = await interpret({ specs: dir, strategy: scripted([gate("GOLD"), gate("gold")], { file: "gate.interpretation.draft.ts" }).strategy, sessions: 2 });
   assert.ok(result.status === "interpreted");
@@ -350,11 +348,11 @@ export const Interpretation = interpretation(Gate, {
 test("比較: 1つのコマンドに食い違いが複数あれば、観点ごとに報告する。ほかのコマンドの食い違いに隠れない", async () => {
   // もう一方は、支払いの成功で: 領収書の割引率を常に 0 にし、失敗の通知も出す。出荷では優先扱いを常に付ける
   const other = reviewed
-    .replace("discountPercent: Campaign.discountPercent,", "discountPercent: 0,")
-    .replace("Effect.IssueCoupon({ type: Campaign.coupon }, onlyWhen(Campaign.grantsCoupon)),", "Effect.IssueCoupon({ type: Campaign.coupon }, onlyWhen(Campaign.grantsCoupon)),\n        Effect.NotifyPaymentFailure(),")
-    .replace("Effect.SendShippingNotice({ priority: Shipping.priority })", "Effect.SendShippingNotice({ priority: true })")
-    .replace("Cancel: component(from(State.PENDING, State.PAID), goTo(State.CANCELLED), Effect.Refund(onlyWhen(was(State.PAID))))", "Cancel: component(from(State.PENDING), goTo(State.CANCELLED))");
-  assert.ok(other.includes("Effect.NotifyPaymentFailure(),\n      ),") && other.includes("priority: true") && other.includes("from(State.PENDING), goTo(State.CANCELLED))"));
+    .replace("discountPercent: Decision.campaign.discountPercent,", "discountPercent: 0,")
+    .replace("Effect.IssueCoupon({ type: Decision.campaign.coupon }).onlyWhen(Decision.campaign.grantsCoupon),", "Effect.IssueCoupon({ type: Decision.campaign.coupon }).onlyWhen(Decision.campaign.grantsCoupon),\n          Effect.NotifyPaymentFailure(),")
+    .replace("Effect.SendShippingNotice({ priority: Decision.shipping.priority })", "Effect.SendShippingNotice({ priority: true })")
+    .replace("Command.Cancel.with({ from: [State.PENDING, State.PAID], goTo: State.CANCELLED, emits: [Effect.Refund().onlyWhen(was(State.PAID))] })", "Command.Cancel.with({ from: [State.PENDING], goTo: State.CANCELLED })");
+  assert.ok(other.includes("discountPercent: 0,") && other.split("Effect.NotifyPaymentFailure()").length === 3 && other.includes("priority: true") && other.includes("from: [State.PENDING], goTo"));
   const log: string[] = [];
   const result = await interpret({ specs: specDir(), strategy: scripted([reviewed, other]).strategy, sessions: 2, log: (line) => log.push(line) });
   assert.ok(result.status === "interpreted");
@@ -373,30 +371,31 @@ test("比較: 1つのコマンドに食い違いが複数あれば、観点ご�
 });
 
 // 文だけのコンポーネント。構造は、すべて解釈が決める
-const COUNTER = `import { component, description } from "@clp/core";
-export const Counter = component(description("A counter that can be raised by a step. It reports each new total. It can be closed."));
+const COUNTER = `import { service } from "@clp/core";
+export const Counter = service({ description: "A counter that can be raised by a step. It reports each new total. It can be closed." });
 `;
-const counter = (close: string) => `import { calculations, component, data, description, effects, from, goTo, input, integer, interpretation, output, states } from "@clp/core";
+const counter = (close: string) => `import { calculations, commands, data, effects, input, integer, interpretation, states } from "@clp/core";
 import { Counter } from "./counter.component.ts";
 
-export const State = states("OPEN", "CLOSED");
+export const State = states(["OPEN", "CLOSED"]);
 export const Data = data({ total: "integer" });
 export const Effect = effects({ ReportTotal: input({ total: "integer" }) });
-export const Calc = calculations({ raised: component(description("the total so far (0 if none) plus the step"), output("integer")) });
+export const Calc = calculations({ raised: { description: "the total so far (0 if none) plus the step", output: "integer" } });
 export const RaiseInput = input({ step: integer({ min: 0, max: 10 }) });
-
-export const Interpretation = interpretation(Counter, {
-  states: State,
-  init: State.OPEN,
-  data: Data,
-  effects: Effect,
-  calculations: Calc,
-  commands: {
-    Raise: component(RaiseInput, from(State.OPEN), Data.total.set(Calc.raised), Effect.ReportTotal({ total: Calc.raised })),
-    Close: ${close},
-  },
-  meanings: [Calc.raised.means((state) => (state.total ?? 0) + (state.step ?? 0))],
+export const Command = commands({
+  Raise: { input: RaiseInput, from: State.OPEN, set: [Data.total.set(Calc.raised)], emits: [Effect.ReportTotal({ total: Calc.raised })] },
+  Close: ${close},
 });
+
+export const Interpretation = interpretation(Counter, [
+  Counter.with({ init: State.OPEN }),
+  State,
+  Data,
+  Effect,
+  Calc,
+  Command,
+  Calc.raised.means((state) => (state.total ?? 0) + (state.step ?? 0)),
+]);
 `;
 
 test("文だけのコンポーネント: 雛形は、決めるべきものを TODO で示す。2つ目には、1つ目が決めた語彙が渡る", async () => {
@@ -405,17 +404,17 @@ test("文だけのコンポーネント: 雛形は、決めるべきものを TO
   const file = "counter.interpretation.draft.ts";
   // 2つ目は、閉じたあとでも、もう一度閉じられると読んだ。
   // （「Close で状態を変えない」という読み方は、CLOSED にたどり着けなくなるので、グラフの検査が差し戻す）
-  const { strategy, seen } = scripted([counter(`component(from(State.OPEN), goTo(State.CLOSED))`), counter(`component(goTo(State.CLOSED))`)], { file });
+  const { strategy, seen } = scripted([counter(`{ from: State.OPEN, goTo: State.CLOSED }`), counter(`{ goTo: State.CLOSED }`)], { file });
   const result = await interpret({ specs: dir, strategy, sessions: 2 });
 
   assert.ok(result.status === "interpreted" && result.comparisons?.[0].status === "compared");
-  for (const todo of ["the state names", "init: ", "what the component remembers", "what it asks", "the effects", "commands —"]) assert.ok(seen[0].start.includes(`// TODO: ${todo}`), todo);
+  for (const todo of ["the state names", "Counter.with({ init: ", "what the component remembers", "what it asks", "the effects", "commands —"]) assert.ok(seen[0].start.includes(`// TODO: ${todo}`), todo);
   // 2つ目の雛形: 状態・初期状態・副作用・コマンドの入力が埋めてあり、data は自分で決める
-  assert.match(seen[1].start, /export const State = states\("OPEN", "CLOSED"\);/);
-  assert.match(seen[1].start, /init: State\.OPEN,/);
+  assert.match(seen[1].start, /export const State = states\(\["OPEN", "CLOSED"\]\);/);
+  assert.match(seen[1].start, /Counter\.with\(\{ init: State\.OPEN \}\),/);
   assert.match(seen[1].start, /export const RaiseInput = input\(\{ step: integer\(\{ max: 10, min: 0 \}\) \}\);/);
-  assert.match(seen[1].start, /Raise: component\(RaiseInput\),/);
-  assert.match(seen[1].start, /ReportTotal: input\(\{ total: "integer" \}\),/);
+  assert.match(seen[1].start, /Raise: \{ input: RaiseInput \},/);
+  assert.match(seen[1].start, /ReportTotal: \{ input: input\(\{ total: "integer" \}\) \},/);
   assert.match(seen[1].start, /\/\/ TODO: what the component remembers/);
   assert.deepEqual(result.comparisons?.[0].differences.map((d) => d.command), ["Close"]);
   assert.equal(result.comparisons![0].differences[0].aspect, "runs");
@@ -425,7 +424,7 @@ test("文だけのコンポーネント: 雛形は、決めるべきものを TO
 test("解釈: コンポーネントが複数あれば、解釈が要る最初のものを選ぶ。名前で選ぶこともできる", async () => {
   const dir = specDir();
   writeFileSync(join(dir, "counter.component.ts"), COUNTER);
-  const full = counter(`component(from(State.OPEN), goTo(State.CLOSED))`);
+  const full = counter(`{ from: State.OPEN, goTo: State.CLOSED }`);
   const first = await interpret({ specs: dir, strategy: scripted([full], { file: "counter.interpretation.draft.ts" }).strategy });
   assert.ok(first.status === "interpreted" && first.component === "counter");
   // 下書きが、いまの Layer 1 のものであれば、次へ進む

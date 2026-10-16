@@ -16,31 +16,26 @@ const tmpRoot = join(import.meta.dirname, ".tmp-graph");
 mkdirSync(tmpRoot, { recursive: true });
 after(() => rmSync(tmpRoot, { recursive: true, force: true }));
 
-// 語彙の中身 (vocabulary) と、コマンド (commands)、解釈が足すもの (added) から、仕様を作る
-function specDir(options: { vocabulary?: string; commands: string; added?: string }) {
+// 語彙 (data / queries / effects の中身) と、コマンド (commands の中身)、解釈が足すもの (added) から、仕様を作る
+function specDir(options: { data?: string; queries?: string; effects?: string; commands: string; added?: string }) {
   const dir = mkdtempSync(join(tmpRoot, "s-"));
-  const names = [...options.commands.matchAll(/^\s*(\w+): component\(/gm)].map((match) => match[1]);
+  const groups = [options.data ? "Data" : "", options.queries ? "Query" : "", options.effects ? "Effect" : ""].filter(Boolean);
   writeFileSync(
     join(dir, "trip.component.ts"),
-    `import { component, conditions, data, effects, from, goTo, input, interpretation, otherwise, output, queries, states, when } from "@clp/core";
-const State = states("PLANNED", "STARTED", "DONE", "ARCHIVED");
+    `import { commands, conditions, data, effects, input, interpretation, otherwise, queries, service, states } from "@clp/core";
+const State = states(["PLANNED", "STARTED", "DONE", "ARCHIVED"]);
 const If = conditions({ rains: "It rains" });
-const Data = data({ miles: "string", note: "string" });
-const Query = queries({ distanceTo: "string", fareTo: "string", far: "string" });
-const Effect = effects({ Notify: input({}), Bill: input({}) });
+const Data = data(${options.data ?? "{}"});
+const Query = queries(${options.queries ?? "{}"});
+const Effect = effects(${options.effects ?? "{}"});
+// 尋ねた答えの名前
+const Asked = queries({ far: "string" });
 const In = input({ place: "string" });
-export const Trip = component({
-  states: ["PLANNED", "STARTED", "DONE", "ARCHIVED"],
-  init: State.PLANNED,
-  ${options.vocabulary ?? ""}
-  commands: {
+const Command = commands({
 ${options.commands}
-  },
 });
-export const Interpretation = interpretation(Trip, {
-  commands: { ${options.added ?? names.map((name) => `${name}: component()`).join(", ")} },
-  meanings: [If.rains.means(() => false)],
-});
+export const Trip = service({ init: State.PLANNED, uses: [State, ${groups.map((name) => `${name}, `).join("")}If, Command] });
+export const Interpretation = interpretation(Trip, [${options.added ?? ""}${options.added ? ", " : ""}If.rains.means(() => false)]);
 `,
   );
   return dir;
@@ -49,11 +44,10 @@ const found = async (dir: string) => graphDiagnostics(await loadSpecs(dir)).map(
 
 test("グラフ: 初期状態からたどり着けない状態と、実行されることのないコマンドは、エラー", async () => {
   const dir = specDir({
-    commands: `    Start: component(from(State.PLANNED), goTo(State.STARTED)),
-    Finish: component(from(State.STARTED), when(If.rains), otherwise(goTo(State.DONE))),
-    Restore: component(from(State.ARCHIVED), goTo(State.PLANNED)),
-    Never: component(from()),`,
-    added: `Start: component(), Finish: component(when(If.rains), otherwise()), Restore: component(), Never: component()`,
+    commands: `    Start: { from: State.PLANNED, goTo: State.STARTED },
+    Finish: { from: State.STARTED, cases: [If.rains.then({}), otherwise({ goTo: State.DONE })] },
+    Restore: { from: State.ARCHIVED, goTo: State.PLANNED },
+    Never: { from: [] },`,
   });
   assert.deepEqual(await found(dir), [
     'error[unreachable-state] 状態 "ARCHIVED" には、初期状態 "PLANNED" から、どのコマンドでもたどり着けません。そこへ遷移する (goTo) コマンドを書くか、状態を消してください',
@@ -65,21 +59,23 @@ test("グラフ: 初期状態からたどり着けない状態と、実行され
 
   // どこからでも実行できるコマンド（from が無い）は、どの状態にも道を作る
   const anywhere = specDir({
-    commands: `    Start: component(from(State.PLANNED), goTo(State.STARTED)),
-    Finish: component(goTo(State.DONE)),
-    Archive: component(from(State.DONE), goTo(State.ARCHIVED)),`,
+    commands: `    Start: { from: State.PLANNED, goTo: State.STARTED },
+    Finish: { goTo: State.DONE },
+    Archive: { from: State.DONE, goTo: State.ARCHIVED },`,
   });
   assert.deepEqual(await found(anywhere), []);
 });
 
 test("グラフ: 起こされない副作用、覚えられないデータ、尋ねられない引数つきの問い合わせは、注意", async () => {
-  const vocabulary = `data: { note: "string", miles: "integer" },
-  queries: { weather: output("string"), distanceTo: component(input({ place: "string" }), output("integer")), fareTo: component(input({ place: "string" }), output("integer")) },
-  effects: { Notify: input({ miles: "integer" }), Bill: input({ amount: "integer" }) },`;
-  const commands = `    Start: component(input({ place: "string" }), from(State.PLANNED), goTo(State.STARTED)),
-    Finish: component(from(State.STARTED), goTo(State.DONE)),
-    Archive: component(from(State.DONE), goTo(State.ARCHIVED)),`;
-  const unused = specDir({ vocabulary, commands });
+  const vocabulary = {
+    data: `{ note: "string", miles: "integer" }`,
+    queries: `{ weather: "string", distanceTo: { input: input({ place: "string" }), output: "integer" }, fareTo: { input: input({ place: "string" }), output: "integer" } }`,
+    effects: `{ Notify: input({ miles: "integer" }), Bill: input({ amount: "integer" }) }`,
+  };
+  const commands = `    Start: { input: In, from: State.PLANNED, goTo: State.STARTED },
+    Finish: { from: State.STARTED, goTo: State.DONE },
+    Archive: { from: State.DONE, goTo: State.ARCHIVED },`;
+  const unused = specDir({ ...vocabulary, commands });
   assert.deepEqual(await found(unused), [
     'warning[unused-effect] 副作用 "Notify" を起こす (emits) コマンドが、1つもありません',
     'warning[unused-effect] 副作用 "Bill" を起こす (emits) コマンドが、1つもありません',
@@ -90,9 +86,9 @@ test("グラフ: 起こされない副作用、覚えられないデータ、尋
   ]);
   // 使えば、何も言わない。引数の無い問い合わせ (weather) は、意味の関数が読むかもしれないので、対象にしない
   const used = specDir({
-    vocabulary,
+    ...vocabulary,
     commands,
-    added: `Start: component(Query.distanceTo({ place: In.place }).as("far"), Query.fareTo({ place: "home" }).as("fare"), Data.miles.set(Query.far), Data.note.set("go"), Effect.Notify({ miles: Query.far })), Finish: component(Effect.Bill({ amount: Data.miles })), Archive: component()`,
+    added: `Command.Start.with({ asks: [Query.distanceTo({ place: In.place }).as("far"), Query.fareTo({ place: "home" }).as("fare")], set: [Data.miles.set(Asked.far), Data.note.set("go")], emits: [Effect.Notify({ miles: Asked.far })] }), Command.Finish.with({ emits: [Effect.Bill({ amount: Data.miles })] })`,
   });
   assert.deepEqual(await found(used), []);
 });
@@ -105,7 +101,7 @@ test("グラフ: 例の仕様と、フレームワーク自身の仕様には、
 
 test("グラフ: clp compile と clp apply は、たどり着けない状態で止まる。注意は、止めない", async () => {
   const clp = (dir: string) => spawnSync(process.execPath, [join(repoRoot, "packages/cli/bin/clp.ts"), "compile", dir], { encoding: "utf8" });
-  const unreachable = specDir({ commands: `    Start: component(from(State.PLANNED), goTo(State.STARTED)),\n    Finish: component(from(State.STARTED), goTo(State.DONE)),` });
+  const unreachable = specDir({ commands: `    Start: { from: State.PLANNED, goTo: State.STARTED },\n    Finish: { from: State.STARTED, goTo: State.DONE },` });
   const rejected = clp(unreachable);
   assert.equal(rejected.status, 1);
   assert.match(rejected.stderr, /error\[unreachable-state\] 状態 "ARCHIVED" には、初期状態 "PLANNED" から、どのコマンドでもたどり着けません/);
@@ -117,8 +113,8 @@ test("グラフ: clp compile と clp apply は、たどり着けない状態で�
 
   const warned = clp(
     specDir({
-      vocabulary: `effects: { Notify: input({}) },`,
-      commands: `    Start: component(from(State.PLANNED), goTo(State.STARTED)),\n    Finish: component(from(State.STARTED), goTo(State.DONE)),\n    Archive: component(from(State.DONE), goTo(State.ARCHIVED)),`,
+      effects: `{ Notify: input({}) }`,
+      commands: `    Start: { from: State.PLANNED, goTo: State.STARTED },\n    Finish: { from: State.STARTED, goTo: State.DONE },\n    Archive: { from: State.DONE, goTo: State.ARCHIVED },`,
     }),
   );
   assert.equal(warned.status, 0, warned.stderr);
