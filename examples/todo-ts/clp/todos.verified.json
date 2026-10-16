@@ -1,0 +1,12 @@
+{
+  "specs": "sha256:0419e2ea4dc223e5ae3b047dd5dfbc7f0984e5f0ea99bc180b04e3f1818dc999",
+  "code": "sha256:93081e2861baaa34559e741c03cd40f2937e71398c2c6eb64a2bcae6f1e45ff6",
+  "files": [
+    "../src/idSource.ts",
+    "../src/index.ts",
+    "../src/rules.ts",
+    "../src/todoList.ts",
+    "../src/types.ts",
+    "todos.adapter.ts"
+  ]
+}

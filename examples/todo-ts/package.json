@@ -1,0 +1,13 @@
+{
+  "name": "example-todo-ts",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server/main.ts",
+    "verify": "clp verify --out ."
+  },
+  "devDependencies": {
+    "@clp/cli": "workspace:*",
+    "@clp/core": "workspace:*"
+  }
+}

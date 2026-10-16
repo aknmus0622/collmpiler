@@ -10,5 +10,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["packages", "examples/*/specs"]
+  "include": ["packages", "examples/*/specs", "examples/*/server"]
 }

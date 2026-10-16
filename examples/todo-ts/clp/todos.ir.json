@@ -1,0 +1,274 @@
+{
+  "behaviors": [
+    {
+      "description": "A title that is empty or made only of whitespace, or that has more characters than the limit (a title of exactly the limit is fine), is refused as invalid, with no item. Otherwise a new open item with a fresh identifier and the given title, stored exactly as given (not trimmed), is added at the end, and the answer is created, with the item.",
+      "from": [
+        "READY"
+      ],
+      "name": "Add",
+      "onlyIf": [],
+      "when": {
+        "The title is empty or made only of whitespace, or has more characters than the limit.": {
+          "effects": [],
+          "responds": {
+            "result": "invalid",
+            "todo": null
+          }
+        },
+        "otherwise": {
+          "effects": [],
+          "responds": {
+            "result": "created",
+            "todo": {
+              "$ref": "calculation:newItem"
+            }
+          },
+          "set": {
+            "items": {
+              "$ref": "calculation:itemsWithNew"
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "The item becomes done. An unknown identifier, or an item that is already done, is refused, and nothing changes.",
+      "from": [
+        "READY"
+      ],
+      "name": "Complete",
+      "onlyIf": [],
+      "when": {
+        "No item has the given identifier.": {
+          "effects": [],
+          "responds": "not-found"
+        },
+        "The item with the given identifier is already done.": {
+          "effects": [],
+          "responds": "already-done"
+        },
+        "otherwise": {
+          "effects": [],
+          "responds": "completed",
+          "set": {
+            "items": {
+              "$ref": "calculation:itemsWithCompleted"
+            }
+          }
+        }
+      }
+    },
+    {
+      "from": [
+        "READY"
+      ],
+      "name": "List",
+      "onlyIf": [],
+      "when": {
+        "otherwise": {
+          "does": "The answer is the items in the order they were added, filtered as asked. Nothing changes.",
+          "effects": [],
+          "responds": {
+            "$ref": "calculation:listedItems"
+          }
+        }
+      }
+    },
+    {
+      "description": "The item is removed. An unknown identifier is refused, and nothing changes.",
+      "from": [
+        "READY"
+      ],
+      "name": "Remove",
+      "onlyIf": [],
+      "when": {
+        "No item has the given identifier.": {
+          "effects": [],
+          "responds": "not-found"
+        },
+        "otherwise": {
+          "effects": [],
+          "responds": "removed",
+          "set": {
+            "items": {
+              "$ref": "calculation:itemsWithoutRemoved"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "decisions": {
+    "limits": {
+      "rows": {
+        "otherwise": {
+          "maxTitleLength": 100
+        }
+      }
+    }
+  },
+  "descriptions": {
+    "component": "A to-do list behind an HTTP API. Items are added, completed, removed and listed. Each item has an identifier given by the list, a title, and whether it is done.",
+    "queries.newId": "A fresh identifier for a new item."
+  },
+  "irVersion": 5,
+  "model": {
+    "calculations": {
+      "itemsWithCompleted": {
+        "is": "The items in the same order, with the item having the given identifier marked done.",
+        "type": {
+          "list": {
+            "record": {
+              "done": "boolean",
+              "id": "string",
+              "title": "string"
+            }
+          }
+        }
+      },
+      "itemsWithNew": {
+        "is": "The items, with the new item added at the end.",
+        "type": {
+          "list": {
+            "record": {
+              "done": "boolean",
+              "id": "string",
+              "title": "string"
+            }
+          }
+        }
+      },
+      "itemsWithoutRemoved": {
+        "is": "The items in the same order, without the item having the given identifier.",
+        "type": {
+          "list": {
+            "record": {
+              "done": "boolean",
+              "id": "string",
+              "title": "string"
+            }
+          }
+        }
+      },
+      "listedItems": {
+        "is": "The items in the order they were added: all of them, only the open ones, or only the done ones, as asked.",
+        "type": {
+          "list": {
+            "record": {
+              "done": "boolean",
+              "id": "string",
+              "title": "string"
+            }
+          }
+        }
+      },
+      "newItem": {
+        "is": "An open item with the fresh identifier newId and the given title.",
+        "type": {
+          "record": {
+            "done": "boolean",
+            "id": "string",
+            "title": "string"
+          }
+        }
+      }
+    },
+    "commands": {
+      "Add": {
+        "title": "string"
+      },
+      "Complete": {
+        "id": {
+          "among": {
+            "data": "items",
+            "field": "id"
+          },
+          "type": "string"
+        }
+      },
+      "List": {
+        "only": [
+          "all",
+          "open",
+          "done"
+        ]
+      },
+      "Remove": {
+        "id": {
+          "among": {
+            "data": "items",
+            "field": "id"
+          },
+          "type": "string"
+        }
+      }
+    },
+    "data": {
+      "items": {
+        "list": {
+          "record": {
+            "done": "boolean",
+            "id": "string",
+            "title": "string"
+          }
+        }
+      }
+    },
+    "effects": {},
+    "init": "READY",
+    "initial": {
+      "items": []
+    },
+    "invariants": [
+      "No two items have the same identifier."
+    ],
+    "outputs": {
+      "Add": {
+        "optional": [
+          "todo"
+        ],
+        "record": {
+          "result": [
+            "created",
+            "invalid"
+          ],
+          "todo": {
+            "record": {
+              "done": "boolean",
+              "id": "string",
+              "title": "string"
+            }
+          }
+        }
+      },
+      "Complete": [
+        "completed",
+        "not-found",
+        "already-done"
+      ],
+      "List": {
+        "list": {
+          "record": {
+            "done": "boolean",
+            "id": "string",
+            "title": "string"
+          }
+        }
+      },
+      "Remove": [
+        "removed",
+        "not-found"
+      ]
+    },
+    "queries": {
+      "newId": {
+        "input": {},
+        "output": "string",
+        "promise": "fresh"
+      }
+    },
+    "states": [
+      "READY"
+    ]
+  }
+}

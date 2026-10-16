@@ -39,6 +39,15 @@ importers:
         specifier: workspace:*
         version: link:../../packages/core
 
+  examples/todo-ts:
+    devDependencies:
+      '@clp/cli':
+        specifier: workspace:*
+        version: link:../../packages/cli
+      '@clp/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+
   packages/cli:
     dependencies:
       '@clp/core':
