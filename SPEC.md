@@ -899,7 +899,7 @@ pnpm clp interpret --accept                                            # 確定�
 ```json
 // --- clp/order.ir.json（抜粋） ---
 {
-  "irVersion": 5,
+  "irVersion": 6,
   "descriptions": {
     "component": "An order: placed by a customer, paid through an external payment module, then shipped or cancelled.",
     "queries.isMonthEnd": "Whether today is the last day of the month.",
@@ -916,7 +916,7 @@ pnpm clp interpret --accept                                            # 確定�
       "paymentResult": { "input": {}, "output": ["succeeded", "failed"] }
     },
     "effects": { "SendReceipt": { "discountPercent": "integer", "amount": "integer" }, "Refund": {}, ... },
-    "calculations": { "amountCharged": { "is": "price × (100 − discount percent) ÷ 100, rounded down to a whole yen", "type": "integer" } },
+    "calculations": { "amountCharged": { "description": "price × (100 − discount percent) ÷ 100, rounded down to a whole yen", "output": "integer" } },
     "invariants": ["Every order past the draft state has a member rank and a price"]
   },
   "decisions": {
@@ -938,22 +938,22 @@ pnpm clp interpret --accept                                            # 確定�
         "The payment succeeded": {
           "goTo": "PAID",
           "does": "A receipt is sent with the campaign's discount percent and the amount charged. Then a coupon is issued if the campaign grants one.",
-          "effects": [
-            { "name": "SendReceipt",
-              "payload": { "discountPercent": { "$ref": "decision:campaign.discountPercent" }, "amount": { "$ref": "calculation:amountCharged" } } },
-            { "name": "IssueCoupon",
-              "payload": { "type": { "$ref": "decision:campaign.coupon" } },
-              "when": { "$ref": "decision:campaign.grantsCoupon" } }
+          "emits": [
+            { "effect": "SendReceipt",
+              "input": { "discountPercent": { "$ref": "decision:campaign.discountPercent" }, "amount": { "$ref": "calculation:amountCharged" } } },
+            { "effect": "IssueCoupon",
+              "input": { "type": { "$ref": "decision:campaign.coupon" } },
+              "onlyWhen": { "$ref": "decision:campaign.grantsCoupon" } }
           ]
         },
-        "otherwise": { "does": "The customer is notified of the payment failure.", "effects": [ ... ] }
+        "otherwise": { "does": "The customer is notified of the payment failure.", "emits": [ ... ] }
       }
     },
     { "name": "Cancel",
       "description": "A pending or paid order can be cancelled. If the order had been paid, a refund is issued.",
       "from": ["PENDING", "PAID"],
       "when": { "otherwise": { "goTo": "CANCELLED",
-        "effects": [ { "name": "Refund", "payload": {}, "when": { "$was": ["PAID"] } } ] } } },
+        "emits": [ { "effect": "Refund", "input": {}, "onlyWhen": { "$was": ["PAID"] } } ] } } },
     ...
   ]
 }
@@ -964,12 +964,14 @@ pnpm clp interpret --accept                                            # 確定�
 * `when` のキーは条件の文です（どれも成り立たなければ `otherwise`）。条件で分かれないコマンドは、`otherwise` だけを持ちます。
 * `model.queries` は、問い合わせごとに、引数（`input`）と答えの型（`output`）を持ちます。引数つきの問い合わせを尋ねるコマンドは、`behaviors` に `asks` を持ちます（`"asks": { "declared": { "query": "stateDeclared", "input": { "name": { "$ref": "input:state" } } } }`）。
 * **`goTo` が無い結果は、状態を変えません**（上の `Checkout` の `otherwise`）。
-* `descriptions`（全体と、項目ごとの説明）、コマンドの `description`、結果の `does` は、Layer 1 の文です。`effects` と `set` がその正確な形で、LLM には両方が渡ります。文は、書かれていなければ出ません。
+* `descriptions`（全体と、項目ごとの説明）、コマンドの `description`、結果の `does` は、Layer 1 の文です。`emits`・`set`・`responds` がその正確な形で、LLM には両方が渡ります。文は、書かれていなければ出ません。
+* 場合の中の `emits` は、起こす副作用を順に並べたものです（`effect` が副作用の名前、`input` が渡す値、`onlyWhen` があればそれが成り立つときだけ）。起こす副作用が無ければ、`emits` は出ません（`set` と同じ）。
 * **IR は、Layer 1 をどこまで構造で書いたかによりません。** 同じ内容なら、Layer 1 に書いても解釈に書いても、同じ IR になります（文の置き場所だけが変わります）。
-* 副作用の `when` は、条件の文か、真偽値の参照です。
+* `onlyWhen` は、条件の文か、真偽値の参照です。
 * 参照: `{"$ref": "input:<名前>"}`、`{"$ref": "data:<名前>"}`、`{"$ref": "query:<名前>"}` は、コマンドの入力、覚えているデータ、問い合わせの答え。`{"$ref": "calculation:<名前>"}` は計算の結果。`{"$ref": "decision:<表>.<列>"}` は当たった行の列の値。`{"$was": [...]}` は、実行前の状態が挙げたどれかであること。解釈の `ref.*` と同じ名前です。
 * 条件・計算・不変条件は自然言語のまま出力されます。評価関数は含みません。
-* `irVersion`（整数、単調増加）が唯一の互換性契約です。
+* `irVersion`（整数、単調増加）が唯一の互換性契約です。版 6 で、キーを仕様を書くときの語にそろえました（計算の `{ is, type }` → `{ description, output }`、場合の `effects: [{ name, payload, when }]` → `emits: [{ effect, input, onlyWhen }]`）。
+* **説明は、`descriptions` の表のまま残します。** 語彙の項目（`model.data` の各フィールドなど）は型そのものなので、説明を入れると、すべての型がオブジェクトになってしまうためです（`DSL.md` §9 の当初の案から変えました）。
 
 ### 3.4. Layer 3: PBT Verification Engine
 

@@ -8,7 +8,7 @@
   解釈の書き方、木の検査、グラフの検査（たどり着けない状態、使われない語彙）、コマンドの結果（`output` / `responds`）、構造を持つ値（`record` / `list` / `optional` を、型を書けるどこにでも）、`initially`、状態を持たない部品、
   依存の約束（`fresh` / `increasing`）、入力の選び方（`among` / `examples`、自動で集めた数を常に使う）。
   既存の例は、この書き方に移してある。いま動く書き方の説明は `SPEC.md` §3。
-* まだ: 名前を付けた条件、Layer 1 に書いた `set` / `emits`、部品の中の部品、IR の語の統一。
+* まだ: 名前を付けた条件、Layer 1 に書いた `set` / `emits`、部品の中の部品。IR の語は、版 6 でそろえた。
   書くと、「まだ使えません」と報告される。
 
 ## 1. 方針
@@ -424,10 +424,14 @@ export const Interpretation = interpretation(Order, {
   | 計算 `{ is, type }` | `{ description, output }` |
   | 場合の中の `effects: [{ name, payload, when }]` | `emits: [{ effect, input, onlyWhen }]` |
   | （無い） | 場合の中の `responds`、コマンドの `output` |
-  | 説明は、別の表（`descriptions: { "queries.isMonthEnd": ... }`） | それぞれの節の `description` |
-  | （無い） | `parts`（含む部品。子の IR を、そのまま入れ子にする）、問い合わせの約束、データの `initially` |
+  | 説明は、別の表（`descriptions: { "queries.isMonthEnd": ... }`） | **変えない**（下の注） |
+  | （無い） | 問い合わせの `promise`、`model.initial`、`model.outputs`、場合の `responds`（使った仕様にだけ出る） |
 
-* **変更は1回にまとめる。** IR の版を1つ上げ（5 → 6）、上の変更をまとめて入れる。
+* **変更は1回にまとめる。** IR の版を1つ上げ（5 → 6）、上の変更をまとめて入れた（実装済み）。
+  既存の例は、生成物を作り直すだけで済んだ（境界は変わらないので、エージェントは呼ばれない）。
+* 注: 説明は `descriptions` の表のまま。語彙の項目は型そのもの（`model.data.price` は `{ type: "integer", ... }`）なので、
+  節ごとに `description` を入れると、すべての型をオブジェクトで包むことになり、読みにくくなる。
+* 部品の入れ子（`parts`）は、0.1 には入れない（web の例で要らなかった）。入れるときに、版を上げる。
 
 ## 10. 例
 
@@ -657,7 +661,7 @@ GoTo: component(
 | 入力の選び方 `among(データ, フィールド)` / `string({ examples })`、自動で集めた数を常に使う | 済み。`among` は、いまは、覚えている並びの要素から選ぶ（含む部品のキーは、部品の入れ子と一緒に） |
 | 名前を付けた条件 | まだ |
 | 部品の中の部品 | まだ（web の例を通してから決める） |
-| IR の語の統一（版 6） | まだ。いまの内部の形と IR は、以前のまま |
+| IR の語の統一（版 6） | 済み。計算は `{ description, output }`、場合は `emits: [{ effect, input, onlyWhen }]`。説明の表は変えない（§9） |
 | グラフの検査（到達しない状態、実行されないコマンド、使われない語彙） | 済み（`packages/cli/src/graph.ts`）。仕様を実行せずに、書かれた構造だけから確かめる。関数が読むものを記録して辺に足すことは、まだ |
 
 作ってみて分かったこと:

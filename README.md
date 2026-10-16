@@ -6,7 +6,8 @@
 
 ## Current Scope
 
-Phase 1 spike. TypeScript targets only.
+Version 0.1. TypeScript targets only. What 0.1 set out to complete, and what comes next, is in
+[`ROADMAP.md`](ROADMAP.md) (in Japanese).
 
 - **Write a spec as TypeScript data. (Spec Driven Development)** Decision tables, plus a component described as
   roughly or as precisely as you like: prose alone, or prose with structure wherever you want to pin something
@@ -18,6 +19,11 @@ Phase 1 spike. TypeScript targets only.
 - **Run it again when the spec changes.** The same command brings the code back into agreement with the spec:
   only the steps the change calls for are run, existing code is kept, and the agent is first shown where the
   current code falls short. If nothing changed, it only verifies.
+- **Behind a web API.** A command answers whoever executed it, and values can be records and lists, so the part
+  of a web application that decides things is specified and verified; the HTTP server around it is written by
+  a person (`examples/todo-ts`).
+- **The framework is built with itself.** Four of its own parts are specs, implemented by an agent and used by
+  the framework; deleted, they are rebuilt by `clp apply` alone (`SELF_HOSTING.md`).
 
 ## Requirements and Setup
 
@@ -73,15 +79,19 @@ pnpm exec clp verify --out .
 
 For now the directory has to be a package of this repository's workspace (`examples/*`): Node does not run
 `.ts` files that sit under `node_modules`, so the framework cannot yet be installed into another repository.
+Everything you can write in a spec, and every message `clp compile` gives, is on one page:
+[`REFERENCE.md`](REFERENCE.md).
+
 ## Example
 
 The walkthrough below uses `examples/checkout-ts/`: the spec of an order that is placed, paid, shipped, or
 cancelled (`specs/`), the implementation an LLM agent wrote from it (`src/`), and the test side (`clp/`).
 Paths and commands are relative to that directory.
 
-Two more examples: `examples/library-ts/` starts from a deliberately rough spec and shows how it was made
-precise (see its `README.md`); `packages/cli/self/` describes parts of the framework itself in the same way,
-and the framework runs on them (`examples/co-llm-piler` is a link to it).
+Three more examples: `examples/library-ts/` starts from a deliberately rough spec and shows how it was made
+precise (see its `README.md`); `examples/todo-ts/` is a to-do list behind an HTTP API, with the server written by
+hand (see its `README.md`); `packages/cli/self/` describes parts of the framework itself in the same way, and the
+framework runs on them (`examples/co-llm-piler` is a link to it).
 
 ### 1. Write the spec
 
@@ -288,14 +298,14 @@ functions of the interpretation are left out, so the IR says *what* must hold bu
 "The payment succeeded": {
   "goTo": "PAID",
   "does": "A receipt is sent with the campaign's discount percent and the amount charged. Then a coupon is issued if the campaign grants one.",
-  "effects": [
-    { "name": "SendReceipt",
-      "payload": {
+  "emits": [
+    { "effect": "SendReceipt",
+      "input": {
         "discountPercent": { "$ref": "decision:campaign.discountPercent" },
         "amount": { "$ref": "calculation:amountCharged" } } },
-    { "name": "IssueCoupon",
-      "payload": { "type": { "$ref": "decision:campaign.coupon" } },
-      "when": { "$ref": "decision:campaign.grantsCoupon" } }
+    { "effect": "IssueCoupon",
+      "input": { "type": { "$ref": "decision:campaign.coupon" } },
+      "onlyWhen": { "$ref": "decision:campaign.grantsCoupon" } }
   ]
 }
 ```
