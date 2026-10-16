@@ -200,6 +200,22 @@ test("依存の約束 increasing と、文字列の例: 現実の時刻でも、
   assert.match(messages.join("\n"), /問い合わせ now の increasing\(\): boolean には付けられません/);
 });
 
+test("入力の生成: 仕様の中の数の前後の長さの文字列も試す（文字列の長さのしきい値に届く）", async () => {
+  const spec = (limit: number) => specDir(`import { component, decide, decisionTable, input, interpretation, otherwise, output, responds, when } from "@clp/core";
+const Limits = decisionTable({ otherwise: { maxLength: ${limit} } });
+export const Note = component({
+  decisions: { limits: Limits },
+  commands: { Write: component(input({ text: "string" }), output(["ok", "too-long"]), when("The text is too long", responds("too-long")), otherwise(responds("ok"))) },
+});
+export const Interpretation = interpretation(Note, {
+  commands: { Write: component(when("The text is too long"), otherwise()) },
+  meanings: { conditions: { "The text is too long": (state) => state.text.length > decide(Note, "limits", state).maxLength } },
+});
+`);
+  // 乱数の文字列は短いので、以前は 100 文字のしきい値に届かず、「検証に現れない」と報告された
+  assert.deepEqual(await observability(await loadSpecs(spec(100)), { seed: 1, numRuns: 500 }), []);
+});
+
 test("検査: 型に合わない値（並びの要素、フィールドの過不足、null、初期値）", async () => {
   const todos = (edit: (text: string) => string) => specDir(edit(TODOS()));
   const messages = async (dir: string) => extract(await loadSpecs(dir)).diagnostics.map((d) => d.message).join("\n");

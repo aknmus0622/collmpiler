@@ -120,7 +120,12 @@ function arbitraryOf(schema: FieldSchema, hints: Hints): fc.Arbitrary<unknown> {
   if (schema === "string" || isStringSchema(schema)) {
     // 意味の関数の中の文字列と、宣言した例を混ぜる（形式の決まった文字列は、乱数ではまず出ない）
     const known = [...new Set([...hints.strings, ...(isStringSchema(schema) ? (schema.examples ?? []) : [])])];
-    return known.length === 0 ? fc.string() : fc.oneof({ weight: 1, arbitrary: fc.string() }, { weight: 1, arbitrary: fc.constantFrom(...known) });
+    // 長さのしきい値: 仕様の中の数の前後の長さの文字列も混ぜる（「100 文字を超えるタイトルは断る」に、乱数の短い文字列は届かない）
+    const lengths = [...new Set(hints.numbers.filter((n) => Number.isInteger(n) && n > 0 && n <= 10_000).flatMap((n) => [n - 1, n, n + 1]))];
+    const choices: fc.WeightedArbitrary<unknown>[] = [{ weight: 2, arbitrary: fc.string() }];
+    if (known.length > 0) choices.push({ weight: 2, arbitrary: fc.constantFrom(...known) });
+    if (lengths.length > 0) choices.push({ weight: 1, arbitrary: fc.constantFrom(...lengths).map((length) => "x".repeat(length)) });
+    return choices.length === 1 ? fc.string() : fc.oneof(...choices);
   }
   if (isEnum(schema)) return fc.constantFrom(...schema);
 
