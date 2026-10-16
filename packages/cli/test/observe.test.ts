@@ -51,7 +51,7 @@ const asPrecondition = () =>
 const asOutcome = () =>
   specDir({
     table: "limit: 3, fee: 100",
-    place: `cases: [If.holderAtLimit.then({ does: "It is refused." }), otherwise]`,
+    place: `cases: [If.holderAtLimit.then({ does: "It is refused.", nothing: true }), otherwise]`,
     structure: `cases: [otherwise({ emits: [${accept}] })]`,
     conditions: `If.holderAtLimit.means((state: any) => state.holding >= Rules.of(state).limit)`,
   });
@@ -76,7 +76,7 @@ test("生成される入力が届かないしきい値は、エラー。null の
   // holding は 0〜10 なので、50 以上になることは無い
   const unreachable = specDir({
     table: "limit: 50, fee: 100, gap: null",
-    place: `cases: [If.holderAtLimit.then({ does: "It is refused." }), otherwise]`,
+    place: `cases: [If.holderAtLimit.then({ does: "It is refused.", nothing: true }), otherwise]`,
     structure: `cases: [otherwise({ emits: [${accept}] })]`,
     conditions: `If.holderAtLimit.means((state: any) => state.holding >= Rules.of(state).limit)`,
   });

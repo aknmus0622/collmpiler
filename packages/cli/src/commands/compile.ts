@@ -17,12 +17,15 @@ export const usage = `clp compile [<specs-dir>] [--component <name>] [--drafts]
 
   <specs-dir>          仕様のディレクトリ（既定: specs）
   --component <name>   1つのコンポーネントだけを対象にする（ほかのコンポーネントの解釈にある型エラーは報告しない）
-  --drafts             解釈の下書き (*.draft.ts) を、確定版の代わりに読む`;
+  --drafts             解釈の下書き (*.draft.ts) を、確定版の代わりに読む
+  --strict-added       解釈が足した語彙（副作用、データ、問い合わせ）が使われていなければ、注意ではなく誤りにする
+                       （clp interpret が、LLM の書いた解釈を確かめるときに使う）`;
 
 export async function main(args: string[]): Promise<void> {
 const { values, positionals } = parseArgs({
   args,
-  options: { drafts: { type: "boolean", default: false }, component: { type: "string" } },
+  // strict-added: 解釈が足した語彙が使われていなければ誤りにする（clp interpret が、LLM の書いた解釈を確かめるときに使う）
+  options: { drafts: { type: "boolean", default: false }, component: { type: "string" }, "strict-added": { type: "boolean", default: false } },
   allowPositionals: true,
 });
 const dir = resolve(process.cwd(), positionals[0] ?? "specs");
@@ -41,7 +44,7 @@ for (const name of names) {
   const { ir, diagnostics } = extract(spec, await references(spec));
   const tag = names.length > 1 ? `${name}: ` : "";
   // グラフの検査: たどり着けない状態とコマンド、使われない語彙（ほかの誤りが無いときに）
-  const structural = diagnostics.some((d) => d.severity === "error") ? [] : graphDiagnostics(spec, provided.get(name));
+  const structural = diagnostics.some((d) => d.severity === "error") ? [] : graphDiagnostics(spec, provided.get(name), values["strict-added"]);
   for (const d of [...diagnostics, ...structural]) console.error(`${d.severity}[${d.code}] ${tag}${whereOf(d)}${d.message}`);
   if ([...diagnostics, ...structural].some((d) => d.severity === "error")) process.exitCode = 1;
   irs[name] = ir;

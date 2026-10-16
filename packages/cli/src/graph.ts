@@ -32,7 +32,8 @@ export function providedData(specs: SpecInput[]): Map<string, Set<string>> {
 }
 
 // provided: 含む部品が作るときに渡すデータ（覚える (set) コマンドが無くても、設定される）
-export function graphDiagnostics(input: SpecInput, provided: ReadonlySet<string> = new Set()): Diagnostic[] {
+// strict: 解釈が足した語彙が使われていなければ、注意ではなく誤り（clp interpret の検査。DSL.md §16.7）
+export function graphDiagnostics(input: SpecInput, provided: ReadonlySet<string> = new Set(), strict = false): Diagnostic[] {
   const model = input.model;
   if (!model) return [];
   const found: Diagnostic[] = [];
@@ -72,19 +73,39 @@ export function graphDiagnostics(input: SpecInput, provided: ReadonlySet<string>
     }
   }
 
-  // 入ってくる辺の無い語彙
+  // 出口の無い状態: 終わりの状態を宣言したときだけ。終わりの状態でないのに、どのコマンドでも別の状態へ出られない
+  if (model.final !== undefined) {
+    for (const state of model.states) {
+      if (model.final.includes(state) || !reachable.has(state)) continue;
+      const leaves = behaviors.some(([, behavior]) =>
+        (behavior.from ?? model.states).includes(state) &&
+        Object.values(behavior.when).some((outcome) => outcome.goTo !== undefined && goToTargets(input, outcome.goTo).some((target) => target !== state)),
+      );
+      if (!leaves) report("error", "dead-end-state", "", `状態 "${state}" は終わりの状態ではありませんが、どのコマンドでも、ほかの状態へ出られません。出るコマンドを書くか、終わりの状態 (final: true) にしてください`);
+    }
+  }
+
+  // 入ってくる辺の無い語彙。解釈が足したもの（Layer 1 が項目として並べていないもの）は、strict なら誤り
+  const listed = (group: "effects" | "data" | "queries") => {
+    const given = (input.layer1 as Record<string, unknown> | undefined)?.[group];
+    return typeof given === "object" && given !== null && !("$description" in given) ? new Set(Object.keys(given)) : new Set<string>();
+  };
+  const unused = (group: "effects" | "data" | "queries", name: string, code: string, message: string) => {
+    const added = strict && !listed(group).has(name);
+    report(added ? "error" : "warning", code, "", added ? `${message}（解釈が足したものです。使わないなら消してください）` : message);
+  };
   const emitted = new Set(outcomes.flatMap((outcome) => outcome.effects.map((effect) => effect.name)));
   for (const effect of Object.keys(model.effects)) {
-    if (!emitted.has(effect)) report("warning", "unused-effect", "", `副作用 "${effect}" を起こす (emits) コマンドが、1つもありません`);
+    if (!emitted.has(effect)) unused("effects", effect, "unused-effect", `副作用 "${effect}" を起こす (emits) コマンドが、1つもありません`);
   }
   const remembered = new Set(outcomes.flatMap((outcome) => Object.keys(outcome.set)));
   for (const field of Object.keys(model.data)) {
-    if (!remembered.has(field) && !provided.has(field)) report("warning", "unset-data", "", `データ "${field}" を覚える (set) コマンドが、1つもありません。いつも未設定のままです`);
+    if (!remembered.has(field) && !provided.has(field)) unused("data", field, "unset-data", `データ "${field}" を覚える (set) コマンドが、1つもありません。いつも未設定のままです`);
   }
   const asked = new Set(behaviors.flatMap(([, behavior]) => Object.values(behavior.asks ?? {}).map((ask) => ask.query)));
   for (const [query, declaration] of Object.entries(model.queries)) {
     if (Object.keys(declaration.input).length > 0 && !asked.has(query)) {
-      report("warning", "unasked-query", "", `引数つきの問い合わせ "${query}" を尋ねる (asks) コマンドが、1つもありません`);
+      unused("queries", query, "unasked-query", `引数つきの問い合わせ "${query}" を尋ねる (asks) コマンドが、1つもありません`);
     }
   }
   return found;

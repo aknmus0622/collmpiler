@@ -126,7 +126,7 @@ test("解釈: 検査に落ちたら、書き直させる (仕様に無い名前�
   assert.ok(result.status === "interpreted" && result.attempts === 4);
   assert.match(seen[1].request, /Problems found in the previous attempt[\s\S]*spec-check[\s\S]*仕様に無い名前 "paymentModuleActiv" を読みました/);
   assert.match(seen[2].request, /Problems found in the previous attempt[\s\S]*複数の条件が同時に成立しました/);
-  assert.match(seen[3].request, /Problems found in the previous attempt[\s\S]*bad-interpretation[\s\S]*コマンド "Checkout" の条件 "The payment succeeded" の goTo は Layer 1 に書かれているので、解釈では書けません/);
+  assert.match(seen[3].request, /Problems found in the previous attempt[\s\S]*bad-interpretation[\s\S]*commands\.Checkout\.cases\.The payment succeeded\.goTo: Layer 1 に書かれているので、解釈では書けません/);
   // 2回目からは、前回の下書きから始まる（先頭の行は除いて渡す）
   assert.equal(seen[1].start, typo);
 });
@@ -306,7 +306,7 @@ test("2つの解釈: 一致すれば、食い違いは無い。2つ目が語彙�
 test("3つ以上の解釈: 1つ目と、ほかのそれぞれを比べる。どれも互いの下書きを見ない", async () => {
   const always = reviewed.replace("Effect.Refund().onlyWhen(was(State.PAID))", "Effect.Refund()");
   // 3つ目は、失敗した支払いのあとも通知しないと読んだ
-  const silent = reviewed.replace("otherwise({ emits: [Effect.NotifyPaymentFailure()] }),", "otherwise,");
+  const silent = reviewed.replace("otherwise({ emits: [Effect.NotifyPaymentFailure()] }),", "otherwise({ nothing: true }),");
   assert.notEqual(silent, reviewed);
   const dir = specDir();
   const { strategy, seen } = scripted([reviewed, always, silent, reviewed]);

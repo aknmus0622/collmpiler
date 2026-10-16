@@ -87,7 +87,7 @@ test("W3: 条件の組み合わせ。意味は、組み合わせる前の条件�
   });
   assert.deepEqual(await selfCheck(spec, { seed: 1, numRuns: 200 }), { ok: true, numRuns: 200 });
   const missing = await load(specDir({ "pipeline.component.ts": PIPELINE.replace('  If.incremental.means((state) => state.incremental === true),\n', "") }));
-  assert.ok(missing.diagnostics.some((line) => line.startsWith('unbound-condition: 条件 "Existing code is being changed"')), missing.diagnostics.join("\n"));
+  assert.ok(missing.diagnostics.some((line) => line.startsWith('incomplete: conditions."Existing code is being changed"')), missing.diagnostics.join("\n"));
 });
 
 // 値を書き出す部品: どれか1つの形 (W4)、何でも入る値 (W5)、数の列挙 (W9)、答えのフィールドの取っ手 (W12)

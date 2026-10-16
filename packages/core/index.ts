@@ -8,7 +8,7 @@
 // - 節は、作られた場所（ファイルと行）を覚える。診断に出すため。
 
 import { BINDING, COMPONENT, UnboundNameError, activate, active, matchCondition, resolveComponent } from "./internal.ts";
-import type { BoundSpecification, Table } from "./internal.ts";
+import type { BoundSpecification, Declaration, MergeRules, MergedView, Structure, Table } from "./internal.ts";
 
 export { BINDING, COMPONENT, RuleConflictError, UnboundNameError, activate, dir, file, isDescription, isFragment, matchCondition, text } from "./internal.ts";
 export type {
@@ -290,13 +290,20 @@ const sentenceOf = (value: ConditionHandle | string): string => (typeof value ==
 /** 状態の宣言。`State.PAID` で指す。説明の無い状態の並び: states(["IDLE", "DONE"]) */
 export function states<const N extends readonly string[]>(names: N): { readonly [K in N[number]]: StateHandle<K> } & Group<"states">;
 /** 説明を添えるとき: states({ DRAFT: "Before the order is placed.", ... }) */
-export function states<const S extends Record<string, string>>(described: S): { readonly [K in keyof S & string]: StateHandle<K> } & Group<"states">;
+export function states<const S extends Record<string, string | { description?: string; final?: boolean }>>(described: S): { readonly [K in keyof S & string]: StateHandle<K> } & Group<"states">;
 /** 文だけのまとまり: 状態は解釈が決める */
 export function states(prose: string): Group<"states">;
 export function states(given: unknown): unknown {
   if (typeof given === "string") return groupOf({}, "states", description(given));
-  // 生の文字列は、状態の説明（§16.0 の略記）
-  const described = isDict(given) ? Object.fromEntries(Object.entries(given).map(([name, text]) => [name, typeof text === "string" ? description(text) : text])) : undefined;
+  // 生の文字列は、状態の説明（§16.0 の略記）。{ description, final } の席でも書ける（final: 終わりの状態。§16.7）
+  const stateBody = (text: unknown): unknown => {
+    if (typeof text === "string") return description(text);
+    if (isDict(text)) {
+      return make("component", { children: [...checkFields("state", text), ...(text.description !== undefined ? [description(String(text.description))] : []), ...(text.final === true ? [make("final")] : [])] });
+    }
+    return text;
+  };
+  const described = isDict(given) ? Object.fromEntries(Object.entries(given).map(([name, text]) => [name, stateBody(text)])) : undefined;
   const names = described ? Object.keys(described) : (given as string[]);
   return groupOf(Object.fromEntries(names.map((name) => [name, { $state: name }])), "states", described ?? names);
 }
@@ -644,33 +651,51 @@ export type KindDefinition = {
   fields?: Readonly<Record<string, string>>;
   entries?: string;
   expand?: (fields: Record<string, any>) => unknown;
+  // 葉の検査 (DSL.md §16.7): 重ねたあとに無ければならない席、どれか1つは無ければならない席（文で起きることが言われた所）、
+  // 文だけで書かれたら、重ねたあとに項目が無ければならないか、場合に分かれたら無ければならない場合
+  required?: readonly string[];
+  oneOfRequired?: readonly string[];
+  nonEmpty?: boolean;
+  requiredCases?: readonly string[];
+  // 単一化: Layer 1 が項目を並べたら、解釈は項目を足せない
+  closed?: boolean;
 };
 
 // 起きること（場合の席。コマンドに書けば、どの場合でも起きる）
-const OUTCOME_FIELDS = { goTo: "state", does: "text", set: "list of set", emits: "list of effects", responds: "value", adds: "list of add", removes: "list of remove" } as const;
+const OUTCOME_FIELDS = {
+  goTo: "state", does: "text", set: "list of set", emits: "list of effects", responds: "value", adds: "list of add", removes: "list of remove",
+  // 何も起きないことの明示 (DSL.md §16.7)
+  nothing: "flag",
+} as const;
+const OUTCOMES = ["goTo", "set", "emits", "responds", "adds", "removes", "nothing"] as const;
 
 /** 組み込みの種類。利用者の種類（kind(...)）も、同じ形で定義する */
 export const KINDS: Record<string, KindDefinition> = {
-  service: { fields: { description: "text", init: "state", uses: "list of groups", assets: "assets" } },
+  service: { fields: { description: "text", init: "state", uses: "list of groups", assets: "assets" }, required: ["init", "commands"] },
   command: {
     fields: {
       description: "text", input: "input", output: "type", route: "text", from: "list of states", onlyIf: "list of conditions",
       asks: "list of asks", calls: "list of calls", cases: "list of cases", ...OUTCOME_FIELDS,
     },
+    // 文で起きることが言われたら、どれか1つ（場合に分かれていなければ、コマンドが1つの場合）
+    oneOfRequired: OUTCOMES,
+    requiredCases: ["otherwise"],
   },
-  case: { fields: OUTCOME_FIELDS },
-  datum: { fields: { description: "text", type: "type", initially: "value" } },
-  query: { fields: { description: "text", input: "input", output: "type", fresh: "flag", increasing: "flag" } },
+  case: { fields: OUTCOME_FIELDS, oneOfRequired: OUTCOMES },
+  datum: { fields: { description: "text", type: "type", initially: "value" }, required: ["type"] },
+  // 状態。final: 終わりの状態（宣言があれば、終わりの状態でないのに出口の無い状態を、グラフの検査が誤りにする）
+  state: { fields: { description: "text", final: "flag" } },
+  query: { fields: { description: "text", input: "input", output: "type", fresh: "flag", increasing: "flag" }, required: ["output"] },
   effect: { fields: { description: "text", input: "input" } },
-  calculation: { fields: { description: "text", output: "type" } },
-  states: { entries: "state" },
-  data: { entries: "datum" },
-  queries: { entries: "query" },
-  effects: { entries: "effect" },
-  calculations: { entries: "calculation" },
+  calculation: { fields: { description: "text", output: "type" }, required: ["description", "output"] },
+  states: { entries: "state", nonEmpty: true, closed: true },
+  data: { entries: "datum", nonEmpty: true, closed: true },
+  queries: { entries: "query", nonEmpty: true, closed: true },
+  effects: { entries: "effect", nonEmpty: true, closed: true },
+  calculations: { entries: "calculation", nonEmpty: true, closed: false },
   conditions: { entries: "condition" },
-  invariants: { entries: "invariant" },
-  commands: { entries: "command" },
+  invariants: { entries: "invariant", closed: false },
+  commands: { entries: "command", nonEmpty: true, closed: true },
   decisions: { entries: "decision" },
   types: { entries: "type" },
   parts: { entries: "part" },
@@ -688,7 +713,7 @@ const MANY = Number.POSITIVE_INFINITY;
 const FIELD_NODES: Record<string, Record<string, number>> = {
   description: { description: MANY }, does: { does: MANY }, input: { input: 1 }, output: { output: 1 }, route: { route: 1 },
   from: { from: 1 }, onlyIf: { onlyIf: MANY }, asks: { asks: MANY }, calls: { calls: MANY }, cases: { when: MANY, otherwise: 1 },
-  goTo: { goTo: 1 }, set: { set: MANY }, emits: { emits: MANY }, responds: { responds: 1 }, adds: { adds: MANY }, removes: { removes: MANY },
+  goTo: { goTo: 1 }, set: { set: MANY }, emits: { emits: MANY }, responds: { responds: 1 }, adds: { adds: MANY }, removes: { removes: MANY }, nothing: { nothing: 1 },
   type: { "#type": 1 }, initially: { initially: 1 }, fresh: { fresh: 1 }, increasing: { increasing: 1 }, init: { init: 1 }, assets: { assets: 1 },
 };
 const rowOf = (kind: string, extra: Record<string, number> = {}): Record<string, number> =>
@@ -715,7 +740,7 @@ export const GRAMMAR: Record<string, Record<string, number>> = {
   // 内部の節（書き手は、席と取っ手を通してだけ書く）
   part: {},
   group: { description: 1 },
-  state: { description: 1 },
+  state: { description: 1, final: 1 },
   condition: { description: 1, meaning: 1 },
   invariant: { description: 1, meaning: 1 },
   input: { "#type": 1 },
@@ -746,7 +771,7 @@ const LABEL: Record<string, string> = {
   query: "問い合わせ", effect: "副作用", decision: "決定表", calculation: "計算", condition: "条件", invariant: "不変条件",
   command: "コマンド", input: "入力 (input)", output: "返すものの形 (output)", from: "from", onlyIf: "onlyIf", when: "場合 (when)",
   otherwise: "otherwise", goTo: "goTo", set: "set", asks: "asks", calls: "呼ぶ部品のコマンド", part: "含む部品", adds: "部品を作る (add)", removes: "部品を消す (remove)", route: "経路 (route)", emits: "emits", responds: "responds", does: "does",
-  initially: "initially", fresh: "fresh", increasing: "increasing", onlyWhen: "onlyWhen", meaning: "意味の関数", field: "フィールド",
+  initially: "initially", fresh: "fresh", increasing: "increasing", nothing: "nothing", final: "final", onlyWhen: "onlyWhen", meaning: "意味の関数", field: "フィールド",
   service: "部品 (service)", case: "場合", datum: "データ",
   value: "値", "#type": "型", type: "型", enum: "列挙", record: "record", list: "list", optional: "optional", setting: "設定",
 };
@@ -886,6 +911,9 @@ function happens(target: Shape, node: Node, into: Collected): boolean {
       target.effects = [...((target.effects as unknown[] | undefined) ?? []), { [String(node.value)]: valuesOf(node), ...(condition ? { when: valueOf(condition.value) } : {}) }];
       return true;
     }
+    case "nothing":
+      target.nothing = true;
+      return true;
     case "responds": {
       // 値1つか、フィールドの組
       const [only] = node.children;
@@ -964,6 +992,7 @@ function layer1From(root: Node): { layer1: Shape; problems: Diagnostic[] } {
   const into: Collected = { problems: [] };
   const layer1: Shape = {};
   const states: [string, string | undefined][] = [];
+  const finals: string[] = [];
   for (const node of root.children) {
     switch (node.kind) {
       case "description":
@@ -971,6 +1000,7 @@ function layer1From(root: Node): { layer1: Shape; problems: Diagnostic[] } {
         break;
       case "state":
         states.push([node.name!, node.children.find((item) => item.kind === "description")?.value as string | undefined]);
+        if (node.children.some((item) => item.kind === "final")) finals.push(node.name!);
         break;
       case "init":
         layer1.init = node.value;
@@ -1008,6 +1038,8 @@ function layer1From(root: Node): { layer1: Shape; problems: Diagnostic[] } {
   }
   if (states.length > 0) {
     layer1.states = states.every(([, text]) => text !== undefined) ? Object.fromEntries(states.map(([name, text]) => [name, { $description: text }])) : states.map(([name]) => name);
+    // 終わりの状態（宣言したときだけ。宣言が無い仕様の Layer 1 とハッシュは、変わらない）
+    if (finals.length > 0) layer1.finals = finals;
   }
   Object.defineProperty(layer1, COMPONENT, { value: true });
   return { layer1, problems: into.problems };
@@ -1059,10 +1091,12 @@ export function interpretation(target: Node, given: readonly unknown[]): BoundSp
   }
   const fn = (node: Node) => node.children.find((item) => item.kind === "meaning")?.value as never;
   const states: string[] = [];
+  const finals: string[] = [];
   for (const node of tree.children) {
     switch (node.kind) {
       case "state":
         states.push(node.name!);
+        if (node.children.some((item) => item.kind === "final")) finals.push(node.name!);
         break;
       case "init":
         structure.init = node.value;
@@ -1089,9 +1123,10 @@ export function interpretation(target: Node, given: readonly unknown[]): BoundSp
     }
   }
   if (states.length > 0) structure.states = states;
+  if (finals.length > 0) structure.finals = finals;
 
   const layer1 = layer1Of(target);
-  const { declaration, commands, problems } = resolveComponent(layer1, structure);
+  const { declaration, commands, problems, view } = resolveComponent(layer1, structure, mergeRules());
   const value: BoundSpecification = {
     source: target,
     component: declaration,
@@ -1100,11 +1135,103 @@ export function interpretation(target: Node, given: readonly unknown[]): BoundSp
     ...(Object.keys(meanings.calculations).length > 0 ? { calculations: meanings.calculations } : {}),
     ...(Object.keys(meanings.invariants).length > 0 ? { invariants: meanings.invariants } : {}),
     problems,
+    incomplete: leafCheck(view, declaration, commands, meanings),
   };
   Object.defineProperty(value, BINDING, { value: true });
   activate(value);
   TREES.set(value, { tree, problems: into.problems });
   return value;
+}
+
+// --- 単一化と葉の検査 (DSL.md §16.7) ---
+
+// 種類の席の名前 → 内部の形の部品の名前
+const INTERNAL: Record<string, string> = { emits: "effects", cases: "when", fresh: "promise", increasing: "promise" };
+const internalOf = (field: string) => INTERNAL[field] ?? field;
+// 重ね合わせの規則を、種類の定義から作る（まとまりごとの特例は、種類の性質として書いてある）
+function mergeRules(): MergeRules {
+  const partsOf = (kind: string) => [...new Set(Object.keys(KINDS[kind].fields ?? {}).map(internalOf))];
+  return {
+    parts: { data: partsOf("datum"), queries: partsOf("query"), effects: partsOf("effect"), calculations: partsOf("calculation") },
+    closed: {
+      data: KINDS.data.closed ?? true,
+      queries: KINDS.queries.closed ?? true,
+      effects: KINDS.effects.closed ?? true,
+      calculations: KINDS.calculations.closed ?? true,
+      commands: KINDS.commands.closed ?? true,
+    },
+    commandParts: [...partsOf("command"), "when"],
+  };
+}
+
+const PART_LABEL: Record<string, string> = { type: "型", output: "答えの型 (output)", description: "文 (description)", init: "初期状態 (init)", commands: "コマンド" };
+/**
+ * 葉の検査: 重ねたあとの木の、すべての道筋が葉（型、定数、解決できる取っ手、意味のある文、nothing）で終わるか。
+ * 決まりは種類の定義 (KINDS) の required / oneOfRequired / nonEmpty / requiredCases が持つ。診断は道筋で書く
+ */
+function leafCheck(view: MergedView, declaration: Declaration, structures: Record<string, Record<string, Structure>>, meanings: Meanings): string[] {
+  const found: string[] = [];
+  const at = (path: string, message: string) => found.push(`${path}: ${message}`);
+  // 部品 (service) の席
+  if (view.states === "missing") at("states", "状態がありません（Layer 1 は文だけです。解釈で状態を宣言してください）");
+  if ((KINDS.service.required ?? []).includes("init") && view.states !== "stateless" && !view.init) at("init", `${PART_LABEL.init}がありません`);
+  if ((KINDS.service.required ?? []).includes("commands") && Object.keys(view.commands).length === 0) at("commands", `${PART_LABEL.commands}がありません`);
+  // 文だけで書かれたまとまりは、重ねたあとに項目が要る
+  const GROUP_KIND: Record<string, string> = { data: "data", queries: "queries", effects: "effects", calculations: "calculations" };
+  for (const group of view.prose) {
+    if (group === "states" || group === "commands" || !KINDS[group]?.nonEmpty) continue;
+    if (Object.keys(view.entries[GROUP_KIND[group] as keyof MergedView["entries"]] ?? {}).length === 0) at(group, "文だけのまま、項目がありません。解釈で項目を宣言してください");
+  }
+  // 項目の、無ければならない席
+  const ENTRY_KIND = { data: "datum", queries: "query", effects: "effect", calculations: "calculation" } as const;
+  for (const [group, kind] of Object.entries(ENTRY_KIND)) {
+    for (const [name, merged] of Object.entries(view.entries[group as keyof typeof ENTRY_KIND])) {
+      for (const field of KINDS[kind].required ?? []) {
+        if (merged[internalOf(field)] === undefined) at(`${group}.${name}.${field}`, `${PART_LABEL[field] ?? field}がありません`);
+      }
+    }
+  }
+  // コマンド: 場合に分かれたら otherwise が要る。文で起きることが言われた場合は、起きること（か nothing）が要る
+  for (const [name, command] of Object.entries(view.commands)) {
+    const cases = Object.keys(command.cases);
+    const branched = cases.some((key) => key !== "otherwise");
+    if (branched) for (const required of KINDS.command.requiredCases ?? []) if (!cases.includes(required)) at(`commands.${name}.cases`, `${required} がありません`);
+    for (const [caseName, { described, filled }] of Object.entries(command.cases)) {
+      const path = branched ? `commands.${name}.cases.${caseName}` : `commands.${name}`;
+      const outcomes = (branched ? KINDS.case : KINDS.command).oneOfRequired ?? [];
+      if (described && !filled.some((field) => outcomes.includes(field))) {
+        at(path, "文で言われた「起きること」が、構造になっていません。何も起きないなら nothing: true と書きます");
+      }
+      if (filled.includes("nothing") && filled.length > 1) at(path, `nothing と、起きること (${filled.filter((field) => field !== "nothing").join(" / ")}) が両方あります`);
+    }
+  }
+  // 文の葉: 使われた条件の文、計算、不変条件には、意味の関数が要る（組み合わせは、組み合わせる前の条件を見る）
+  const conditionsUsed = new Set<string>();
+  for (const [name, command] of Object.entries(declaration.commands)) {
+    for (const sentence of [...Object.keys(command.when), ...(command.onlyIf ?? [])]) if (sentence !== "otherwise") conditionsUsed.add(sentence);
+    for (const structure of Object.values(structures[name] ?? {})) {
+      for (const effect of structure.effects ?? []) if (typeof effect.when === "string") conditionsUsed.add(effect.when);
+    }
+  }
+  for (const table of Object.values(declaration.decisions ?? {})) for (const row of Object.keys(table)) if (row !== "otherwise") conditionsUsed.add(row);
+  const checkCondition = (sentence: string, seen = new Set<string>()) => {
+    if (seen.has(sentence)) return;
+    seen.add(sentence);
+    const composition = COMPOSITIONS.get(sentence);
+    if (composition) {
+      for (const part of "all" in composition ? composition.all : [composition.not]) checkCondition(part, seen);
+      return;
+    }
+    if (typeof meanings.conditions[sentence] !== "function") at(`conditions."${sentence}"`, "意味の関数がありません（解釈の meanings に書きます）");
+  };
+  for (const sentence of conditionsUsed) checkCondition(sentence);
+  for (const name of Object.keys(declaration.calculations ?? {})) {
+    if (typeof meanings.calculations[name] !== "function") at(`calculations.${name}`, "意味の関数がありません（解釈の meanings に書きます）");
+  }
+  for (const sentence of declaration.invariants ?? []) {
+    if (typeof meanings.invariants[sentence] !== "function") at(`invariants."${sentence}"`, "意味の関数がありません（解釈の meanings に書きます）");
+  }
+  return found;
 }
 
 // 木の検査の結果: 文法に合わない所と、まだ使えない書き方。value は、部品の木か、解釈
@@ -1188,6 +1315,9 @@ function outcomeNodes(kind: string, given: Record<string, unknown>): Node[] {
       case "removes":
         out.push(...(asList(value) as Node[]));
         break;
+      case "nothing":
+        if (value === true) out.push(make("nothing"));
+        break;
     }
   }
   return out;
@@ -1256,7 +1386,7 @@ function commandBody(given: unknown): Node {
 }
 
 // 起きることの節の種類（コマンドにも、場合にも書ける）
-const OUTCOME_KINDS = new Set(["goTo", "does", "set", "emits", "responds", "adds", "removes"]);
+const OUTCOME_KINDS = new Set(["goTo", "does", "set", "emits", "responds", "adds", "removes", "nothing"]);
 // コマンドに書いた「起きること」(W1): 場合に分かれていれば、どの場合でも起きる（場合の中の分より先に）。
 // otherwise が無ければ足す（どの場合にも当たらないときも起きるため）。同じ席が場合の中にもあれば、文法の検査が報告する
 function distribute(children: Node[], common: Node[], names: string[] = []): Node[] {

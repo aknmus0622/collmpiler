@@ -1303,3 +1303,20 @@ const Queries = kind("queries", { entries: Query, nonEmpty: true });
 
 葉の検査が見ないもの: 意味が正しいか（2つの解釈の比較と、人のレビュー）、値が型に合うか（いまの型の検査）。
 
+**実装（N8f。完了）。**
+
+* 重ね合わせは `resolveComponent(layer1, written, rules)` のまま、まとまりごとの特例を `MergeRules` に移した。`rules` は
+  `mergeRules()` が `KINDS` の `closed`（項目を足せないまとまり。計算と不変条件は開いている）から作る。Layer 1 が
+  構造として書いた席を解釈が書けば、道筋で誤りになる（`commands.Checkout.cases.The payment succeeded.goTo: Layer 1 に書かれているので、解釈では書けません`）。
+  触れなかったコマンドと場合は、何も足さない（解釈が「すべてのコマンドと場合に触れる」決まりは、葉の検査に置き換えた）。
+* 重ねた結果の見取り図（`MergedView`: 文だけのまとまり、項目の席、状態と `init`、コマンドと場合ごとの「文で言われたか」と
+  「埋まった席」）を、`leafCheck` が `KINDS` の `required` / `oneOfRequired` / `nonEmpty` / `requiredCases` で調べる。
+  結果は `incomplete` として `extract.ts` が出し、1件でもあればモデルを作らない。
+* 置き換わったもの: 型・出力・説明が無い項目、`otherwise` が無い、状態・`init`・コマンドが無い、`unbound-condition` /
+  `unbound-calculation` / `unbound-invariant`（すべて `incomplete` に）。知らない名前と、参照の型が合わないもの
+  （`unknown-*`、`bad-reference`）は、self の `reference-check` / `payload-check` が判断しているので、そのまま残した。
+* 診断の道筋は部品の中から書く（`commands.Ship.cases.otherwise`）。部品の名前は、診断の `where` が持つ。
+* 終わりの状態は `states({ DONE: { final: true } })`。1つでも宣言すると、`graph.ts` が出口の無い状態を `dead-end-state` で誤りにする。
+* 解釈が足した副作用・データ・問い合わせが使われていなければ、`clp compile --strict-added`（`clp interpret` の検査が使う）で誤り。
+  それ以外では、これまでどおり注意。
+

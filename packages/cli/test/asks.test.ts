@@ -169,7 +169,7 @@ test("検査: asks の誤り (知らない問い合わせ、引数の漏れ・�
   // Layer 1 が尋ねることを書いたコマンドには、解釈は asks を書けない
   const overriding = DOOR(undefined, 'asks: [Query.isMember({ person: "x" }).as("other")], ');
   assert.notEqual(overriding, DOOR());
-  assert.match(extract(await loadSpecs(specDir(overriding))).diagnostics.map((d) => d.message).join("\n"), /コマンド "Knock" の asks は Layer 1 に書かれているので、解釈では書けません/);
+  assert.match(extract(await loadSpecs(specDir(overriding))).diagnostics.map((d) => d.message).join("\n"), /commands\.Knock\.asks: Layer 1 に書かれているので、解釈では書けません/);
 });
 
 test("読み込み: 尋ねた答えに付けた名前は、data や入力と重ねられない", async () => {

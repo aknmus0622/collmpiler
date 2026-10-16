@@ -71,7 +71,7 @@ test("解釈: 名前を持つノードの並び。触れなかったコマンド
   assert.deepEqual(bound.commands.Complete.otherwise.effects, [{ Notify: { title: { $ref: "data", path: "title" } } }]);
   // Layer 1 が並べたまとまりは閉じている（足すと、これまでどおり報告される）
   const closed = interpretation(Item, [data({ renamed: "boolean" }), If.alreadyDone.means(() => false)]);
-  assert.match(closed.problems.join("\n"), /data の "renamed" は Layer 1 にありません/);
+  assert.match(closed.problems.join("\n"), /data\.renamed: Layer 1 にありません/);
 });
 
 test("解釈: 部品に足す（init、まとまり）は、部品の取っ手の with で書く", () => {

@@ -115,7 +115,17 @@ export const isDescription = (value: unknown): value is Description =>
 // 遷移先: 状態の名前か、決定表の列の参照（その行の値が、状態の名前） (W2)
 export type GoTo = string | { readonly $ref: string; readonly path: unknown };
 // Layer 1 も、覚えることと副作用を書ける (W11)。解釈の分は、そのあとに足される
-export type OutcomeShape = { goTo?: GoTo; does?: string; responds?: unknown; effects?: readonly Record<string, unknown>[]; set?: Record<string, unknown>; adds?: readonly Adds[]; removes?: readonly Removes[] };
+export type OutcomeShape = {
+  goTo?: GoTo;
+  does?: string;
+  responds?: unknown;
+  effects?: readonly Record<string, unknown>[];
+  set?: Record<string, unknown>;
+  adds?: readonly Adds[];
+  removes?: readonly Removes[];
+  // 何も起きないことの明示 (DSL.md §16.7)
+  nothing?: true;
+};
 // コマンドが返すものの形。どの型でも書ける
 export type OutputSchema = FieldSchema;
 // 尋ねること: 答えに付ける名前 → { 問い合わせの名前: 引数 }
@@ -181,7 +191,7 @@ export const BINDING = Symbol.for("clp.binding");
 
 // --- 実行時に扱う形 ---
 // Layer 1 に解釈を重ねて、すべてが構造になったコンポーネント
-export type Outcome = { goTo?: GoTo; does?: string; responds?: unknown };
+export type Outcome = { goTo?: GoTo; does?: string; responds?: unknown; nothing?: true };
 // 尋ねること: どの問い合わせを、どの引数で
 export type Asked = { query: string; input: Record<string, unknown> };
 export type CommandDeclaration = {
@@ -209,6 +219,8 @@ export type Declaration = {
   descriptions: Record<string, string>;
   assets?: readonly AssetDeclaration[];
   states: readonly string[];
+  // 終わりの状態（宣言したときだけ）
+  finals?: readonly string[];
   init: string;
   data: Fields;
   // 覚えるデータの、はじめの値（宣言したものだけ。無ければ未設定）
@@ -230,6 +242,8 @@ export type BoundSpecification = {
   // コマンド名 → 条件 → 構造
   commands: Record<string, Record<string, Structure>>;
   conditions: Record<string, (state: any) => boolean>;
+  // 葉の検査で見つかった書き残し（道筋つき。DSL.md §16.7）
+  incomplete?: string[];
   calculations?: Record<string, (state: any) => unknown>;
   invariants?: Record<string, (state: any) => boolean>;
   // Layer 1 と解釈が合わない点（Layer 1 が構造として書いたものの書き換え、足りない構造など）
@@ -251,6 +265,7 @@ type CommandStructure = OutcomeStructure & {
 type EntryStructure = Record<string, unknown>;
 type StructureValue = {
   states?: readonly string[];
+  finals?: readonly string[];
   init?: string;
   data?: Record<string, EntryStructure>;
   queries?: Record<string, EntryStructure>;
@@ -263,23 +278,47 @@ type StructureValue = {
 
 const OUTCOME_KEYS = ["goTo", "does", "responds", "effects", "set", "adds", "removes"] as const;
 const COMMAND_KEYS = ["description", "input", "output", "route", "from", "onlyIf", "asks", "calls", "when", ...OUTCOME_KEYS] as const;
-const STRUCTURE_KEYS = ["states", "init", "data", "queries", "effects", "decisions", "calculations", "invariants", "commands"] as const;
-// まとまりごとの、項目に書ける部品。required は、Layer 1 か解釈のどちらかに無ければならないもの
-const ENTRY_PARTS = {
-  data: { parts: ["description", "type", "initially"], required: ["type"], additive: false },
-  queries: { parts: ["description", "input", "output", "promise"], required: ["output"], additive: false },
-  effects: { parts: ["description", "input"], required: [], additive: false },
-  calculations: { parts: ["description", "output"], required: ["description", "output"], additive: true },
-} as const;
-const COMMAND_PARTS = ["description", "input", "output", "route", "from", "onlyIf", "asks", "calls", "goTo", "does", "responds", "effects", "set", "adds", "removes", "when"];
+const STRUCTURE_KEYS = ["states", "finals", "init", "data", "queries", "effects", "decisions", "calculations", "invariants", "commands"] as const;
+// 重ね合わせの規則。種類の定義 (packages/core/index.ts の KINDS) から作って渡す。
+// parts: まとまりごとの、項目に書ける部品。closed: Layer 1 が項目を並べたら、解釈は項目を足せない
+export type MergeRules = {
+  parts: Record<"data" | "queries" | "effects" | "calculations", readonly string[]>;
+  closed: Record<"data" | "queries" | "effects" | "calculations" | "commands", boolean>;
+  commandParts: readonly string[];
+};
+const DEFAULT_RULES: MergeRules = {
+  parts: {
+    data: ["description", "type", "initially"],
+    queries: ["description", "input", "output", "promise"],
+    effects: ["description", "input"],
+    calculations: ["description", "output"],
+  },
+  closed: { data: true, queries: true, effects: true, calculations: false, commands: true },
+  commandParts: ["description", "input", "output", "route", "from", "onlyIf", "asks", "calls", "goTo", "does", "responds", "effects", "set", "adds", "removes", "nothing", "when"],
+};
+
+// 重ねたあとの形（葉の検査が読む。DSL.md §16.7）
+export type MergedView = {
+  // 文だけで書かれたまとまり（Layer 1）
+  prose: string[];
+  // 項目: まとまり → 名前 → 重ねた部品
+  entries: Record<"data" | "queries" | "effects" | "calculations", Record<string, Record<string, unknown>>>;
+  // 状態の宣言があるか、状態を持たない部品か
+  states: "given" | "missing" | "stateless";
+  init: boolean;
+  // コマンド: 文だけのコマンドか、場合ごとに、文で起きることが言われたか・何が書かれたか
+  commands: Record<string, { prose: boolean; cases: Record<string, { described: boolean; filled: string[] }> }>;
+};
 
 // Layer 1 に解釈の構造を重ねる。Layer 1 が構造として書いたものは、解釈では書き換えられない。
 // 合わない点は problems に集める（読み込みの時点では投げない。報告は IR を作るときに行う）
 export function resolveComponent(
   layer1: object,
   written: object = {},
-): { declaration: Declaration; commands: Record<string, Record<string, Structure>>; problems: string[] } {
+  rules: MergeRules = DEFAULT_RULES,
+): { declaration: Declaration; commands: Record<string, Record<string, Structure>>; problems: string[]; view: MergedView } {
   const base = layer1 as Layer1;
+  const view: MergedView = { prose: [], entries: { data: {}, queries: {}, effects: {}, calculations: {} }, states: "given", init: false, commands: {} };
   const structure = written as StructureValue;
   const problems: string[] = [];
   const descriptions: Record<string, string> = {};
@@ -300,21 +339,25 @@ export function resolveComponent(
       else problems.push(`states の "${name}" には、description(...) を書いてください`);
     }
   }
-  if (states !== undefined && structure.states !== undefined) problems.push("states は Layer 1 に構造として書かれているので、解釈では書けません");
+  if (states !== undefined && structure.states !== undefined) problems.push("states: Layer 1 に構造として書かれているので、解釈では書けません");
   states = states ?? structure.states;
-  if (base.init !== undefined && structure.init !== undefined) problems.push("init は Layer 1 に書かれているので、解釈では書けません");
+  if (base.init !== undefined && structure.init !== undefined) problems.push("init: Layer 1 に書かれているので、解釈では書けません");
   let init = base.init ?? structure.init;
   // 状態も初期状態も、どこにも書かれていない: 状態を持たない部品。内部では、1つだけの状態を持つものとして扱う
   if (states === undefined && init === undefined && !isDescription(base.states)) {
     states = [STATELESS];
     init = STATELESS;
+    view.states = "stateless";
   }
-  if (states === undefined) problems.push("states が、Layer 1 にも解釈にもありません");
-  if (init === undefined) problems.push("init が、Layer 1 にも解釈にもありません");
+  // 状態と初期状態が足りないことは、葉の検査が報告する
+  if (states === undefined) view.states = "missing";
+  view.init = init !== undefined;
+  for (const key of ["states", "data", "queries", "effects", "calculations", "commands"] as const) if (isDescription(base[key])) view.prose.push(key);
 
   // 語彙のまとまり: 項目ごとに、Layer 1 の部品に、解釈の足りない分を重ねる
-  const entries = (key: keyof typeof ENTRY_PARTS): Record<string, CommandShape> => {
-    const { parts, required, additive } = ENTRY_PARTS[key];
+  const entries = (key: keyof MergeRules["parts"]): Record<string, CommandShape> => {
+    const parts = rules.parts[key];
+    const additive = !rules.closed[key];
     const given = base[key];
     if (isDescription(given)) descriptions[key] = given.$description;
     const listed = given === undefined || isDescription(given) ? undefined : given;
@@ -322,7 +365,7 @@ export function resolveComponent(
     const names = listed ? [...Object.keys(listed), ...(additive ? Object.keys(added).filter((name) => !(name in listed)) : [])] : Object.keys(added);
     if (listed && !additive) {
       for (const name of Object.keys(added)) {
-        if (!(name in listed)) problems.push(`${key} の "${name}" は Layer 1 にありません（Layer 1 が項目を並べているので、解釈では足せません）`);
+        if (!(name in listed)) problems.push(`${key}.${name}: Layer 1 にありません（Layer 1 が項目を並べているので、解釈では足せません）`);
       }
     }
     const result: Record<string, CommandShape> = {};
@@ -336,12 +379,11 @@ export function resolveComponent(
       }
       for (const part of Object.keys(right)) {
         if (!(parts as readonly string[]).includes(part)) problems.push(`${key}.${name}: 解釈に "${part}" というキーは書けません`);
-        else if (left[part] !== undefined) problems.push(`${key}.${name} の ${part} は Layer 1 に書かれているので、解釈では書けません`);
+        else if (left[part] !== undefined) problems.push(`${key}.${name}.${part}: Layer 1 に書かれているので、解釈では書けません`);
       }
       const merged = { ...right, ...left } as CommandShape & Record<string, unknown>;
-      for (const part of required) {
-        if (merged[part] === undefined) problems.push(`${key}.${name} の ${part === "description" ? "式を述べる文 (is)" : `型 (${part})`} が、Layer 1 にも解釈にもありません`);
-      }
+      // 足りない部品は、葉の検査が報告する
+      view.entries[key][name] = merged;
       if (merged.description !== undefined && key !== "calculations") descriptions[`${key}.${name}`] = merged.description;
       result[name] = merged;
     }
@@ -360,7 +402,7 @@ export function resolveComponent(
   const calculations = Object.fromEntries(
     Object.entries(entries("calculations")).map(([name, entry]) => [name, { is: entry.description ?? "", type: (entry.output ?? "string") as FieldSchema }]),
   );
-  if (base.decisions !== undefined && structure.decisions !== undefined) problems.push("decisions は Layer 1 に書かれているので、解釈では書けません");
+  if (base.decisions !== undefined && structure.decisions !== undefined) problems.push("decisions: Layer 1 に書かれているので、解釈では書けません");
 
   // コマンド
   const commands: Declaration["commands"] = {};
@@ -371,39 +413,38 @@ export function resolveComponent(
   const refined = structure.commands ?? {};
   if (sketched) {
     for (const name of Object.keys(refined)) {
-      if (!(name in sketched)) problems.push(`コマンド "${name}" は Layer 1 にありません（Layer 1 がコマンドを並べているので、解釈では足せません）`);
+      if (!(name in sketched) && rules.closed.commands) problems.push(`commands.${name}: Layer 1 にありません（Layer 1 がコマンドを並べているので、解釈では足せません）`);
     }
   }
-  const names = sketched ? Object.keys(sketched) : Object.keys(refined);
-  if (names.length === 0) problems.push("commands が、Layer 1 にも解釈にもありません");
+  const names = sketched ? [...Object.keys(sketched), ...(rules.closed.commands ? [] : Object.keys(refined).filter((name) => !(name in sketched)))] : Object.keys(refined);
   for (const name of names) {
     const left = shapeOf(sketched?.[name]);
     for (const part of Object.keys(left)) {
-      if (!COMMAND_PARTS.includes(part)) problems.push(`コマンド "${name}": ここには ${part === "type" ? "typed" : part} を書けません`);
+      if (!rules.commandParts.includes(part)) problems.push(`commands.${name}: ここには ${part === "type" ? "typed" : part} を書けません`);
     }
-    const right = refined[name];
-    if (right === undefined) {
-      problems.push(`コマンド "${name}" の構造が、解釈にありません（足すものが無ければ component() と書きます）`);
-      continue;
-    }
+    // 解釈が触れなかったコマンドは、何も足さない（単一化）
+    const right = refined[name] ?? {};
+    const prose = isDescription(sketched?.[name]) || (sketched === undefined && isDescription(given));
+    view.commands[name] = { prose, cases: {} };
     for (const key of Object.keys(right)) {
-      if (!(COMMAND_KEYS as readonly string[]).includes(key)) problems.push(`コマンド "${name}": 解釈に "${key}" というキーは書けません`);
+      if (!(COMMAND_KEYS as readonly string[]).includes(key) && key !== "nothing") problems.push(`commands.${name}: 解釈に "${key}" というキーは書けません`);
     }
     for (const key of ["input", "output", "route", "from", "onlyIf", "asks", "calls", "description"] as const) {
       if (left[key] !== undefined && right[key] !== undefined) {
-        problems.push(`コマンド "${name}" の ${key} は Layer 1 に書かれているので、解釈では書けません`);
+        problems.push(`commands.${name}.${key}: Layer 1 に書かれているので、解釈では書けません`);
       }
     }
-    const merge = (where: string, a: OutcomeShape, b: OutcomeStructure): [Outcome, Structure] => {
-      for (const key of ["goTo", "does", "responds"] as const) {
-        if (a[key] !== undefined && b[key] !== undefined) problems.push(`${where} の ${key} は Layer 1 に書かれているので、解釈では書けません`);
+    const merge = (where: string, a: OutcomeShape, b: OutcomeStructure, caseName = "otherwise"): [Outcome, Structure] => {
+      for (const key of ["goTo", "does", "responds", "nothing"] as const) {
+        if (a[key] !== undefined && b[key] !== undefined) problems.push(`${where}.${key}: Layer 1 に書かれているので、解釈では書けません`);
       }
       const goTo = a.goTo ?? b.goTo;
       const does = a.does ?? b.does;
       const responds = a.responds !== undefined ? a.responds : b.responds;
+      const nothing = a.nothing ?? b.nothing;
       // 覚えること: 同じデータを両方が覚えるなら、Layer 1 が勝つ（解釈は書き換えられない）
       for (const field of Object.keys(b.set ?? {})) {
-        if (a.set && field in a.set) problems.push(`${where} の set.${field} は Layer 1 に書かれているので、解釈では書けません`);
+        if (a.set && field in a.set) problems.push(`${where}.set.${field}: Layer 1 に書かれているので、解釈では書けません`);
       }
       // 副作用と、部品を作る・消すことは、Layer 1 の分が先、解釈の分があと
       const joined = <T>(first: readonly T[] | undefined, second: readonly T[] | undefined) =>
@@ -412,8 +453,21 @@ export function resolveComponent(
       const set = a.set === undefined && b.set === undefined ? undefined : { ...(b.set ?? {}), ...(a.set ?? {}) };
       const adds = joined(a.adds, b.adds);
       const removes = joined(a.removes, b.removes);
+      // 葉の検査のために、文で起きることが言われたか、何が書かれたかを残す
+      view.commands[name].cases[caseName] = {
+        described: does !== undefined || prose,
+        filled: [
+          ...(goTo === undefined ? [] : ["goTo"]),
+          ...(responds === undefined ? [] : ["responds"]),
+          ...(effects?.length ? ["emits"] : []),
+          ...(set && Object.keys(set).length > 0 ? ["set"] : []),
+          ...(adds?.length ? ["adds"] : []),
+          ...(removes?.length ? ["removes"] : []),
+          ...(nothing ? ["nothing"] : []),
+        ],
+      };
       return [
-        { ...(goTo === undefined ? {} : { goTo }), ...(does === undefined ? {} : { does }), ...(responds === undefined ? {} : { responds }) },
+        { ...(goTo === undefined ? {} : { goTo }), ...(does === undefined ? {} : { does }), ...(responds === undefined ? {} : { responds }), ...(nothing ? { nothing } : {}) },
         {
           ...(effects === undefined ? {} : { effects }),
           ...(set === undefined ? {} : { set }),
@@ -428,47 +482,43 @@ export function resolveComponent(
     const flat = OUTCOME_KEYS.filter((key) => right[key] !== undefined);
     if (left.when) {
       // Layer 1 が場合分けを書いた: 解釈は、同じ場合のそれぞれに構造を書く（otherwise だけは足せる）
-      if (flat.length > 0) problems.push(`コマンド "${name}" は条件で分かれるので、${flat.join(" / ")} は when の下に、条件ごとに書いてください`);
-      if (left.goTo !== undefined || left.does !== undefined || left.responds !== undefined) problems.push(`コマンド "${name}": Layer 1 の goTo / does / responds は、when か otherwise の中に書いてください`);
+      if (flat.length > 0) problems.push(`commands.${name}: 場合に分かれるので、${flat.join(" / ")} は場合 (cases) の中に書いてください`);
+      if (left.goTo !== undefined || left.does !== undefined || left.responds !== undefined) problems.push(`commands.${name}: Layer 1 の goTo / does / responds は、場合 (cases) の中に書いてください`);
       const keys = [...Object.keys(left.when), ...(left.when.otherwise === undefined && right.when?.otherwise !== undefined ? ["otherwise"] : [])];
       for (const condition of Object.keys(right.when ?? {})) {
-        if (!keys.includes(condition)) problems.push(`コマンド "${name}" の条件 "${condition}" は Layer 1 にありません（Layer 1 が場合分けを書いているので、解釈では足せません）`);
+        if (!keys.includes(condition)) problems.push(`commands.${name}.cases.${condition}: Layer 1 にありません（Layer 1 が場合分けを書いているので、解釈では足せません）`);
       }
+      // 解釈が触れなかった場合は、何も足さない（単一化）
       for (const condition of keys) {
-        const branch = right.when?.[condition];
-        if (branch === undefined) {
-          problems.push(`コマンド "${name}" の条件 "${condition}" の構造が、解釈にありません（足すものが無ければ component() と書きます）`);
-          continue;
-        }
-        [outcomes[condition], cases[condition]] = merge(`コマンド "${name}" の条件 "${condition}"`, left.when[condition] ?? {}, branch);
+        [outcomes[condition], cases[condition]] = merge(`commands.${name}.cases.${condition}`, left.when[condition] ?? {}, right.when?.[condition] ?? {}, condition);
       }
     } else if (right.when) {
       // 解釈が場合分けを決めた
-      if (flat.length > 0) problems.push(`コマンド "${name}" は条件で分かれるので、${flat.join(" / ")} は when の下に、条件ごとに書いてください`);
-      if (left.goTo !== undefined) problems.push(`コマンド "${name}": Layer 1 が遷移先を1つに決めているので、解釈では場合分けできません`);
+      if (flat.length > 0) problems.push(`commands.${name}: 場合に分かれるので、${flat.join(" / ")} は場合 (cases) の中に書いてください`);
+      if (left.goTo !== undefined) problems.push(`commands.${name}: Layer 1 が遷移先を1つに決めているので、解釈では場合分けできません`);
       text = text ?? left.does;
       for (const [condition, branch] of Object.entries(right.when)) {
-        [outcomes[condition], cases[condition]] = merge(`コマンド "${name}" の条件 "${condition}"`, {}, branch);
+        [outcomes[condition], cases[condition]] = merge(`commands.${name}.cases.${condition}`, {}, branch, condition);
       }
     } else {
-      [outcomes.otherwise, cases.otherwise] = merge(`コマンド "${name}"`, left, right);
+      [outcomes.otherwise, cases.otherwise] = merge(`commands.${name}`, left, right);
     }
-    if (outcomes.otherwise === undefined && Object.keys(outcomes).length > 0) problems.push(`コマンド "${name}" に otherwise がありません`);
+    // otherwise が無いことは、葉の検査が報告する
 
     // 尋ねること: { 名前: { 問い合わせ: 引数 } } を、{ 名前: { query, input } } にする
     const asked: Record<string, Asked> = {};
     for (const [alias, entry] of Object.entries(left.asks ?? right.asks ?? {})) {
       const queried = Object.keys(entry ?? {});
-      if (queried.length !== 1) problems.push(`コマンド "${name}" の asks.${alias}: 問い合わせを1つだけ書いてください (${queried.join(", ") || "なし"})`);
+      if (queried.length !== 1) problems.push(`commands.${name}.asks.${alias}: 問い合わせを1つだけ書いてください (${queried.join(", ") || "なし"})`);
       else asked[alias] = { query: queried[0], input: entry[queried[0]] ?? {} };
     }
     // 含む部品を呼ぶこと
     const called = left.calls ?? right.calls ?? {};
     for (const [alias, call] of Object.entries(called)) {
       const part = base.parts?.[call.part];
-      if (!part) problems.push(`コマンド "${name}" の ${alias}: 部品 "${call.part}" は parts にありません`);
+      if (!part) problems.push(`commands.${name}.calls.${alias}: 部品 "${call.part}" は parts にありません`);
       else if ((part.by === undefined) !== (call.key === undefined)) {
-        problems.push(`コマンド "${name}" の ${alias}: 部品 "${call.part}" は${part.by === undefined ? "1つだけなので、at(...) は要りません" : "多数あるので、at(キー) でどれかを選んでください"}`);
+        problems.push(`commands.${name}.calls.${alias}: 部品 "${call.part}" は${part.by === undefined ? "1つだけなので、at(...) は要りません" : "多数あるので、at(キー) でどれかを選んでください"}`);
       }
     }
     const routed = left.route ?? right.route;
@@ -495,6 +545,7 @@ export function resolveComponent(
     ...(Object.keys(initial).length > 0 ? { initial } : {}),
     ...(base.assets ? { assets: base.assets } : {}),
     states: states ?? [],
+    ...((base as { finals?: readonly string[] }).finals ?? structure.finals ? { finals: (base as { finals?: readonly string[] }).finals ?? structure.finals } : {}),
     init: init ?? "",
     data,
     queries,
@@ -506,7 +557,7 @@ export function resolveComponent(
     commands,
     ...(base.parts ? { parts: base.parts } : {}),
   };
-  return { declaration, commands: structures, problems };
+  return { declaration, commands: structures, problems, view };
 }
 
 // コンポーネント → その解釈。decide / calculate が、意味の関数の中から引けるようにする

@@ -133,7 +133,7 @@ test("読み込み: data・queries・入力の名前が重なるとエラー (�
 });
 
 test("部品: 説明と、起きることの文が、そのまま振る舞いに出る（席は1つずつなので、2つ書くことはできない）", async () => {
-  const spec = await loadSpecs(specDir({ commands: `Place: { description: "First.", does: "It moves." }` }, ""));
+  const spec = await loadSpecs(specDir({ commands: `Place: { description: "First.", does: "It moves." }` }, "Command.Place.with({ nothing: true })"));
   assert.deepEqual(spec.behaviors.Place, { description: "First.", from: undefined, onlyIf: undefined, when: { otherwise: { does: "It moves.", effects: [], set: {} } } });
 });
 
@@ -145,28 +145,28 @@ test("解釈: Layer 1 が構造として書いたものは、書き換えられ�
   const report = async (items: string) => (await messages(specDir(layer1, items))).join("\n");
 
   assert.doesNotMatch(await report(""), /Layer 1/);
-  assert.match(await report(`Thing.with({ uses: [states(["A", "B", "C"])] })`), /states は Layer 1 に構造として書かれているので、解釈では書けません/);
-  assert.match(await report(`Thing.with({ init: State.B })`), /init は Layer 1 に書かれているので、解釈では書けません/);
+  assert.match(await report(`Thing.with({ uses: [states(["A", "B", "C"])] })`), /states: Layer 1 に構造として書かれているので、解釈では書けません/);
+  assert.match(await report(`Thing.with({ init: State.B })`), /init: Layer 1 に書かれているので、解釈では書けません/);
   // 項目を並べたまとまりには、項目を足せない。項目の、書かれていない部品だけを足せる
-  assert.match(await report(`effects({ Extra: {} })`), /effects の "Extra" は Layer 1 にありません/);
-  assert.match(await report(`effects({ Notify: input({ text: "string" }) })`), /effects\.Notify の input は Layer 1 に書かれているので、解釈では書けません/);
+  assert.match(await report(`effects({ Extra: {} })`), /effects\.Extra: Layer 1 にありません/);
+  assert.match(await report(`effects({ Notify: input({ text: "string" }) })`), /effects\.Notify\.input: Layer 1 に書かれているので、解釈では書けません/);
   assert.doesNotMatch(await report(`effects({ Ping: input({ text: "string" }) })`), /Layer 1/);
-  assert.match(await report(`Command.Place.with({ input: input({ other: "string" }) })`), /コマンド "Place" の input は Layer 1 に書かれているので/);
-  assert.match(await report(`Command.Place.with({ from: State.B })`), /コマンド "Place" の from は Layer 1 に書かれているので/);
-  assert.match(await report(`Command.Place.with({ cases: [If.big.then({ goTo: State.A })] })`), /コマンド "Place" の条件 "It is big" の goTo は Layer 1 に書かれているので/);
-  assert.match(await report(`Command.Place.with({ cases: [If.odd.then({})] })`), /条件 "It is odd" は Layer 1 にありません/);
+  assert.match(await report(`Command.Place.with({ input: input({ other: "string" }) })`), /commands\.Place\.input: Layer 1 に書かれているので/);
+  assert.match(await report(`Command.Place.with({ from: State.B })`), /commands\.Place\.from: Layer 1 に書かれているので/);
+  assert.match(await report(`Command.Place.with({ cases: [If.big.then({ goTo: State.A })] })`), /commands\.Place\.cases\.It is big\.goTo: Layer 1 に書かれているので/);
+  assert.match(await report(`Command.Place.with({ cases: [If.odd.then({})] })`), /commands\.Place\.cases\.It is odd: Layer 1 にありません/);
   // コマンドに書いた goTo は、どの場合にも足される (W1)。Layer 1 が goTo を書いた場合とは、ぶつかる
-  assert.match(await report(`Command.Place.with({ goTo: State.B })`), /コマンド "Place" の条件 "It is big" の goTo は Layer 1 に書かれているので/);
-  assert.match(await report(`commands({ Jump: {} })`), /コマンド "Jump" は Layer 1 にありません/);
+  assert.match(await report(`Command.Place.with({ goTo: State.B })`), /commands\.Place\.cases\.It is big\.goTo: Layer 1 に書かれているので/);
+  assert.match(await report(`commands({ Jump: {} })`), /commands\.Jump: Layer 1 にありません/);
   // Layer 1 が遷移先を1つに決めたコマンドを、解釈が場合分けすることもできない
-  assert.match(await report(`Command.Back.with({ cases: [If.big.then({}), otherwise] })`), /コマンド "Back": Layer 1 が遷移先を1つに決めているので、解釈では場合分けできません/);
+  assert.match(await report(`Command.Back.with({ cases: [If.big.then({}), otherwise] })`), /commands\.Back: Layer 1 が遷移先を1つに決めているので、解釈では場合分けできません/);
 });
 
 test("解釈: 触れなかったコマンドと場合には、何も足さない（単一化）。when には otherwise が要る", async () => {
   const layer1 = { commands: `Place: { cases: [If.big.then({ goTo: State.B }), otherwise] }, Back: { goTo: State.A }, Split: { cases: [If.big.then({ goTo: State.B })] }` };
   const meaning = `If.big.means(() => true)`;
   // Layer 1 が otherwise を書いていなければ、解釈が足す
-  assert.match((await messages(specDir(layer1, "", meaning))).join("\n"), /コマンド "Split" に otherwise がありません/);
+  assert.match((await messages(specDir(layer1, "", meaning))).join("\n"), /commands\.Split\.cases: otherwise がありません/);
   assert.equal((await codes(specDir(layer1, `Command.Split.with({ cases: [otherwise] })`, meaning))).join(), "");
 });
 
@@ -244,17 +244,19 @@ export const Interpretation = interpretation(Thing, [commands({ Start: {} })]);
 `,
   );
   assert.deepEqual((await messages(dir)).sort(), [
-    "calculations.total の 型 (output) が、Layer 1 にも解釈にもありません",
-    "data.memo の 型 (type) が、Layer 1 にも解釈にもありません",
-    "init が、Layer 1 にも解釈にもありません",
-    "queries.ready の 型 (output) が、Layer 1 にも解釈にもありません",
+    "calculations.total.output: 答えの型 (output)がありません",
+    "calculations.total: 意味の関数がありません（解釈の meanings に書きます）",
+    "commands.Start: 文で言われた「起きること」が、構造になっていません。何も起きないなら nothing: true と書きます",
+    "data.memo.type: 型がありません",
+    "init: 初期状態 (init)がありません",
+    "queries.ready.output: 答えの型 (output)がありません",
   ]);
   // 状態を持たない部品: states も init も書かない。内部では、1つだけの状態 (READY) を持つ
   const stateless = mkdtempSync(join(tmpRoot, "s-"));
   writeFileSync(
     join(stateless, "x.component.ts"),
     `import { commands, interpretation, service } from "@clp/core";
-export const Thing = service({ uses: [commands({ Ping: { does: "Nothing happens." } })] });
+export const Thing = service({ uses: [commands({ Ping: { does: "Nothing happens.", nothing: true } })] });
 export const Interpretation = interpretation(Thing, []);
 `,
   );
@@ -270,10 +272,10 @@ test("検査: 解釈が無い、名前の意味が書かれていない", async 
   };
   assert.deepEqual(await codes(specDir(declaration)), ["unbound-specification"]);
   assert.deepEqual(await codes(specDir(declaration, "")), [
-    "unbound-calculation",
-    "unbound-condition", // 決定表の行
-    "unbound-condition", // onlyIf
-    "unbound-invariant",
+    "incomplete", // 計算
+    "incomplete", // 決定表の行の条件
+    "incomplete", // onlyIf の条件
+    "incomplete", // 不変条件
   ]);
 });
 
@@ -298,7 +300,7 @@ test("検査: 構造の誤りを、場所と理由が分かる文面で報告す
   assert.match(await report(`emits: [Effect.Grade({ level: Query.mode })]`), /Grade\.level: "x" \| "y" は "low" \| "high" に入りません/);
   assert.match(await report(`emits: [Effect.Grade({ level: "low" }).onlyWhen(Size["count"])]`), /Grade の onlyWhen: 決定表の値 10 は boolean に入りません/);
   assert.match(await report(`emits: [Effect.Grade({ level: "low" }).onlyWhen(was(State.Z))]`), /was: "Z" は states にありません/);
-  assert.match(await report(`emits: [Effect.Grade({ level: "low" }).onlyWhen(If.odd)]`), /条件 "It is odd" の意味が、解釈の conditions に書かれていません/);
+  assert.match(await report(`emits: [Effect.Grade({ level: "low" }).onlyWhen(If.odd)]`), /conditions\."It is odd": 意味の関数がありません/);
   assert.match(await report(`set: [Data.nickname.set("x")]`), /set\.nickname: "nickname" は data にありません/);
   assert.match(await report(`set: [Data.memo.set(In.nota)]`), /"nota" は、コマンド Place の input にありません/);
 });

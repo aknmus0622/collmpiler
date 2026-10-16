@@ -146,7 +146,7 @@ test("検査: 返す値の誤り（返す値が無い、形を宣言していな
   assert.match(await messages(undeclared), /bad-response: コマンド Borrow は、返すものの形 \(output\) を宣言していないので、responds は書けません/);
   // Layer 1 が書いた返す値を、解釈は書き換えられない
   const overriding = SHELF({ added: `Command.Borrow.with({ cases: [If.memberHoldsMaximumNumberBooks.then({ responds: { result: "lent", dueInDays: 1 } }), otherwise({ responds: { result: "lent", dueInDays: 1 } })] }),` });
-  assert.match(await messages(overriding), /bad-interpretation: コマンド "Borrow" の条件 "The member holds the maximum number of books" の responds は Layer 1 に書かれているので、解釈では書けません/);
+  assert.match(await messages(overriding), /bad-interpretation: commands\.Borrow\.cases\.The member holds the maximum number of books\.responds: Layer 1 に書かれているので、解釈では書けません/);
 });
 
 test("結果にしか現れない決定表の値は、検証に現れる。2つの解釈の比較は、返す値の違いも報告する", async () => {

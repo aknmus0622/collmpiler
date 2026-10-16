@@ -484,6 +484,8 @@ missing.
     \`{ description: "<how it is computed>", output: type }\`; for one Layer 1 describes in prose, only
     \`{ output: type }\`. \`invariants({ key: "<sentence>" })\`: sentences that must hold after every command.
   - States: \`export const State = states(["A", "B"])\`, listed, with \`Order.with({ init: State.A })\`.
+    A state the component never leaves on purpose is declared final: \`states({ A: "...", DONE: { final: true } })\`.
+    Once any state is final, every other state must have a command that leaves it.
 - Field types: \`"boolean"\`, \`"integer"\`, \`"number"\`, \`"string"\`, an array of allowed values,
   \`integer({ min, max })\` / \`number({ min, max })\`, \`list(type)\` (a sequence, compared in order),
   \`record({ field: type })\` (a value with fields), and \`optional(type)\` (the value, or \`null\` when there is
@@ -510,7 +512,10 @@ missing.
     there is \`null\`.
   - If the command branches, put what happens in \`cases: [If.x.then({ ... }), otherwise({ ... })]\` instead.
     If Layer 1 already lists the cases, add to each of them by its condition (\`If.x.then({ emits: [...] })\`); you
-    may add only \`otherwise\` (\`otherwise\` alone when nothing happens). \`otherwise\` is mandatory.
+    may add only \`otherwise\`. \`otherwise\` is mandatory.
+  - Where Layer 1 says in prose that something happens (\`does\`, or a command given only as a sentence), leaving
+    the structure empty is rejected: write what happens, or say \`nothing: true\` if it really changes nothing
+    observable (\`otherwise({ nothing: true })\`, \`If.x.then({ nothing: true })\`).
   - For a command Layer 1 only describes in prose, you may add \`does: "<what happens>"\`.
   If Layer 1 gives the commands only as prose, declare them: \`export const Command = commands({ Name: { ... } })\`.
 
@@ -552,7 +557,7 @@ you must then also give a meaning. Prefer a boolean handle when one fits.
 - \`onlyIf\` (and \`from\`) put a situation **outside** the specification: nothing about it is tested, and
   the production code need not handle it. Use them only for situations that cannot arise or that someone else
   rules out. When the prose says something is refused, not allowed, or has no effect, write that as an outcome
-  (a case \`If.x.then({})\` with no \`goTo\` and no effect), so that the refusal itself is verified.
+  (a case \`If.x.then({ nothing: true })\`, with no \`goTo\` and no effect), so that the refusal itself is verified.
 - Calculations over money use whole numbers; apply the rounding the description states.
 - Do not change any other file, and do not read anything outside this directory.
 
@@ -561,8 +566,11 @@ you must then also give a meaning. Prefer a boolean handle when one fits.
 After you finish, the file is type-checked, and the specification is run on its own over many random sequences
 of commands. The interpretation is rejected if it has a type error, if a part is written where it does not
 belong, if it overrides structure written in
-Layer 1, if a case is missing (\`otherwise\`), if a reference does not fit the field it is used for, if a name is
-left without a meaning, if two conditions of the same table or command hold at once, if an invariant is broken,
+Layer 1, if anything is left unfinished (a group given only as prose, an entry without its type, a command or case
+described in prose with no structure and no \`nothing: true\`, a missing \`otherwise\`, a sentence without a
+meaning; each is reported by its path, such as \`commands.Ship.cases.otherwise\`), if a reference does not fit the
+field it is used for, if an effect, data field or query you added is never used, if a non-final state cannot be
+left, if two conditions of the same table or command hold at once, if an invariant is broken,
 or if a value does not fit its declared type. Passing this check does not mean the interpretation is right; that
 is what the review is for.
 ${renderAssets(assets)}${problems ? `\n## ${update && attempt === 1 ? "Problems with the current interpretation" : "Problems found in the previous attempt"}\n\n\`\`\`\n${problems}\n\`\`\`\n` : ""}`;
@@ -572,7 +580,8 @@ ${renderAssets(assets)}${problems ? `\n## ${update && attempt === 1 ? "Problems 
 // drafts が true なら、下書きを使って検査する。見るのは指定したコンポーネントだけ。通れば IR を返す
 type CheckedIr = { model?: SpecModel; behaviors?: { name: string }[] };
 function check(specsDir: string, drafts: boolean, component: string): { ir?: CheckedIr; problems?: string } {
-  const run = spawnSync(process.execPath, [CLP, "compile", specsDir, "--component", component, ...(drafts ? ["--drafts"] : [])], {
+  // LLM が書いた解釈では、足した語彙が使われていないことも誤り（書きかけの証拠）
+  const run = spawnSync(process.execPath, [CLP, "compile", specsDir, "--component", component, "--strict-added", ...(drafts ? ["--drafts"] : [])], {
     encoding: "utf8",
     timeout: 120_000,
   });

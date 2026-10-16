@@ -32,7 +32,7 @@ Declare the vocabulary first, as groups, and refer to it through the **handles**
 type error, and the interpretation imports the same handles, so **export every group**.
 
 ```ts
-export const State = states({ DRAFT: "Before the order is placed.", PAID: "Paid." });   // or states(["DRAFT", "PAID"])
+export const State = states({ DRAFT: "Before the order is placed.", PAID: { description: "Paid.", final: true } });   // or states(["DRAFT", "PAID"])
 export const If = conditions({ paid: "The payment succeeded" });   // condition sentences
 export const Data = data({ price: Yen });
 export const Query = queries({ isMonthEnd: "boolean" });
@@ -124,6 +124,7 @@ What happens: fields of a command, or of a case (`If.x.then({...})`, `otherwise(
 | `emits` | the effects, in order: `[Effect.Name({ field: value }), Effect.Other().onlyWhen(handle)]`. `.onlyWhen` (a condition or a boolean handle) is not exclusive like a case |
 | `responds` | the answer: a value, or `{ field: value }` |
 | `does` | what happens, in prose |
+| `nothing: true` | nothing happens, said explicitly. Where prose says something happens, the merged spec must have a structural outcome or this |
 
 ## Types
 
@@ -257,12 +258,13 @@ Every message is `severity[code] where: message`. Errors stop `clp apply` before
 | `misplaced`, `too-many`, `duplicate`, `unknown` | error | something placed where it does not belong, twice, or under the same name |
 | `not-yet` | error | a word that is designed but not implemented yet |
 | `unbound-specification`, `stale-interpretation`, `unreviewed-interpretation` | error | no interpretation, Layer 1 changed after it was derived, or an accepted interpretation with an open `// REVIEW:` |
-| `bad-interpretation` | error | the interpretation overrides Layer 1, or a command's cases lack `otherwise` |
+| `bad-interpretation` | error | the interpretation overrides Layer 1 (reported with the path, `commands.Checkout.cases.paid.goTo: ...`) |
+| `incomplete` | error | something left unwritten after merging, with its path: a type, `init`, a group given as prose that got no entries, `otherwise`, a meaning function, or prose that says something happens with no structure for it (write `nothing: true` if nothing does) |
+| `dead-end-state` | error | with final states declared (`final: true`), a state that is not final but that no command leaves |
 | `name-collision`, `unknown-state`, `bad-decision`, `bad-type` | error | names that collide, an initial state that is not a state, a table without `otherwise` or with mixed kinds in a column, an impossible range or an empty enumeration |
 | `unknown-effect`, `missing-field`, `bad-value`, `bad-response`, `missing-response`, `bad-promise` | error | references and values that do not fit what is declared |
-| `unbound-condition`, `unbound-calculation`, `unbound-invariant` | error | a sentence without a meaning in the interpretation |
 | `unreachable-state`, `unreachable-command` | error | no command leads there |
-| `unused-effect`, `unset-data`, `unasked-query` | warning | declared, never used |
+| `unused-effect`, `unset-data`, `unasked-query` | warning | declared, never used (an error for what the interpretation added, when `clp interpret` checks a draft) |
 | `spec-check` | error | running the spec alone: two conditions held at once, an invariant broke, a value did not fit, a meaning function read a name the spec does not have |
 | `unobservable-value` | error / warning | a decision-table value that changes nothing the tests can see (an unused column, a filler, a limit written as `onlyIf`, a threshold out of reach) |
 | `unreached-case` | warning | a case that never held when the spec was run |

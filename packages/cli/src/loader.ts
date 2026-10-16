@@ -234,11 +234,15 @@ function effectsOf(component: string, where: string, structure: Structure): Spec
 // 解釈が無い、または Layer 1 と合わないときは、語彙を作らずに、その旨だけを持たせる（報告は extract が行う）
 function normalize(name: string, layer1: object, binding: BoundSpecification | undefined): SpecInput {
   if (!binding) return { behaviors: {}, decisions: {}, layer1 };
-  if (binding.problems.length > 0) return { behaviors: {}, decisions: {}, layer1, binding, problems: binding.problems };
+  // 重ね合わせの誤りか、書き残し（葉の検査）があれば、語彙は作らない（報告は extract が行う）
+  if (binding.problems.length > 0 || (binding.incomplete?.length ?? 0) > 0) {
+    return { behaviors: {}, decisions: {}, layer1, binding, problems: binding.problems, ...(binding.incomplete?.length ? { incomplete: binding.incomplete } : {}) };
+  }
   const component = binding.component;
   const model: SpecModel = {
     init: component.init,
     states: component.states,
+    ...(component.finals ? { final: component.finals } : {}),
     data: component.data,
     commands: Object.fromEntries(Object.entries(component.commands).map(([command, decl]) => [command, decl.input ?? {}])),
     queries: component.queries,

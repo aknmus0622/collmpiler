@@ -18,6 +18,8 @@ export const IR_VERSION = 7;
 export type SpecModel = {
   init: string;
   states: readonly string[];
+  // 終わりの状態（宣言したときだけ）
+  final?: readonly string[];
   data: Fields;
   // コマンド名 → 入力
   commands: Record<string, Fields>;
@@ -104,6 +106,8 @@ export type SpecInput = {
   stale?: boolean;
   // 確定版の解釈に、人が確かめていない印 (// REVIEW:) が残っている場所
   unreviewed?: string[];
+  // 葉の検査で見つかった書き残し（道筋つき。DSL.md §16.7）
+  incomplete?: string[];
   // コンポーネントの assets に宣言された添付資料（ファイルは内容を読み込んだもの）。IR には含めない
   assets?: Asset[];
   // どのファイルのどの export か（解釈の下書きを書くときに使う）
@@ -463,6 +467,7 @@ export function extract(
     report(found.code, "", "", `${found.at ? `${relative(process.cwd(), found.at.file)}:${found.at.line}: ` : ""}${found.message}`);
   }
   for (const problem of input.problems ?? []) report("bad-interpretation", "", "", problem);
+  for (const found of input.incomplete ?? []) report("incomplete", "", "", found);
   if (input.stale) {
     report("stale-interpretation", "", "", "解釈を導いたあとで、Layer 1 が変わっています。clp interpret で導き直すか、解釈がいまも正しいことを確かめて clp interpret --accept を実行してください");
   }
@@ -481,9 +486,9 @@ export function extract(
       for (const part of "all" in composition ? composition.all : [composition.not]) condition(behavior, caseName, part);
       return;
     }
-    if (binding && name !== "otherwise" && typeof binding.conditions?.[name] !== "function") {
-      report("unbound-condition", behavior, caseName, `条件 "${name}" の意味が、解釈の conditions に書かれていません`);
-    }
+    // 意味の関数が無いことは、葉の検査 (incomplete) が報告する
+    void behavior;
+    void caseName;
   };
 
   // 名前の検査は、判断を受け取るだけ。文面（利用者向け）は、ここで付ける
@@ -745,16 +750,6 @@ export function extract(
   for (const [name, table] of Object.entries(input.decisions)) {
     for (const row of Object.keys(table)) condition("", "", row);
     decisions[name] = { rows: table };
-  }
-  for (const name of Object.keys(model.calculations ?? {})) {
-    if (binding && typeof binding.calculations?.[name] !== "function") {
-      report("unbound-calculation", "", "", `計算 "${name}" の中身が、解釈の calculations に書かれていません`);
-    }
-  }
-  for (const name of model.invariants ?? []) {
-    if (binding && typeof binding.invariants?.[name] !== "function") {
-      report("unbound-invariant", "", "", `不変条件 "${name}" の判定が、解釈の invariants に書かれていません`);
-    }
   }
 
   // Layer 1 が文で書いた説明（全体と、項目ごと）。構造が正確な形で、こちらは意図を伝える
