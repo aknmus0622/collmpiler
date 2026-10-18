@@ -48,7 +48,7 @@ export interface Target {
   };
   generate: {
     contract(ir: Ir): string;
-    adapterSkeleton(ws: Workspace): string;
+    adapterSkeleton(ws: Workspace, ir: Ir): string;
     verify(ir: Ir, ws: Workspace, specsDir: string): string;
   };
 

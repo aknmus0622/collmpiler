@@ -1,12 +1,15 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { isDeepStrictEqual, parseArgs } from "node:util";
 import fc from "fast-check";
-import { RuleConflictError, activate, matchCondition } from "@clp/core";
+import { FAILED, RuleConflictError, activate, matchCondition } from "@clp/core";
 import type { BoundSpecification, FieldSchema } from "@clp/core";
 import { extract, isRecordOutput, isReference, respondedValues, stableStringify } from "./extract.ts";
 import { seedOf } from "./generate.ts";
 import type { Ir } from "./generate.ts";
 import type { Reference, SpecInput, SpecModel, SpecValue } from "./extract.ts";
-import { dependenciesOf, loadSpecs } from "./loader.ts";
+import { dependenciesOf, loadSpecs, restartable } from "./loader.ts";
 import { conforms, isEnum, isList, isNumberSchema, isOneOf, isOptional, isRecord, isStringSchema } from "./schema.ts";
 
 // 生成された verify.ts から呼ばれる PBT ランタイム。
@@ -15,7 +18,8 @@ import { conforms, isEnum, isList, isNumberSchema, isOneOf, isOptional, isRecord
 
 type Fn = (...args: any[]) => any;
 
-export type Ports = { queries: Record<string, Fn>; effects: Record<string, Fn> };
+// storage: 再起動を越えて残すものを置くファイルのパス（再起動を越えて残るものを含む部品だけ。試行ごとに新しい）
+export type Ports = { queries: Record<string, Fn>; effects: Record<string, Fn>; storage?: string };
 
 export type Adapter = {
   setupIsolation(ports: any): Promise<void>;
@@ -23,6 +27,8 @@ export type Adapter = {
   // 返すものの形を宣言したコマンドは、その値を返す
   executeCommand(command: any): Promise<unknown>;
   getCurrentState(): Promise<unknown>;
+  // 本番システムを止めて、同じ保存先で起動し直す（再起動を越えて残るものを含む部品だけ。W7）
+  restartSystem?(): Promise<void>;
 };
 
 type Values = Record<string, unknown>;
@@ -35,6 +41,10 @@ type RawStep = {
   answers: Record<string, (input: Values) => unknown>;
   deltas: Record<string, number>;
   chosen: Record<string, Record<string, number | null>>;
+  // 失敗することがある (mayFail) 引数の無い問い合わせが、この手に失敗するか (W8)
+  failures?: Record<string, boolean>;
+  // このコマンドの前に、システムを再起動するか（再起動を越えて残るものを含む部品だけ。W7）
+  restart?: boolean;
   // 含む部品の、この手の問い合わせの答えなど（部品の名前 → その部品の1手分）
   parts?: Record<string, RawStep>;
 };
@@ -48,8 +58,10 @@ type Observation = { state: unknown; effects: unknown; output?: unknown };
 
 // data は、そのコマンドの実行前に部品が覚えているはずのデータ。case は成立した条件（無ければ "otherwise"）
 // asks: そのコマンドで尋ねること（付けた名前、問い合わせ、引数）と、その答え
-export type Asked = { name: string; query: string; input: Values; answer: unknown };
-export type Step = { from: string; data: Values; command: string; input: Values; queries: Values; asks: Asked[]; case: string };
+// failed: その問い合わせは、この手に失敗する（答えは無く、代役は例外を投げる。W8）
+export type Asked = { name: string; query: string; input: Values; answer: unknown; failed?: true };
+// failed: この手に失敗する、引数の無い問い合わせ（含む部品のものは、部品の名前で修飾する）
+export type Step = { from: string; data: Values; command: string; input: Values; queries: Values; asks: Asked[]; case: string; failed?: string[] };
 
 export type PbtResult =
   | { status: "pass"; seed: number; numRuns: number }
@@ -171,15 +183,19 @@ const recordOf = (fields: Record<string, FieldSchema>, hints: Hints) =>
   fc.record(Object.fromEntries(Object.entries(fields).map(([key, schema]) => [key, arbitraryOf(schema, hints)])));
 
 const plain = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+// 失敗した問い合わせの答えの代わりに置く印。読まれたら、仕様の誤りにする（失敗したときに答えを使う仕様は、書けない）
+const FAILED_ANSWER: unique symbol = Symbol("failed answer");
+// 失敗することがある問い合わせは、4回に1回失敗する
+const failing = () => fc.integer({ min: 0, max: 3 }).map((n) => n === 0);
 const messageOf = (error: unknown) => (error instanceof Error ? `${error.name}: ${error.message}` : String(error));
 
 // 仕様側のシミュレーション。実装には触れず、仕様だけで「次に何が起きるべきか」を進める
 type Simulator = ReturnType<typeof simulator>;
-function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecification, hints: Hints = literalsIn(binding, ...bindingsOf(input))) {
+function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecification, hints: Hints = literalsIn(binding, ...bindingsOf(input)), nested = false) {
   const commands = Object.keys(input.behaviors).sort();
   // 含む部品の仕様。外側のコマンドが呼んだ所で、その部品の仕様を実行する
   const children: Record<string, Simulator> = Object.fromEntries(
-    Object.entries(input.parts ?? {}).map(([part, child]) => [part, simulator(child, child.model!, child.binding!, hints)]),
+    Object.entries(input.parts ?? {}).map(([part, child]) => [part, simulator(child, child.model!, child.binding!, hints, true)]),
   );
   // 多数ある部品（名前 → キーの名前）
   const keyed: Record<string, string> = Object.fromEntries(Object.entries(input.parts ?? {}).flatMap(([part, child]) => (child.by === undefined ? [] : [[part, child.by]])));
@@ -189,6 +205,10 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
   // 引数の無い問い合わせは、1手に1つの答え。引数つきは、1手ごとに、引数から答えを決める関数
   const nullary = Object.keys(model.queries).filter((name) => Object.keys(model.queries[name].input).length === 0);
   const parameterized = Object.keys(model.queries).filter((name) => !nullary.includes(name));
+  // 失敗することがある問い合わせ (W8)
+  const mayFail = (name: string) => model.queries[name].mayFail === true;
+  // 再起動を越えて残るものを含むか (W7)。含む部品として読まれたもの (外側が再起動を引く) は、自分では引かない
+  const restarts = !nested && restartable(input);
 
   // 約束のある問い合わせ（引数の無いもの）と、いま覚えているものから選ぶ入力
   const promised = nullary.filter((name) => model.queries[name].promise !== undefined);
@@ -207,7 +227,19 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
       pick: fc.nat(),
       inputs: fc.record(Object.fromEntries(commands.map((name) => [name, recordOf(model.commands[name] ?? {}, hints)]))),
       queries: recordOf(Object.fromEntries(nullary.map((name) => [name, model.queries[name].output])), hints),
-      answers: fc.record(Object.fromEntries(parameterized.map((name) => [name, fc.func(arbitraryOf(model.queries[name].output, hints))]))),
+      // 引数つきで失敗することがあるものは、引数ごとに、答えるか失敗するか（同じ引数には、同じ結果）
+      answers: fc.record(
+        Object.fromEntries(
+          parameterized.map((name) => {
+            const answer = arbitraryOf(model.queries[name].output, hints);
+            return [name, fc.func(mayFail(name) ? fc.oneof({ weight: 3, arbitrary: answer }, { weight: 1, arbitrary: fc.constant(FAILED_ANSWER) }) : answer)];
+          }),
+        ),
+      ),
+      // 失敗することがある問い合わせが無ければ、持たない（乱数の引き方を、以前の仕様と変えないため）
+      ...(nullary.some(mayFail) ? { failures: fc.record(Object.fromEntries(nullary.filter(mayFail).map((name) => [name, failing()]))) } : {}),
+      // 再起動は、6回に1回。含む部品の手には持たせない（再起動は、システム全体のこと）
+      ...(restarts ? { restart: fc.integer({ min: 0, max: 5 }).map((n) => n === 0) } : {}),
       deltas: fc.record(Object.fromEntries(increasing.map((name) => [name, deltaOf(name)]))),
       // 4回に3回は、いま覚えているものから選ぶ。残りは、乱数の値のまま（無いものも試す）
       chosen: fc.record(Object.fromEntries(commands.map((name) => [name, fc.record(Object.fromEntries(selecting[name].map(([field]) => [field, fc.option(fc.nat(), { nil: null, freq: 4 })])))]))),
@@ -234,9 +266,15 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
         if (typeof key === "string" && !known.has(key) && !IGNORED.has(key) && !(key in target)) {
           throw new Error(`意味の関数が、仕様に無い名前 "${key}" を読みました（data、引数の無い問い合わせ、コマンドの入力、asks で付けた名前の、どれでもありません）`);
         }
-        return Reflect.get(target, key, receiver);
+        const value = Reflect.get(target, key, receiver);
+        if (value === FAILED_ANSWER) throw new Error(failedRead(String(key)));
+        return value;
       },
     });
+
+  // 失敗した問い合わせの答えが読まれた (W8)
+  const failedRead = (name: string) =>
+    `問い合わせ "${name}" が失敗した場面で、その答えが読まれました。失敗したときに起きることを、条件 Query.${name}.failed（尋ねたものなら、付けた名前の .failed）の場合として書いてください`;
 
   const start = (): State => ({
     status: model.init,
@@ -249,11 +287,27 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
     ...(Object.keys(keyed).length > 0 ? { many: Object.fromEntries(Object.keys(keyed).map((part) => [part, []])) } : {}),
   });
 
+  // 再起動 (W7): 再起動を越えて残る部品は、状態とデータ（中の部品も）をそのまま持つ。ほかは始めに戻る。
+  // 中の部品は、それぞれの決まりで。依存の約束のための記録（前の答え、返した値）は残る（依存は再起動しない）
+  const restart = (state: State): State => {
+    if (model.durable !== undefined) return state;
+    const fresh = start();
+    return {
+      ...fresh,
+      env: state.env,
+      ...(state.parts ? { parts: Object.fromEntries(Object.entries(state.parts).map(([part, inner]) => [part, children[part].restart(inner)])) } : {}),
+    };
+  };
+
   // 依存の約束を守った、問い合わせの答え。increasing は、前の答えに増え幅を足す。fresh は、すでに返した値を避ける
-  const answersOf = (state: State, raw: RawStep): { queries: Values; env: Env } => {
+  const answersOf = (state: State, raw: RawStep): { queries: Values; env: Env; failed: string[] } => {
     const env: Env = { last: { ...state.env?.last }, used: { ...state.env?.used } };
     const queries: Values = { ...raw.queries };
+    // 失敗した問い合わせは、答えが無い（約束のための記録も、進めない）
+    const failed = nullary.filter((name) => raw.failures?.[name] === true);
+    for (const name of failed) queries[name] = FAILED_ANSWER;
     for (const name of promised) {
+      if (failed.includes(name)) continue;
       const { promise, output } = model.queries[name];
       if (promise === "increasing") {
         const previous = env.last[name];
@@ -269,7 +323,7 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
         env.used[name] = [...used, value];
       }
     }
-    return { queries, env };
+    return { queries, env, failed };
   };
   // コマンドの入力。among を宣言したフィールドは、いま覚えている並びの要素から選ぶ
   const inputOf = (state: State, raw: RawStep, name: string): Values => {
@@ -307,8 +361,13 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
     }
   };
 
-  // 参照を、その場の値に解決する
+  // 参照を、その場の値に解決する。失敗した問い合わせの答えには、ならない
   const resolve = (value: SpecValue, context: Values & { status: string }, command: string): unknown => {
+    const resolved = resolveRaw(value, context, command);
+    if (resolved === FAILED_ANSWER) throw new Error(failedRead(String((value as Reference).path)));
+    return resolved;
+  };
+  const resolveRaw = (value: SpecValue, context: Values & { status: string }, command: string): unknown => {
     if (!isReference(value)) return value;
     const ref: Reference = value;
     const name = String(ref.path);
@@ -352,6 +411,11 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
     }
   };
 
+  // 記録する形: 失敗した問い合わせは、答えを持たない（失敗したことは failed に記す）
+  const answeredOf = (queries: Values): Values => Object.fromEntries(Object.entries(queries).filter(([, value]) => value !== FAILED_ANSWER));
+  const plainAsks = (asked: Asked[]): Asked[] => asked.map((entry) => (entry.failed ? { name: entry.name, query: entry.query, input: plain(entry.input), answer: null, failed: true } : plain(entry)));
+  const failedOf = (names: string[]) => (names.length > 0 ? { failed: names } : {});
+
   // 経路 (route) の path の :name に入る値のうち、HTTP では送れないもの。"." と ".." は、パーセントエンコードしても
   // URL の正規化で区切りとして扱われる（/todos/./complete は /todos/complete になる）。その入力でのコマンドは、
   // onlyIf と同じく仕様の外として、生成しない（本番コードに扱いを求めても、検証できない）
@@ -368,7 +432,7 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
       // 意味の関数の中の decide / calculate が、この解釈を引くようにする
       activate(binding);
       // この手の、問い合わせの答えと、コマンドごとの入力（約束と、入力の選び方を反映したもの）
-      const { queries, env } = answersOf(state, raw);
+      const { queries, env, failed } = answersOf(state, raw);
       const inputs = Object.fromEntries(commands.map((name) => [name, inputOf(state, raw, name)]));
       // そのコマンドが尋ねることを、引数を解決して、答えと一緒に並べる
       const askedBy = (name: string): Asked[] => {
@@ -377,18 +441,25 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
           const answer = raw.answers[asked.query];
           if (!answer) throw new Error(`asks.${alias}: 問い合わせ "${asked.query}" は、引数つきの問い合わせとして宣言されていません`);
           const args = plain(Object.fromEntries(Object.entries(asked.input).map(([field, value]) => [field, resolve(value, base, name)]))) as Values;
-          return { name: alias, query: asked.query, input: args, answer: answer(args) };
+          const answered = answer(args);
+          return answered === FAILED_ANSWER ? { name: alias, query: asked.query, input: args, answer: FAILED_ANSWER, failed: true as const } : { name: alias, query: asked.query, input: args, answer: answered };
         });
       };
-      const contextOf = (name: string) =>
-        guarded({
+      // 意味の関数に渡す状態。失敗した問い合わせの名前も持つ（失敗の条件が読む。W8）。
+      // 守り (guarded) は最後に掛ける（守ったものを広げると、失敗した答えを読んだことになるため）
+      const rawContextOf = (name: string): Values & { status: string } => {
+        const asked = askedBy(name);
+        return {
           status: state.status,
           ...state.data,
           ...manyViews(state.many),
           ...queries,
           ...inputs[name],
-          ...Object.fromEntries(askedBy(name).map((asked) => [asked.name, asked.answer])),
-        });
+          ...Object.fromEntries(asked.map((entry) => [entry.name, entry.answer])),
+          [FAILED]: [...failed, ...asked.filter((entry) => entry.failed).map((entry) => entry.name)],
+        };
+      };
+      const contextOf = (name: string) => guarded(rawContextOf(name));
       const enabled = commands.filter((name) => {
         const behavior = input.behaviors[name];
         return (
@@ -415,10 +486,11 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
       const childEffects: { name: string; payload: Values }[] = [];
       const childQueries: Values = {};
       const childAsks: Asked[] = [];
+      const childFailed: string[] = [];
       for (const [alias, call] of Object.entries(input.behaviors[command].calls ?? {})) {
         const child = children[call.part];
         if (!child) throw new Error(`${alias}: 部品 "${call.part}" は parts にありません`);
-        const base = { ...contextOf(command), ...answers };
+        const base = { ...rawContextOf(command), ...answers };
         const args = plain(Object.fromEntries(Object.entries(call.input).map(([field, value]) => [field, resolve(value, base as Values & { status: string }, command)]))) as Values;
         const childRaw: RawStep = { ...raw.parts![call.part], pick: 0, inputs: { [call.command]: args }, chosen: {} };
         // 多数ある部品: キーで1つを選ぶ。無ければ、何も起きず、答えは null
@@ -447,11 +519,12 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
         childEffects.push(...(result.expected.effects as { name: string; payload: Values }[]).map((effect) => ({ name: `${call.part}.${effect.name}`, payload: effect.payload })));
         for (const [name, value] of Object.entries(result.step.queries)) if (!(`${call.part}.${name}` in childQueries)) childQueries[`${call.part}.${name}`] = value;
         childAsks.push(...result.step.asks.map((asked) => ({ ...asked, query: `${call.part}.${asked.query}` })));
+        childFailed.push(...(result.step.failed ?? []).map((name) => `${call.part}.${name}`));
       }
       // 多数ある部品は、呼んだあとの並びに、呼んだ答えを添える（state.items と state.items.Complete）
       const views = manyViews(manyStates);
       for (const part of Object.keys(keyed)) if (answers[part]) Object.assign(views[part] as object, answers[part]);
-      const context = guarded({ ...contextOf(command), ...answers, ...views });
+      const context = guarded({ ...rawContextOf(command), ...answers, ...views });
       const cases = input.behaviors[command].when;
       let matched: string;
       try {
@@ -459,7 +532,7 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
       } catch (error) {
         // 衝突した場面（コマンドと入力）を、再現するコマンド列に含める。以前は、最後のコマンドが列に入らなかった
         if (!(error instanceof RuleConflictError)) throw error;
-        steps.push({ from: state.status, data: plain(state.data), command, input: inputs[command], queries, asks: plain(askedBy(command)), case: `(${error.hits.join(" / ")})` });
+        steps.push({ from: state.status, data: plain(state.data), command, input: inputs[command], queries: answeredOf(queries), asks: plainAsks(askedBy(command)), case: `(${error.hits.join(" / ")})`, ...failedOf(failed) });
         throw new SpecError(`${command} で、${error.message}（入力 ${JSON.stringify(inputs[command])}）`, steps);
       }
       const step: Step = {
@@ -467,9 +540,10 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
         data: plain(state.data),
         command,
         input: inputs[command],
-        queries: { ...queries, ...childQueries },
-        asks: plain([...askedBy(command), ...childAsks]),
+        queries: { ...answeredOf(queries), ...childQueries },
+        asks: plainAsks([...askedBy(command), ...childAsks]),
         case: matched,
+        ...failedOf([...failed, ...childFailed]),
       };
       steps.push(step);
 
@@ -520,7 +594,7 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
         if (isRecordOutput(declared)) {
           const fields = Object.fromEntries(responded.map(([field, value]) => [field, valueOf(value)]));
           for (const [field, schema] of Object.entries(declared.record)) {
-            const fits = fields[field] === null ? declared.optional?.includes(field) === true : conforms(schema, fields[field]);
+            const fits = fields[field] === null && schema !== "value" ? declared.optional?.includes(field) === true : conforms(schema, fields[field]);
             if (!fits) throw new Error(`responds: ${field} = ${JSON.stringify(fields[field])} が宣言した型・範囲に合いません`);
           }
           output = fields;
@@ -570,7 +644,7 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
     }
   };
 
-  return { commands, step, sequences, start, next, checkInvariants };
+  return { commands, step, sequences, start, next, checkInvariants, restart, restarts };
 }
 
 // 仕様の事前検査: 実装なしで、仕様だけをランダムなアクション列で実行する。
@@ -875,12 +949,17 @@ export async function check(
           name,
           (asked?: unknown) => {
             if (!current) throw new Error(`ports.queries.${name}() was called before any command; ask during the command instead`);
-            if (Object.keys(dependencies.queries[name].input).length === 0) return current.queries[name];
+            // 失敗する手では、例外を投げる (W8)
+            if (Object.keys(dependencies.queries[name].input).length === 0) {
+              if (current.failed?.includes(name)) throw new Error(`ports.queries.${name}: the dependency failed`);
+              return current.queries[name];
+            }
             // 引数つき: そのコマンドが尋ねることの中から、引数が一致するものを探す。
             // 尋ねなかったことは問わない（答えで結果が変わるなら、結果の不一致として現れる）
             const given = plain(asked ?? {});
             const allowed = current.asks.filter((entry) => entry.query === name);
             const found = allowed.find((entry) => isDeepStrictEqual(entry.input, given));
+            if (found?.failed) throw new Error(`ports.queries.${name}: the dependency failed`);
             if (found) return found.answer;
             misasked = `ports.queries.${name} was asked with ${JSON.stringify(given)}, but in this command the specification asks it ${
               allowed.length === 0 ? "nothing" : `only with ${allowed.map((entry) => JSON.stringify(entry.input)).join(" or ")}`
@@ -897,6 +976,10 @@ export async function check(
       ),
     };
 
+    // 再起動を越えて残すものの置き場所。試行ごとに新しく、終わったら消す
+    const storageDir = sim.restarts ? mkdtempSync(join(tmpdir(), "clp-storage-")) : undefined;
+    if (storageDir) ports.storage = join(storageDir, "data.sqlite");
+
     let expected: Observation = { state: model.init, effects: [] };
     try {
       await adapter.setupIsolation(ports);
@@ -906,6 +989,18 @@ export async function check(
         if (!isDeepStrictEqual(expected, initial)) return { steps, expected, actual: initial };
 
         for (const rawStep of raw) {
+          // 再起動 (W7): 本番システムを同じ保存先で起動し直す。残るはずのものは残り、ほかは始めに戻る
+          if (rawStep.restart) {
+            steps.push({ from: state.status, data: plain(state.data), command: "(restart)", input: {}, queries: {}, asks: [], case: "restart" });
+            current = undefined;
+            recorded = [];
+            state = sim.restart(state);
+            expected = { state: state.status, effects: [] };
+            if (!adapter.restartSystem) return { steps, expected, actual: { error: "adapter.restartSystem() is missing: this system keeps data across restarts, so the adapter must be able to restart it" } };
+            await adapter.restartSystem();
+            const restarted = plain({ state: await adapter.getCurrentState(), effects: recorded });
+            if (!isDeepStrictEqual(expected, restarted)) return { steps, expected, actual: restarted };
+          }
           const planned = sim.next(state, rawStep, steps);
           if (!planned) continue;
           expected = planned.expected;
@@ -922,7 +1017,11 @@ export async function check(
           state = planned.after;
         }
       } finally {
-        await adapter.teardownIsolation();
+        try {
+          await adapter.teardownIsolation();
+        } finally {
+          if (storageDir) rmSync(storageDir, { recursive: true, force: true });
+        }
       }
     } catch (error) {
       if (error instanceof SpecError) throw error;

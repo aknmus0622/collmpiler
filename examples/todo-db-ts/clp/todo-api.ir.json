@@ -1,0 +1,339 @@
+{
+  "behaviors": [
+    {
+      "calls": {
+        "todos.Complete": {
+          "command": "Complete",
+          "input": {
+            "id": {
+              "$ref": "input:id"
+            }
+          },
+          "part": "todos"
+        }
+      },
+      "description": "The item is completed in the list. Completed: 200. Not found: 404. Already done: 409.",
+      "from": [
+        "READY"
+      ],
+      "name": "CompleteTodo",
+      "onlyIf": [],
+      "when": {
+        "The list found no item with the given identifier to complete.": {
+          "responds": {
+            "status": 404
+          }
+        },
+        "The list found that the item with the given identifier is already done.": {
+          "responds": {
+            "status": 409
+          }
+        },
+        "otherwise": {
+          "responds": {
+            "status": 200
+          }
+        }
+      }
+    },
+    {
+      "calls": {
+        "todos.Remove": {
+          "command": "Remove",
+          "input": {
+            "id": {
+              "$ref": "input:id"
+            }
+          },
+          "part": "todos"
+        }
+      },
+      "description": "The item is removed from the list. Removed: 204. Not found: 404.",
+      "from": [
+        "READY"
+      ],
+      "name": "DeleteTodo",
+      "onlyIf": [],
+      "when": {
+        "The list found no item with the given identifier to remove.": {
+          "responds": {
+            "status": 404
+          }
+        },
+        "otherwise": {
+          "responds": {
+            "status": 204
+          }
+        }
+      }
+    },
+    {
+      "calls": {
+        "todos.List": {
+          "command": "List",
+          "input": {
+            "only": {
+              "$ref": "input:only"
+            }
+          },
+          "part": "todos"
+        }
+      },
+      "from": [
+        "READY"
+      ],
+      "name": "GetTodos",
+      "onlyIf": [],
+      "when": {
+        "otherwise": {
+          "does": "The list's items, filtered as asked, are the body, with 200.",
+          "responds": {
+            "body": {
+              "$ref": "call",
+              "path": [
+                "todos.List"
+              ]
+            },
+            "status": 200
+          }
+        }
+      }
+    },
+    {
+      "calls": {
+        "todos.Add": {
+          "command": "Add",
+          "input": {
+            "title": {
+              "$ref": "input:body.title"
+            }
+          },
+          "part": "todos"
+        }
+      },
+      "description": "The title in the body is added to the list. Created: 201, with the new item. Invalid: 422, with no body. Unavailable: 503, with no body.",
+      "from": [
+        "READY"
+      ],
+      "name": "PostTodos",
+      "onlyIf": [],
+      "when": {
+        "The list refused the title as invalid.": {
+          "responds": {
+            "body": null,
+            "status": 422
+          }
+        },
+        "The list refused the title because no identifier could be had (unavailable).": {
+          "responds": {
+            "body": null,
+            "status": 503
+          }
+        },
+        "otherwise": {
+          "responds": {
+            "body": {
+              "$ref": "call",
+              "path": [
+                "todos.Add",
+                "todo"
+              ]
+            },
+            "status": 201
+          }
+        }
+      }
+    }
+  ],
+  "decisions": {},
+  "descriptions": {
+    "component": "The HTTP API of the to-do list. Each request is passed to the list, and the list's answer becomes the response."
+  },
+  "irVersion": 7,
+  "model": {
+    "commands": {
+      "CompleteTodo": {
+        "id": {
+          "among": {
+            "data": "items"
+          },
+          "type": "string"
+        }
+      },
+      "DeleteTodo": {
+        "id": {
+          "among": {
+            "data": "items"
+          },
+          "type": "string"
+        }
+      },
+      "GetTodos": {
+        "only": [
+          "all",
+          "open",
+          "done"
+        ]
+      },
+      "PostTodos": {
+        "body": {
+          "record": {
+            "title": "string"
+          }
+        }
+      }
+    },
+    "data": {},
+    "effects": {},
+    "init": "READY",
+    "outputs": {
+      "CompleteTodo": {
+        "record": {
+          "status": {
+            "max": 599,
+            "min": 200,
+            "type": "integer"
+          }
+        }
+      },
+      "DeleteTodo": {
+        "record": {
+          "status": {
+            "max": 599,
+            "min": 200,
+            "type": "integer"
+          }
+        }
+      },
+      "GetTodos": {
+        "record": {
+          "body": {
+            "list": {
+              "record": {
+                "done": "boolean",
+                "id": "string",
+                "title": "string"
+              }
+            }
+          },
+          "status": {
+            "max": 599,
+            "min": 200,
+            "type": "integer"
+          }
+        }
+      },
+      "PostTodos": {
+        "optional": [
+          "body"
+        ],
+        "record": {
+          "body": {
+            "record": {
+              "done": "boolean",
+              "id": "string",
+              "title": "string"
+            }
+          },
+          "status": {
+            "max": 599,
+            "min": 200,
+            "type": "integer"
+          }
+        }
+      }
+    },
+    "parts": {
+      "todos": {
+        "commands": {
+          "Add": {
+            "title": "string"
+          },
+          "Complete": {
+            "id": {
+              "among": {
+                "data": "items"
+              },
+              "type": "string"
+            }
+          },
+          "List": {
+            "only": [
+              "all",
+              "open",
+              "done"
+            ]
+          },
+          "Remove": {
+            "id": {
+              "among": {
+                "data": "items"
+              },
+              "type": "string"
+            }
+          }
+        },
+        "component": "todos",
+        "durable": true,
+        "effects": {},
+        "outputs": {
+          "Add": {
+            "optional": [
+              "todo"
+            ],
+            "record": {
+              "result": [
+                "created",
+                "invalid",
+                "unavailable"
+              ],
+              "todo": {
+                "record": {
+                  "done": "boolean",
+                  "id": "string",
+                  "title": "string"
+                }
+              }
+            }
+          },
+          "Complete": [
+            "completed",
+            "not-found",
+            "already-done"
+          ],
+          "List": {
+            "list": {
+              "record": {
+                "done": "boolean",
+                "id": "string",
+                "title": "string"
+              }
+            }
+          },
+          "Remove": [
+            "removed",
+            "not-found"
+          ]
+        },
+        "queries": {
+          "newId": {
+            "input": {},
+            "mayFail": true,
+            "output": "string",
+            "promise": "fresh"
+          }
+        }
+      }
+    },
+    "queries": {},
+    "routes": {
+      "CompleteTodo": "POST /todos/:id/complete",
+      "DeleteTodo": "DELETE /todos/:id",
+      "GetTodos": "GET /todos",
+      "PostTodos": "POST /todos"
+    },
+    "states": [
+      "READY"
+    ]
+  }
+}

@@ -151,8 +151,9 @@ export async function implement(options: ImplementOptions) {
   }
 
   // 部品を含む部品は、含む部品のあとに一致させる（中の部品の本番コードを使うので）
+  // 保存先の部品 (durable: Store。W7) も、含む部品と同じに扱う: 先に一致させ、本番コードは使うだけ
   const partsOf = (unit: Unit, trail: string[] = []): string[] =>
-    Object.values(unit.ir.model?.parts ?? {}).flatMap(({ component }) => {
+    [...Object.values(unit.ir.model?.parts ?? {}), ...(typeof unit.ir.model?.durable === "object" ? [{ component: unit.ir.model.durable.store }] : [])].flatMap(({ component }) => {
       const inner = units.find((candidate) => candidate.name === component);
       return inner && !trail.includes(component) ? [component, ...partsOf(inner, [...trail, component])] : [];
     });

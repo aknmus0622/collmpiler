@@ -1,0 +1,272 @@
+{
+  "behaviors": [
+    {
+      "description": "A title that is empty or made only of whitespace, or that has more characters than the limit (a title of exactly the limit is fine), is refused as invalid, with no item. Otherwise a new item with a fresh identifier and the given title, stored exactly as given (not trimmed), is created after the others, and the answer is created, with the item (not done). When no identifier can be had because the source of identifiers is unavailable, a title that is not invalid is refused as unavailable, with no item.",
+      "from": [
+        "READY"
+      ],
+      "name": "Add",
+      "onlyIf": [],
+      "when": {
+        "(not \"The title is empty, or made only of whitespace, or has more characters than the limit.\" and query \"newId\" failed)": {
+          "responds": {
+            "result": "unavailable",
+            "todo": null
+          }
+        },
+        "The title is empty, or made only of whitespace, or has more characters than the limit.": {
+          "responds": {
+            "result": "invalid",
+            "todo": null
+          }
+        },
+        "otherwise": {
+          "adds": [
+            {
+              "data": {
+                "title": {
+                  "$ref": "input:title"
+                }
+              },
+              "key": {
+                "$ref": "query:newId"
+              },
+              "part": "items"
+            }
+          ],
+          "responds": {
+            "result": "created",
+            "todo": {
+              "$ref": "calculation:createdTodo"
+            }
+          }
+        }
+      }
+    },
+    {
+      "calls": {
+        "items.Complete": {
+          "at": {
+            "$ref": "input:id"
+          },
+          "command": "Complete",
+          "input": {},
+          "part": "items"
+        }
+      },
+      "description": "The item with the identifier is asked to complete, and the answer is what the item answered. An unknown identifier is not found, and nothing changes.",
+      "from": [
+        "READY"
+      ],
+      "name": "Complete",
+      "onlyIf": [],
+      "when": {
+        "There is no item with the identifier to complete.": {
+          "responds": "not-found"
+        },
+        "otherwise": {
+          "responds": {
+            "$ref": "call",
+            "path": [
+              "items.Complete"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "from": [
+        "READY"
+      ],
+      "name": "List",
+      "onlyIf": [],
+      "when": {
+        "otherwise": {
+          "does": "The answer is the items in the order they were added, filtered as asked, each with its identifier, its title and whether it is done. Nothing changes.",
+          "responds": {
+            "$ref": "calculation:listedTodos"
+          }
+        }
+      }
+    },
+    {
+      "description": "The item is removed. An unknown identifier is refused as not found, and nothing changes.",
+      "from": [
+        "READY"
+      ],
+      "name": "Remove",
+      "onlyIf": [],
+      "when": {
+        "There is no item with the identifier to remove.": {
+          "responds": "not-found"
+        },
+        "otherwise": {
+          "removes": [
+            {
+              "key": {
+                "$ref": "input:id"
+              },
+              "part": "items"
+            }
+          ],
+          "responds": "removed"
+        }
+      }
+    }
+  ],
+  "conditions": {
+    "(not \"The title is empty, or made only of whitespace, or has more characters than the limit.\" and query \"newId\" failed)": {
+      "all": [
+        "not \"The title is empty, or made only of whitespace, or has more characters than the limit.\"",
+        "query \"newId\" failed"
+      ]
+    },
+    "not \"The title is empty, or made only of whitespace, or has more characters than the limit.\"": {
+      "not": "The title is empty, or made only of whitespace, or has more characters than the limit."
+    },
+    "query \"newId\" failed": {
+      "failed": "newId"
+    }
+  },
+  "decisions": {
+    "limits": {
+      "rows": {
+        "otherwise": {
+          "maxTitleLength": 100
+        }
+      }
+    }
+  },
+  "descriptions": {
+    "component": "A to-do list behind an HTTP API. Items are added, completed, removed and listed. Each item is a to-do item of its own, with an identifier given by the list and a title; whether it is done is the item's state. The list survives a restart: after it, it has the same items, in the same order, each open or done as before.",
+    "queries.newId": "A fresh identifier for a new item. The source of identifiers can be unavailable."
+  },
+  "irVersion": 7,
+  "model": {
+    "calculations": {
+      "createdTodo": {
+        "description": "The new item: the fresh identifier, the title exactly as given, and not done.",
+        "output": {
+          "record": {
+            "done": "boolean",
+            "id": "string",
+            "title": "string"
+          }
+        }
+      },
+      "listedTodos": {
+        "description": "The items in the order they were added, keeping all of them, only the open ones or only the done ones as asked, each with its identifier, its title and whether it is done.",
+        "output": {
+          "list": {
+            "record": {
+              "done": "boolean",
+              "id": "string",
+              "title": "string"
+            }
+          }
+        }
+      }
+    },
+    "commands": {
+      "Add": {
+        "title": "string"
+      },
+      "Complete": {
+        "id": {
+          "among": {
+            "data": "items"
+          },
+          "type": "string"
+        }
+      },
+      "List": {
+        "only": [
+          "all",
+          "open",
+          "done"
+        ]
+      },
+      "Remove": {
+        "id": {
+          "among": {
+            "data": "items"
+          },
+          "type": "string"
+        }
+      }
+    },
+    "data": {},
+    "durable": {
+      "store": "store"
+    },
+    "effects": {},
+    "init": "READY",
+    "outputs": {
+      "Add": {
+        "optional": [
+          "todo"
+        ],
+        "record": {
+          "result": [
+            "created",
+            "invalid",
+            "unavailable"
+          ],
+          "todo": {
+            "record": {
+              "done": "boolean",
+              "id": "string",
+              "title": "string"
+            }
+          }
+        }
+      },
+      "Complete": [
+        "completed",
+        "not-found",
+        "already-done"
+      ],
+      "List": {
+        "list": {
+          "record": {
+            "done": "boolean",
+            "id": "string",
+            "title": "string"
+          }
+        }
+      },
+      "Remove": [
+        "removed",
+        "not-found"
+      ]
+    },
+    "parts": {
+      "items": {
+        "by": "id",
+        "commands": {
+          "Complete": {}
+        },
+        "component": "todo-item",
+        "effects": {},
+        "outputs": {
+          "Complete": [
+            "completed",
+            "already-done"
+          ]
+        },
+        "queries": {}
+      }
+    },
+    "queries": {
+      "newId": {
+        "input": {},
+        "mayFail": true,
+        "output": "string",
+        "promise": "fresh"
+      }
+    },
+    "states": [
+      "READY"
+    ]
+  }
+}

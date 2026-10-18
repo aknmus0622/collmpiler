@@ -83,10 +83,14 @@ function shape(fields: Record<string, FieldSchema>): string {
 
 const members = (lines: string[]) => (lines.length === 0 ? "{}" : `{\n${lines.map((line) => `    ${line};`).join("\n")}\n  }`);
 
+// 再起動を越えて残るものを含むか（その部品か、含む部品のどれかが durable。W7）。含むなら、検証は途中で再起動する
+export const restartsIn = (model: IrModel): boolean => model.durable !== undefined || Object.values(model.parts ?? {}).some((part) => part.durable === true);
+
 // アダプターの契約。エージェントが読むのでコメントは英語。
 export function generateContract(ir: Ir): string {
   const model = requireModel(ir);
   const behaviors = [...ir.behaviors].sort((a, b) => (a.name < b.name ? -1 : 1));
+  const restarts = restartsIn(model);
   // 含む部品の依存も、部品の名前で修飾して並ぶ（todos.newId）。アダプターが、それを中の部品のコードに渡す
   const allQueries = { ...model.queries };
   const allEffects = { ...model.effects };
@@ -96,9 +100,13 @@ export function generateContract(ir: Ir): string {
   }
   const key = (name: string) => (/^[A-Za-z_$][\w$]*$/.test(name) ? name : JSON.stringify(name));
   const queries = Object.keys(allQueries).sort().map((name) => {
-    const { input, output, promise } = allQueries[name];
-    // 依存の約束。代役は、これを守って答える
-    const note = promise === "fresh" ? "/** Never answers with the same value twice. */ " : promise === "increasing" ? "/** Never answers with less than it answered before. */ " : "";
+    const { input, output, promise, mayFail } = allQueries[name];
+    // 依存の約束。代役は、これを守って答える。失敗することがある依存は、ときどき例外を投げる (W8)
+    const notes = [
+      ...(promise === "fresh" ? ["Never answers with the same value twice."] : promise === "increasing" ? ["Never answers with less than it answered before."] : []),
+      ...(mayFail ? ["May fail: throws when the dependency is unavailable. Let the exception reach the production code."] : []),
+    ];
+    const note = notes.length === 0 ? "" : `/** ${notes.join(" ")} */ `;
     return `${note}${key(name)}(${Object.keys(input).length > 0 ? `input: ${shape(input)}` : ""}): ${fieldType(output)}`;
   });
   const effects = Object.keys(allEffects).sort().map((name) => `${key(name)}(payload: ${shape(allEffects[name])}): void`);
@@ -162,7 +170,16 @@ export type Ports = {
    */
   queries: ${members(queries)};
   /** Side effects the system performs on its environment. Calls are recorded in order and compared with the spec. */
-  effects: ${members(effects)};
+  effects: ${members(effects)};${
+    restarts
+      ? `
+  /**
+   * Where the system keeps what must survive a restart: the path of a file that does not exist yet (a new one
+   * for every trial, removed afterwards). Give it to the production code as its storage location.
+   */
+  storage: string;`
+      : ""
+  }
 };
 
 /** The test harness drives the production system only through this interface. */
@@ -174,7 +191,16 @@ export interface TargetSystemAdapter {
   /** Execute one command. A trial executes several commands in sequence on the same system. */
   executeCommand(command: Command): Promise<${outputs.length === 0 ? "void" : "CommandOutput[keyof CommandOutput] | void"}>;
   /** The current state of the system. */
-  getCurrentState(): Promise<StateName>;
+  getCurrentState(): Promise<StateName>;${
+    restarts
+      ? `
+  /**
+   * Stop the production system and start it again on the same \`ports.storage\`, as after a crash or a
+   * redeployment: a new instance, nothing carried over in memory. What it keeps must come back from storage.
+   */
+  restartSystem(): Promise<void>;`
+      : ""
+  }
 }
 `;
 }
@@ -183,8 +209,8 @@ export interface TargetSystemAdapter {
 // 同じだと、配線の段階が何も書かなくても「未実装で失敗した」ように見えて、赤の確認を通ってしまう
 export const ADAPTER_NOT_WRITTEN = "the adapter is not written yet";
 
-export function generateAdapterSkeleton(ws: Workspace): string {
-  const methods = ["setupIsolation(ports)", "teardownIsolation()", "executeCommand(command)", "getCurrentState()"];
+export function generateAdapterSkeleton(ws: Workspace, ir?: Ir): string {
+  const methods = ["setupIsolation(ports)", "teardownIsolation()", "executeCommand(command)", "getCurrentState()", ...(ir?.model && restartsIn(ir.model) ? ["restartSystem()"] : [])];
   return `import type { TargetSystemAdapter } from "${importPath(ws.paths.adapter, ws.paths.contract)}";
 
 // Import the production code from ${dirFrom(ws.paths.adapter, ws.src)} and forward each call to it. No business logic here.

@@ -12,7 +12,7 @@ import type { BoundSpecification, Declaration, MergeRules, MergedView, Structure
 
 export { BINDING, COMPONENT, RuleConflictError, UnboundNameError, activate, dir, file, isDescription, isFragment, matchCondition, text } from "./internal.ts";
 export type {
-  AssetDeclaration, AssetPhase, BoundSpecification, CommandShape, Constant, Declaration, FieldSchema, Fields, GoTo, Layer1, OutputSchema, Structure, Table,
+  AssetDeclaration, AssetPhase, BoundSpecification, Durable, CommandShape, Constant, Declaration, FieldSchema, Fields, GoTo, Layer1, OutputSchema, Structure, Table,
 } from "./internal.ts";
 
 export type Position = { file: string; line: number };
@@ -207,8 +207,8 @@ export type InvariantHandle = { readonly $invariant: string; means(fn: (state: a
 // フィールドの組のデータは、フィールドを続けて指せる（Data.last.status）
 export type DataHandle = Ref & { set(value: unknown): Node } & { readonly [field: string]: any };
 export type CalculationHandle = Ref & { means(fn: (state: any) => unknown): Meaning; of(state: object): any };
-export type AskNode = Node & { readonly answer: AnswerRef; as(alias: string): AskNode };
-export type QueryHandle = Ref & { (input?: Record<string, unknown>): AskNode; readonly answer: AnswerRef };
+export type AskNode = Node & { readonly answer: AnswerRef; readonly failed: ConditionHandle; as(alias: string): AskNode };
+export type QueryHandle = Ref & { (input?: Record<string, unknown>): AskNode; readonly answer: AnswerRef; readonly failed: ConditionHandle };
 export type EffectHandle = ((...given: unknown[]) => Node & { onlyWhen(condition: ConditionHandle | Ref): Node });
 // 含む部品のコマンドの答え。フィールドは、そのまま続けて指す（Part.todos.Add.answer.todo）
 export type AnswerRef = Ref & { readonly [field: string]: any };
@@ -329,7 +329,15 @@ const conditionHandle = (sentence: string, composite = false): ConditionHandle =
   }) as ConditionHandle;
 
 // 条件の組み合わせ (W3): 組み合わせを表す文 → 中身。意味の関数は、組み合わせる前の条件にだけ書き、組み合わせは自動で決まる
-export type Composition = { readonly all: readonly string[] } | { readonly not: string };
+// failed: 依存の失敗 (W8)。問い合わせ（引数の無いものは名前、尋ねたものは付けた名前）が失敗した
+export type Composition = { readonly all: readonly string[] } | { readonly not: string } | { readonly failed: string };
+/** 意味の関数に渡す状態の中で、この手に失敗した問い合わせの名前の並びを持つキー */
+export const FAILED = Symbol.for("clp.failed");
+// 問い合わせが失敗した、という条件。意味は自動で決まる
+const failedHandle = (answer: string): ConditionHandle => composite(`query "${answer}" failed`, { failed: answer });
+// 組み合わせた条件の、組み合わせる前の条件（失敗の条件は、何も組み合わせない）
+export const partsOfComposition = (composition: Composition): readonly string[] =>
+  "all" in composition ? composition.all : "not" in composition ? [composition.not] : [];
 const COMPOSITIONS = new Map<string, Composition>();
 const wrap = (sentence: string) => (COMPOSITIONS.has(sentence) ? sentence : `"${sentence}"`);
 /** 組み合わせた条件の中身。組み合わせでなければ undefined */
@@ -376,7 +384,7 @@ export function queries(prose: string): Group<"queries">;
 export function queries<const S extends Record<string, unknown>>(shape: S): { readonly [K in keyof S]: QueryHandle } & Group<"queries">;
 export function queries(shape: unknown): unknown {
   const ask = (query: string, alias: string, given: Record<string, unknown>): AskNode =>
-    hidden(asks(alias, query, given), { answer: fieldsRef("query", alias, outputOf(query)), as: (other: string) => ask(query, other, given) }) as AskNode;
+    withFailed(hidden(asks(alias, query, given), { answer: fieldsRef("query", alias, outputOf(query)), as: (other: string) => ask(query, other, given) }), alias) as AskNode;
   // 答えの型（フィールドを続けて指すため）
   const outputOf = (query: string) => {
     const given = (proseFree(shape) as Record<string, unknown>)[query];
@@ -386,7 +394,7 @@ export function queries(shape: unknown): unknown {
     Object.keys(proseFree(shape)).map((name) => {
       const handle = (given: Record<string, unknown> = {}) => ask(name, name, given);
       Object.defineProperty(handle, "name", { value: name });
-      return [name, hidden(Object.assign(handle, { $ref: "query", path: name }), { answer: fieldsRef("query", name, outputOf(name)) })];
+      return [name, withFailed(hidden(Object.assign(handle, { $ref: "query", path: name }), { answer: fieldsRef("query", name, outputOf(name)) }), name)];
     }),
   );
   return groupOf(handles, "queries", proseOr(shape)) as never;
@@ -421,6 +429,12 @@ export function calculations(shape: unknown): unknown {
     ]),
   );
   return groupOf(handles, "calculations", proseOr(shape)) as never;
+}
+const failedMeaning = (answer: string) => (state: Record<symbol, readonly string[] | undefined>) => (state[FAILED] ?? []).includes(answer);
+// 失敗の条件の取っ手 (W8): Query.newId.failed。使ったときに作る（使わない問い合わせの条件は、作らない）
+function withFailed<T extends object>(target: T, answer: string): T {
+  Object.defineProperty(target, "failed", { get: () => failedHandle(answer), enumerable: false });
+  return target;
 }
 // 参照に、フィールドの組のフィールドの取っ手を足す（"last.status" のように、点でつないだ名前で指す）
 function fieldsRef(kind: string, path: string, type: unknown): Ref {
@@ -589,6 +603,7 @@ type ComponentShape = {
   // 含む部品
   parts?: Record<string, Node | Many> | Group<"parts">;
   assets?: readonly unknown[];
+  durable?: true | Node;
 };
 const GROUPS: Record<string, string> = { data: "data", queries: "query", effects: "effect", calculations: "calculation", commands: "command" };
 
@@ -615,7 +630,7 @@ function fromShape(given: ComponentShape): Node[] {
   const shape = Object.fromEntries(Object.entries(given).map(([key, value]) => [key, groupIn(value)?.shape ?? value])) as ComponentShape & Record<string, unknown>;
   for (const [name, table] of Object.entries((given.decisions ?? {}) as Record<string, object>)) if (typeof table === "object" && table !== null) TABLE_NAMES.set(table, name);
   const children: Node[] = [];
-  const known = new Set(["description", "states", "init", "decisions", "conditions", "invariants", "assets", "meanings", "parts", ...Object.keys(GROUPS)]);
+  const known = new Set(["description", "states", "init", "decisions", "conditions", "invariants", "assets", "meanings", "parts", "durable", ...Object.keys(GROUPS)]);
   for (const key of Object.keys(shape)) if (!known.has(key)) children.push(make("unknown", { name: key, value: (shape as Record<string, unknown>)[key] }));
   if (shape.description !== undefined) children.push(typeof shape.description === "string" ? description(shape.description) : shape.description);
   if (Array.isArray(shape.states)) for (const name of shape.states) children.push(state(name));
@@ -637,6 +652,10 @@ function fromShape(given: ComponentShape): Node[] {
   // 条件のまとまりは、使う所 (when / onlyIf / onlyWhen / 決定表の行) から集まる。部品に並べても、何も足さない
   if (Array.isArray(shape.invariants)) for (const sentence of shape.invariants as string[]) children.push(invariant(sentence));
   if (shape.assets !== undefined) children.push(make("assets", { value: shape.assets }));
+  // 再起動を越えて残る: 自分で (true) か、保存先の部品を通して（部品の木は、値として持つ）
+  if (shape.durable === true) children.push(make("durable", { value: true }));
+  else if (isNode(shape.durable)) children.push(make("durable", { value: { store: shape.durable } }));
+  else if (shape.durable !== undefined) children.push(make("unknown", { name: "durable", value: shape.durable }));
   return children;
 }
 
@@ -671,7 +690,8 @@ const OUTCOMES = ["goTo", "set", "emits", "responds", "adds", "removes", "nothin
 
 /** 組み込みの種類。利用者の種類（kind(...)）も、同じ形で定義する */
 export const KINDS: Record<string, KindDefinition> = {
-  service: { fields: { description: "text", init: "state", uses: "list of groups", assets: "assets" }, required: ["init", "commands"] },
+  // durable: 再起動を越えて残る (W7)。true なら自分で残す。保存先の部品を渡せば、それを使って残す
+  service: { fields: { description: "text", init: "state", uses: "list of groups", assets: "assets", durable: "durable" }, required: ["init", "commands"] },
   command: {
     fields: {
       description: "text", input: "input", output: "type", route: "text", from: "list of states", onlyIf: "list of conditions",
@@ -685,7 +705,8 @@ export const KINDS: Record<string, KindDefinition> = {
   datum: { fields: { description: "text", type: "type", initially: "value" }, required: ["type"] },
   // 状態。final: 終わりの状態（宣言があれば、終わりの状態でないのに出口の無い状態を、グラフの検査が誤りにする）
   state: { fields: { description: "text", final: "flag" } },
-  query: { fields: { description: "text", input: "input", output: "type", fresh: "flag", increasing: "flag" }, required: ["output"] },
+  // mayFail: 依存が失敗することがある (W8)。失敗は条件 Query.x.failed で分ける
+  query: { fields: { description: "text", input: "input", output: "type", fresh: "flag", increasing: "flag", mayFail: "flag" }, required: ["output"] },
   effect: { fields: { description: "text", input: "input" } },
   calculation: { fields: { description: "text", output: "type" }, required: ["description", "output"] },
   states: { entries: "state", nonEmpty: true, closed: true },
@@ -714,7 +735,7 @@ const FIELD_NODES: Record<string, Record<string, number>> = {
   description: { description: MANY }, does: { does: MANY }, input: { input: 1 }, output: { output: 1 }, route: { route: 1 },
   from: { from: 1 }, onlyIf: { onlyIf: MANY }, asks: { asks: MANY }, calls: { calls: MANY }, cases: { when: MANY, otherwise: 1 },
   goTo: { goTo: 1 }, set: { set: MANY }, emits: { emits: MANY }, responds: { responds: 1 }, adds: { adds: MANY }, removes: { removes: MANY }, nothing: { nothing: 1 },
-  type: { "#type": 1 }, initially: { initially: 1 }, fresh: { fresh: 1 }, increasing: { increasing: 1 }, init: { init: 1 }, assets: { assets: 1 },
+  type: { "#type": 1 }, initially: { initially: 1 }, fresh: { fresh: 1 }, increasing: { increasing: 1 }, mayFail: { mayFail: 1 }, init: { init: 1 }, assets: { assets: 1 }, durable: { durable: 1 },
 };
 const rowOf = (kind: string, extra: Record<string, number> = {}): Record<string, number> =>
   Object.assign({}, ...Object.keys(KINDS[kind].fields ?? {}).map((field) => FIELD_NODES[field] ?? {}), extra);
@@ -771,8 +792,8 @@ const LABEL: Record<string, string> = {
   query: "問い合わせ", effect: "副作用", decision: "決定表", calculation: "計算", condition: "条件", invariant: "不変条件",
   command: "コマンド", input: "入力 (input)", output: "返すものの形 (output)", from: "from", onlyIf: "onlyIf", when: "場合 (when)",
   otherwise: "otherwise", goTo: "goTo", set: "set", asks: "asks", calls: "呼ぶ部品のコマンド", part: "含む部品", adds: "部品を作る (add)", removes: "部品を消す (remove)", route: "経路 (route)", emits: "emits", responds: "responds", does: "does",
-  initially: "initially", fresh: "fresh", increasing: "increasing", nothing: "nothing", final: "final", onlyWhen: "onlyWhen", meaning: "意味の関数", field: "フィールド",
-  service: "部品 (service)", case: "場合", datum: "データ",
+  initially: "initially", fresh: "fresh", increasing: "increasing", mayFail: "mayFail", nothing: "nothing", final: "final", onlyWhen: "onlyWhen", meaning: "意味の関数", field: "フィールド",
+  service: "部品 (service)", case: "場合", datum: "データ", durable: "再起動を越えて残る (durable)",
   value: "値", "#type": "型", type: "型", enum: "列挙", record: "record", list: "list", optional: "optional", setting: "設定",
 };
 const label = (node: Node) => `${LABEL[node.kind] ?? node.kind}${node.name !== undefined && node.kind !== "when" ? ` "${node.name}"` : ""}`;
@@ -980,6 +1001,9 @@ function shapeOfEntry(node: Node, into: Collected): Shape {
       case "increasing":
         shape.promise = item.kind;
         break;
+      case "mayFail":
+        shape.mayFail = true;
+        break;
     }
   }
   return shape;
@@ -1019,6 +1043,9 @@ function layer1From(root: Node): { layer1: Shape; problems: Diagnostic[] } {
         break;
       case "assets":
         layer1.assets = node.value;
+        break;
+      case "durable":
+        layer1.durable = node.value;
         break;
       case "part":
         layer1.parts = { ...(layer1.parts as Shape | undefined), [node.name!]: node.value };
@@ -1080,13 +1107,19 @@ export function interpretation(target: Node, given: readonly unknown[]): BoundSp
   // 組み合わせた条件の意味: 組み合わせる前の条件の意味から決まる。足りなければ、読み込みの検査 (extract) が報告する
   for (const [sentence, composition] of COMPOSITIONS) {
     if (sentence in meanings.conditions) continue;
+    // 失敗の条件 (W8): その手に失敗した問い合わせの名前の並びに、あるか。
+    // 関数を分けておく（意味の関数の中の文字列は、入力の生成に混ざるため、組み合わせの関数の文面を変えない）
+    if ("failed" in composition) {
+      meanings.conditions[sentence] = failedMeaning(composition.failed);
+      continue;
+    }
     meanings.conditions[sentence] = (state) => {
       const holds = (part: string) => {
         const fn = meanings.conditions[part];
         if (!fn) throw new UnboundNameError("条件", part);
         return fn(state);
       };
-      return "all" in composition ? composition.all.every(holds) : !holds(composition.not);
+      return "all" in composition ? composition.all.every(holds) : !holds((composition as { not: string }).not);
     };
   }
   const fn = (node: Node) => node.children.find((item) => item.kind === "meaning")?.value as never;
@@ -1219,7 +1252,7 @@ function leafCheck(view: MergedView, declaration: Declaration, structures: Recor
     seen.add(sentence);
     const composition = COMPOSITIONS.get(sentence);
     if (composition) {
-      for (const part of "all" in composition ? composition.all : [composition.not]) checkCondition(part, seen);
+      for (const part of partsOfComposition(composition)) checkCondition(part, seen);
       return;
     }
     if (typeof meanings.conditions[sentence] !== "function") at(`conditions."${sentence}"`, "意味の関数がありません（解釈の meanings に書きます）");
@@ -1432,6 +1465,9 @@ function entryBody(kind: string, given: Record<string, unknown>): Node {
       case "increasing":
         if (item === true) children.push(increasing());
         break;
+      case "mayFail":
+        if (item === true) children.push(make("mayFail"));
+        break;
     }
   }
   return make("component", { children });
@@ -1502,6 +1538,8 @@ export type ServiceShape = {
   init?: StateHandle;
   uses?: readonly unknown[];
   assets?: readonly unknown[];
+  // 再起動を越えて残る (W7): true なら自分で残す。保存先の部品 (Store) を渡せば、それを通して残す
+  durable?: true | Node;
 };
 // まとまりの種類 → これまでの dict 形式のキー
 const USES_KEY: Record<string, keyof ComponentShape> = {
@@ -1542,6 +1580,7 @@ export function service<const S extends ServiceShape>(
   if (shape.description !== undefined) legacy.description = shape.description;
   if (shape.init !== undefined) legacy.init = shape.init;
   if (shape.assets !== undefined) legacy.assets = shape.assets;
+  if (shape.durable !== undefined) legacy.durable = shape.durable;
   legacyOf(shape as Record<string, unknown>, legacy, extra);
   const node = make("component", { children: [...fromShape(legacy), ...extra] });
   return hidden(node, { with: (fields: Record<string, unknown>): With => ({ [WITH]: "service", fields }) }) as never;

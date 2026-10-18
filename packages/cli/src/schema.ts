@@ -49,7 +49,7 @@ export function conforms(schema: FieldSchema, value: unknown): boolean {
     const given = value as Record<string, unknown>;
     return (
       Object.keys(given).every((field) => field in schema.record) &&
-      Object.entries(schema.record).every(([field, type]) => (given[field] === null ? schema.optional?.includes(field) === true : field in given && conforms(type, given[field])))
+      Object.entries(schema.record).every(([field, type]) => (given[field] === null && type !== "value" ? schema.optional?.includes(field) === true : field in given && conforms(type, given[field])))
     );
   }
   if (isEnum(schema)) return schema.includes(value as string | number);

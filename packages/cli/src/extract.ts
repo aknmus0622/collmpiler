@@ -1,4 +1,4 @@
-import { compositionOf } from "@clp/core";
+import { compositionOf, partsOfComposition } from "@clp/core";
 import type { BoundSpecification, Composition, Constant, Declaration, FieldSchema, Fields, GoTo, OutputSchema, Table } from "@clp/core";
 import { relative } from "node:path";
 import type { Asset } from "./assets.ts";
@@ -24,7 +24,7 @@ export type SpecModel = {
   // コマンド名 → 入力
   commands: Record<string, Fields>;
   // 問い合わせの名前 → 引数と、答えの型。引数の無い問い合わせは、名前でそのまま読める
-  queries: Record<string, { input: Fields; output: FieldSchema; promise?: "fresh" | "increasing" }>;
+  queries: Record<string, { input: Fields; output: FieldSchema; promise?: "fresh" | "increasing"; mayFail?: true }>;
   // 副作用の名前 → フィールド
   effects: Record<string, Fields>;
   // コマンドの名前 → 返すものの形。返すコマンドがあるときだけ持つ
@@ -36,6 +36,8 @@ export type SpecModel = {
   invariants?: readonly string[];
   // コマンドの名前 → 経路（"POST /todos"）。書いたコマンドがあるときだけ持つ
   routes?: Record<string, string>;
+  // 再起動を越えて残る (W7): 自分で (true) か、保存先の部品 (store はその名前) を通して
+  durable?: true | { store: string };
   // 含む部品の名前 → その部品の名前と、外から見た境界（呼べるコマンド、依存。依存の名前は部品の名前で修飾したもの）
   parts?: Record<
     string,
@@ -45,8 +47,10 @@ export type SpecModel = {
       by?: string;
       commands: Record<string, Fields>;
       outputs?: Record<string, OutputSchema>;
-      queries: Record<string, { input: Fields; output: FieldSchema; promise?: "fresh" | "increasing" }>;
+      queries: Record<string, { input: Fields; output: FieldSchema; promise?: "fresh" | "increasing"; mayFail?: true }>;
       effects: Record<string, Fields>;
+      // その部品か、その中の部品が、再起動を越えて残る
+      durable?: true;
     }
   >;
 };
@@ -482,8 +486,17 @@ export function extract(
     const composition = compositionOf(name);
     if (composition) {
       compositions[name] = composition;
+      // 失敗の条件 (W8): 失敗することがある (mayFail) 問い合わせで、そのコマンドが読めるもの
+      if ("failed" in composition) {
+        const asked = input.behaviors[behavior]?.asks?.[composition.failed];
+        const query = model.queries[asked?.query ?? composition.failed];
+        const where = behavior === "" ? "" : behavior;
+        if (!query) report("unknown-query", where, caseName, `${name}: "${composition.failed}" は、queries にも、このコマンドの asks にもありません`);
+        else if (query.mayFail !== true) report("bad-failure", where, caseName, `${name}: 問い合わせ ${asked?.query ?? composition.failed} は失敗しません。失敗することがあるなら、mayFail: true と宣言してください`);
+        else if (!asked && Object.keys(query.input).length > 0) report("bad-failure", where, caseName, `${name}: 問い合わせ ${composition.failed} には引数があります。asks で尋ねたもの (.as で付けた名前) の failed を使ってください`);
+      }
       // 組み合わせの意味は自動で決まるので、組み合わせる前の条件を確かめる
-      for (const part of "all" in composition ? composition.all : [composition.not]) condition(behavior, caseName, part);
+      for (const part of partsOfComposition(composition)) condition(behavior, caseName, part);
       return;
     }
     // 意味の関数が無いことは、葉の検査 (incomplete) が報告する
@@ -623,7 +636,8 @@ export function extract(
           if (given.has("")) break;
           if (!given.has(field)) report("missing-field", name, caseName, `responds に、フィールド "${field}" がありません`);
           else if ((given.get(field) as unknown) === null) {
-            if (!output.optional?.includes(field)) report("bad-value", name, caseName, `responds.${field}: null を返せるのは、optional(...) と宣言したフィールドだけです`);
+            // 何でも入る値 (value) には、null も入る
+            if (!output.optional?.includes(field) && schema !== "value") report("bad-value", name, caseName, `responds.${field}: null を返せるのは、optional(...) と宣言したフィールドだけです`);
           } else {
             const problem = mismatch(input, name, given.get(field)!, schema);
             if (problem) report("bad-value", name, caseName, `responds.${field}: ${problem}`);
@@ -781,8 +795,11 @@ function irModel(model: SpecModel): unknown {
 
 // 境界: アダプターの契約を決める部分（状態・コマンドと入力・問い合わせ・副作用）
 export const boundaryOf = (ir: { model?: Partial<Omit<SpecModel, "calculations">> }) => {
-  const { init, states, commands, queries, effects, outputs, parts, routes } = ir.model ?? {};
-  return stableStringify({ init, states, commands, queries, effects, ...(outputs ? { outputs } : {}), ...(parts ? { parts } : {}), ...(routes ? { routes } : {}) });
+  const { init, states, commands, queries, effects, outputs, parts, routes, durable } = ir.model ?? {};
+  return stableStringify({
+    init, states, commands, queries, effects,
+    ...(outputs ? { outputs } : {}), ...(parts ? { parts } : {}), ...(routes ? { routes } : {}), ...(durable !== undefined ? { durable } : {}),
+  });
 };
 
 // キーをソートし、インデントと改行を固定する（出力の決定性）

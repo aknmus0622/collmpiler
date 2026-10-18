@@ -17,7 +17,8 @@ import { importsOf, scan } from "./scan.ts";
 
 // Node の組み込みモジュールのうち、HTTP で受けるのに要るものだけ。ファイルやプロセスに触れるもの (node:fs など) は、
 // 仕様や採点基準を読めてしまうので使えない
-export const BUILTINS = new Set(["node:http", "node:url", "node:events", "node:stream", "node:buffer", "node:util", "node:string_decoder"]);
+// node:sqlite は、再起動を越えて残すもの (W7) を、渡された保存先のファイルに置くため
+export const BUILTINS = new Set(["node:http", "node:url", "node:events", "node:stream", "node:buffer", "node:util", "node:string_decoder", "node:sqlite"]);
 
 export type Violation = { file: string; rule: string; message: string };
 

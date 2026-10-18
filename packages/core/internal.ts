@@ -149,6 +149,8 @@ export type CommandShape = {
   initially?: { readonly value: unknown };
   // 問い合わせの約束
   promise?: "fresh" | "increasing";
+  // 依存が失敗することがある (W8)
+  mayFail?: true;
   from?: readonly string[];
   onlyIf?: readonly string[];
   asks?: Asks;
@@ -181,7 +183,10 @@ export type Layer1 = {
   commands?: Record<string, Entry> | Description;
   // 含む部品（名前 → その部品と、多数あるならキーの名前）
   parts?: Record<string, PartDeclaration>;
+  // 再起動を越えて残る (W7): 自分で (true) か、保存先の部品を通して
+  durable?: Durable;
 };
+export type Durable = true | { store: object };
 
 // 構造として書かれた値（文や省略なら never）
 // 状態を持たない部品の、ただ1つの状態の名前
@@ -213,7 +218,8 @@ export type CommandDeclaration = {
   when: Record<string, Outcome>;
 };
 // promise: 依存が守る約束。fresh は「一度返した値は、二度と返さない」、increasing は「前の答えより小さくならない」
-export type QueryDeclaration = { input: Fields; output: FieldSchema; promise?: "fresh" | "increasing" };
+// mayFail: 依存が失敗することがある（代役は、ときどき例外を投げる）
+export type QueryDeclaration = { input: Fields; output: FieldSchema; promise?: "fresh" | "increasing"; mayFail?: true };
 export type Declaration = {
   // 全体と、項目ごとの説明（Layer 1 が文で書いたもの。キーは "component"、"queries"、"queries.isMonthEnd" など）
   descriptions: Record<string, string>;
@@ -233,6 +239,7 @@ export type Declaration = {
   commands: Record<string, CommandDeclaration>;
   // 含む部品（名前 → Layer 1 の component(...) の値と、多数あるならキーの名前）
   parts?: Record<string, PartDeclaration>;
+  durable?: Durable;
 };
 export type Structure = { effects?: readonly Record<string, unknown>[]; set?: Record<string, unknown>; adds?: readonly Adds[]; removes?: readonly Removes[] };
 export type BoundSpecification = {
@@ -289,7 +296,7 @@ export type MergeRules = {
 const DEFAULT_RULES: MergeRules = {
   parts: {
     data: ["description", "type", "initially"],
-    queries: ["description", "input", "output", "promise"],
+    queries: ["description", "input", "output", "promise", "mayFail"],
     effects: ["description", "input"],
     calculations: ["description", "output"],
   },
@@ -395,7 +402,12 @@ export function resolveComponent(
   const queries = Object.fromEntries(
     Object.entries(entries("queries")).map(([name, entry]) => [
       name,
-      { input: entry.input ?? {}, output: (entry.output ?? "boolean") as FieldSchema, ...(entry.promise === undefined ? {} : { promise: entry.promise }) },
+      {
+        input: entry.input ?? {},
+        output: (entry.output ?? "boolean") as FieldSchema,
+        ...(entry.promise === undefined ? {} : { promise: entry.promise }),
+        ...(entry.mayFail === true ? { mayFail: true as const } : {}),
+      },
     ]),
   );
   const effects = Object.fromEntries(Object.entries(entries("effects")).map(([name, entry]) => [name, entry.input ?? {}]));
@@ -556,6 +568,7 @@ export function resolveComponent(
     invariants: [...(base.invariants ?? []), ...(structure.invariants ?? [])],
     commands,
     ...(base.parts ? { parts: base.parts } : {}),
+    ...(base.durable !== undefined ? { durable: base.durable } : {}),
   };
   return { declaration, commands: structures, problems, view };
 }

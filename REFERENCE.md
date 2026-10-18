@@ -51,6 +51,7 @@ export const Command = commands({ ... });                           // the comma
 | `If.paid` | a condition: `If.paid.then({...})` is the case where it holds (in `cases`, and as a decision-table row); also `onlyIf`, `.onlyWhen(...)` |
 | `Data.price` | remembered data, as a value; `Data.price.set(value)` stores one (in `set: [...]`) |
 | `Query.isMonthEnd` | the answer of a query without input |
+| `Query.newId.failed` | the condition "asking it failed", for a query declared `mayFail: true` (an asked one: the asked node's `.failed`); its meaning is automatic |
 | `Query.declared({ name: "PAID" }).as("found")` | asks a query that takes an input (in `asks: [...]`); its `.answer` is the value |
 | `Effect.SendReceipt({ amount: ... })` | performs an effect, in `emits: [...]` (`Effect.Refund()` when it carries nothing); `.onlyWhen(handle)` performs it only sometimes |
 | `Calc.charged` | a calculation's result |
@@ -68,6 +69,7 @@ export const Order = service({
   init: State.DRAFT,                      // leave out states and init for a stateless component
   uses: [State, Data, Query, Effect, Decision, If, Calc, Inv, Command],   // its vocabulary, in any order
   assets: [file("docs/style.md")],        // advice for the implementing agent; not part of the meaning
+  durable: true,                          // what it remembers survives a restart (or durable: Store, below)
 });
 ```
 
@@ -77,7 +79,7 @@ a whole sentence (`queries("How many books the member holds, and whether the boo
 | Group | An entry is | Example |
 | --- | --- | --- |
 | `data` | its type, or `{ type, initially, description }` | `price: Yen`, `items: { type: list(Type.Todo), initially: [] }` |
-| `queries` | its answer's type, or `{ output, input, description, fresh, increasing }` | `isMonthEnd: "boolean"`, `newId: { output: "string", fresh: true }` |
+| `queries` | its answer's type, or `{ output, input, description, fresh, increasing, mayFail }` | `isMonthEnd: "boolean"`, `newId: { output: "string", fresh: true, mayFail: true }` |
 | `effects` | `input({...})` for what it carries, a sentence, or `{ input, description }` | `SendReceipt: input({ amount: "integer" })` |
 | `calculations` | `{ description: "<how it is computed>", output: type }` | `fee: { description: "days late × 100, at most 1000", output: "integer" }` |
 | `commands` | a sentence, or the fields below | |
@@ -248,6 +250,29 @@ To look at the design before anything else is written, run `clp apply --stop-aft
 the skeleton passes. Read it (and edit it if you like), then run `clp apply` again; it continues with the
 wiring.
 
+## Restarts and failing dependencies
+
+**`durable`**: what a component remembers (its state, its data, everything it contains) survives a restart.
+Verification then restarts the system at random points in a trial (the contract gains `restartSystem()` and
+`ports.storage`, a fresh database file per trial): a durable component keeps everything, the others start over.
+An implementation that keeps things only in memory fails there. `durable: true` leaves how to keep them to the
+implementing agent (Node's `node:sqlite`, which production code may import). `durable: Store` names a store
+component (an exported service, itself `durable: true`) whose production code the agent uses, like a part's: it
+is reconciled first, its code may not be changed and is not mutated, and its spec is not run in this component's
+verification. Write where the data lives (a file path) only in the composition root, never in the spec.
+
+**`mayFail: true`** on a query: the dependency can fail. The test stand-in then sometimes throws instead of
+answering (one ask in four), and the spec says what happens with the condition `Query.newId.failed`:
+
+```ts
+export const When = conditions({ idFailed: all(not(If.invalidTitle), Query.newId.failed) });
+cases: [If.invalidTitle.then({ responds: { status: 422 } }), When.idFailed.then({ responds: { status: 503 } }), otherwise({ ... })]
+```
+
+There is no priority for failures: conditions stay exclusive, so whether an invalid title is refused before or
+after an identifier is asked for is something the spec says (forgetting `not(If.invalidTitle)` is a condition
+conflict, found before any agent runs). Reading the answer of a failed query is a spec error.
+
 ## What `clp compile` reports
 
 Every message is `severity[code] where: message`. Errors stop `clp apply` before any agent runs.
@@ -263,6 +288,7 @@ Every message is `severity[code] where: message`. Errors stop `clp apply` before
 | `dead-end-state` | error | with final states declared (`final: true`), a state that is not final but that no command leaves |
 | `name-collision`, `unknown-state`, `bad-decision`, `bad-type` | error | names that collide, an initial state that is not a state, a table without `otherwise` or with mixed kinds in a column, an impossible range or an empty enumeration |
 | `unknown-effect`, `missing-field`, `bad-value`, `bad-response`, `missing-response`, `bad-promise` | error | references and values that do not fit what is declared |
+| `bad-failure` | error | `.failed` on a query that is not `mayFail`, or on a query with an input that was not asked |
 | `unreachable-state`, `unreachable-command` | error | no command leads there |
 | `unused-effect`, `unset-data`, `unasked-query` | warning | declared, never used (an error for what the interpretation added, when `clp interpret` checks a draft) |
 | `spec-check` | error | running the spec alone: two conditions held at once, an invariant broke, a value did not fit, a meaning function read a name the spec does not have |

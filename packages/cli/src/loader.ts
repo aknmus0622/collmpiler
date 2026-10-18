@@ -29,10 +29,11 @@ export function openReviews(text: string): OpenReview[] {
 // Layer 1 のハッシュ。解釈に影響し得るものすべてを含める。
 // 決定表のセルの値は含めない（値は解釈を通らずに IR に届く。含めるのは、行と列の名前と、値の型だけ）。添付資料も含めない
 export function layer1Hash(layer1: object): string {
-  const { assets: _assets, decisions, parts, ...rest } = layer1 as {
+  const { assets: _assets, decisions, parts, durable, ...rest } = layer1 as {
     assets?: unknown;
     decisions?: Record<string, Record<string, Record<string, unknown>>>;
     parts?: Record<string, { component: object; by?: string }>;
+    durable?: true | { store: object };
   };
   const shapes = Object.fromEntries(
     Object.entries(decisions ?? {}).map(([name, table]) => [
@@ -54,7 +55,10 @@ export function layer1Hash(layer1: object): string {
             }),
           ),
         };
-  return `sha256:${createHash("sha256").update(stableStringify({ ...rest, decisions: shapes, ...nested })).digest("hex")}`;
+  // 保存先の部品も、その部品の Layer 1 のハッシュで表す
+  const kept =
+    durable === undefined ? {} : { durable: durable === true ? true : { store: layer1Hash(isComponent(durable.store) ? layer1Of(durable.store) : durable.store) } };
+  return `sha256:${createHash("sha256").update(stableStringify({ ...rest, decisions: shapes, ...nested, ...kept })).digest("hex")}`;
 }
 
 type Found = { name: string; declaration: object; file: string; exportName: string };
@@ -177,6 +181,18 @@ export async function loadSpecs(
   if (unloadable && options.bindings !== false) {
     input.problems = [...(input.problems ?? []), `解釈のファイル ${unloadable.file} を読み込めません: ${unloadable.message}`];
   }
+  // 再起動を越えて残るか (W7)。保存先の部品は、その名前で指す
+  const durableOf = (spec: SpecInput) => {
+    const declared = spec.component?.durable;
+    if (declared === undefined || !spec.model) return;
+    if (declared === true) {
+      spec.model.durable = true;
+      return;
+    }
+    const store = components.find((other) => other.declaration === declared.store);
+    if (!store) spec.problems = [...(spec.problems ?? []), "durable: 保存先の部品が、仕様のファイルから export された部品ではありません"];
+    else spec.model.durable = { store: store.name };
+  };
   // 含む部品: それぞれを、その部品の解釈と一緒に読む
   const nest = (spec: SpecInput, trail: string[]) => {
     const declared = spec.component?.parts;
@@ -199,6 +215,7 @@ export async function loadSpecs(
         problems.push(`含む部品 "${part}" (${inner.name}) の解釈が無いか、Layer 1 と合いません。先に、その部品を clp interpret してください`);
         continue;
       }
+      durableOf(child);
       nest(child, [...trail, inner.name]);
       if (by !== undefined) child.by = by;
       found[part] = child;
@@ -207,7 +224,10 @@ export async function loadSpecs(
     spec.parts = found;
     spec.model.parts = Object.fromEntries(Object.entries(found).map(([part, child]) => [part, boundaryOfPart(child)]));
   };
-  if (options.bindings !== false) nest(input, [name]);
+  if (options.bindings !== false) {
+    durableOf(input);
+    nest(input, [name]);
+  }
   input.sources = {
     component: { file, exportName },
     ...(bound ? { binding: bound.file } : unloadable ? { binding: unloadable.file.replace(/\.draft\.ts$/, ".ts") } : {}),
@@ -334,8 +354,12 @@ export function boundaryOfPart(child: SpecInput): NonNullable<SpecModel["parts"]
     ...(model.outputs ? { outputs: model.outputs } : {}),
     queries,
     effects,
+    // 再起動を越えて残るものを含む（その部品か、さらに中の部品が durable）
+    ...(restartable(child) ? { durable: true as const } : {}),
   };
 }
+// 再起動を越えて残るものを含むか（その部品か、中の部品のどれかが durable）。含むなら、検証は途中で再起動する
+export const restartable = (spec: SpecInput): boolean => spec.model?.durable !== undefined || Object.values(spec.parts ?? {}).some(restartable);
 // その部品自身と、含む部品の依存（中の部品のものは、部品の名前で修飾する）
 export function dependenciesOf(spec: SpecInput): { queries: SpecModel["queries"]; effects: SpecModel["effects"] } {
   const queries = { ...spec.model!.queries };

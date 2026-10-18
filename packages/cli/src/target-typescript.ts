@@ -155,7 +155,9 @@ export const typescriptTarget: Target = {
 - \`executeCommand(command)\`: call the production code for that command with its input.
 - \`getCurrentState()\`: return the current state as one of the \`StateName\` values, translating if the
   production code names its states differently.
-- \`teardownIsolation()\`: discard the system.`,
+- \`teardownIsolation()\`: discard the system.
+- \`restartSystem()\` (only if the contract has it): stop the production system and start a new instance on the
+  same \`ports.storage\`, connected to the same \`ports\`. Keep nothing from the old instance.`,
     adapterImports: `The adapter may import only \`${importPath(ws.paths.adapter, ws.paths.contract)}\` and production files under \`${dirFrom(ws.paths.adapter, ws.src)}\`.`,
     signatureErrorExample: `"x is not a function"`,
   }),

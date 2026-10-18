@@ -139,7 +139,7 @@ export function entryGate(ctx: GateContext, phase: Phase, attempt: number, feedb
     inputs[ws.paths.contract] = ctx.target.generate.contract(ctx.ir);
     inputs[ws.paths.adapter] = existsSync(join(ws.root, ws.paths.adapter))
       ? readFileSync(join(ws.root, ws.paths.adapter), "utf8")
-      : ctx.target.generate.adapterSkeleton(ws);
+      : ctx.target.generate.adapterSkeleton(ws, ctx.ir);
   } else {
     inputs[ws.paths.ir] = stableStringify(ctx.ir);
     // ほかのコンポーネントの仕様。配線の段階には渡さない（配線は、どの仕様も見ない）

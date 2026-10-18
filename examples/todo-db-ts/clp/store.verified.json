@@ -1,0 +1,13 @@
+{
+  "specs": "sha256:10825d5766fbae63129d9850bb52545033a1a5e9ff2ca91b1da344aadbfb2e00",
+  "code": "sha256:8310c3af122ea7386a33b714df2dbf8c524be546c736e44e9866524e416a1b94",
+  "files": [
+    "../src/json.ts",
+    "../src/store-entries.ts",
+    "../src/store.ts",
+    "../src/todo-api.ts",
+    "../src/todo-item.ts",
+    "../src/todos.ts",
+    "store.adapter.ts"
+  ]
+}

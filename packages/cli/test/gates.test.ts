@@ -35,7 +35,7 @@ test("対象言語: 流れとゲートは Target だけを通して、生成・�
     name: "recording",
     generate: {
       contract: (ir) => (calls.push("generate.contract"), typescriptTarget.generate.contract(ir)),
-      adapterSkeleton: (ws) => (calls.push("generate.adapterSkeleton"), typescriptTarget.generate.adapterSkeleton(ws)),
+      adapterSkeleton: (ws, ir) => (calls.push("generate.adapterSkeleton"), typescriptTarget.generate.adapterSkeleton(ws, ir)),
       verify: (ir, ws, specs) => (calls.push("generate.verify"), typescriptTarget.generate.verify(ir, ws, specs)),
     },
     check: (...args) => (calls.push("check"), typescriptTarget.check(...args)),

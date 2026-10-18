@@ -186,7 +186,7 @@ const member = (group: string, key: string) => (/^[A-Za-z_$][\w$]*$/.test(key) ?
 const keyText = (key: string) => (/^[A-Za-z_$][\w$]*$/.test(key) ? key : quote(key));
 
 const CORE_WORDS =
-  "among, calculations, commands, conditions, data, effects, input, integer, interpretation, invariants, list, number, oneOf, optional, otherwise, queries, record, states, string, value, was";
+  "all, among, calculations, commands, conditions, data, effects, input, integer, interpretation, invariants, list, not, number, oneOf, optional, otherwise, queries, record, states, string, value, was";
 
 // 出発点: Layer 1 に書かれたコマンドと名前を並べ、中身は空にしておく。参照は、Layer 1 が export する取っ手で書く。
 // 解釈は、足すものを名前を持つノードとして並べる（DSL.md §16.0）。pinned があれば（2つ目の解釈）、
@@ -443,6 +443,8 @@ already imports them. A handle is used as a value:
   (in \`cases\`, and as a row of a decision table). A group of conditions is \`conditions({ key: "<sentence>" })\`.
 - \`Data.price\`: remembered data, as a value; \`Data.price.set(value)\` stores a value (in \`set: [...]\`).
 - \`Query.isMonthEnd\`: the answer of a query without input.
+- \`Query.newId.failed\`: the condition "asking newId failed" (only for a query declared \`mayFail: true\`; for a
+  query asked with an input, the asked node's \`.failed\`). Its meaning is automatic: write no function for it.
 - \`Effect.SendReceipt({ field: value })\`: performs an effect (\`Effect.Refund()\` when it carries nothing), in
   \`emits: [...]\`. \`Effect.IssueCoupon({ type: ... }).onlyWhen(handle)\` performs it only sometimes.
 - \`Calc.amountCharged\`: the result of a calculation.
@@ -492,6 +494,11 @@ missing.
   none). A bare \`{ ... }\` is never a type. Thresholds and strings that appear in your functions and in the
   decision tables are tried by the test automatically; do not copy them into \`around\`. To change a list or a
   record, describe the new value as a calculation and store its result (\`set: [Data.items.set(Calc.itemsWithNew)]\`).
+- A dependency that can fail (the prose says it can be unavailable, time out, refuse) is a query with
+  \`mayFail: true\`. What happens then is a case like any other: \`Query.newId.failed.then({ ... })\`, combined with
+  the other conditions so that only one case holds (\`all(not(If.invalid), Query.newId.failed)\` in a
+  \`conditions({ ... })\` group, when an invalid input is refused whether or not the query would fail). The
+  answer of a failed query must not be read: a case that uses it must not hold when it failed.
 - A query's answers can be promised to be \`fresh: true\` (never the same value twice: an identifier) or
   \`increasing: true\` (never less than before: a clock): \`newId: { output: "string", fresh: true }\`.
   An input field whose value should usually be one the component already remembers is

@@ -52,7 +52,11 @@ The IR describes one component by its boundary.
   something, the fields of that something (\`input\`). The answers can change from one command to the next, so
   ask when the value is needed and do not cache it. \`promise\` (if present) is something the environment
   guarantees about the answers: \`fresh\` means it never answers with the same value twice, \`increasing\`
-  that it never answers with less than before. Rely on it; do not implement it.
+  that it never answers with less than before. Rely on it; do not implement it. \`mayFail\` (if present) means
+  that asking can fail: the dependency throws instead of answering. What happens then is in the conditions
+  named \`query "<name>" failed\` (\`<name>\` is the query, or the name an \`asks\` gave its answer): catch the
+  failure where the query is asked and do what that case says. Ask only when the answer is needed, in the order
+  the conditions imply; a failure of a query the command did not need to ask must not change its outcome.
 - \`model.effects\`: the side effects the component may perform on its environment, with their payload fields.
 - \`model.parts\` (if present): components this one contains. Each entry names the contained component
   (\`component\`), the commands you can call on it (\`commands\`, with their input fields, and \`outputs\`, what they
@@ -60,6 +64,13 @@ The IR describes one component by its boundary.
   Their dependencies come from the same environment as this component's: pass them on to that code. An entry
   with \`by\` is a component of which there are many, one per key (\`by\` names the key): this component creates
   them (\`adds\`), removes them (\`removes\`) and executes a command on the one with a given key (\`at\` in \`calls\`).
+- \`model.durable\` (if present): what this component remembers (its state, its data, and everything it
+  contains) survives a restart of the system, as after a crash or a redeployment. Keep it in storage, not only in
+  memory: the production code is given the location of its storage (the path of a database file) by whoever
+  starts it, and must come back with everything it had when started again on the same location. Use Node's
+  \`node:sqlite\` for it, unless \`durable\` names a store component (\`{ "store": "<component>" }\`): then that
+  component's production code already exists and keeps values for you; use it. Components without \`durable\`
+  start over on a restart. A part marked \`durable\` in \`model.parts\` keeps what it has across a restart.
 - \`model.routes\` (if present): how each command reaches the system from outside, as an HTTP method and path
   (\`"POST /todos"\`, \`"DELETE /todos/:id"\`). The production code serves them over HTTP itself: it includes the
   HTTP server (Node's \`node:http\`), which can be started with its dependencies on a given port (0 for any free

@@ -1,0 +1,48 @@
+{
+  "behaviors": [
+    {
+      "description": "An open item becomes done, and the answer is completed. An item that is already done stays done, and the answer is already-done.",
+      "from": [
+        "OPEN",
+        "DONE"
+      ],
+      "name": "Complete",
+      "onlyIf": [],
+      "when": {
+        "The item is open.": {
+          "goTo": "DONE",
+          "responds": "completed"
+        },
+        "otherwise": {
+          "responds": "already-done"
+        }
+      }
+    }
+  ],
+  "decisions": {},
+  "descriptions": {
+    "component": "One item of a to-do list. It is open until it is completed."
+  },
+  "irVersion": 7,
+  "model": {
+    "commands": {
+      "Complete": {}
+    },
+    "data": {
+      "title": "string"
+    },
+    "effects": {},
+    "init": "OPEN",
+    "outputs": {
+      "Complete": [
+        "completed",
+        "already-done"
+      ]
+    },
+    "queries": {},
+    "states": [
+      "OPEN",
+      "DONE"
+    ]
+  }
+}
