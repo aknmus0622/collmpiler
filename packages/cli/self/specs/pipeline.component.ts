@@ -19,6 +19,7 @@ export const When = conditions({
   passedNewCode: all(If.checkPassed, not(If.existingCode)),
   retry: all(not(If.checkPassed), If.attemptsRemain),
   restart: all(not(If.checkPassed), not(If.attemptsRemain), If.roundsRemain),
+  fromNothing: not(If.existingCode),
 });
 
 export const Query = queries({
@@ -47,9 +48,9 @@ const rejected = [
   When.retry.then({ does: "The attempt number goes up by one. A session of the same phase is started with the new attempt number." }),
   When.restart.then({
     goTo: State.DESIGN,
-    does:
-      "The round number goes up by one and the attempt number goes back to 1. " +
-      "The code is discarded if it was being written from nothing. Then a design session is started in the new round.",
+    // The code is discarded first, if it was being written from nothing
+    emits: [Effect.DiscardCode().onlyWhen(When.fromNothing)],
+    does: "The round number goes up by one and the attempt number goes back to 1. Then a design session is started in the new round.",
   }),
   otherwise({ goTo: State.FAILED }),
 ];

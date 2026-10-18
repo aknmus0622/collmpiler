@@ -59,12 +59,12 @@
           }
         },
         "(not \"The check passed\" and not \"Attempts remain in this phase\" and \"Rounds remain\")": {
-          "does": "The round number goes up by one and the attempt number goes back to 1. The code is discarded if it was being written from nothing. Then a design session is started in the new round.",
+          "does": "The round number goes up by one and the attempt number goes back to 1. Then a design session is started in the new round.",
           "emits": [
             {
               "effect": "DiscardCode",
               "input": {},
-              "onlyWhen": "The code is being written from nothing"
+              "onlyWhen": "not \"Existing code is being changed (the code was not written from nothing)\""
             },
             {
               "effect": "StartSession",
@@ -139,12 +139,12 @@
           }
         },
         "(not \"The check passed\" and not \"Attempts remain in this phase\" and \"Rounds remain\")": {
-          "does": "The round number goes up by one and the attempt number goes back to 1. The code is discarded if it was being written from nothing. Then a design session is started in the new round.",
+          "does": "The round number goes up by one and the attempt number goes back to 1. Then a design session is started in the new round.",
           "emits": [
             {
               "effect": "DiscardCode",
               "input": {},
-              "onlyWhen": "The code is being written from nothing"
+              "onlyWhen": "not \"Existing code is being changed (the code was not written from nothing)\""
             },
             {
               "effect": "StartSession",
@@ -287,12 +287,12 @@
           }
         },
         "(not \"The check passed\" and not \"Attempts remain in this phase\" and \"Rounds remain\")": {
-          "does": "The round number goes up by one and the attempt number goes back to 1. The code is discarded if it was being written from nothing. Then a design session is started in the new round.",
+          "does": "The round number goes up by one and the attempt number goes back to 1. Then a design session is started in the new round.",
           "emits": [
             {
               "effect": "DiscardCode",
               "input": {},
-              "onlyWhen": "The code is being written from nothing"
+              "onlyWhen": "not \"Existing code is being changed (the code was not written from nothing)\""
             },
             {
               "effect": "StartSession",
