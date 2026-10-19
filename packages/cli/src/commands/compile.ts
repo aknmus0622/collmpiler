@@ -6,7 +6,7 @@ import { listComponents, loadSpecs } from "../loader.ts";
 import { seedOf } from "../generate.ts";
 import type { Ir } from "../generate.ts";
 import { describeUnobservable, observability, selfCheck, unreachedCases } from "../runtime.ts";
-import { references } from "../stage1.ts";
+import { mutationVerdict, references, runStage1 } from "../stage1.ts";
 import { typecheckSpecs } from "../typecheck.ts";
 
 export const summary = "仕様を検査して、IR を標準出力に出す";
@@ -68,7 +68,7 @@ for (const name of names) {
   // 仕様のミューテーション: 決定表の値が、検証に現れるか（事前検査に通ったあとで）
   checks.push(async () => {
     if (!spec.model || process.exitCode === 1) return;
-    for (const found of await observability(spec, { seed: seedOf(ir as Ir) })) {
+    for (const found of await observability(spec, { seed: seedOf(ir as Ir) }, (trials) => runStage1(mutationVerdict, trials))) {
       console.error(`${found.severity}[unobservable-value] ${tag}${describeUnobservable(found)}`);
       if (found.severity === "error") process.exitCode = 1;
     }

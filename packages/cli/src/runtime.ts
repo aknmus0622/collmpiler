@@ -780,7 +780,7 @@ export type Unobservable = {
   table: string;
   row: string;
   column: string;
-  value: string | number | boolean;
+  value: string | number | boolean | null;
   verdict: "precondition" | "unobserved" | "rare";
   // 数値と文字列は、ミューテーションのゲートが合否に使う。真偽値は使わないので、ここでも止めない
   severity: "error" | "warning";
@@ -788,7 +788,7 @@ export type Unobservable = {
 export const mutateCell = (cell: string | number | boolean): string | number | boolean =>
   typeof cell === "number" ? cell + 1 : typeof cell === "boolean" ? !cell : `${cell}~`;
 // 検証のシードのほかに確かめるシードの数
-const EXTRA_SEEDS = 2;
+export const EXTRA_SEEDS = 2;
 
 // 一度も成り立たない場合: コマンドの場合 (when) のうち、仕様を実行しても一度も当たらないもの。
 // いつも偽の条件、届かない入力、ほかの場合と取り違えた条件の文などで起きる。その場合の結果は検証されない。
@@ -822,62 +822,102 @@ export async function unreachedCases(input: SpecInput, params: { seed?: number; 
   return missing();
 }
 
-export async function observability(input: SpecInput, params: { seed?: number; numRuns?: number } = {}): Promise<Unobservable[]> {
+// 値1つの試行: 決定表の値を1つ変えた仕様を、指定したシードで走らせる（判断を持たない糊。走らせること自体は意味の実行で、N12）。
+// extra: 検証のシードに足す数（0 なら検証のシード）
+export type CellTrial = {
+  table: string;
+  row: string;
+  column: string;
+  value: string | number | boolean | null;
+  run(extra: number): Promise<{ changed: boolean; enablementDiffers: boolean }>;
+};
+export function cellTrials(input: SpecInput, params: { seed?: number; numRuns?: number } = {}): CellTrial[] {
   const { model, binding } = input;
   if (!model || !binding) return [];
   const original = simulator(input, model, binding);
-  const found: Unobservable[] = [];
+  const trials: CellTrial[] = [];
   for (const [table, rows] of Object.entries(input.decisions)) {
     for (const [row, cells] of Object.entries(rows)) {
       for (const [column, cell] of Object.entries(cells)) {
-        if (cell === null) continue;
-        // 値を1つ変えた仕様。解釈の関数はそのままで、決定表だけが違う
-        const decisions = { ...input.decisions, [table]: { ...rows, [row]: { ...cells, [column]: mutateCell(cell) } } };
-        const mutatedBinding = { ...binding, component: { ...binding.component, decisions } };
-        const mutated = simulator({ ...input, decisions, binding: mutatedBinding }, model, mutatedBinding, literalsIn(binding));
-        let enablementDiffers = false;
-        const outcomeDiffers = (raw: RawStep[]): boolean => {
-          let left = original.start();
-          let right = mutated.start();
-          for (const rawStep of raw) {
-            const expected = original.next(left, rawStep, []);
-            // 変えた仕様が、同じ場面で選ぶコマンド（実行できるかどうかの違いを見る）
-            let chosen: string | undefined;
-            try {
-              chosen = mutated.next(right, rawStep, [])?.step.command;
-            } catch (error) {
-              if (!(error instanceof SpecError)) throw error;
+        const value = cell as string | number | boolean | null;
+        const run = async (extra: number) => {
+          // 値を1つ変えた仕様。解釈の関数はそのままで、決定表だけが違う
+          const decisions = { ...input.decisions, [table]: { ...rows, [row]: { ...cells, [column]: mutateCell(value as string | number | boolean) } } };
+          const mutatedBinding = { ...binding, component: { ...binding.component, decisions } };
+          const mutated = simulator({ ...input, decisions, binding: mutatedBinding }, model, mutatedBinding, literalsIn(binding));
+          let enablementDiffers = false;
+          const outcomeDiffers = (raw: RawStep[]): boolean => {
+            let left = original.start();
+            let right = mutated.start();
+            for (const rawStep of raw) {
+              const expected = original.next(left, rawStep, []);
+              // 変えた仕様が、同じ場面で選ぶコマンド（実行できるかどうかの違いを見る）
+              let chosen: string | undefined;
+              try {
+                chosen = mutated.next(right, rawStep, [])?.step.command;
+              } catch (error) {
+                if (!(error instanceof SpecError)) throw error;
+              }
+              if (chosen !== expected?.step.command) enablementDiffers = true;
+              if (!expected) continue;
+              // 元の仕様が実行するコマンドを、変えた仕様でも実行して、結果を比べる
+              let changed: ReturnType<typeof mutated.next>;
+              try {
+                changed = mutated.next(right, rawStep, [], expected.step.command);
+              } catch (error) {
+                // 変えた値が型に合わなくなるなど。値が結果に届いている
+                if (error instanceof SpecError) return true;
+                throw error;
+              }
+              if (!changed || !isDeepStrictEqual(expected.expected, changed.expected)) return true;
+              left = expected.after;
+              right = changed.after;
             }
-            if (chosen !== expected?.step.command) enablementDiffers = true;
-            if (!expected) continue;
-            // 元の仕様が実行するコマンドを、変えた仕様でも実行して、結果を比べる
-            let changed: ReturnType<typeof mutated.next>;
-            try {
-              changed = mutated.next(right, rawStep, [], expected.step.command);
-            } catch (error) {
-              // 変えた値が型に合わなくなるなど。値が結果に届いている
-              if (error instanceof SpecError) return true;
-              throw error;
-            }
-            if (!changed || !isDeepStrictEqual(expected.expected, changed.expected)) return true;
-            left = expected.after;
-            right = changed.after;
-          }
-          return false;
+            return false;
+          };
+          const seed = extra === 0 ? params.seed : (params.seed ?? 0) + extra;
+          const details = await fc.check(fc.property(original.sequences, (raw) => !outcomeDiffers(raw)), { numRuns: DEFAULT_RUNS, ...params, ...(seed === undefined ? {} : { seed }) });
+          return { changed: details.failed, enablementDiffers };
         };
-        const seenWith = async (seed: number | undefined) =>
-          (await fc.check(fc.property(original.sequences, (raw) => !outcomeDiffers(raw)), { numRuns: DEFAULT_RUNS, ...params, ...(seed === undefined ? {} : { seed }) })).failed;
-        // 検証と同じシードで現れれば、それでよい
-        if (await seenWith(params.seed)) continue;
-        // 現れなかった: ほかのシードでも確かめる
-        let elsewhere = false;
-        for (let extra = 1; extra <= EXTRA_SEEDS && !elsewhere; extra++) elsewhere = await seenWith((params.seed ?? 0) + extra);
-        const verdict = elsewhere ? "rare" : enablementDiffers ? "precondition" : "unobserved";
-        found.push({ table, row, column, value: cell, verdict, severity: verdict === "rare" || typeof cell === "boolean" ? "warning" : "error" });
+        trials.push({ table, row, column, value, run });
       }
     }
   }
+  return trials;
+}
+
+// 判定 (Stage 0、手書き)。フレームワーク自身の仕様 (self/specs/mutation-verdict.*) から生成した部品 (Stage 1) でも下せる
+export async function verdictStage0(trials: CellTrial[]): Promise<Unobservable[]> {
+  const found: Unobservable[] = [];
+  for (const trial of trials) {
+    if (trial.value === null) continue;
+    // 実行できるかどうかが変わったかは、この値のどの試行でも見る
+    let enablementDiffers = false;
+    const tried = async (extra: number) => {
+      const result = await trial.run(extra);
+      enablementDiffers ||= result.enablementDiffers;
+      return result.changed;
+    };
+    // 検証と同じシードで現れれば、それでよい
+    if (await tried(0)) continue;
+    // 現れなかった: ほかのシードでも確かめる
+    let elsewhere = false;
+    for (let extra = 1; extra <= EXTRA_SEEDS && !elsewhere; extra++) elsewhere = await tried(extra);
+    const verdict = elsewhere ? "rare" : enablementDiffers ? "precondition" : "unobserved";
+    const { table, row, column, value } = trial;
+    found.push({ table, row, column, value, verdict, severity: verdict === "rare" || typeof value === "boolean" ? "warning" : "error" });
+  }
   return found;
+}
+
+// judge: 判定を下すもの。省略時か、実行できなかった (undefined) ときは Stage 0
+export async function observability(
+  input: SpecInput,
+  params: { seed?: number; numRuns?: number } = {},
+  judge?: (trials: CellTrial[]) => Promise<Unobservable[] | undefined>,
+): Promise<Unobservable[]> {
+  const trials = cellTrials(input, params);
+  return (await judge?.(trials)) ?? verdictStage0(trials);
 }
 
 // 検証に現れない値についての、利用者向けの説明

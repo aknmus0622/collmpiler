@@ -1,7 +1,8 @@
 import { effectOccurrences, isReference, kindOf, payloadEvents, referenceEvents, structuredVocabulary, valuesToWrite, writeEvent } from "./extract.ts";
 import type { PayloadDiagnostic, ReferenceDiagnostic, SpecInput } from "./extract.ts";
 import { isEnum, isNumberSchema } from "./schema.ts";
-import type { Adapter } from "./runtime.ts";
+import { EXTRA_SEEDS } from "./runtime.ts";
+import type { Adapter, CellTrial, Unobservable } from "./runtime.ts";
 import { fileURLToPath } from "node:url";
 import { staleness } from "./verified.ts";
 
@@ -162,6 +163,44 @@ export const valueWriter: Stage1Part<SpecInput, Map<string, unknown>> = {
       else throw new Error(`値 ${slot} に対して、答えが想定と違います: ${JSON.stringify(written)}`);
     }
     return values;
+  },
+};
+
+// 仕様のミューテーションの判定 (mutation-verdict)。値を1つずつ渡し、部品が頼んだ試行 (RunTrials) を走らせて、結果 (Tried) を返す。
+// 部品が報告したもの (Report) が、検証に現れない値
+export const mutationVerdict: Stage1Part<CellTrial[], Unobservable[]> = {
+  component: "mutation-verdict",
+  async run(adapter, trials) {
+    const found: Unobservable[] = [];
+    const requested: ({ name: "RunTrials"; extra: number } | { name: "Report"; verdict: Unobservable["verdict"]; severity: Unobservable["severity"] })[] = [];
+    await adapter.setupIsolation({
+      queries: {},
+      effects: {
+        RunTrials: ({ extra }: { extra: number }) => void requested.push({ name: "RunTrials", extra }),
+        Report: ({ verdict, severity }: { verdict: Unobservable["verdict"]; severity: Unobservable["severity"] }) => void requested.push({ name: "Report", verdict, severity }),
+      },
+    });
+    try {
+      for (const trial of trials) {
+        const { table, row, column, value } = trial;
+        requested.length = 0;
+        await adapter.executeCommand({ name: "Begin", input: { kind: value === null ? "null" : typeof value } });
+        // 頼まれたことを、頼まれた順に行う。試行は、値1つにつき、検証のシードとほかのシードの数まで
+        let runs = 0;
+        while (requested.length > 0) {
+          const request = requested.shift()!;
+          if (request.name === "Report") {
+            found.push({ table, row, column, value, verdict: request.verdict, severity: request.severity });
+            continue;
+          }
+          if (++runs > 1 + EXTRA_SEEDS) throw new Error(`mutation-verdict が、値 ${table}.${row}.${column} について、試行を ${runs} 回頼みました`);
+          await adapter.executeCommand({ name: "Tried", input: await trial.run(request.extra) });
+        }
+      }
+    } finally {
+      await adapter.teardownIsolation();
+    }
+    return found;
   },
 };
 

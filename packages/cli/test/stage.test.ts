@@ -6,7 +6,9 @@ import { pathToFileURL } from "node:url";
 import { after, test } from "node:test";
 import { extract, payloadDiagnostics, referenceDiagnostics, referenceEvents, serialize, stableStringify, structuredVocabulary, valuesToWrite } from "../src/extract.ts";
 import { listComponents, loadSpecs } from "../src/loader.ts";
-import { references, stage1Payloads, stage1References, stage1Values } from "../src/stage1.ts";
+import { mutationVerdict, references, runStage1, stage1Payloads, stage1References, stage1Values } from "../src/stage1.ts";
+import { verdictStage0 } from "../src/runtime.ts";
+import type { CellTrial } from "../src/runtime.ts";
 import { implement } from "../src/loop.ts";
 import type { ImplementationStrategy } from "../src/strategy.ts";
 import { staleness } from "../src/verified.ts";
@@ -294,6 +296,7 @@ test("自分自身の検証: 自分の生成物の上で動くフレームワー
   assert.equal(result.status, "pass");
   assert.deepEqual(called, []);
   assert.deepEqual(result.attempts.map((a) => `${a.component}:${a.phase}:${a.attempt}:${a.feedback?.kind ?? "ok"}`), [
+    "mutation-verdict:implementation:0:ok",
     "payload-check:implementation:0:ok",
     "pipeline:implementation:0:ok",
     "reference-check:implementation:0:ok",
@@ -519,4 +522,41 @@ test("パイプライン: 仕様に無い指定 (--from、範囲の外の回数)
   const many = await run({}, { mutation: null, maxAttempts: 4 });
   assert.deepEqual(many.stages, { order: 0 });
   assert.equal(many.status, "pass");
+});
+
+test("Stage 1: 仕様のミューテーションの判定は、手書きの版 (Stage 0) と同じ判定を、同じ順に返す (N10b)", async () => {
+  // 試行の結果を台本で与える: シードごとに、結果が変わったか、実行できるかが変わったか
+  const scripted = (value: CellTrial["value"], runs: [changed: boolean, enablementDiffers: boolean][], asked: number[] = []): CellTrial => ({
+    table: "t",
+    row: `r${asked.length}`,
+    column: JSON.stringify(value) + runs.map(([c, e]) => `${+c}${+e}`).join(""),
+    value,
+    run: async (extra) => {
+      asked.push(extra);
+      const [changed, enablementDiffers] = runs[extra] ?? [false, false];
+      return { changed, enablementDiffers };
+    },
+  });
+  const cases: [CellTrial["value"], [boolean, boolean][]][] = [
+    [null, []],
+    [5, [[true, false]]],
+    [5, [[false, false], [true, false]]],
+    [5, [[false, false], [false, false], [true, true]]],
+    [5, [[false, false], [false, false], [false, false]]],
+    [5, [[false, true], [false, false], [false, false]]],
+    [5, [[false, false], [false, false], [false, true]]],
+    ["Gold", [[false, false], [false, false], [false, false]]],
+    [true, [[false, false], [false, false], [false, false]]],
+    [false, [[false, true], [false, false], [false, false]]],
+    [true, [[false, false], [true, false]]],
+  ];
+  const stage0Asked: number[][] = cases.map(() => []);
+  const stage1Asked: number[][] = cases.map(() => []);
+  const stage0 = await verdictStage0(cases.map(([value, runs], index) => scripted(value, runs, stage0Asked[index])));
+  const stage1 = await runStage1(mutationVerdict, cases.map(([value, runs], index) => scripted(value, runs, stage1Asked[index])));
+  assert.ok(stage1, "Stage 1 が実行できること");
+  assert.deepEqual(stage1.map(({ column, verdict, severity }) => [column, verdict, severity]), stage0.map(({ column, verdict, severity }) => [column, verdict, severity]));
+  // 頼む試行も、同じ順に同じだけ
+  assert.deepEqual(stage1Asked, stage0Asked);
+  assert.ok(stage0.length >= 6);
 });

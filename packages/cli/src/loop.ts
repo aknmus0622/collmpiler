@@ -16,7 +16,7 @@ import type { MutationStrategy } from "./mutation.ts";
 import { PHASES } from "./request.ts";
 import type { Phase } from "./request.ts";
 import { DEFAULT_RUNS, defaultRuns, describeUnobservable, observability, selfCheck, unreachedCases } from "./runtime.ts";
-import { references, stage1Adapter, stage1Unavailable } from "./stage1.ts";
+import { mutationVerdict, references, runStage1, stage1Adapter, stage1Unavailable } from "./stage1.ts";
 import type { StaticCheckStrategy } from "./static-check.ts";
 import { clearVerified, writeVerified } from "./verified.ts";
 import type { ImplementationStrategy } from "./strategy.ts";
@@ -135,7 +135,7 @@ export async function implement(options: ImplementOptions) {
     for (const found of await unreachedCases(spec, { seed: seedOf(ir), numRuns: options.runs ?? DEFAULT_RUNS })) {
       log(`注意 (${name}): ${found.command}.${found.case}: 仕様を実行しても、この場合には一度も当たりませんでした（この場合の結果は検証されません）`);
     }
-    const unobservable = await observability(spec, { seed: seedOf(ir), numRuns: options.runs ?? DEFAULT_RUNS });
+    const unobservable = await observability(spec, { seed: seedOf(ir), numRuns: options.runs ?? DEFAULT_RUNS }, (trials) => runStage1(mutationVerdict, trials));
     for (const found of unobservable.filter((entry) => entry.severity === "warning")) log(`注意 (${name}): ${describeUnobservable(found)}`);
     const blocking = unobservable.filter((entry) => entry.severity === "error");
     if (blocking.length > 0) {
