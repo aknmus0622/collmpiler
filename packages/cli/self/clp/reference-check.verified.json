@@ -4,8 +4,10 @@
     "reference-check.interpretation.ts"
   ],
   "specs": "sha256:972035f913c35ed8f6ca9e786a11512f48bcb9d5c697adeff29ee88d41c8b45b",
-  "code": "sha256:a4e8e2fba7fc82711eff65364fc2d198da97ca750b2099cebb0bee184445094f",
+  "code": "sha256:62eaf03118ae1731adb68f26966dbd9fab0aa02b642adc143e5cd39b2583b8ab",
   "files": [
+    "../src/gate-rules/gate-rules.ts",
+    "../src/gate-rules/types.ts",
     "../src/graph-check/graph-check.ts",
     "../src/graph-check/rules.ts",
     "../src/graph-check/types.ts",

@@ -11,7 +11,12 @@ import { stableStringify } from "./extract.ts";
 import { FILES, TEST_DIR } from "./generate.ts";
 import type { Ir } from "./generate.ts";
 import { decisionValues, judge, judgeEvents } from "./mutation.ts";
-import { judgeDecided } from "./stage1.ts";
+import { gateVerdict, judgeDecided } from "./stage1.ts";
+import { changedFileStage0, mutationSiteStage0, partFileStage0, removedInputStage0, sandboxFileStage0, testsStage0, wiringStage0 } from "./rules.ts";
+import type { SandboxFileVerdict } from "./rules.ts";
+// 作業場所のファイルの判定のうち、厳しいほう: 違反は、取り出す・残すより厳しい
+const SANDBOX_VIOLATIONS = new Set<SandboxFileVerdict>(["toolchain-modified", "not-regular", "unexpected", "input-modified"]);
+const strictSandbox = (a: SandboxFileVerdict, b: SandboxFileVerdict) => (SANDBOX_VIOLATIONS.has(a) ? a : SANDBOX_VIOLATIONS.has(b) ? b : a);
 import type { MutationStrategy } from "./mutation.ts";
 import { ASSETS_DIR, renderRequest } from "./request.ts";
 import type { RequestSections } from "./request.ts";
@@ -108,7 +113,6 @@ const posix = (path: string) => path.split(sep).join("/");
 const isInside = (dir: string, path: string) => path === dir || path.startsWith(dir + sep);
 
 // その段階でエージェントが書いてよい場所
-const writable = (ws: Workspace, phase: Phase, rel: string) => (phase === "wiring" ? rel === ws.paths.adapter : isSource(ws, rel));
 
 function filesUnder(root: string): { rel: string; entry: Dirent }[] {
   if (!existsSync(root)) return [];
@@ -276,27 +280,31 @@ export async function exitGate(ctx: GateContext, sandbox: Sandbox): Promise<Gate
 
   // 1. 作業場所の監査: 取り出すのは、その段階で書いてよい場所だけ。それ以外の変化は違反
   const found = new Set<string>();
+  // 判定は rules.ts (Stage 0) と、使えれば生成した部品 (gate-rules) の厳しい側。ここは事実を集めて、判定に従う
+  const where = (rel: string) => ({ phase, isAdapter: rel === ADAPTER, isSource: isSource(ws, rel) });
   for (const { rel, entry } of filesUnder(sandbox.dir)) {
     found.add(rel);
-    if (rel.startsWith(".") || rel === REQUEST) continue;
-    if (sandbox.toolchain && rel in sandbox.toolchain) {
-      if (!entry.isFile() || readFileSync(join(sandbox.dir, rel), "utf8") !== sandbox.toolchain[rel]) {
-        violations.push({ file: rel, rule: "read-only-file-modified", message: "This file is a tool's file (type definitions); it may not be edited." });
-      }
-      continue;
-    }
-    if (!entry.isFile()) {
-      violations.push({ file: rel, rule: "unexpected-file", message: "Only regular files are allowed (no symlinks)." });
-    } else if (writable(ws, phase, rel)) {
-      outputs.push(rel);
-    } else if (!(rel in sandbox.inputs)) {
-      violations.push({ file: rel, rule: "unexpected-file", message: "This step may not create files here." });
-    } else if (readFileSync(join(sandbox.dir, rel), "utf8") !== sandbox.inputs[rel]) {
-      violations.push({ file: rel, rule: "read-only-file-modified", message: "This step may not edit this file." });
-    }
+    const toolchain = sandbox.toolchain !== undefined && rel in sandbox.toolchain;
+    const content = () => readFileSync(join(sandbox.dir, rel), "utf8");
+    const facts = {
+      hidden: rel.startsWith(".") || rel === REQUEST,
+      toolchain,
+      toolchainIntact: toolchain && entry.isFile() && content() === sandbox.toolchain![rel],
+      regular: entry.isFile(),
+      ...where(rel),
+      input: rel in sandbox.inputs,
+      inputIntact: rel in sandbox.inputs && entry.isFile() && content() === sandbox.inputs[rel],
+    };
+    const verdict = await gateVerdict("SandboxFile", facts, sandboxFileStage0(facts), strictSandbox);
+    if (verdict === "take") outputs.push(rel);
+    else if (verdict === "toolchain-modified") violations.push({ file: rel, rule: "read-only-file-modified", message: "This file is a tool's file (type definitions); it may not be edited." });
+    else if (verdict === "not-regular") violations.push({ file: rel, rule: "unexpected-file", message: "Only regular files are allowed (no symlinks)." });
+    else if (verdict === "unexpected") violations.push({ file: rel, rule: "unexpected-file", message: "This step may not create files here." });
+    else if (verdict === "input-modified") violations.push({ file: rel, rule: "read-only-file-modified", message: "This step may not edit this file." });
   }
   for (const rel of Object.keys(sandbox.inputs)) {
-    if (rel !== REQUEST && !writable(ws, phase, rel) && !found.has(rel)) {
+    if (rel === REQUEST || found.has(rel)) continue;
+    if ((await gateVerdict("Removed", where(rel), removedInputStage0(where(rel)), (a, b) => (a === "removed" ? a : b))) === "removed") {
       violations.push({ file: rel, rule: "read-only-file-modified", message: "This step may not remove this file." });
     }
   }
@@ -312,7 +320,8 @@ export async function exitGate(ctx: GateContext, sandbox: Sandbox): Promise<Gate
   if (phase !== "wiring") {
     for (const rel of ctx.partFiles ?? []) {
       const now = existsSync(join(ws.root, rel)) ? readFileSync(join(ws.root, rel), "utf8") : undefined;
-      if (now === ctx.before[rel] || ctx.before[rel] === undefined) continue;
+      const facts = { changed: now !== ctx.before[rel], existedBefore: ctx.before[rel] !== undefined };
+      if ((await gateVerdict("PartFile", facts, partFileStage0(facts), (a, b) => (a === "restore" ? a : b))) !== "restore") continue;
       mkdirSync(dirname(join(ws.root, rel)), { recursive: true });
       writeFileSync(join(ws.root, rel), ctx.before[rel]);
       violations.push({
@@ -398,8 +407,10 @@ async function judgeOutput(
     // （アダプターが振る舞いを肩代わりしているか、未実装の部分を呼んでいない）。
     // 未実装の部分が無いとき（仕様の変更が、すでにあるコードで満たされている）は、合格してよい
     const unimplemented = sourceFiles(ws).some((rel) => readFileSync(join(ws.root, rel), "utf8").includes(target.notImplemented));
-    if (result.status === "pass") {
-      if (!unimplemented) return { ...ran };
+    const error = result.status === "pass" ? undefined : "error" in result.actual ? result.actual.error : undefined;
+    const facts = { passed: result.status === "pass", unimplemented, error: error === undefined ? ("none" as const) : error.includes(target.notImplemented) ? ("not-implemented" as const) : ("other" as const) };
+    const verdict = await gateVerdict("Wiring", facts, wiringStage0(facts), (a, b) => (a !== "ok" ? a : b));
+    if (verdict === "passes-unimplemented") {
       return {
         feedback: {
           kind: "red",
@@ -408,8 +419,7 @@ async function judgeOutput(
         },
       };
     }
-    const error = "error" in result.actual ? result.actual.error : undefined;
-    if (error !== undefined && !error.includes(target.notImplemented)) {
+    if (verdict === "adapter-error") {
       return {
         feedback: {
           kind: "red",
@@ -421,7 +431,8 @@ async function judgeOutput(
   }
 
   // 緑: 合格しなければならない
-  if (result.status !== "pass") return { ...ran, feedback: { kind: "pbt", result } };
+  const green = { passed: result.status === "pass", purpose: "implementation" as const };
+  if ((await gateVerdict("Tests", green, testsStage0(green), (a, b) => (a !== "ok" ? a : b))) !== "ok") return { ...ran, feedback: { kind: "pbt", result } };
 
   // 回帰: 同じ本番コードを使う、ほかのコンポーネントの検証が通り続けていること
   const usedByOthers: Usage[] = [];
@@ -431,7 +442,8 @@ async function judgeOutput(
     writeFileSync(join(other.ws.root, other.ws.paths.verify), target.generate.verify(other.ir, other.ws, ctx.specsDir));
     const { usage: used, ...regression } = runVerify(ctx, other, true);
     if (regression.result?.status === "error") throw new Error(`PBT を実行できませんでした (${other.name}): ${regression.result.message}`);
-    if (regression.result?.status !== "pass") {
+    const passed = { passed: regression.result?.status === "pass", purpose: "regression" as const };
+    if ((await gateVerdict("Tests", passed, testsStage0(passed), (a, b) => (a !== "ok" ? a : b))) !== "ok") {
       return { ...ran, feedback: { kind: "regression", component: other.name, ...regression } };
     }
     if (used) usedByOthers.push(used);
@@ -444,9 +456,11 @@ async function judgeOutput(
   //   ほかのコンポーネントだけが使っている … このコンポーネントのために変える理由が無い。元に戻して差し戻す
   if (usage) {
     const read = (rel: string) => (existsSync(join(ws.root, rel)) ? readFileSync(join(ws.root, rel), "utf8") : undefined);
-    const foreign = Object.keys(ctx.before).filter(
-      (rel) => read(rel) !== ctx.before[rel] && !usage.uses(rel) && !target.inert?.(ws, rel) && usedByOthers.some((other) => other.uses(rel)),
-    );
+    const foreign: string[] = [];
+    for (const rel of Object.keys(ctx.before)) {
+      const facts = { changed: read(rel) !== ctx.before[rel], usedByThis: usage.uses(rel), inert: target.inert?.(ws, rel) ?? false, usedByOthers: usedByOthers.some((other) => other.uses(rel)) };
+      if ((await gateVerdict("ChangedFile", facts, changedFileStage0(facts), (a, b) => (a === "out-of-scope" ? a : b))) === "out-of-scope") foreign.push(rel);
+    }
     if (foreign.length > 0) {
       for (const rel of foreign) writeFileSync(join(ws.root, rel), ctx.before[rel]);
       return {
@@ -467,6 +481,12 @@ async function judgeOutput(
   // ミューテーション: 本番コードを壊して PBT が落ちることを確かめる。合否の基準はゲート (judge) が持つ
   if (!ctx.mutation) return { ...ran };
   const values = decisionValues(ctx.ir);
+  // 壊す範囲の判定は、4つの事実だけで決まる。壊す処理は同期なので、事実の組み合わせすべてについて、前もって判定を下しておく
+  const breaks = new Map<string, boolean>();
+  for (const bits of [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]) {
+    const facts = { executedByThis: (bits & 1) > 0, executedByOthers: (bits & 2) > 0, fileUsedByThis: (bits & 4) > 0, fileUsedByOthers: (bits & 8) > 0 };
+    breaks.set(JSON.stringify(facts), await gateVerdict("Site", facts, mutationSiteStage0(facts), (a, b) => a || b));
+  }
   const report = await ctx.mutation.run({
     root: ws.root,
     // 含む部品のコードは壊さない（そちらの検証で済んでいる。ここで壊しても、この部品の誤りではない）
@@ -480,8 +500,14 @@ async function judgeOutput(
     ...(usage
       ? {
           executed: (file: string, offset: number) =>
-            usage.executed(file, offset) ||
-            (!usedByOthers.some((other) => other.executed(file, offset)) && (usage.uses(file) || !usedByOthers.some((other) => other.uses(file)))),
+            breaks.get(
+              JSON.stringify({
+                executedByThis: usage.executed(file, offset),
+                executedByOthers: usedByOthers.some((other) => other.executed(file, offset)),
+                fileUsedByThis: usage.uses(file),
+                fileUsedByOthers: usedByOthers.some((other) => other.uses(file)),
+              }),
+            )!,
         }
       : {}),
     test: () => runVerify(ctx).result?.status === "pass",

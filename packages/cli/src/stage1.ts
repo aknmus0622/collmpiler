@@ -10,6 +10,17 @@ import type { FieldSchema, LeafFacts, LeafReport, Node, TreeReport } from "@clp/
 import type { LoadJudges } from "./loader.ts";
 import { hashFiles, staleness } from "./verified.ts";
 import { judgeEvents, judgeStage0 } from "./mutation.ts";
+import { changedFileStage0, mutationSiteStage0, partFileStage0, removedInputStage0, sandboxFileStage0, testsStage0, wiringStage0 } from "./rules.ts";
+// 出口の門の判定の Stage 0 (事例の集まりで、生成した部品と比べる相手)
+const GATE_RULES_STAGE0 = {
+  SandboxFile: sandboxFileStage0,
+  Removed: removedInputStage0,
+  PartFile: partFileStage0,
+  Wiring: wiringStage0,
+  Tests: testsStage0,
+  ChangedFile: changedFileStage0,
+  Site: mutationSiteStage0,
+} as const;
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -54,6 +65,7 @@ function fallback(component: string, error: unknown): undefined {
 // これらは、つねに Stage 0 が採点し (R1)、その記録があるときだけ使い (R2)、人が Stage 0 を直したら使わない (R5)
 export const R1_COMPONENTS: Record<string, readonly string[]> = {
   "mutation-judge": ["mutation.ts"],
+  "gate-rules": ["rules.ts"],
 };
 export const stage0HashOf = (component: string) => hashFiles(fileURLToPath(new URL(".", import.meta.url)), R1_COMPONENTS[component] ?? []);
 // R1: 採点の部品を作り直す実行では、採点の判断をすべて Stage 0 が下す。切り替えるオプションは持たない
@@ -488,9 +500,30 @@ export async function judgeDecided(events: JudgeEvent[]): Promise<JudgeReport[]>
   return grade(judgePart, events, judgeStage0(events), union, same);
 }
 
+// 出口の門の判定 (gate-rules、採点の部品)。問い1つを、1回の隔離で尋ねる
+const gateRulesPart: Stage1Part<{ name: string; input: object }, unknown> = {
+  component: "gate-rules",
+  async run(adapter, question) {
+    const [answer] = await session(adapter, { queries: {}, effects: {} }, [question]);
+    return answer;
+  },
+};
+// 判定を下す (R4): Stage 0 と、使えれば Stage 1 の厳しい側。strict は、2つの判定から厳しいほうを選ぶ
+export function gateVerdict<R>(name: string, facts: object, stage0: R, strict: (a: R, b: R) => R): Promise<R> {
+  return grade(gateRulesPart as Stage1Part<{ name: string; input: object }, R>, { name, input: facts }, stage0, strict, (a, b) => JSON.stringify(a) === JSON.stringify(b));
+}
+
 // 採点の部品の事例の集まり (R3)。事例は入力だけ（期待値は持たない: 同じ入力で Stage 0 が判断したもの）。
 // compare は、1つの事例を Stage 0 と、渡したアダプターの両方で判断し、食い違えばその説明を返す
 export const R1_CASES: Record<string, { compare(adapter: Adapter, given: unknown): Promise<string | undefined> }> = {
+  "gate-rules": {
+    async compare(adapter, given) {
+      const { name, input } = given as { name: keyof typeof GATE_RULES_STAGE0; input: never };
+      const stage0 = GATE_RULES_STAGE0[name](input);
+      const stage1 = await gateRulesPart.run(adapter, { name, input });
+      return JSON.stringify(stage0) === JSON.stringify(stage1) ? undefined : `${name} ${JSON.stringify(input)}: Stage 0 ${JSON.stringify(stage0)}、Stage 1 ${JSON.stringify(stage1)}`;
+    },
+  },
   "mutation-judge": {
     async compare(adapter, given) {
       const { mutants, values, adapter: adapterSource, shared } = given as { mutants: { value?: string | number; killed: boolean }[]; values: (string | number)[]; adapter: string; shared: boolean };

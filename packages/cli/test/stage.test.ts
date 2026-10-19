@@ -301,6 +301,7 @@ test("自分自身の検証: 自分の生成物の上で動くフレームワー
   assert.equal(result.status, "pass");
   assert.deepEqual(called, []);
   assert.deepEqual(result.attempts.map((a) => `${a.component}:${a.phase}:${a.attempt}:${a.feedback?.kind ?? "ok"}`), [
+    "gate-rules:implementation:0:ok",
     "graph-check:implementation:0:ok",
     "interpret-flow:implementation:0:ok",
     "leaf-check:implementation:0:ok",
@@ -864,4 +865,17 @@ test("採点の部品 (N11): ミューテーションの合否は、事例の集
   writeFileSync(join(copy, "clp/mutation-judge.adapter.ts"), `export const adapter = { async setupIsolation() {}, async teardownIsolation() {}, async executeCommand() {}, async getCurrentState() { return "VALUES"; } };\n`);
   const checked = runCases(specs, workspace(copy), "mutation-judge");
   assert.match(checked.problem ?? "", /事例 \d+: Stage 0/);
+});
+
+test("採点の部品 (N11c / N11d): 出口の門の判定は、事実のすべての組み合わせで Stage 0 と同じ判定を返す", async () => {
+  const { R1_CASES, runCases, stage1Adapter } = await import("../src/stage1.ts");
+  const self = join(repoRoot, "packages/cli/self");
+  const adapter = await stage1Adapter("gate-rules");
+  assert.ok(adapter, "Stage 0 が採点した記録があり、使えること (R2)");
+  const cases = JSON.parse(readFileSync(join(self, "cases/gate-rules.json"), "utf8")).cases as unknown[];
+  assert.ok(cases.length > 800);
+  for (const given of cases) assert.equal(await R1_CASES["gate-rules"].compare(adapter, given), undefined, JSON.stringify(given));
+  const { resolveLayout, workspaceOf } = await import("../src/layout.ts");
+  const { typescriptTarget } = await import("../src/target-typescript.ts");
+  assert.equal(runCases(join(self, "specs"), workspaceOf(resolveLayout({ out: self }), typescriptTarget.files, "gate-rules"), "gate-rules").problem, undefined);
 });

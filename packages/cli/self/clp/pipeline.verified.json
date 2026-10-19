@@ -4,8 +4,10 @@
     "pipeline.interpretation.ts"
   ],
   "specs": "sha256:cd2a330ce6f8bb602beb0281b621b0dc25debef9ecbba63578f8ad77c236b594",
-  "code": "sha256:d8484819ec8bc29b7d95c54338b68f5dbc759ed4026285d13e610cfcb8819fae",
+  "code": "sha256:5da6f30c155067310a2b7ef35b43998dbee50a42f2cdd029fda22e580e67a01a",
   "files": [
+    "../src/gate-rules/gate-rules.ts",
+    "../src/gate-rules/types.ts",
     "../src/graph-check/graph-check.ts",
     "../src/graph-check/rules.ts",
     "../src/graph-check/types.ts",

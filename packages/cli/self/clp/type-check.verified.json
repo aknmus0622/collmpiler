@@ -4,8 +4,10 @@
     "type-check.interpretation.ts"
   ],
   "specs": "sha256:36faa2eaa25778c581911bdaee6aa72a52617a4b172beab2c1dbf0da15270e4b",
-  "code": "sha256:7aa09c3c2ec81a758d8cec19794ba0fcb8a34f77236148d80f04f56376ea0451",
+  "code": "sha256:b715aeb5dcba151c853f14708ce49f8fd7c6355162818f09ab132d3bfc0175e3",
   "files": [
+    "../src/gate-rules/gate-rules.ts",
+    "../src/gate-rules/types.ts",
     "../src/graph-check/graph-check.ts",
     "../src/graph-check/rules.ts",
     "../src/graph-check/types.ts",
