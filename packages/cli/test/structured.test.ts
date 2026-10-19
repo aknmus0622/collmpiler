@@ -122,8 +122,8 @@ test("構造を持つ値: 並びとフィールドの組を、データ・結果
   assert.match(contract, /Add: \{ result: "created" \| "invalid"; todo: \{ done: boolean; id: string; title: string \} \| null \};/);
   assert.match(contract, /List: \{ done: boolean; id: string; title: string \}\[\];/);
   assert.match(contract, /\/\*\* Never answers with the same value twice\. \*\/ newId\(\): string;/);
-  // 構造を持つ値の検査は、手書きの版 (Stage 0) が行う（セルフホストした部品の仕様の範囲の外）
-  assert.equal(await stage1Payloads(spec), undefined);
+  // 構造を持つ値の置き場所も Stage 1 が検査する。構造を持つ型どうしの比べ方だけは、Stage 0 の結果を事実として渡す
+  assert.deepEqual(await stage1Payloads(spec), []);
   assert.deepEqual(await selfCheck(spec, { seed: 1, numRuns: 300 }), { ok: true, numRuns: 300 });
 });
 

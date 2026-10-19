@@ -4,7 +4,7 @@
     "graph-check.interpretation.ts"
   ],
   "specs": "sha256:41e93d67e41ecfcb9661b8c39dcdb7df4d8a14563b719782c1845afbe8b79765",
-  "code": "sha256:00ce105904b0be5e90e8d6d22ceb23b1ee45e3fe9ed61e1ab29b0d4f97930e1b",
+  "code": "sha256:592a73af5337979bed671ef11ffde9045de7a3d59d489757b48f49c4ff6c886b",
   "files": [
     "../src/graph-check/graph-check.ts",
     "../src/graph-check/rules.ts",

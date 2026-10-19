@@ -4,7 +4,8 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, 
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { after, test } from "node:test";
-import { extract, payloadDiagnostics, referenceDiagnostics, referenceEvents, serialize, stableStringify, structuredVocabulary, valuesToWrite } from "../src/extract.ts";
+import { extract, referenceDiagnostics, referenceEvents, serialize, stableStringify, valuesToWrite } from "../src/extract.ts";
+import { slotReportsStage0, slotsOf } from "../src/slots.ts";
 import { listComponents, loadSpecs } from "../src/loader.ts";
 import { graphCheck, leafCheckPart, mutationVerdict, treeCheck, typeCheck, references, runStage1, stage1Payloads, stage1References, stage1Values } from "../src/stage1.ts";
 import { verdictStage0 } from "../src/runtime.ts";
@@ -89,13 +90,10 @@ test("Stage 1: 誤りの無い仕様でも一致する（例の仕様と、フ�
       const stage1 = await stage1References(spec);
       assert.deepEqual(stage1, [], `${component}: Stage 1 が実行できること`);
       assert.deepEqual(stage1, referenceDiagnostics(spec));
-      // 語彙に構造を持つ型 (oneOf、value など) があれば、ペイロードの検査は Stage 0 が行う（payload-check の仕様の範囲の外）
+      // 値の置き場所の検査: 構造を持つ型の比べ方は Stage 0 の結果を受けるので、どの仕様でも Stage 1 で実行できる
       const payloads = await stage1Payloads(spec);
-      if (structuredVocabulary(spec.model!)) assert.equal(payloads, undefined, `${component}: 構造を持つ型は Stage 0 が検査する`);
-      else {
-        assert.deepEqual(payloads, [], `${component}: ペイロードの検査も Stage 1 で実行できること`);
-        assert.deepEqual(payloads, payloadDiagnostics(spec));
-      }
+      assert.deepEqual(payloads, [], `${component}: 値の置き場所の検査も Stage 1 で実行できること`);
+      assert.deepEqual(payloads, slotsOf(spec).flatMap(slotReportsStage0));
       // 値の直列化: IR が、どちらの Stage で作ってもバイト一致する
       assert.ok(await stage1Values(spec), `${component}: 値の直列化も Stage 1 で実行できること`);
       assert.equal(stableStringify(extract(spec, await references(spec)).ir), stableStringify(extract(spec).ir));
@@ -232,8 +230,10 @@ test("Stage 1: ペイロードの検査は、手書きの版 (Stage 0) と同じ
   ];
   for (const [effects, expected] of cases) {
     const spec = await loadSpecs(payloads(effects));
-    const stage0 = payloadDiagnostics(spec);
-    assert.deepEqual(stage0.map((d) => `${d.code}:${d.occurrence}:${d.field}`), expected, effects);
+    const stage0 = slotsOf(spec).flatMap(slotReportsStage0);
+    // 副作用のスロット (鍵の最後が、その副作用の順番) について、以前の形 (missing-field / bad-value) に読み替えて比べる
+    const effectReports = stage0.filter((d) => d.key.includes("|effect|")).map((d) => `${d.code === "missing-field" ? "missing-field" : "bad-value"}:${d.key.split("|").at(-1)}:${d.field}`);
+    assert.deepEqual(effectReports, expected, effects);
     assert.deepEqual(await stage1Payloads(spec), stage0, effects);
     // 診断の全体（文面を含む）も、どちらの Stage で動かしても同じ
     assert.deepEqual(extract(spec, await references(spec)), extract(spec), effects);
@@ -718,4 +718,52 @@ export const Interpretation = interpretation(X, [If.big.means(() => true)]);
   for (const code of ["empty-enum", "empty-one-of", "min-above-max", "around-outside", "mixed-column", "promise-kind", "promise-input", "failure-not-may-fail", "name-collision"]) {
     assert.ok(reports.includes(code), `${code}: ${reports.join(", ")}`);
   }
+});
+
+test("Stage 1: 値の置き場所の検査は、副作用のほかの置き場所でも、手書きの版 (Stage 0) と同じ判断を返す (N10e / N10f)", async () => {
+  const dir = mkdtempSync(join(tmpRoot, "slots-"));
+  writeFileSync(
+    join(dir, "item.component.ts"),
+    `import { commands, input, interpretation, service } from "@clp/core";
+export const Command = commands({ Touch: { input: input({ times: "integer" }), output: "integer", responds: 1 } });
+export const Item = service({ uses: [Command] });
+export const Interpretation = interpretation(Item, []);
+`,
+  );
+  writeFileSync(
+    join(dir, "shop.component.ts"),
+    `import { by, calculations, commands, conditions, data, effects, input, integer, interpretation, many, optional, otherwise, parts, queries, record, service } from "@clp/core";
+import { Item } from "./item.component.ts";
+export const If = conditions({ big: "It is big" });
+export const Data = data({ memo: "string", count: { type: "integer", initially: "zero" }, kept: optional("string") });
+const Undeclared = data({ ghost: "string" });
+export const Query = queries({ price: { input: input({ sku: "string", qty: "integer" }), output: "integer" } });
+export const Part = parts({ items: many(Item, by("id")) });
+export const Calc = calculations({ label: { description: "a label", output: "string" } });
+export const Effect = effects({ Note: input({ text: "string" }) });
+export const BuyInput = input({ sku: "string", n: "integer" });
+export const Command = commands({
+  Buy: {
+    input: BuyInput,
+    asks: [Query.price({ sku: BuyInput.n, extra: 1 } as never).as("p"), Query.price({ sku: Calc.label, qty: 1 }).as("q")],
+    calls: [Part.items.at(BuyInput.sku).Touch({ times: "many" } as never)],
+    output: record({ status: integer({ min: 200, max: 599 }), note: "string" }),
+    cases: [
+      If.big.then({ responds: { status: 700, note: null, more: 1 } as never, set: [Data.memo.set(BuyInput.n), Undeclared.ghost.set("x"), Data.kept.set(null)] }),
+      otherwise({ responds: 1 as never, adds: [Part.items.add(BuyInput.sku, { times: 2 } as never)], emits: [Effect.Note({ text: "x" }).onlyWhen(BuyInput.n as never)] }),
+    ],
+  },
+  Look: { cases: [If.big.then({ responds: 1 as never }), otherwise({ nothing: true })] },
+});
+export const Shop = service({ uses: [Data, Query, Part, Calc, Effect, If, Command] });
+export const Interpretation = interpretation(Shop, [If.big.means(() => true), Calc.label.means(() => "l")]);
+`,
+  );
+  const shop = await loadSpecs(dir, { component: "shop" });
+  const stage0 = slotsOf(shop).flatMap(slotReportsStage0);
+  const codes = new Set(stage0.map((d) => d.code));
+  for (const code of ["missing-field", "unknown-field", "bad-source", "mismatch", "no-output", "wrong-shape"]) assert.ok(codes.has(code as never), `${code}: ${[...codes].join(", ")}`);
+  assert.deepEqual(await stage1Payloads(shop), stage0);
+  // 診断の全体（文面を含む）も、どちらの Stage で動かしても同じ
+  assert.deepEqual(extract(shop, await references(shop)), extract(shop));
 });

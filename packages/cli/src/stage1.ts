@@ -1,6 +1,7 @@
-import { effectOccurrences, isReference, kindOf, payloadEvents, referenceEvents, structuredVocabulary, valuesToWrite, writeEvent } from "./extract.ts";
-import type { PayloadDiagnostic, ReferenceDiagnostic, SpecInput } from "./extract.ts";
-import { isEnum, isNumberSchema } from "./schema.ts";
+import { referenceEvents, valuesToWrite, writeEvent } from "./extract.ts";
+import type { ReferenceDiagnostic, SpecInput } from "./extract.ts";
+import { slotQueries, slotsOf } from "./slots.ts";
+import type { SlotReport } from "./slots.ts";
 import { EXTRA_SEEDS } from "./runtime.ts";
 import type { Adapter, CellTrial, Unobservable } from "./runtime.ts";
 import { fileURLToPath } from "node:url";
@@ -119,41 +120,20 @@ export const referenceCheck: Stage1Part<SpecInput, ReferenceDiagnostic[]> = {
   },
 };
 
-// ペイロードの検査 (payload-check)。構造を持つ値（並び、フィールドの組、無いことがある値）は、この部品の仕様の範囲の外
-export const payloadCheck: Stage1Part<SpecInput, PayloadDiagnostic[]> = {
+// 値の置き場所の検査 (payload-check)。スロットごとに1回の隔離で、事実を順に渡す。報告は、そのスロットの鍵と一緒に
+export const payloadCheck: Stage1Part<SpecInput, SlotReport[]> = {
   component: "payload-check",
-  inScope: (input) => input.model !== undefined && !structuredVocabulary(input.model),
+  inScope: (input) => input.model !== undefined,
   async run(adapter, input) {
-    const model = input.model!;
-    const found: PayloadDiagnostic[] = [];
-    for (const { occurrence, command, effect } of effectOccurrences(input)) {
-      // 依存: 宣言と、与えられたフィールドについて、名前で尋ねられる。答えるのは、この仕様の語彙と、いまたどっている副作用
-      type At = { effect: string; field: string };
-      const schema = ({ effect: name, field }: At) => model.effects[name]?.[field];
-      const bounds = (at: At): { min?: number; max?: number } => {
-        const declared = schema(at);
-        return declared !== undefined && isNumberSchema(declared) ? declared : {};
-      };
+    const found: SlotReport[] = [];
+    for (const slot of slotsOf(input)) {
       await session(
         adapter,
         {
-          queries: {
-            effectDeclared: ({ name }: { name: string }) => name in model.effects,
-            fieldDeclared: (at: At) => schema(at) !== undefined,
-            fieldGiven: ({ field }: At) => field in effect.payload,
-            fieldKind: (at: At) => (schema(at) === undefined ? "string" : kindOf(schema(at)!)),
-            memberOf: ({ value, ...at }: At & { value: string }) => {
-              const declared = schema(at);
-              return declared !== undefined && isEnum(declared) && declared.includes(value);
-            },
-            hasMinimum: (at: At) => bounds(at).min !== undefined,
-            minimum: (at: At) => bounds(at).min ?? 0,
-            hasMaximum: (at: At) => bounds(at).max !== undefined,
-            maximum: (at: At) => bounds(at).max ?? 0,
-          },
-          effects: { ReportDiagnostic: ({ code, field }: { code: PayloadDiagnostic["code"]; field: string }) => void found.push({ code, occurrence, field }) },
+          queries: slotQueries(slot),
+          effects: { Report: ({ code, field }: { code: SlotReport["code"]; field: string }) => void found.push({ key: slot.key, code, field }) },
         },
-        payloadEvents(input, command, effect),
+        slot.events,
       );
     }
     return found;
@@ -404,6 +384,6 @@ export const stage1Values = (input: SpecInput, url?: string) => runStage1(valueW
 
 // IR を作るときの判断を、使える中でいちばん新しい Stage で実行した結果を、extract に渡す形で返す
 export const references = async (input: SpecInput) => {
-  const [found, payloads, values, declared] = [await runStage1(referenceCheck, input), await runStage1(payloadCheck, input), await runStage1(valueWriter, input), await stage1Declared(input)];
-  return { ...(found ? { references: found } : {}), ...(payloads ? { payloads } : {}), ...(values ? { values } : {}), ...(declared ? { declared } : {}) };
+  const [found, slots, values, declared] = [await runStage1(referenceCheck, input), await runStage1(payloadCheck, input), await runStage1(valueWriter, input), await stage1Declared(input)];
+  return { ...(found ? { references: found } : {}), ...(slots ? { slots } : {}), ...(values ? { values } : {}), ...(declared ? { declared } : {}) };
 };

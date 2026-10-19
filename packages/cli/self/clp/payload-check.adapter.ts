@@ -4,10 +4,10 @@ import type { ConstantValue, PayloadCheckState } from "../src/payload-check/type
 
 const STATE_NAMES: Record<PayloadCheckState, StateName> = {
   "outside": "OUTSIDE",
-  "in-effect": "IN_EFFECT",
-  "in-unknown-effect": "IN_UNKNOWN_EFFECT",
-  "in-field": "IN_FIELD",
-  "in-settled-field": "IN_SETTLED_FIELD",
+  "inactive": "INACTIVE",
+  "active": "ACTIVE",
+  "checking": "CHECKING",
+  "settled": "SETTLED",
 };
 
 type ConstantInput = Extract<Command, { name: "Constant" }>["input"];
@@ -40,23 +40,20 @@ export const adapter: TargetSystemAdapter = {
     const { queries, effects } = ports;
     system = new PayloadCheck(
       {
-        declaresEffect: (effect) => queries.effectDeclared({ name: effect }),
-        declaresField: (effect, field) => queries.fieldDeclared({ effect, field }),
-        fieldType: (effect, field) => queries.fieldKind({ effect, field }),
-        minimum: (effect, field) =>
-          queries.hasMinimum({ effect, field }) ? queries.minimum({ effect, field }) : undefined,
-        maximum: (effect, field) =>
-          queries.hasMaximum({ effect, field }) ? queries.maximum({ effect, field }) : undefined,
-        isMember: (effect, field, value) => queries.memberOf({ effect, field, value }),
+        declaresField: (field) => queries.fieldDeclared({ field }),
+        fieldType: (field) => queries.fieldKind({ field }),
+        isOptional: (field) => queries.fieldOptional({ field }),
+        minimum: (field) => (queries.hasMinimum({ field }) ? queries.minimum({ field }) : undefined),
+        maximum: (field) => (queries.hasMaximum({ field }) ? queries.maximum({ field }) : undefined),
+        isMember: (field, value) => queries.memberOf({ field, value }),
       },
       {
-        givesField: (effect, field) => queries.fieldGiven({ effect, field }),
+        givesField: (field) => queries.fieldGiven({ field }),
       },
       {
         report: (diagnostic) =>
-          effects.ReportDiagnostic({
+          effects.Report({
             code: diagnostic.code,
-            effect: diagnostic.effect,
             field: diagnostic.field,
           }),
       },
@@ -72,12 +69,18 @@ export const adapter: TargetSystemAdapter = {
         return check.constant(toConstantValue(command.input));
       case "DeclaredField":
         return check.declaredField(command.input.name);
-      case "EnterEffect":
-        return check.enterEffect(command.input.name);
+      case "EnterSlot":
+        return check.enterSlot(command.input);
       case "GivenField":
         return check.givenField(command.input.name);
-      case "LeaveEffect":
-        return check.leaveEffect();
+      case "Judged":
+        return check.judged(command.input.fits);
+      case "LeaveSlot":
+        return check.leaveSlot();
+      case "Null":
+        return check.nullValue();
+      case "Source":
+        return check.source(command.input.kind);
       case "Typed":
         return check.typed(command.input.type);
       case "Unresolved":
