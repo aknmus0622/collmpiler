@@ -4,6 +4,9 @@ import { isEnum, isNumberSchema } from "./schema.ts";
 import { EXTRA_SEEDS } from "./runtime.ts";
 import type { Adapter, CellTrial, Unobservable } from "./runtime.ts";
 import { fileURLToPath } from "node:url";
+import { GRAMMAR, leafEvents, leafMessage, leafQueries, slotOf, treeDiagnostic } from "@clp/core";
+import type { LeafFacts, LeafReport, Node, TreeReport } from "@clp/core";
+import type { LoadJudges } from "./loader.ts";
 import { staleness } from "./verified.ts";
 import { transitions, vocabularyFacts } from "./graph.ts";
 import type { GraphReport } from "./graph.ts";
@@ -61,7 +64,14 @@ export type Stage1Part<I, R> = {
 
 // 登録した部品を Stage 1 で実行する。実行できなければ（範囲の外、記録が古い、読み込めない、例外）undefined。
 // 呼び出し側は、そのとき Stage 0 で判断する
-export async function runStage1<I, R>(part: Stage1Part<I, R>, input: I, url?: string): Promise<R | undefined> {
+// 生成した部品は、モジュールに1つだけの状態を持つので、1度に1つずつ動かす（並行して呼ばれても、順に）
+let queue: Promise<unknown> = Promise.resolve();
+export function runStage1<I, R>(part: Stage1Part<I, R>, input: I, url?: string): Promise<R | undefined> {
+  const run = queue.then(() => runStage1Now(part, input, url));
+  queue = run.catch(() => undefined);
+  return run;
+}
+async function runStage1Now<I, R>(part: Stage1Part<I, R>, input: I, url?: string): Promise<R | undefined> {
   if (part.inScope && !part.inScope(input)) return undefined;
   const adapter = await stage1Adapter(part.component, url);
   if (!adapter) return undefined;
@@ -256,6 +266,95 @@ export const graphCheck: Stage1Part<GraphInput, GraphReport[]> = {
     }
     return found;
   },
+};
+
+// 木の検査 (tree-check)。親ごとに1回の隔離で、子を書いた順に渡す。部品が言った「中を見る」子へ、そのあとで降りる。
+// 報告の順は Stage 0 と同じにそろえる（子の報告、その子の中、次の子、…、最後に親についての報告）。組み立ては糊
+export const treeCheck: Stage1Part<Node, TreeReport[]> = {
+  component: "tree-check",
+  async run(adapter, root) {
+    const found: TreeReport[] = [];
+    const limitOf = (parent: string, slot: string) => {
+      const limit = (GRAMMAR[parent] ?? {})[slot];
+      return limit === undefined || limit === Number.POSITIVE_INFINITY ? 0 : limit;
+    };
+    const visit = async (parent: Node): Promise<void> => {
+      const reports = new Map<number, TreeReport["code"][]>();
+      const atEnd: TreeReport["code"][] = [];
+      const descend = new Set<number>();
+      let ending = false;
+      await adapter.setupIsolation({
+        queries: {
+          allowed: ({ parent: kind, slot }: { parent: string; slot: string }) => slot in (GRAMMAR[kind] ?? {}),
+          limit: ({ parent: kind, slot }: { parent: string; slot: string }) => limitOf(kind, slot),
+          stateNamed: ({ name }: { name: string }) => parent.children.some((node) => node.kind === "state" && node.name === name),
+        },
+        effects: {
+          Report: ({ code, index }: { code: TreeReport["code"]; index: number }) => void (ending ? atEnd : (reports.get(index) ?? reports.set(index, []).get(index)!)).push(code),
+          Descend: ({ index }: { index: number }) => void descend.add(index),
+        },
+      });
+      const states = parent.children.filter((node) => node.kind === "state");
+      const initIndex = parent.children.findIndex((node) => node.kind === "init");
+      try {
+        await adapter.executeCommand({ name: "BeginParent", input: { kind: parent.kind } });
+        for (const [index, node] of parent.children.entries()) {
+          // 文法の節でないもの（種類に無い席、裸の値）と、節。同じ種類で同じ名前の節は、同じもの（種類と名前を合わせて渡す）
+          if (node.kind === "badField" || node.kind === "unknown") await adapter.executeCommand({ name: "Stray", input: { index, form: node.kind === "badField" ? "bad-field" : "unknown" } });
+          else await adapter.executeCommand({ name: "Child", input: { index, slot: slotOf(node.kind), named: node.name !== undefined, identity: `${node.kind}:${node.name ?? ""}` } });
+        }
+        ending = true;
+        await adapter.executeCommand({
+          name: "EndParent",
+          input: {
+            isComponent: parent.kind === "component",
+            hasInit: initIndex >= 0,
+            initIndex: Math.max(initIndex, 0),
+            init: initIndex >= 0 ? String(parent.children[initIndex].value) : "",
+            stateCount: states.length,
+          },
+        });
+      } finally {
+        await adapter.teardownIsolation();
+      }
+      for (const [index, node] of parent.children.entries()) {
+        for (const code of reports.get(index) ?? []) found.push({ code, parent, node });
+        if (descend.has(index)) await visit(node);
+      }
+      for (const code of atEnd) found.push({ code, parent, node: parent.children[initIndex] });
+    };
+    await visit(root);
+    return found;
+  },
+};
+
+// 葉の検査 (leaf-check)。事実の列 (leafEvents) を1つずつ渡す。報告は、直前に渡した事実についてのもの
+export const leafCheckPart: Stage1Part<LeafFacts, LeafReport[]> = {
+  component: "leaf-check",
+  async run(adapter, facts) {
+    const found: LeafReport[] = [];
+    let current: ReturnType<typeof leafEvents> extends Generator<infer E> ? E : never;
+    const events = [...leafEvents(facts)];
+    await adapter.setupIsolation({
+      queries: leafQueries,
+      effects: { Report: ({ code }: { code: LeafReport["code"] }) => void found.push({ code, event: current }) },
+    });
+    try {
+      for (const event of events) {
+        current = event;
+        await adapter.executeCommand({ name: event.name, input: event.input });
+      }
+    } finally {
+      await adapter.teardownIsolation();
+    }
+    return found;
+  },
+};
+
+// 仕様を読み込むときの判断（木の検査と葉の検査）を、使える中でいちばん新しい Stage で下す。loadSpecs の judges に渡す
+export const loadJudges: LoadJudges = {
+  tree: async (tree) => (await runStage1(treeCheck, tree))?.map(treeDiagnostic),
+  leaf: async (facts) => (await runStage1(leafCheckPart, facts))?.map(leafMessage),
 };
 
 // これまでの呼び方（テストが、偽のアダプターの場所を渡して使う）

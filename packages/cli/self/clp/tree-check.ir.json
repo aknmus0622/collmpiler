@@ -1,0 +1,407 @@
+{
+  "behaviors": [
+    {
+      "from": [
+        "READY"
+      ],
+      "name": "BeginParent",
+      "onlyIf": [],
+      "when": {
+        "otherwise": {
+          "does": "The children of a parent of this kind are given next. Nothing has been given for this parent yet.",
+          "set": {
+            "names": [],
+            "parent": {
+              "$ref": "input:kind"
+            },
+            "slots": []
+          }
+        }
+      }
+    },
+    {
+      "asks": {
+        "slotAllowed": {
+          "input": {
+            "parent": {
+              "$ref": "data:parent"
+            },
+            "slot": {
+              "$ref": "input:slot"
+            }
+          },
+          "query": "allowed"
+        },
+        "slotLimit": {
+          "input": {
+            "parent": {
+              "$ref": "data:parent"
+            },
+            "slot": {
+              "$ref": "input:slot"
+            }
+          },
+          "query": "limit"
+        }
+      },
+      "description": "One child, at this position, that is a node. If its slot may not be under the parent, it is reported as misplaced and not looked inside. Otherwise it fits: it is counted in its slot, and if that makes one more child in the slot than the limit allows (exactly one more; with no limit, never), it is reported as too-many. If it has a name and a child with the same identity was already given and fit, it is also reported as duplicate (after too-many, when both are reported). A node that fits is looked inside, after what is reported about it.",
+      "from": [
+        "READY"
+      ],
+      "name": "Child",
+      "onlyIf": [
+        "The children of a parent are being given (a BeginParent was executed before)"
+      ],
+      "when": {
+        "The child is a node that fits, it does not make one more child in its slot than the limit allows, and it has a name while a child with the same identity was already given and fit": {
+          "emits": [
+            {
+              "effect": "Report",
+              "input": {
+                "code": "duplicate",
+                "index": {
+                  "$ref": "input:index"
+                }
+              }
+            },
+            {
+              "effect": "Descend",
+              "input": {
+                "index": {
+                  "$ref": "input:index"
+                }
+              }
+            }
+          ],
+          "set": {
+            "names": {
+              "$ref": "calculation:namesWithChild"
+            },
+            "slots": {
+              "$ref": "calculation:slotsWithChild"
+            }
+          }
+        },
+        "The child is a node that fits, it makes exactly one more child in its slot than the limit allows, and it has a name while a child with the same identity was already given and fit": {
+          "emits": [
+            {
+              "effect": "Report",
+              "input": {
+                "code": "too-many",
+                "index": {
+                  "$ref": "input:index"
+                }
+              }
+            },
+            {
+              "effect": "Report",
+              "input": {
+                "code": "duplicate",
+                "index": {
+                  "$ref": "input:index"
+                }
+              }
+            },
+            {
+              "effect": "Descend",
+              "input": {
+                "index": {
+                  "$ref": "input:index"
+                }
+              }
+            }
+          ],
+          "set": {
+            "names": {
+              "$ref": "calculation:namesWithChild"
+            },
+            "slots": {
+              "$ref": "calculation:slotsWithChild"
+            }
+          }
+        },
+        "The child is a node that fits, it makes exactly one more child in its slot than the limit allows, and it is not a duplicate": {
+          "emits": [
+            {
+              "effect": "Report",
+              "input": {
+                "code": "too-many",
+                "index": {
+                  "$ref": "input:index"
+                }
+              }
+            },
+            {
+              "effect": "Descend",
+              "input": {
+                "index": {
+                  "$ref": "input:index"
+                }
+              }
+            }
+          ],
+          "set": {
+            "names": {
+              "$ref": "calculation:namesWithChild"
+            },
+            "slots": {
+              "$ref": "calculation:slotsWithChild"
+            }
+          }
+        },
+        "The child is a node whose slot may not be under the parent": {
+          "emits": [
+            {
+              "effect": "Report",
+              "input": {
+                "code": "misplaced",
+                "index": {
+                  "$ref": "input:index"
+                }
+              }
+            }
+          ]
+        },
+        "otherwise": {
+          "emits": [
+            {
+              "effect": "Descend",
+              "input": {
+                "index": {
+                  "$ref": "input:index"
+                }
+              }
+            }
+          ],
+          "set": {
+            "names": {
+              "$ref": "calculation:namesWithChild"
+            },
+            "slots": {
+              "$ref": "calculation:slotsWithChild"
+            }
+          }
+        }
+      }
+    },
+    {
+      "asks": {
+        "initStateDeclared": {
+          "input": {
+            "name": {
+              "$ref": "input:init"
+            }
+          },
+          "query": "stateNamed"
+        }
+      },
+      "description": "All the children have been given (and looked inside). If the parent is a component that has an initial state (given at position initIndex) and at least one state, and no state has the initial state's name, the initial state is reported as unknown-state.",
+      "from": [
+        "READY"
+      ],
+      "name": "EndParent",
+      "onlyIf": [
+        "The children of a parent are being given (a BeginParent was executed before)"
+      ],
+      "when": {
+        "The parent is a component that has an initial state and at least one state, and no state has the initial state's name": {
+          "emits": [
+            {
+              "effect": "Report",
+              "input": {
+                "code": "unknown-state",
+                "index": {
+                  "$ref": "input:initIndex"
+                }
+              }
+            }
+          ]
+        },
+        "otherwise": {}
+      }
+    },
+    {
+      "description": "One child, at this position, that is not a node of the grammar. A field the parent's kind does not have (form bad-field) is reported as unknown-field, and something that is not a node at all (form unknown) as unknown. Neither is looked inside, and neither counts for the children that follow.",
+      "from": [
+        "READY"
+      ],
+      "name": "Stray",
+      "onlyIf": [],
+      "when": {
+        "The child is a field the parent's kind does not have (form bad-field)": {
+          "emits": [
+            {
+              "effect": "Report",
+              "input": {
+                "code": "unknown-field",
+                "index": {
+                  "$ref": "input:index"
+                }
+              }
+            }
+          ]
+        },
+        "otherwise": {
+          "emits": [
+            {
+              "effect": "Report",
+              "input": {
+                "code": "unknown",
+                "index": {
+                  "$ref": "input:index"
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "decisions": {},
+  "descriptions": {
+    "component": "Checks, one parent at a time, whether the children of a specification's nodes fit the grammar.",
+    "data.names": "The identity (kind and name) of every child given so far that fits and has a name.",
+    "data.parent": "The kind of the parent whose children are being given.",
+    "data.slots": "The slot of every child given so far that fits under the parent, in order (a slot appears once per child).",
+    "effects.Descend": "Look inside the child at this position: its own children are checked next.",
+    "effects.Report": "The child at this position (among the parent's children) does not fit, for this reason.",
+    "queries.allowed": "Whether a child in this slot may be under a parent of this kind.",
+    "queries.limit": "How many children in this slot a parent of this kind may have; 0 when there is no limit.",
+    "queries.stateNamed": "Whether the parent has a state child with this name."
+  },
+  "irVersion": 7,
+  "model": {
+    "calculations": {
+      "namesWithChild": {
+        "description": "The identities given so far, followed by the child's identity if it has a name (unchanged otherwise)",
+        "output": {
+          "list": "string"
+        }
+      },
+      "slotsWithChild": {
+        "description": "The slots given so far, followed by the slot of the child",
+        "output": {
+          "list": "string"
+        }
+      }
+    },
+    "commands": {
+      "BeginParent": {
+        "kind": "string"
+      },
+      "Child": {
+        "identity": {
+          "among": {
+            "data": "names"
+          },
+          "type": "string"
+        },
+        "index": {
+          "max": 1000,
+          "min": 0,
+          "type": "integer"
+        },
+        "named": "boolean",
+        "slot": {
+          "among": {
+            "data": "slots"
+          },
+          "type": "string"
+        }
+      },
+      "EndParent": {
+        "hasInit": "boolean",
+        "init": "string",
+        "initIndex": {
+          "max": 1000,
+          "min": 0,
+          "type": "integer"
+        },
+        "isComponent": "boolean",
+        "stateCount": {
+          "max": 1000,
+          "min": 0,
+          "type": "integer"
+        }
+      },
+      "Stray": {
+        "form": [
+          "bad-field",
+          "unknown"
+        ],
+        "index": {
+          "max": 1000,
+          "min": 0,
+          "type": "integer"
+        }
+      }
+    },
+    "data": {
+      "names": {
+        "list": "string"
+      },
+      "parent": "string",
+      "slots": {
+        "list": "string"
+      }
+    },
+    "effects": {
+      "Descend": {
+        "index": {
+          "max": 1000,
+          "min": 0,
+          "type": "integer"
+        }
+      },
+      "Report": {
+        "code": [
+          "unknown-field",
+          "unknown",
+          "misplaced",
+          "too-many",
+          "duplicate",
+          "unknown-state"
+        ],
+        "index": {
+          "max": 1000,
+          "min": 0,
+          "type": "integer"
+        }
+      }
+    },
+    "init": "READY",
+    "initial": {
+      "names": [],
+      "slots": []
+    },
+    "queries": {
+      "allowed": {
+        "input": {
+          "parent": "string",
+          "slot": "string"
+        },
+        "output": "boolean"
+      },
+      "limit": {
+        "input": {
+          "parent": "string",
+          "slot": "string"
+        },
+        "output": {
+          "max": 1,
+          "min": 0,
+          "type": "integer"
+        }
+      },
+      "stateNamed": {
+        "input": {
+          "name": "string"
+        },
+        "output": "boolean"
+      }
+    },
+    "states": [
+      "READY"
+    ]
+  }
+}

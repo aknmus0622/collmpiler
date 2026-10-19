@@ -1,0 +1,35 @@
+{
+  "roots": [
+    "tree-check.component.ts",
+    "tree-check.interpretation.ts"
+  ],
+  "specs": "sha256:d77ed93ba84e1e3602b21e5b9e42ccafa82847749fc94e54f51b1683c34e2597",
+  "code": "sha256:efed03d405e685c570bd75860b9888818ab22f728545b9927c015d4d1710eda7",
+  "files": [
+    "../src/graph-check/graph-check.ts",
+    "../src/graph-check/rules.ts",
+    "../src/graph-check/types.ts",
+    "../src/leaf-check/leaf-check.ts",
+    "../src/leaf-check/rules.ts",
+    "../src/leaf-check/types.ts",
+    "../src/mutation-verdict/judgement.ts",
+    "../src/mutation-verdict/mutation-verdict.ts",
+    "../src/mutation-verdict/types.ts",
+    "../src/payload-check/fit.ts",
+    "../src/payload-check/payload-check.ts",
+    "../src/payload-check/types.ts",
+    "../src/pipeline/pipeline.ts",
+    "../src/pipeline/plan.ts",
+    "../src/pipeline/types.ts",
+    "../src/reference-check/reference-check.ts",
+    "../src/reference-check/types.ts",
+    "../src/reference-check/verdict.ts",
+    "../src/tree-check/rules.ts",
+    "../src/tree-check/tree-check.ts",
+    "../src/tree-check/types.ts",
+    "../src/value-writer/reference-text.ts",
+    "../src/value-writer/types.ts",
+    "../src/value-writer/value-writer.ts",
+    "tree-check.adapter.ts"
+  ]
+}

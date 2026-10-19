@@ -312,7 +312,7 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
       if (promise === "increasing") {
         const previous = env.last[name];
         const max = isNumberSchema(output) ? output.max : undefined;
-        const value = previous === undefined ? (queries[name] as number) : Math.min(previous + (raw.deltas[name] ?? 0), max ?? Number.POSITIVE_INFINITY);
+        const value = previous === undefined ? (queries[name] as number) : Math.min(previous + (raw.deltas?.[name] ?? 0), max ?? Number.POSITIVE_INFINITY);
         queries[name] = value;
         env.last[name] = value;
       } else {
@@ -329,7 +329,8 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
   const inputOf = (state: State, raw: RawStep, name: string): Values => {
     const given: Values = { ...raw.inputs[name] };
     for (const [field, among] of selecting[name]) {
-      const pick = raw.chosen[name]?.[field];
+      // 縮めた手 (fast-check の shrink) には、chosen が無いことがある
+      const pick = raw.chosen?.[name]?.[field];
       // 自分が覚えていなければ、含む部品が覚えているものから（入口の部品が、中の部品の項目を指すとき）
       // 多数ある部品を指したときは、そのキーから
       const remembered =

@@ -6,7 +6,7 @@ import { listComponents, loadSpecs } from "../loader.ts";
 import { seedOf } from "../generate.ts";
 import type { Ir } from "../generate.ts";
 import { describeUnobservable, observability, selfCheck, unreachedCases } from "../runtime.ts";
-import { graphCheck, mutationVerdict, references, runStage1 } from "../stage1.ts";
+import { graphCheck, loadJudges, mutationVerdict, references, runStage1 } from "../stage1.ts";
 import { typecheckSpecs } from "../typecheck.ts";
 
 export const summary = "仕様を検査して、IR を標準出力に出す";
@@ -38,7 +38,7 @@ const irs: Record<string, unknown> = {};
 const ignored = new Set<string>();
 const checks: (() => Promise<void>)[] = [];
 for (const name of names) {
-  const spec = await loadSpecs(dir, { drafts: values.drafts, component: name });
+  const spec = await loadSpecs(dir, { drafts: values.drafts, component: name, judges: loadJudges });
   if (values.component !== undefined) for (const file of spec.sources?.otherBindings ?? []) ignored.add(file);
   // 名前の検査は、フレームワーク自身の仕様から生成したコード (Stage 1) で行う。使えなければ手書き (Stage 0)
   const { ir, diagnostics } = extract(spec, await references(spec));

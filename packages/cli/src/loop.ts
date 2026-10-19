@@ -16,7 +16,7 @@ import type { MutationStrategy } from "./mutation.ts";
 import { PHASES } from "./request.ts";
 import type { Phase } from "./request.ts";
 import { DEFAULT_RUNS, defaultRuns, describeUnobservable, observability, selfCheck, unreachedCases } from "./runtime.ts";
-import { graphCheck, mutationVerdict, references, runStage1, stage1Adapter, stage1Unavailable } from "./stage1.ts";
+import { graphCheck, loadJudges, mutationVerdict, references, runStage1, stage1Adapter, stage1Unavailable } from "./stage1.ts";
 import type { StaticCheckStrategy } from "./static-check.ts";
 import { clearVerified, writeVerified } from "./verified.ts";
 import type { ImplementationStrategy } from "./strategy.ts";
@@ -108,7 +108,7 @@ export async function implement(options: ImplementOptions) {
     throw new Error(`コンポーネント "${options.component}" がありません (あるのは: ${names.join(", ")})`);
   }
   const units: Unit[] = [];
-  const specs = new Map(await Promise.all(names.map(async (name) => [name, await loadSpecs(specsDir, { drafts, component: name })] as const)));
+  const specs = new Map(await Promise.all(names.map(async (name) => [name, await loadSpecs(specsDir, { drafts, component: name, judges: loadJudges })] as const)));
   // 含む部品が作るときに渡すデータ（覚える (set) コマンドが無くても、設定される）
   const provided = providedData([...specs.values()]);
   for (const name of names) {

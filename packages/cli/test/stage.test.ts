@@ -6,8 +6,10 @@ import { pathToFileURL } from "node:url";
 import { after, test } from "node:test";
 import { extract, payloadDiagnostics, referenceDiagnostics, referenceEvents, serialize, stableStringify, structuredVocabulary, valuesToWrite } from "../src/extract.ts";
 import { listComponents, loadSpecs } from "../src/loader.ts";
-import { graphCheck, mutationVerdict, references, runStage1, stage1Payloads, stage1References, stage1Values } from "../src/stage1.ts";
+import { graphCheck, leafCheckPart, mutationVerdict, treeCheck, references, runStage1, stage1Payloads, stage1References, stage1Values } from "../src/stage1.ts";
 import { verdictStage0 } from "../src/runtime.ts";
+import { checkReports, commands, leafEvents, leafFactsOf, leafReportsStage0, otherwise, service, states, treeOf } from "@clp/core";
+import type { Node } from "@clp/core";
 import { graphReportsStage0, providedData } from "../src/graph.ts";
 import type { CellTrial } from "../src/runtime.ts";
 import { implement } from "../src/loop.ts";
@@ -298,10 +300,12 @@ test("自分自身の検証: 自分の生成物の上で動くフレームワー
   assert.deepEqual(called, []);
   assert.deepEqual(result.attempts.map((a) => `${a.component}:${a.phase}:${a.attempt}:${a.feedback?.kind ?? "ok"}`), [
     "graph-check:implementation:0:ok",
+    "leaf-check:implementation:0:ok",
     "mutation-verdict:implementation:0:ok",
     "payload-check:implementation:0:ok",
     "pipeline:implementation:0:ok",
     "reference-check:implementation:0:ok",
+    "tree-check:implementation:0:ok",
     "value-writer:implementation:0:ok",
   ]);
   // ミューテーションのゲートも通っている（壊した範囲は、それぞれが使うコードだけ）
@@ -603,4 +607,72 @@ void Added; void AddedData;
     }
   }
   assert.ok(reports >= 10, `報告のある場合を含むこと (${reports})`);
+});
+
+test("Stage 1: 木の検査は、手書きの版 (Stage 0) と同じ報告を、同じ順に返す (N10d)", async () => {
+  // 文法に合わない所を持つ木（部品として読み込めないので、直接作る）: 種類に無い席、重なった状態、初期状態が状態に無い、裸の {}
+  const State = states(["A", "B", "A"]);
+  const Other = states(["Z"]);
+  const Command = commands({ Go: { from: State.A, goto: State.B, nothing: true } as never, Stay: { cases: [{} as never, otherwise] } });
+  const broken = service({ init: Other.Z, uses: [State, Command], bogus: 1 } as never);
+  const trees = [broken as unknown as Node];
+  for (const specs of [specsDir, selfSpecs, join(repoRoot, "examples/library-ts/specs"), join(repoRoot, "examples/todo-db-ts/specs")]) {
+    for (const component of await listComponents(specs)) {
+      const spec = await loadSpecs(specs, { component });
+      for (const value of [spec.binding?.source, spec.binding]) {
+        const found = value && treeOf(value as object);
+        if (found) trees.push(found.tree);
+      }
+    }
+  }
+  let reports = 0;
+  for (const tree of trees) {
+    const stage0 = checkReports(tree);
+    reports += stage0.length;
+    const stage1 = await runStage1(treeCheck, tree);
+    assert.ok(stage1, "Stage 1 が実行できること");
+    assert.deepEqual(stage1.map((r) => [r.code, r.parent, r.node]), stage0.map((r) => [r.code, r.parent, r.node]));
+  }
+  assert.ok(trees.length >= 10 && reports >= 3, `${trees.length} trees, ${reports} reports`);
+});
+
+test("Stage 1: 葉の検査は、手書きの版 (Stage 0) と同じ報告を、同じ順に返す (N10d)", async () => {
+  // 書き残しのある仕様: 文だけのまとまり、型の無い項目、otherwise の無い場合分け、構造になっていない文、意味の無い文と計算
+  const dir = mkdtempSync(join(tmpRoot, "leaf-"));
+  writeFileSync(
+    join(dir, "x.component.ts"),
+    `import { all, calculations, commands, conditions, data, effects, input, interpretation, invariants, not, otherwise, queries, service, states } from "@clp/core";
+export const State = states(["OPEN", "DONE"]);
+export const If = conditions({ big: "It is big", odd: "It is odd" });
+export const Data = data({ memo: { description: "A note." } });
+export const Query = queries("Whether it is raining.");
+export const Effect = effects({ Notify: input({}) });
+export const Calc = calculations({ total: { description: "the sum", output: "integer" } });
+export const Inv = invariants({ ok: "It is fine" });
+export const Command = commands({
+  Close: "The thing is closed and a notice is sent.",
+  Go: { cases: [all(If.big, not(If.odd)).then({ goTo: State.DONE }), If.odd.then({ does: "It moves." })] },
+  Both: { cases: [If.big.then({ nothing: true, goTo: State.DONE }), otherwise] },
+});
+export const Thing = service({ init: State.OPEN, uses: [State, Data, Query, Effect, Calc, Inv, If, Command] });
+export const Interpretation = interpretation(Thing, [If.big.means(() => true)]);
+`,
+  );
+  const facts = [];
+  for (const specs of [dir, specsDir, selfSpecs, join(repoRoot, "examples/library-ts/specs"), join(repoRoot, "examples/todo-db-ts/specs")]) {
+    for (const component of await listComponents(specs)) {
+      const binding = (await loadSpecs(specs, { component })).binding;
+      const found = binding && leafFactsOf(binding);
+      if (found) facts.push(found);
+    }
+  }
+  let reports = 0;
+  for (const fact of facts) {
+    const stage0 = leafReportsStage0(leafEvents(fact));
+    reports += stage0.length;
+    const stage1 = await runStage1(leafCheckPart, fact);
+    assert.ok(stage1, "Stage 1 が実行できること");
+    assert.deepEqual(stage1, stage0);
+  }
+  assert.ok(facts.length >= 10 && reports >= 6, `${facts.length} specs, ${reports} reports`);
 });

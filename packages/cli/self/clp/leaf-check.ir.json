@@ -1,0 +1,480 @@
+{
+  "behaviors": [
+    {
+      "asks": {
+        "commandsRequired": {
+          "input": {
+            "field": "commands",
+            "kind": "service"
+          },
+          "query": "required"
+        },
+        "initRequired": {
+          "input": {
+            "field": "init",
+            "kind": "service"
+          },
+          "query": "required"
+        }
+      },
+      "from": [
+        "READY"
+      ],
+      "name": "Begin",
+      "onlyIf": [],
+      "when": {
+        "otherwise": {
+          "does": "The merged specification as a whole. Each of the three is judged on its own (more than one can be reported). If it has no states although Layer 1 speaks of them (states missing), that is reported as states-missing. If the service requires an initial state, the specification is not stateless, and there is none, init-missing. If the service requires commands and there are none, commands-missing.",
+          "emits": [
+            {
+              "effect": "Report",
+              "input": {
+                "code": "states-missing"
+              },
+              "onlyWhen": "The specification has no states although Layer 1 speaks of them (states missing)"
+            },
+            {
+              "effect": "Report",
+              "input": {
+                "code": "init-missing"
+              },
+              "onlyWhen": "The service requires an initial state, the specification is not stateless, and there is none"
+            },
+            {
+              "effect": "Report",
+              "input": {
+                "code": "commands-missing"
+              },
+              "onlyWhen": "The service requires commands and there are none"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "from": [
+        "READY"
+      ],
+      "name": "BeginCase",
+      "onlyIf": [
+        "A command has been begun (a BeginCommand was executed before)"
+      ],
+      "when": {
+        "otherwise": {
+          "does": "One case of the command (the whole command when it has not branched) is judged next: whether prose says something happens in it. No field has been written in it yet. A case always follows the BeginCommand of its command.",
+          "set": {
+            "caseDescribed": {
+              "$ref": "input:described"
+            },
+            "nothingWritten": false,
+            "otherWritten": false,
+            "outcomeWritten": false
+          }
+        }
+      }
+    },
+    {
+      "asks": {
+        "otherwiseRequired": {
+          "input": {
+            "name": "otherwise"
+          },
+          "query": "requiredCase"
+        }
+      },
+      "description": "A command, with how many cases it has and whether otherwise is one of them. It has branched when it has a case other than otherwise. A branched command without otherwise, when otherwise is a required case, is reported as otherwise-missing.",
+      "from": [
+        "READY"
+      ],
+      "name": "BeginCommand",
+      "onlyIf": [],
+      "when": {
+        "The command has branched, otherwise is not one of its cases, and otherwise is a required case": {
+          "emits": [
+            {
+              "effect": "Report",
+              "input": {
+                "code": "otherwise-missing"
+              }
+            }
+          ],
+          "set": {
+            "branched": {
+              "$ref": "calculation:branched"
+            },
+            "outcomeKind": {
+              "$ref": "calculation:outcomeKind"
+            }
+          }
+        },
+        "otherwise": {
+          "set": {
+            "branched": {
+              "$ref": "calculation:branched"
+            },
+            "outcomeKind": {
+              "$ref": "calculation:outcomeKind"
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "A calculation. Without a meaning, it is reported as no-meaning.",
+      "from": [
+        "READY"
+      ],
+      "name": "Calculation",
+      "onlyIf": [],
+      "when": {
+        "It has no meaning": {
+          "emits": [
+            {
+              "effect": "Report",
+              "input": {
+                "code": "no-meaning"
+              }
+            }
+          ]
+        },
+        "otherwise": {}
+      }
+    },
+    {
+      "from": [
+        "READY"
+      ],
+      "name": "EndCase",
+      "onlyIf": [
+        "A case has been begun (a BeginCase was executed before)"
+      ],
+      "when": {
+        "otherwise": {
+          "does": "All the fields of the case have been given. If prose says something happens and no written field is an outcome, it is reported as no-outcome. Then, independently, if `nothing` is written together with any other field, it is reported as nothing-and-others.",
+          "emits": [
+            {
+              "effect": "Report",
+              "input": {
+                "code": "no-outcome"
+              },
+              "onlyWhen": "Prose says something happens in the case and no written field is an outcome"
+            },
+            {
+              "effect": "Report",
+              "input": {
+                "code": "nothing-and-others"
+              },
+              "onlyWhen": "`nothing` is written in the case together with another field"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "asks": {
+        "fieldRequired": {
+          "input": {
+            "field": {
+              "$ref": "input:field"
+            },
+            "kind": {
+              "$ref": "input:kind"
+            }
+          },
+          "query": "required"
+        }
+      },
+      "description": "A field of an entry of the vocabulary (an entry of the given kind), and whether it is written. A required field that is not written is reported as field-missing.",
+      "from": [
+        "READY"
+      ],
+      "name": "EntryField",
+      "onlyIf": [],
+      "when": {
+        "The field is required on an entry of this kind and is not written": {
+          "emits": [
+            {
+              "effect": "Report",
+              "input": {
+                "code": "field-missing"
+              }
+            }
+          ]
+        },
+        "otherwise": {}
+      }
+    },
+    {
+      "description": "An invariant. Without a meaning, it is reported as no-meaning.",
+      "from": [
+        "READY"
+      ],
+      "name": "Invariant",
+      "onlyIf": [],
+      "when": {
+        "It has no meaning": {
+          "emits": [
+            {
+              "effect": "Report",
+              "input": {
+                "code": "no-meaning"
+              }
+            }
+          ]
+        },
+        "otherwise": {}
+      }
+    },
+    {
+      "asks": {
+        "mustHaveEntries": {
+          "input": {
+            "group": {
+              "$ref": "input:group"
+            }
+          },
+          "query": "nonEmpty"
+        }
+      },
+      "description": "A group Layer 1 gave only as prose, with the number of entries it ended up with. States and commands are judged elsewhere and never reported here. Any other group that must end up with entries and has none is reported as prose-empty.",
+      "from": [
+        "READY"
+      ],
+      "name": "ProseGroup",
+      "onlyIf": [],
+      "when": {
+        "The group is neither states nor commands, it must end up with entries, and it has none": {
+          "emits": [
+            {
+              "effect": "Report",
+              "input": {
+                "code": "prose-empty"
+              }
+            }
+          ]
+        },
+        "otherwise": {}
+      }
+    },
+    {
+      "description": "A condition sentence the specification uses. A sentence that is not a combination of others and has no meaning is reported as no-meaning.",
+      "from": [
+        "READY"
+      ],
+      "name": "Sentence",
+      "onlyIf": [],
+      "when": {
+        "The sentence is not a combination of others and has no meaning": {
+          "emits": [
+            {
+              "effect": "Report",
+              "input": {
+                "code": "no-meaning"
+              }
+            }
+          ]
+        },
+        "otherwise": {}
+      }
+    },
+    {
+      "asks": {
+        "isOutcome": {
+          "input": {
+            "field": {
+              "$ref": "input:field"
+            },
+            "kind": {
+              "$ref": "data:outcomeKind"
+            }
+          },
+          "query": "outcome"
+        }
+      },
+      "from": [
+        "READY"
+      ],
+      "name": "Written",
+      "onlyIf": [
+        "A case has been begun (a BeginCase was executed before)"
+      ],
+      "when": {
+        "otherwise": {
+          "does": "One field written in the case. Whether it is an outcome is asked, of the kind whose outcomes count (outcomeKind). Whether it is `nothing` or another field (any other name, the empty one included) is taken into account.",
+          "set": {
+            "nothingWritten": {
+              "$ref": "calculation:nothingWrittenNow"
+            },
+            "otherWritten": {
+              "$ref": "calculation:otherWrittenNow"
+            },
+            "outcomeWritten": {
+              "$ref": "calculation:outcomeWrittenNow"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "decisions": {},
+  "descriptions": {
+    "component": "Checks that every path of a merged specification ends in a leaf, and reports what is left unwritten.",
+    "data.branched": "Whether the command being judged has cases other than otherwise.",
+    "data.caseDescribed": "Whether prose says something happens in the case being judged.",
+    "data.nothingWritten": "Whether `nothing` has been written in the case being judged.",
+    "data.otherWritten": "Whether a field other than `nothing` has been written in the case being judged.",
+    "data.outcomeKind": "Whose outcomes count in the command being judged: a case's when it has branched, a command's otherwise.",
+    "data.outcomeWritten": "Whether an outcome field has been written in the case being judged.",
+    "effects.Report": "What was just given is left unwritten, for this reason.",
+    "queries.nonEmpty": "Whether a group of this kind, given only as prose in Layer 1, must end up with entries.",
+    "queries.outcome": "Whether a field is one of the outcomes of a node of this kind (`command` or `case`): one of them must be written where prose says something happens.",
+    "queries.required": "Whether a field is required on a node of this kind (`service`, `datum`, `query`, `calculation`, ...).",
+    "queries.requiredCase": "Whether a command that has cases must have the case with this name."
+  },
+  "irVersion": 7,
+  "model": {
+    "calculations": {
+      "branched": {
+        "description": "Whether the command has a case other than otherwise",
+        "output": "boolean"
+      },
+      "nothingWrittenNow": {
+        "description": "Whether `nothing` was written in the case, the field just given included",
+        "output": "boolean"
+      },
+      "otherWrittenNow": {
+        "description": "Whether a field other than `nothing` was written in the case, the field just given included",
+        "output": "boolean"
+      },
+      "outcomeKind": {
+        "description": "case when the command has branched, command otherwise",
+        "output": [
+          "case",
+          "command"
+        ]
+      },
+      "outcomeWrittenNow": {
+        "description": "Whether an outcome field was written in the case, the field just given included",
+        "output": "boolean"
+      }
+    },
+    "commands": {
+      "Begin": {
+        "commands": {
+          "max": 1000,
+          "min": 0,
+          "type": "integer"
+        },
+        "init": "boolean",
+        "states": [
+          "given",
+          "missing",
+          "stateless"
+        ]
+      },
+      "BeginCase": {
+        "described": "boolean"
+      },
+      "BeginCommand": {
+        "cases": {
+          "max": 1000,
+          "min": 0,
+          "type": "integer"
+        },
+        "hasOtherwise": "boolean"
+      },
+      "Calculation": {
+        "hasMeaning": "boolean"
+      },
+      "EndCase": {},
+      "EntryField": {
+        "field": "string",
+        "kind": "string",
+        "present": "boolean"
+      },
+      "Invariant": {
+        "hasMeaning": "boolean"
+      },
+      "ProseGroup": {
+        "entries": {
+          "max": 1000,
+          "min": 0,
+          "type": "integer"
+        },
+        "group": [
+          "states",
+          "data",
+          "queries",
+          "effects",
+          "calculations",
+          "commands"
+        ]
+      },
+      "Sentence": {
+        "composite": "boolean",
+        "hasMeaning": "boolean"
+      },
+      "Written": {
+        "field": "string"
+      }
+    },
+    "data": {
+      "branched": "boolean",
+      "caseDescribed": "boolean",
+      "nothingWritten": "boolean",
+      "otherWritten": "boolean",
+      "outcomeKind": [
+        "case",
+        "command"
+      ],
+      "outcomeWritten": "boolean"
+    },
+    "effects": {
+      "Report": {
+        "code": [
+          "states-missing",
+          "init-missing",
+          "commands-missing",
+          "prose-empty",
+          "field-missing",
+          "otherwise-missing",
+          "no-outcome",
+          "nothing-and-others",
+          "no-meaning"
+        ]
+      }
+    },
+    "init": "READY",
+    "queries": {
+      "nonEmpty": {
+        "input": {
+          "group": "string"
+        },
+        "output": "boolean"
+      },
+      "outcome": {
+        "input": {
+          "field": "string",
+          "kind": "string"
+        },
+        "output": "boolean"
+      },
+      "required": {
+        "input": {
+          "field": "string",
+          "kind": "string"
+        },
+        "output": "boolean"
+      },
+      "requiredCase": {
+        "input": {
+          "name": "string"
+        },
+        "output": "boolean"
+      }
+    },
+    "states": [
+      "READY"
+    ]
+  }
+}

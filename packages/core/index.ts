@@ -800,37 +800,64 @@ const label = (node: Node) => `${LABEL[node.kind] ?? node.kind}${node.name !== u
 
 export type Diagnostic = { code: string; message: string; at?: Position };
 
-// 木の検査: 文法の表に照らして、書けない組み合わせ、多すぎる子、重なった名前を報告する
+// 木の検査の判断: どの子が、なぜ合わないか。文面と位置は treeDiagnostic が付ける。
+// 判断は Stage 0 (check) か、フレームワーク自身の仕様から生成した部品 (Stage 1、self/specs/tree-check.*) が下す
+export type TreeReport = { code: "unknown-field" | "unknown" | "misplaced" | "too-many" | "duplicate" | "unknown-state"; parent: Node; node: Node };
+export function treeDiagnostic({ code, parent, node }: TreeReport): Diagnostic {
+  const at = (where: Node, message: string): Diagnostic => ({ code, message, ...(where.at ? { at: where.at } : {}) });
+  switch (code) {
+    case "unknown-field":
+      return at(node.at ? node : parent, `${LABEL[(node.value as { kind: string }).kind] ?? (node.value as { kind: string }).kind}に、"${node.name}" という席はありません`);
+    case "unknown": {
+      const what = node.name !== undefined ? `"${node.name}" というまとまり` : typeof node.value === "object" ? "裸の {}（受け取る語の無いもの）" : JSON.stringify(node.value);
+      return at(node.at ? node : parent, `${label(parent)}の中に、${what}は書けません`);
+    }
+    case "misplaced":
+      return at(node, `${label(parent)}の中に、${label(node)}は書けません`);
+    case "too-many": {
+      const key = slotOf(node.kind);
+      return at(node, `${label(parent)}の中に、${LABEL[key] ?? key}を ${(GRAMMAR[parent.kind] ?? {})[key] + 1} つ以上は書けません`);
+    }
+    case "duplicate":
+      return at(node, `${label(parent)}の中に、${label(node)}が2回書かれています`);
+    case "unknown-state":
+      return at(node, `初期状態 "${String(node.value)}" は、状態にありません`);
+  }
+}
+/** 子の節が、文法の表のどの欄に当たるか（型の節は、どれも "#type"） */
+export const slotOf = (kind: string) => slot(kind);
+
+// 木の検査 (Stage 0): 文法の表に照らして、書けない組み合わせ、多すぎる子、重なった名前を報告する
 export function check(root: Node): Diagnostic[] {
-  const found: Diagnostic[] = [];
-  const report = (code: string, node: Node, message: string) => found.push({ code, message, ...(node.at ? { at: node.at } : {}) });
+  return checkReports(root).map(treeDiagnostic);
+}
+export function checkReports(root: Node): TreeReport[] {
+  const found: TreeReport[] = [];
+  const report = (code: TreeReport["code"], parent: Node, node: Node) => found.push({ code, parent, node });
   const visit = (parent: Node) => {
     const allowed = GRAMMAR[parent.kind] ?? {};
     const counts = new Map<string, number>();
     const names = new Map<string, Node>();
     for (const node of parent.children) {
       if (node.kind === "badField") {
-        report("unknown-field", node.at ? node : parent, `${LABEL[(node.value as { kind: string }).kind] ?? (node.value as { kind: string }).kind}に、"${node.name}" という席はありません`);
+        report("unknown-field", parent, node);
         continue;
       }
       if (node.kind === "unknown") {
-        const what = node.name !== undefined ? `"${node.name}" というまとまり` : typeof node.value === "object" ? "裸の {}（受け取る語の無いもの）" : JSON.stringify(node.value);
-        report("unknown", node.at ? node : parent, `${label(parent)}の中に、${what}は書けません`);
+        report("unknown", parent, node);
         continue;
       }
       const key = slot(node.kind);
       if (!(key in allowed)) {
-        report("misplaced", node, `${label(parent)}の中に、${label(node)}は書けません`);
+        report("misplaced", parent, node);
         continue;
       }
       counts.set(key, (counts.get(key) ?? 0) + 1);
-      if (counts.get(key)! === allowed[key] + 1) {
-        report("too-many", node, `${label(parent)}の中に、${LABEL[key] ?? key}を ${allowed[key] + 1} つ以上は書けません`);
-      }
+      if (counts.get(key)! === allowed[key] + 1) report("too-many", parent, node);
       // 同じ種類で、同じ名前の節は、1つだけ
       if (node.name !== undefined) {
         const id = `${node.kind}:${node.name}`;
-        if (names.has(id)) report("duplicate", node, `${label(parent)}の中に、${label(node)}が2回書かれています`);
+        if (names.has(id)) report("duplicate", parent, node);
         names.set(id, node);
       }
       visit(node);
@@ -839,9 +866,7 @@ export function check(root: Node): Diagnostic[] {
       const states = parent.children.filter((node) => node.kind === "state");
       const start = parent.children.find((node) => node.kind === "init");
       // otherwise と init が無いことは、ここでは報告しない（Layer 1 に無ければ、解釈が足せる。重ねたあとで確かめる）
-      if (start && states.length > 0 && !states.some((node) => node.name === start.value)) {
-        report("unknown-state", start, `初期状態 "${String(start.value)}" は、状態にありません`);
-      }
+      if (start && states.length > 0 && !states.some((node) => node.name === start.value)) report("unknown-state", parent, start);
     }
   };
   visit(root);
@@ -1222,70 +1247,158 @@ const leafFacts = (view: MergedView, declaration: Declaration, structures: Recor
     invariants: Object.keys(meanings.invariants).filter((name) => typeof meanings.invariants[name] === "function"),
   },
 });
-export function leafCheck({ view, declaration, structures, meanings: named }: LeafFacts): string[] {
-  const meanings = { conditions: new Set(named.conditions), calculations: new Set(named.calculations), invariants: new Set(named.invariants) };
-  const found: string[] = [];
-  const at = (path: string, message: string) => found.push(`${path}: ${message}`);
-  // 部品 (service) の席
-  if (view.states === "missing") at("states", "状態がありません（Layer 1 は文だけです。解釈で状態を宣言してください）");
-  if ((KINDS.service.required ?? []).includes("init") && view.states !== "stateless" && !view.init) at("init", `${PART_LABEL.init}がありません`);
-  if ((KINDS.service.required ?? []).includes("commands") && Object.keys(view.commands).length === 0) at("commands", `${PART_LABEL.commands}がありません`);
-  // 文だけで書かれたまとまりは、重ねたあとに項目が要る
-  const GROUP_KIND: Record<string, string> = { data: "data", queries: "queries", effects: "effects", calculations: "calculations" };
+// 葉の検査に渡す事実の列（判断を持たない糊）。Stage 0 も Stage 1 も、同じ列を受け取る。where は文面のためだけに持つ
+export type LeafEvent =
+  | { name: "Begin"; input: { states: MergedView["states"]; init: boolean; commands: number }; where: {} }
+  | { name: "ProseGroup"; input: { group: string; entries: number }; where: {} }
+  | { name: "EntryField"; input: { kind: string; field: string; present: boolean }; where: { group: string; entry: string } }
+  | { name: "BeginCommand"; input: { cases: number; hasOtherwise: boolean }; where: { command: string } }
+  | { name: "BeginCase"; input: { described: boolean }; where: { path: string } }
+  | { name: "Written"; input: { field: string }; where: { path: string } }
+  | { name: "EndCase"; input: {}; where: { path: string; filled: string[] } }
+  | { name: "Sentence"; input: { composite: boolean; hasMeaning: boolean }; where: { sentence: string } }
+  | { name: "Calculation" | "Invariant"; input: { hasMeaning: boolean }; where: { name: string } };
+export function* leafEvents({ view, declaration, structures, meanings }: LeafFacts): Generator<LeafEvent> {
+  yield { name: "Begin", input: { states: view.states, init: view.init, commands: Object.keys(view.commands).length }, where: {} };
+  const GROUP_ENTRIES: Record<string, keyof MergedView["entries"] | undefined> = { data: "data", queries: "queries", effects: "effects", calculations: "calculations" };
   for (const group of view.prose) {
-    if (group === "states" || group === "commands" || !KINDS[group]?.nonEmpty) continue;
-    if (Object.keys(view.entries[GROUP_KIND[group] as keyof MergedView["entries"]] ?? {}).length === 0) at(group, "文だけのまま、項目がありません。解釈で項目を宣言してください");
+    const entries = GROUP_ENTRIES[group];
+    yield { name: "ProseGroup", input: { group, entries: entries ? Object.keys(view.entries[entries]).length : 0 }, where: {} };
   }
-  // 項目の、無ければならない席
   const ENTRY_KIND = { data: "datum", queries: "query", effects: "effect", calculations: "calculation" } as const;
   for (const [group, kind] of Object.entries(ENTRY_KIND)) {
-    for (const [name, merged] of Object.entries(view.entries[group as keyof typeof ENTRY_KIND])) {
-      for (const field of KINDS[kind].required ?? []) {
-        if (merged[internalOf(field)] === undefined) at(`${group}.${name}.${field}`, `${PART_LABEL[field] ?? field}がありません`);
+    for (const [entry, merged] of Object.entries(view.entries[group as keyof typeof ENTRY_KIND])) {
+      for (const field of Object.keys(KINDS[kind].fields ?? {})) {
+        yield { name: "EntryField", input: { kind, field, present: merged[internalOf(field)] !== undefined }, where: { group, entry } };
       }
     }
   }
-  // コマンド: 場合に分かれたら otherwise が要る。文で起きることが言われた場合は、起きること（か nothing）が要る
-  for (const [name, command] of Object.entries(view.commands)) {
-    const cases = Object.keys(command.cases);
-    const branched = cases.some((key) => key !== "otherwise");
-    if (branched) for (const required of KINDS.command.requiredCases ?? []) if (!cases.includes(required)) at(`commands.${name}.cases`, `${required} がありません`);
-    for (const [caseName, { described, filled }] of Object.entries(command.cases)) {
-      const path = branched ? `commands.${name}.cases.${caseName}` : `commands.${name}`;
-      const outcomes = (branched ? KINDS.case : KINDS.command).oneOfRequired ?? [];
-      if (described && !filled.some((field) => outcomes.includes(field))) {
-        at(path, "文で言われた「起きること」が、構造になっていません。何も起きないなら nothing: true と書きます");
-      }
-      if (filled.includes("nothing") && filled.length > 1) at(path, `nothing と、起きること (${filled.filter((field) => field !== "nothing").join(" / ")}) が両方あります`);
+  for (const [command, { cases }] of Object.entries(view.commands)) {
+    const names = Object.keys(cases);
+    yield { name: "BeginCommand", input: { cases: names.length, hasOtherwise: names.includes("otherwise") }, where: { command } };
+    const branched = names.some((key) => key !== "otherwise");
+    for (const [caseName, { described, filled }] of Object.entries(cases)) {
+      const path = branched ? `commands.${command}.cases.${caseName}` : `commands.${command}`;
+      yield { name: "BeginCase", input: { described }, where: { path } };
+      for (const field of filled) yield { name: "Written", input: { field }, where: { path } };
+      yield { name: "EndCase", input: {}, where: { path, filled: [...filled] } };
     }
   }
-  // 文の葉: 使われた条件の文、計算、不変条件には、意味の関数が要る（組み合わせは、組み合わせる前の条件を見る）
-  const conditionsUsed = new Set<string>();
+  // 使われた条件の文。組み合わせは、組み合わせる前の文をたどる（たどり方は糊）
+  const used = new Set<string>();
   for (const [name, command] of Object.entries(declaration.commands)) {
-    for (const sentence of [...Object.keys(command.when), ...(command.onlyIf ?? [])]) if (sentence !== "otherwise") conditionsUsed.add(sentence);
+    for (const sentence of [...Object.keys(command.when), ...(command.onlyIf ?? [])]) if (sentence !== "otherwise") used.add(sentence);
     for (const structure of Object.values(structures[name] ?? {})) {
-      for (const effect of structure.effects ?? []) if (typeof effect.when === "string") conditionsUsed.add(effect.when);
+      for (const effect of structure.effects ?? []) if (typeof effect.when === "string") used.add(effect.when);
     }
   }
-  for (const table of Object.values(declaration.decisions ?? {})) for (const row of Object.keys(table)) if (row !== "otherwise") conditionsUsed.add(row);
-  const checkCondition = (sentence: string, seen = new Set<string>()) => {
-    if (seen.has(sentence)) return;
-    seen.add(sentence);
-    const composition = COMPOSITIONS.get(sentence);
-    if (composition) {
-      for (const part of partsOfComposition(composition)) checkCondition(part, seen);
-      return;
-    }
-    if (!meanings.conditions.has(sentence)) at(`conditions."${sentence}"`, "意味の関数がありません（解釈の meanings に書きます）");
-  };
-  for (const sentence of conditionsUsed) checkCondition(sentence);
-  for (const name of Object.keys(declaration.calculations ?? {})) {
-    if (!meanings.calculations.has(name)) at(`calculations.${name}`, "意味の関数がありません（解釈の meanings に書きます）");
+  for (const table of Object.values(declaration.decisions ?? {})) for (const row of Object.keys(table)) if (row !== "otherwise") used.add(row);
+  const has = { conditions: new Set(meanings.conditions), calculations: new Set(meanings.calculations), invariants: new Set(meanings.invariants) };
+  function* sentence(text: string, seen: Set<string>): Generator<LeafEvent> {
+    if (seen.has(text)) return;
+    seen.add(text);
+    const composition = COMPOSITIONS.get(text);
+    yield { name: "Sentence", input: { composite: composition !== undefined, hasMeaning: has.conditions.has(text) }, where: { sentence: text } };
+    if (composition) for (const part of partsOfComposition(composition)) yield* sentence(part, seen);
   }
-  for (const sentence of declaration.invariants ?? []) {
-    if (!meanings.invariants.has(sentence)) at(`invariants."${sentence}"`, "意味の関数がありません（解釈の meanings に書きます）");
+  for (const text of used) yield* sentence(text, new Set());
+  for (const name of Object.keys(declaration.calculations ?? {})) yield { name: "Calculation", input: { hasMeaning: has.calculations.has(name) }, where: { name } };
+  for (const text of declaration.invariants ?? []) yield { name: "Invariant", input: { hasMeaning: has.invariants.has(text) }, where: { name: text } };
+}
+
+// 葉の検査の判断: どの事実について、何が書き残されているか。文面は leafMessage が付ける
+export type LeafReport = {
+  code: "states-missing" | "init-missing" | "commands-missing" | "prose-empty" | "field-missing" | "otherwise-missing" | "no-outcome" | "nothing-and-others" | "no-meaning";
+  event: LeafEvent;
+};
+// 種類の定義 (KINDS) に尋ねること。Stage 1 の部品にも、同じ答えを返す
+export const leafQueries = {
+  required: ({ kind, field }: { kind: string; field: string }) => (KINDS[kind]?.required ?? []).includes(field),
+  nonEmpty: ({ group }: { group: string }) => KINDS[group]?.nonEmpty === true,
+  requiredCase: ({ name }: { name: string }) => (KINDS.command.requiredCases ?? []).includes(name),
+  outcome: ({ kind, field }: { kind: string; field: string }) => (KINDS[kind]?.oneOfRequired ?? []).includes(field),
+};
+// 判断 (Stage 0、手書き)
+export function leafReportsStage0(events: Iterable<LeafEvent>): LeafReport[] {
+  const found: LeafReport[] = [];
+  const report = (code: LeafReport["code"], event: LeafEvent) => found.push({ code, event });
+  let branched = false;
+  // いまの場合: 文で起きることが言われたか、書かれた席に起きることがあるか、nothing と、ほかの席があるか
+  let described = false;
+  let outcome = false;
+  let nothing = false;
+  let others = false;
+  for (const event of events) {
+    switch (event.name) {
+      case "Begin":
+        if (event.input.states === "missing") report("states-missing", event);
+        if (leafQueries.required({ kind: "service", field: "init" }) && event.input.states !== "stateless" && !event.input.init) report("init-missing", event);
+        if (leafQueries.required({ kind: "service", field: "commands" }) && event.input.commands === 0) report("commands-missing", event);
+        break;
+      case "ProseGroup":
+        if (event.input.group !== "states" && event.input.group !== "commands" && leafQueries.nonEmpty({ group: event.input.group }) && event.input.entries === 0) report("prose-empty", event);
+        break;
+      case "EntryField":
+        if (!event.input.present && leafQueries.required(event.input)) report("field-missing", event);
+        break;
+      case "BeginCommand":
+        branched = event.input.cases > (event.input.hasOtherwise ? 1 : 0);
+        if (branched && leafQueries.requiredCase({ name: "otherwise" }) && !event.input.hasOtherwise) report("otherwise-missing", event);
+        break;
+      case "BeginCase":
+        [described, outcome, nothing, others] = [event.input.described, false, false, false];
+        break;
+      case "Written":
+        if (leafQueries.outcome({ kind: branched ? "case" : "command", field: event.input.field })) outcome = true;
+        if (event.input.field === "nothing") nothing = true;
+        else others = true;
+        break;
+      case "EndCase":
+        if (described && !outcome) report("no-outcome", event);
+        if (nothing && others) report("nothing-and-others", event);
+        break;
+      case "Sentence":
+        if (!event.input.composite && !event.input.hasMeaning) report("no-meaning", event);
+        break;
+      case "Calculation":
+      case "Invariant":
+        if (!event.input.hasMeaning) report("no-meaning", event);
+        break;
+    }
   }
   return found;
+}
+// 判断に、道筋つきの文面を付ける
+const NO_MEANING = "意味の関数がありません（解釈の meanings に書きます）";
+export function leafMessage({ code, event }: LeafReport): string {
+  switch (event.name) {
+    case "Begin":
+      if (code === "states-missing") return "states: 状態がありません（Layer 1 は文だけです。解釈で状態を宣言してください）";
+      if (code === "init-missing") return `init: ${PART_LABEL.init}がありません`;
+      return `commands: ${PART_LABEL.commands}がありません`;
+    case "ProseGroup":
+      return `${event.input.group}: 文だけのまま、項目がありません。解釈で項目を宣言してください`;
+    case "EntryField":
+      return `${event.where.group}.${event.where.entry}.${event.input.field}: ${PART_LABEL[event.input.field] ?? event.input.field}がありません`;
+    case "BeginCommand":
+      return `commands.${event.where.command}.cases: otherwise がありません`;
+    case "BeginCase":
+    case "Written":
+      return `${event.where.path}: ${code}`;
+    case "EndCase":
+      return code === "no-outcome"
+        ? `${event.where.path}: 文で言われた「起きること」が、構造になっていません。何も起きないなら nothing: true と書きます`
+        : `${event.where.path}: nothing と、起きること (${event.where.filled.filter((field) => field !== "nothing").join(" / ")}) が両方あります`;
+    case "Sentence":
+      return `conditions."${event.where.sentence}": ${NO_MEANING}`;
+    case "Calculation":
+      return `calculations.${event.where.name}: ${NO_MEANING}`;
+    case "Invariant":
+      return `invariants."${event.where.name}": ${NO_MEANING}`;
+  }
+}
+export function leafCheck(facts: LeafFacts): string[] {
+  return leafReportsStage0(leafEvents(facts)).map(leafMessage);
 }
 
 // 木の検査の結果: 文法に合わない所と、まだ使えない書き方。value は、部品の木か、解釈
