@@ -1,5 +1,9 @@
 {
-  "specs": "sha256:94b72665c8551fe78f7d2991f1d2717433af9b2ace2ff94cb95a0c59c94bcadb",
+  "roots": [
+    "payload-check.component.ts",
+    "payload-check.interpretation.ts"
+  ],
+  "specs": "sha256:1fde2a190ad3b0d4145fb5bbd36fb123647ba995290b475d6f9a19849478e500",
   "code": "sha256:cdba9515b71f08c92c7ce535815ed9b34728dbb67573711e5b7342ba99e12c27",
   "files": [
     "../src/payload-check/fit.ts",

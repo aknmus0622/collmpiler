@@ -93,3 +93,23 @@ test("到達点: 解釈が足した語彙が使われていなければ、strict
   assert.deepEqual((extract(finals).ir as { model: { final: string[] } }).model.final, ["DONE"]);
   assert.deepEqual(graphDiagnostics(finals).map((d) => d.message), ['状態 "STUCK" は終わりの状態ではありませんが、どのコマンドでも、ほかの状態へ出られません。出るコマンドを書くか、終わりの状態 (final: true) にしてください']);
 });
+
+test("判断の差し替え (N10a): 木の検査と葉の検査は、読み込む側が渡した判断 (Stage 1) で下せる。undefined なら Stage 0", async () => {
+  const dir = specDir({ uses: "effects({ Notify: input({}) }),", commands: `Close: "The thing is closed and a notice is sent."` });
+  const stage0 = await report(dir);
+  assert.ok(stage0.some((line) => line.startsWith("incomplete: commands.Close")));
+  // 渡した判断が、事実を受け取って結果を返す
+  let seen: { prose?: string[]; nodes?: number } = {};
+  const judged = await loadSpecs(dir, {
+    judges: {
+      leaf: async (facts) => ((seen.prose = facts.view.prose), ["judged.elsewhere: Stage 1 の判断"]),
+      tree: async (tree) => ((seen.nodes = tree.children.length), []),
+    },
+  });
+  assert.deepEqual(extract(judged).diagnostics.map((d) => `${d.code}: ${d.message}`), ["incomplete: judged.elsewhere: Stage 1 の判断"]);
+  assert.deepEqual(seen.prose, []);
+  assert.ok((seen.nodes ?? 0) > 0);
+  // 実行できなかった (undefined) ときは、Stage 0 の判断
+  const fallen = await loadSpecs(dir, { judges: { leaf: async () => undefined, tree: async () => undefined } });
+  assert.deepEqual(extract(fallen).diagnostics.map((d) => `${d.code}: ${d.message}`), stage0);
+});

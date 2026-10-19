@@ -1,5 +1,9 @@
 {
-  "specs": "sha256:10825d5766fbae63129d9850bb52545033a1a5e9ff2ca91b1da344aadbfb2e00",
+  "roots": [
+    "store.component.ts",
+    "store.interpretation.ts"
+  ],
+  "specs": "sha256:02a06ef8756648aa7d2679b397a8f2920befe086c52d1efb22f470e07a3730ba",
   "code": "sha256:8310c3af122ea7386a33b714df2dbf8c524be546c736e44e9866524e416a1b94",
   "files": [
     "../src/json.ts",

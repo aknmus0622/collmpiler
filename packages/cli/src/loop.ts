@@ -147,6 +147,7 @@ export async function implement(options: ImplementOptions) {
       ws: workspaceOf(layout, target.files, name, names),
       seed: seedOf(ir),
       assets: spec.assets ?? [],
+      roots: [spec.sources?.component?.file, spec.sources?.binding].filter((file): file is string => file !== undefined),
     });
   }
 
@@ -218,12 +219,13 @@ export async function implement(options: ImplementOptions) {
   // 合格の記録を残す。本番コードは共有なので、最後のコンポーネントまで合格してから、まとめて書く
   // （あとのコンポーネントがコードを変えると、前のコンポーネントの記録は合わなくなる）。
   // 確認していない下書きを正解にしたときは、合格済みとは扱わない
-  if (status === "pass" && oracle === "reviewed") for (const unit of chosen) writeVerified(unit.ws, specsDir);
+  if (status === "pass" && oracle === "reviewed") for (const unit of chosen) writeVerified(unit.ws, specsDir, unit.roots);
   // seed は、最初のコンポーネントのもの（コンポーネントが1つのときの、従来の形）
   return { status, oracle, attempts, stages, seed: units[0].seed, seeds: Object.fromEntries(units.map((unit) => [unit.name, unit.seed])) };
 }
 
-type Unit = { name: string; ir: Ir; ws: Workspace; seed: number; assets: Asset[] };
+// roots: 仕様の起点（Layer 1 と解釈のファイル。合格の記録が、そこからたどったファイルだけをハッシュする）
+type Unit = { name: string; ir: Ir; ws: Workspace; seed: number; assets: Asset[]; roots: string[] };
 
 // 1つのコンポーネントについて、仕様・本番コード・アダプターを一致させる。
 // 段階の進め方（どの段階から始めるか、差し戻すか、やり直すか）の判断は、2通りある:

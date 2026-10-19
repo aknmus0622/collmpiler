@@ -1168,8 +1168,10 @@ export function interpretation(target: Node, given: readonly unknown[]): BoundSp
     ...(Object.keys(meanings.calculations).length > 0 ? { calculations: meanings.calculations } : {}),
     ...(Object.keys(meanings.invariants).length > 0 ? { invariants: meanings.invariants } : {}),
     problems,
-    incomplete: leafCheck(view, declaration, commands, meanings),
+    // Stage 0 の判断。読み込む側は、事実 (facts) から、Stage 1 で判断し直せる
+    incomplete: leafCheck(leafFacts(view, declaration, commands, meanings)),
   };
+  Object.defineProperty(value, FACTS, { value: leafFacts(view, declaration, commands, meanings) });
   Object.defineProperty(value, BINDING, { value: true });
   activate(value);
   TREES.set(value, { tree, problems: into.problems });
@@ -1202,7 +1204,26 @@ const PART_LABEL: Record<string, string> = { type: "型", output: "答えの型 
  * 葉の検査: 重ねたあとの木の、すべての道筋が葉（型、定数、解決できる取っ手、意味のある文、nothing）で終わるか。
  * 決まりは種類の定義 (KINDS) の required / oneOfRequired / nonEmpty / requiredCases が持つ。診断は道筋で書く
  */
-function leafCheck(view: MergedView, declaration: Declaration, structures: Record<string, Record<string, Structure>>, meanings: Meanings): string[] {
+// 葉の検査が見る事実（重ねたあとの見取り図と、意味の関数を持つ名前）。判断は、Stage 0 (leafCheck) か、
+// フレームワーク自身の仕様から生成した部品 (Stage 1) が行う。core は、事実を出すだけでよい（SELF_HOSTING.md §11）
+export type LeafFacts = {
+  view: MergedView;
+  declaration: Declaration;
+  structures: Record<string, Record<string, Structure>>;
+  meanings: { conditions: string[]; calculations: string[]; invariants: string[] };
+};
+const leafFacts = (view: MergedView, declaration: Declaration, structures: Record<string, Record<string, Structure>>, meanings: Meanings): LeafFacts => ({
+  view,
+  declaration,
+  structures,
+  meanings: {
+    conditions: Object.keys(meanings.conditions).filter((name) => typeof meanings.conditions[name] === "function"),
+    calculations: Object.keys(meanings.calculations).filter((name) => typeof meanings.calculations[name] === "function"),
+    invariants: Object.keys(meanings.invariants).filter((name) => typeof meanings.invariants[name] === "function"),
+  },
+});
+export function leafCheck({ view, declaration, structures, meanings: named }: LeafFacts): string[] {
+  const meanings = { conditions: new Set(named.conditions), calculations: new Set(named.calculations), invariants: new Set(named.invariants) };
   const found: string[] = [];
   const at = (path: string, message: string) => found.push(`${path}: ${message}`);
   // 部品 (service) の席
@@ -1255,24 +1276,32 @@ function leafCheck(view: MergedView, declaration: Declaration, structures: Recor
       for (const part of partsOfComposition(composition)) checkCondition(part, seen);
       return;
     }
-    if (typeof meanings.conditions[sentence] !== "function") at(`conditions."${sentence}"`, "意味の関数がありません（解釈の meanings に書きます）");
+    if (!meanings.conditions.has(sentence)) at(`conditions."${sentence}"`, "意味の関数がありません（解釈の meanings に書きます）");
   };
   for (const sentence of conditionsUsed) checkCondition(sentence);
   for (const name of Object.keys(declaration.calculations ?? {})) {
-    if (typeof meanings.calculations[name] !== "function") at(`calculations.${name}`, "意味の関数がありません（解釈の meanings に書きます）");
+    if (!meanings.calculations.has(name)) at(`calculations.${name}`, "意味の関数がありません（解釈の meanings に書きます）");
   }
   for (const sentence of declaration.invariants ?? []) {
-    if (typeof meanings.invariants[sentence] !== "function") at(`invariants."${sentence}"`, "意味の関数がありません（解釈の meanings に書きます）");
+    if (!meanings.invariants.has(sentence)) at(`invariants."${sentence}"`, "意味の関数がありません（解釈の meanings に書きます）");
   }
   return found;
 }
 
 // 木の検査の結果: 文法に合わない所と、まだ使えない書き方。value は、部品の木か、解釈
 export function grammarOf(value: object): Diagnostic[] {
-  if (isNode(value)) return [...check(value), ...(LAYER1.get(value)?.problems ?? (layer1Of(value), LAYER1.get(value)!.problems))];
-  const found = TREES.get(value);
+  const found = treeOf(value);
   return found ? [...check(found.tree), ...found.problems] : [];
 }
+// 木の検査が見る事実: 書かれた木（部品の木か、解釈の木）と、変換でまだ扱えなかったもの (not-yet)。
+// 文法に合うかの判断 (check) は、読み込む側が、Stage 0 か Stage 1 で行える
+export function treeOf(value: object): { tree: Node; problems: Diagnostic[] } | undefined {
+  if (isNode(value)) return { tree: value, problems: LAYER1.get(value)?.problems ?? (layer1Of(value), LAYER1.get(value)!.problems) };
+  return TREES.get(value);
+}
+// 解釈が持つ、葉の検査の事実
+const FACTS = Symbol.for("clp.leafFacts");
+export const leafFactsOf = (binding: BoundSpecification): LeafFacts | undefined => (binding as unknown as Record<symbol, LeafFacts | undefined>)[FACTS];
 
 
 // --- 1.0 の書き方 (DSL.md §16.0): 種類と、席・項目・並び、略記 ---

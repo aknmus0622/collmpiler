@@ -1,5 +1,9 @@
 {
-  "specs": "sha256:10825d5766fbae63129d9850bb52545033a1a5e9ff2ca91b1da344aadbfb2e00",
+  "roots": [
+    "todo-item.component.ts",
+    "todo-item.interpretation.ts"
+  ],
+  "specs": "sha256:08524c3fa49d9c5535338025ef17ada65f9622ac21aae42e9e6a81a5b567cdfc",
   "code": "sha256:7602e3a57e9b3730a9e0b84e6b3a64f8e3c2b2abdcffcf0f0e605fca60c1862a",
   "files": [
     "../src/json.ts",

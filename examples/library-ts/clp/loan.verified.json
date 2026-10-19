@@ -1,4 +1,8 @@
 {
+  "roots": [
+    "loan.component.ts",
+    "loan.interpretation.ts"
+  ],
   "specs": "sha256:ab8a30c1a0fc44875d7b72ac5cdaaa790564363244a8ff17874cf043a5e946d5",
   "code": "sha256:10aad5eeec7e86744d3a2bf8211c82213303fb36612a36b6c20c5c850c5addb3",
   "files": [

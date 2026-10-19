@@ -1,9 +1,8 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, posix, relative, sep } from "node:path";
 import { sourceFiles } from "./layout.ts";
 import type { Workspace } from "./layout.ts";
-import { DRAFT_SUFFIX } from "./loader.ts";
 
 // 合格の記録: 「この仕様に対して、このコードが、検証に合格した」ことを、テスト側に残す。
 //
@@ -15,7 +14,10 @@ import { DRAFT_SUFFIX } from "./loader.ts";
 // ファイルのパスは、記録のファイルから見た相対パスで持つ。記録だけを見て、確かめ直せるようにするため
 
 export type Verified = {
-  // 仕様のファイル（下書きを除く、仕様のディレクトリの .ts すべて）のハッシュ
+  // このコンポーネントの仕様の起点（Layer 1 と解釈のファイル。仕様のディレクトリからの相対パス）
+  roots: string[];
+  // 起点と、そこから相対パスで import されるファイル（たどったものすべて）のハッシュ。
+  // ほかのコンポーネントの仕様を直しても、このコンポーネントの記録は古くならない
   specs: string;
   // 本番コードのファイルと、このコンポーネントのアダプターのハッシュ
   code: string;
@@ -29,14 +31,27 @@ function hashFiles(base: string, files: readonly string[]): string {
   for (const file of [...files].sort()) hash.update(`${file}\0`).update(readFileSync(join(base, file))).update("\0");
   return `sha256:${hash.digest("hex")}`;
 }
-const specFiles = (specsDir: string) =>
-  (readdirSync(specsDir, { recursive: true, encoding: "utf8" }) as string[]).map(toPosix).filter((file) => file.endsWith(".ts") && !file.endsWith(DRAFT_SUFFIX));
+// 起点から、相対パスの import をたどったファイル（仕様のディレクトリの中にあるものだけ。仕様のディレクトリからの相対パス）
+export function specClosure(specsDir: string, roots: readonly string[]): string[] {
+  const found = new Set<string>();
+  const visit = (rel: string) => {
+    if (found.has(rel) || rel.startsWith("..") || !existsSync(join(specsDir, rel))) return;
+    found.add(rel);
+    const text = readFileSync(join(specsDir, rel), "utf8");
+    for (const match of text.matchAll(/(?:^|[\s;])(?:import|export)\b[^"'`;]*?from\s*["'](\.{1,2}\/[^"']+)["']/g)) {
+      visit(posix.normalize(posix.join(posix.dirname(rel), match[1])));
+    }
+  };
+  for (const root of roots) visit(toPosix(root));
+  return [...found].sort();
+}
 
-// 合格したコンポーネントの記録を書く
-export function writeVerified(ws: Workspace, specsDir: string): void {
+// 合格したコンポーネントの記録を書く。roots: そのコンポーネントの仕様の起点（Layer 1 と解釈のファイル）
+export function writeVerified(ws: Workspace, specsDir: string, roots: readonly string[]): void {
   const record = join(ws.root, ws.paths.verified);
   const files = [...sourceFiles(ws), ws.paths.adapter].map((rel) => toPosix(relative(dirname(record), join(ws.root, rel)))).sort();
-  const verified: Verified = { specs: hashFiles(specsDir, specFiles(specsDir)), code: hashFiles(dirname(record), files), files };
+  const sortedRoots = [...roots].map(toPosix).sort();
+  const verified: Verified = { roots: sortedRoots, specs: hashFiles(specsDir, specClosure(specsDir, sortedRoots)), code: hashFiles(dirname(record), files), files };
   writeFileSync(record, `${JSON.stringify(verified, null, 2)}\n`);
 }
 export const clearVerified = (ws: Workspace) => rmSync(join(ws.root, ws.paths.verified), { force: true });
@@ -50,7 +65,9 @@ export function staleness(record: string, specsDir: string): string | undefined 
   } catch {
     return "検証に合格した記録を読めません";
   }
-  if (!existsSync(specsDir) || hashFiles(specsDir, specFiles(specsDir)) !== verified.specs) return "合格したあとで、仕様が変わっています";
+  if (!Array.isArray(verified.roots)) return "検証に合格した記録が、古い形です（clp apply で採点し直してください）";
+  if (!existsSync(specsDir) || verified.roots.some((root) => !existsSync(join(specsDir, root)))) return "合格したあとで、仕様が変わっています";
+  if (hashFiles(specsDir, specClosure(specsDir, verified.roots)) !== verified.specs) return "合格したあとで、仕様が変わっています";
   const base = dirname(record);
   const missing = verified.files.find((file) => !existsSync(posix.join(toPosix(base), file)));
   if (missing !== undefined) return `合格したときのコードがありません (${missing})`;

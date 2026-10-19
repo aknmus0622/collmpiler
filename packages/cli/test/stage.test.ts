@@ -333,8 +333,11 @@ test("合格の記録: Stage 1 が使うのは、検証に合格した、いま�
   assert.equal(staleness(record, specs), undefined);
   // アダプターも、コードのうち
   assert.ok(files.includes("pipeline.adapter.ts"));
-  // 仕様が変わった（ほかのコンポーネントの仕様でも: 仕様のディレクトリ全体を見る）
+  // ほかのコンポーネントの仕様が変わっても、この記録は古くならない（見るのは、自分の仕様と、そこから import するものだけ）
   writeFileSync(join(specs, "value-writer.decisions.ts"), `${readFileSync(join(specs, "value-writer.decisions.ts"), "utf8")}// changed\n`);
+  assert.equal(staleness(record, specs), undefined);
+  // 自分の仕様が import するファイルが変わった
+  writeFileSync(join(specs, "pipeline.decisions.ts"), `${readFileSync(join(specs, "pipeline.decisions.ts"), "utf8")}// changed\n`);
   assert.equal(staleness(record, specs), "合格したあとで、仕様が変わっています");
   // 下書きは、仕様に数えない
   cpSync(join(self, "specs"), specs, { recursive: true });

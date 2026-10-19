@@ -1,5 +1,9 @@
 {
-  "specs": "sha256:94b72665c8551fe78f7d2991f1d2717433af9b2ace2ff94cb95a0c59c94bcadb",
+  "roots": [
+    "pipeline.component.ts",
+    "pipeline.interpretation.ts"
+  ],
+  "specs": "sha256:cd2a330ce6f8bb602beb0281b621b0dc25debef9ecbba63578f8ad77c236b594",
   "code": "sha256:784dda2a392486f8e46b1fb582d5ed75c9a51e4c611d6bc6127cc1df72418660",
   "files": [
     "../src/payload-check/fit.ts",

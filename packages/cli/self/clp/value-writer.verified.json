@@ -1,5 +1,9 @@
 {
-  "specs": "sha256:94b72665c8551fe78f7d2991f1d2717433af9b2ace2ff94cb95a0c59c94bcadb",
+  "roots": [
+    "value-writer.component.ts",
+    "value-writer.interpretation.ts"
+  ],
+  "specs": "sha256:cc963f70a0017e698b6a0ca27dfdff02adfdcef7de8c18ed5c196bd769f58e51",
   "code": "sha256:21cf9a4b2a51b88783da4f7c6a2c5326c412d62172288184ebf142e028bd5745",
   "files": [
     "../src/payload-check/fit.ts",
