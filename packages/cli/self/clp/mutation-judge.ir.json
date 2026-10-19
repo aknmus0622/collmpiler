@@ -1,0 +1,194 @@
+{
+  "behaviors": [
+    {
+      "from": [
+        "VALUES"
+      ],
+      "name": "BeginValue",
+      "onlyIf": [],
+      "when": {
+        "otherwise": {
+          "does": "A decision-table value is judged next: whether it is a number, and whether it appears in the adapter as a number. None of its sites has been given yet.",
+          "goTo": "IN_VALUE",
+          "set": {
+            "sawSite": false,
+            "siteKilled": false,
+            "valueInAdapter": {
+              "$ref": "calculation:valueInAdapterNow"
+            }
+          }
+        }
+      }
+    },
+    {
+      "from": [
+        "IN_VALUE"
+      ],
+      "name": "EndValue",
+      "onlyIf": [],
+      "when": {
+        "otherwise": {
+          "does": "The value's sites are over. If it had a site, a value is located in production code (for the rest of the judgement), and if none of its sites was killed, it survived. If it had no site, and it is a number that appears in the adapter, it is in the adapter.",
+          "emits": [
+            {
+              "effect": "Survived",
+              "input": {},
+              "onlyWhen": "The value had a site, and none of its sites was killed"
+            },
+            {
+              "effect": "InAdapter",
+              "input": {},
+              "onlyWhen": "The value had no site, and it is a number that appears in the adapter"
+            }
+          ],
+          "goTo": "VALUES",
+          "set": {
+            "located": {
+              "$ref": "calculation:locatedNow"
+            }
+          }
+        }
+      }
+    },
+    {
+      "from": [
+        "VALUES",
+        "MUTANTS"
+      ],
+      "name": "Finish",
+      "onlyIf": [],
+      "when": {
+        "otherwise": {
+          "does": "The judgement is over. If no value was located in production code, no mutant was killed, and the production code is not shared with other components in a way that could not be narrowed (shared), the mutation is ineffective.",
+          "emits": [
+            {
+              "effect": "Ineffective",
+              "input": {},
+              "onlyWhen": "No value was located in production code, no mutant was killed, and the production code is not shared with other components in a way that could not be narrowed"
+            }
+          ],
+          "goTo": "DONE"
+        }
+      }
+    },
+    {
+      "from": [
+        "VALUES",
+        "MUTANTS"
+      ],
+      "name": "Mutant",
+      "onlyIf": [],
+      "when": {
+        "otherwise": {
+          "does": "A mutant (every one, the sites of values included) and whether it was killed.",
+          "goTo": "MUTANTS",
+          "set": {
+            "anyKilled": {
+              "$ref": "calculation:anyKilledNow"
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "A site of the value: a place in production code where the value was changed, and whether that made the tests fail (killed).",
+      "from": [
+        "IN_VALUE"
+      ],
+      "name": "Site",
+      "onlyIf": [],
+      "when": {
+        "Breaking it made the tests fail (killed)": {
+          "set": {
+            "sawSite": true,
+            "siteKilled": true
+          }
+        },
+        "otherwise": {
+          "set": {
+            "sawSite": true
+          }
+        }
+      }
+    }
+  ],
+  "decisions": {},
+  "descriptions": {
+    "component": "Decides whether a mutation report passes the mutation gate, value by value and as a whole.",
+    "data.anyKilled": "Whether some mutant so far was killed.",
+    "data.located": "Whether some value so far had a site.",
+    "data.sawSite": "Whether the value being judged has a site (a place in production code where it was broken).",
+    "data.siteKilled": "Whether some site of the value being judged was killed (breaking it made the tests fail).",
+    "data.valueInAdapter": "Whether the value being judged is a number that appears in the adapter.",
+    "effects.InAdapter": "The value being judged has no site in production code, but appears in the adapter: the decision was put in the adapter.",
+    "effects.Ineffective": "No decision-table value was found in production code, and no mutant at all was killed: the tested behaviour does not come from production code.",
+    "effects.Survived": "The value being judged has sites, and none was killed: it is not decided by production code.",
+    "states.DONE": "The judgement is over.",
+    "states.IN_VALUE": "The sites of one value are being given.",
+    "states.MUTANTS": "Every mutant is being given.",
+    "states.VALUES": "Values are being judged, one after another."
+  },
+  "irVersion": 7,
+  "model": {
+    "calculations": {
+      "anyKilledNow": {
+        "description": "Whether some mutant so far, the one given included, was killed",
+        "output": "boolean"
+      },
+      "locatedNow": {
+        "description": "Whether some value so far, the one whose sites are over included, had a site",
+        "output": "boolean"
+      },
+      "valueInAdapterNow": {
+        "description": "Whether the value given is a number and appears in the adapter",
+        "output": "boolean"
+      }
+    },
+    "commands": {
+      "BeginValue": {
+        "inAdapter": "boolean",
+        "numeric": "boolean"
+      },
+      "EndValue": {},
+      "Finish": {
+        "shared": "boolean"
+      },
+      "Mutant": {
+        "killed": "boolean"
+      },
+      "Site": {
+        "killed": "boolean"
+      }
+    },
+    "data": {
+      "anyKilled": "boolean",
+      "located": "boolean",
+      "sawSite": "boolean",
+      "siteKilled": "boolean",
+      "valueInAdapter": "boolean"
+    },
+    "effects": {
+      "InAdapter": {},
+      "Ineffective": {},
+      "Survived": {}
+    },
+    "final": [
+      "DONE"
+    ],
+    "init": "VALUES",
+    "initial": {
+      "anyKilled": false,
+      "located": false,
+      "sawSite": false,
+      "siteKilled": false,
+      "valueInAdapter": false
+    },
+    "queries": {},
+    "states": [
+      "VALUES",
+      "IN_VALUE",
+      "MUTANTS",
+      "DONE"
+    ]
+  }
+}

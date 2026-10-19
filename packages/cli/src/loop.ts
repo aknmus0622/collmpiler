@@ -16,7 +16,7 @@ import type { MutationStrategy } from "./mutation.ts";
 import { PHASES } from "./request.ts";
 import type { Phase } from "./request.ts";
 import { DEFAULT_RUNS, defaultRuns, describeUnobservable, observability, selfCheck, unreachedCases } from "./runtime.ts";
-import { graphCheck, loadJudges, mutationVerdict, planContract, requestPlan, references, runStage1, stage1Adapter, stage1Unavailable } from "./stage1.ts";
+import { R1_COMPONENTS, runCases, graphCheck, loadJudges, mutationVerdict, planContract, requestPlan, setGradingByStage0, stage0HashOf, references, runStage1, stage1Adapter, stage1Unavailable } from "./stage1.ts";
 import type { StaticCheckStrategy } from "./static-check.ts";
 import { clearVerified, writeVerified } from "./verified.ts";
 import type { ImplementationStrategy } from "./strategy.ts";
@@ -189,6 +189,10 @@ export async function implement(options: ImplementOptions) {
   const chosen = units.filter((candidate) => options.component === undefined || candidate.name === options.component);
   // 合格の記録は、これから確かめ直すので、いったん消す（途中で止まったときに、前の記録が残らないように）
   for (const unit of chosen) clearVerified(unit.ws);
+  // R1: 採点の部品を作り直す実行では、採点の判断をすべて Stage 0 が下す（採点される側に、採点させない）
+  const gradingByStage0 = chosen.some((unit) => unit.name in R1_COMPONENTS);
+  setGradingByStage0(gradingByStage0);
+  try {
   for (const unit of chosen) {
     const ctx: GateContext = {
       target,
@@ -218,10 +222,28 @@ export async function implement(options: ImplementOptions) {
       break;
     }
   }
+  } finally {
+    setGradingByStage0(false);
+  }
   // 合格の記録を残す。本番コードは共有なので、最後のコンポーネントまで合格してから、まとめて書く
   // （あとのコンポーネントがコードを変えると、前のコンポーネントの記録は合わなくなる）。
-  // 確認していない下書きを正解にしたときは、合格済みとは扱わない
-  if (status === "pass" && oracle === "reviewed") for (const unit of chosen) writeVerified(unit.ws, specsDir, unit.roots);
+  // 確認していない下書きを正解にしたときは、合格済みとは扱わない。
+  // 記録には、採点した側を書く (R2)。採点の部品には、対になる Stage 0 のハッシュも書き (R5)、事例の集まりで
+  // Stage 0 と食い違えば書かない (R3)
+  if (status === "pass" && oracle === "reviewed") {
+    for (const unit of chosen) {
+      const r1 = unit.name in R1_COMPONENTS;
+      if (r1) {
+        const cases = runCases(specsDir, unit.ws, unit.name);
+        for (const line of cases.unexecuted) log(`注意 (${unit.name}): 事例の集まりで一度も実行されない関数があります。事例を足してください: ${line}`);
+        if (cases.problem !== undefined) {
+          log(`${unit.name}: 合格の記録を書きません。事例の集まりで、Stage 0 と食い違いました (R3): ${cases.problem}`);
+          continue;
+        }
+      }
+      writeVerified(unit.ws, specsDir, unit.roots, { gradedBy: gradingByStage0 ? "stage0" : "stage1", ...(r1 ? { stage0: stage0HashOf(unit.name) } : {}) });
+    }
+  }
   // seed は、最初のコンポーネントのもの（コンポーネントが1つのときの、従来の形）
   return { status, oracle, attempts, stages, seed: units[0].seed, seeds: Object.fromEntries(units.map((unit) => [unit.name, unit.seed])) };
 }

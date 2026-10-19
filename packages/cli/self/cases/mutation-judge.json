@@ -1,0 +1,20 @@
+{
+  "about": "Cases for the mutation-judge grading component (SELF_HOSTING.md §10.3, R3). Inputs only: the expected verdicts are what Stage 0 (packages/cli/src/mutation.ts judgeStage0) decides for the same input. Written and extended by people.",
+  "cases": [
+    { "mutants": [], "values": [], "adapter": "", "shared": false },
+    { "mutants": [], "values": [], "adapter": "", "shared": true },
+    { "mutants": [{ "killed": true }], "values": [], "adapter": "", "shared": false },
+    { "mutants": [{ "killed": false }, { "killed": false }], "values": [], "adapter": "", "shared": false },
+    { "mutants": [{ "value": 20, "killed": true }], "values": [20], "adapter": "", "shared": false },
+    { "mutants": [{ "value": 20, "killed": false }], "values": [20], "adapter": "", "shared": false },
+    { "mutants": [{ "value": 20, "killed": false }, { "value": 20, "killed": true }], "values": [20], "adapter": "", "shared": false },
+    { "mutants": [{ "value": 20, "killed": false }, { "value": 20, "killed": false }, { "killed": true }], "values": [20, 5], "adapter": "", "shared": false },
+    { "mutants": [{ "killed": true }], "values": [10000], "adapter": "function check(amount) { if (amount >= 10000) return true; return false; }", "shared": false },
+    { "mutants": [{ "killed": false }], "values": [10000], "adapter": "const limit = 10000;", "shared": false },
+    { "mutants": [{ "killed": false }], "values": [10000], "adapter": "const limit = 10000;", "shared": true },
+    { "mutants": [{ "killed": false }], "values": ["Gold"], "adapter": "const rank = \"Gold\";", "shared": false },
+    { "mutants": [{ "value": "Gold", "killed": false }], "values": ["Gold", 3], "adapter": "const n = 3;", "shared": false },
+    { "mutants": [{ "value": "Gold", "killed": true }, { "killed": false }], "values": ["Gold", 3, 4], "adapter": "const n = 3, m = 7;", "shared": true },
+    { "mutants": [{ "value": 1, "killed": false }, { "value": 2, "killed": true }, { "value": 3, "killed": false }, { "killed": false }], "values": [1, 2, 3, 4], "adapter": "x(4); y(5);", "shared": false }
+  ]
+}

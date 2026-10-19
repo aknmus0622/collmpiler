@@ -10,7 +10,8 @@ import type { Violation } from "./check.ts";
 import { stableStringify } from "./extract.ts";
 import { FILES, TEST_DIR } from "./generate.ts";
 import type { Ir } from "./generate.ts";
-import { decisionValues, judge } from "./mutation.ts";
+import { decisionValues, judge, judgeEvents } from "./mutation.ts";
+import { judgeDecided } from "./stage1.ts";
 import type { MutationStrategy } from "./mutation.ts";
 import { ASSETS_DIR, renderRequest } from "./request.ts";
 import type { RequestSections } from "./request.ts";
@@ -493,7 +494,11 @@ async function judgeOutput(
       .filter((mutant) => !mutant.killed)
       .map(({ file, line, original }) => ({ file, line, original })),
   };
-  const survived = judge(report, values, readFileSync(join(ws.root, ADAPTER), "utf8"), ADAPTER, label(ws.src), ctx.others.length > 0 && !usage);
+  // 合否の決まり: 判断は Stage 0 と、使えれば Stage 1 の厳しい側 (R4)。採点の部品を作り直す実行では Stage 0 だけ (R1)
+  const adapterSource = readFileSync(join(ws.root, ADAPTER), "utf8");
+  const shared = ctx.others.length > 0 && !usage;
+  const decided = await judgeDecided([...judgeEvents(report, values, adapterSource, shared)]);
+  const survived = judge(report, values, adapterSource, ADAPTER, label(ws.src), shared, decided);
   return survived.length > 0
     ? { ...ran, feedback: { kind: "mutation", violations: survived }, mutation }
     : { ...ran, mutation };

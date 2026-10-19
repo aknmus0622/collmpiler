@@ -304,6 +304,7 @@ test("自分自身の検証: 自分の生成物の上で動くフレームワー
     "graph-check:implementation:0:ok",
     "interpret-flow:implementation:0:ok",
     "leaf-check:implementation:0:ok",
+    "mutation-judge:implementation:0:ok",
     "mutation-verdict:implementation:0:ok",
     "payload-check:implementation:0:ok",
     "pipeline:implementation:0:ok",
@@ -810,4 +811,57 @@ test("Stage 1: 文面の判断（契約の型の書き方・注記・節、依�
       assert.deepEqual(await runStage1(requestPlan, facts), requestSectionsStage0(facts), JSON.stringify(facts));
     }
   }
+});
+
+test("採点の部品 (N11): ミューテーションの合否は、事例の集まりで Stage 0 と同じ判断を返す。R1〜R5 の決まりが効く", async () => {
+  const { R1_CASES, grade, judgePart, runCases, setGradingByStage0, stage0HashOf, stage1Adapter } = await import("../src/stage1.ts");
+  const { judgeEvents, judgeStage0 } = await import("../src/mutation.ts");
+  const self = join(repoRoot, "packages/cli/self");
+  // R3: 事例の集まり（入力だけ）を、生成したコードと Stage 0 の両方で判断して、一致する
+  const cases = JSON.parse(readFileSync(join(self, "cases/mutation-judge.json"), "utf8")).cases as unknown[];
+  const adapter = await stage1Adapter("mutation-judge");
+  assert.ok(adapter, "Stage 0 が採点した記録があり、使えること (R2)");
+  for (const given of cases) assert.equal(await R1_CASES["mutation-judge"].compare(adapter, given), undefined, JSON.stringify(given));
+  const { resolveLayout, workspaceOf } = await import("../src/layout.ts");
+  const { typescriptTarget } = await import("../src/target-typescript.ts");
+  const workspace = (out: string) => workspaceOf(resolveLayout({ out }), typescriptTarget.files, "mutation-judge");
+  // 事例の集まりを別のプロセスで流しても、食い違いは無い
+  assert.equal(runCases(join(self, "specs"), workspace(self), "mutation-judge").problem, undefined);
+
+  // R4: 両方を走らせ、厳しい側を取る。甘い Stage 1 は、Stage 0 なら落とすものを通さない
+  const report = { strategy: "x", mutants: [{ file: "src/a.ts", line: 1, original: "20", mutated: "21", value: 20, killed: false }] };
+  const events = [...judgeEvents(report, [20], "", false)];
+  const stage0 = judgeStage0(events);
+  assert.deepEqual(stage0.map((r) => r.code), ["survived"]);
+  const lenient = { component: "mutation-judge", run: async () => [] as typeof stage0 };
+  const union = (a: typeof stage0, b: typeof stage0) => [...a, ...b];
+  assert.deepEqual((await grade(lenient, events, stage0, union, (a, b) => a.length === b.length)).map((r) => r.code), ["survived"]);
+  // R1: 採点の部品を作り直す実行では、Stage 1 を呼ばない
+  let called = false;
+  setGradingByStage0(true);
+  try {
+    await grade({ component: "mutation-judge", run: async () => ((called = true), []) }, events, stage0, union, () => true);
+  } finally {
+    setGradingByStage0(false);
+  }
+  assert.equal(called, false);
+  assert.deepEqual(await judgePart.run(adapter, events), stage0);
+
+  // R2 / R5: 採点の部品の記録は、Stage 0 が採点したもので、対になる Stage 0 が変わっていないときだけ使える
+  const copy = mkdtempSync(join(tmpRoot, "r1-"));
+  cpSync(self, copy, { recursive: true });
+  const record = join(copy, "clp/mutation-judge.verified.json");
+  const specs = join(copy, "specs");
+  const grading = { stage0: stage0HashOf("mutation-judge") };
+  assert.equal(staleness(record, specs, grading), undefined);
+  const written = JSON.parse(readFileSync(record, "utf8"));
+  writeFileSync(record, JSON.stringify({ ...written, gradedBy: "stage1" }));
+  assert.match(staleness(record, specs, grading) ?? "", /R2/);
+  writeFileSync(record, JSON.stringify(written));
+  assert.match(staleness(record, specs, { stage0: "sha256:changed" }) ?? "", /R5/);
+
+  // R3: いまのコードが Stage 0 と食い違えば、記録を書かない（ここでは、何も報告しないアダプターに差し替えて確かめる）
+  writeFileSync(join(copy, "clp/mutation-judge.adapter.ts"), `export const adapter = { async setupIsolation() {}, async teardownIsolation() {}, async executeCommand() {}, async getCurrentState() { return "VALUES"; } };\n`);
+  const checked = runCases(specs, workspace(copy), "mutation-judge");
+  assert.match(checked.problem ?? "", /事例 \d+: Stage 0/);
 });

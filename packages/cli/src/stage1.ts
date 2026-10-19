@@ -8,7 +8,16 @@ import { fileURLToPath } from "node:url";
 import { GRAMMAR, leafEvents, leafMessage, leafQueries, slotOf, treeDiagnostic } from "@clp/core";
 import type { FieldSchema, LeafFacts, LeafReport, Node, TreeReport } from "@clp/core";
 import type { LoadJudges } from "./loader.ts";
-import { staleness } from "./verified.ts";
+import { hashFiles, staleness } from "./verified.ts";
+import { judgeEvents, judgeStage0 } from "./mutation.ts";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, relative, sep } from "node:path";
+import { isSource } from "./layout.ts";
+import type { Workspace } from "./layout.ts";
+const CLP_BIN = fileURLToPath(new URL("../bin/clp.ts", import.meta.url));
+import type { JudgeEvent, JudgeReport } from "./mutation.ts";
 import { contractFacts, innerSchemas, registerContractPlan, typeFactsOf } from "./generate.ts";
 import type { ContractPlan, ContractSections, Ir, NoteId } from "./generate.ts";
 import type { RequestFacts, RequestSections } from "./request.ts";
@@ -40,12 +49,36 @@ function fallback(component: string, error: unknown): undefined {
   return undefined;
 }
 
+// --- 採点の部品 (SELF_HOSTING.md §10.3) ---
+// 採点の判定と意味の実行の部品 (R1 の部品)。値は、対になる Stage 0 (手書き) のファイル（packages/cli/src からの相対パス）。
+// これらは、つねに Stage 0 が採点し (R1)、その記録があるときだけ使い (R2)、人が Stage 0 を直したら使わない (R5)
+export const R1_COMPONENTS: Record<string, readonly string[]> = {
+  "mutation-judge": ["mutation.ts"],
+};
+export const stage0HashOf = (component: string) => hashFiles(fileURLToPath(new URL(".", import.meta.url)), R1_COMPONENTS[component] ?? []);
+// R1: 採点の部品を作り直す実行では、採点の判断をすべて Stage 0 が下す。切り替えるオプションは持たない
+let gradingByStage0 = false;
+export const setGradingByStage0 = (on: boolean) => void (gradingByStage0 = on);
+export const isGradingByStage0 = () => gradingByStage0;
+
+// 採点の判断を下す (R4)。Stage 0 はいつも判断し、Stage 1 が使えれば両方の厳しい側を取る（strict）。食い違えば知らせる（止めない）。
+// 甘い Stage 1 が、Stage 0 なら落とすものを通すことはない
+export async function grade<I, R>(part: Stage1Part<I, R>, input: I, stage0: R, strict: (a: R, b: R) => R, same: (a: R, b: R) => boolean): Promise<R> {
+  if (gradingByStage0) return stage0;
+  const stage1 = await runStage1(part, input);
+  if (stage1 === undefined) return stage0;
+  if (!same(stage0, stage1)) console.error(`注意: 採点の判断が、Stage 0 と Stage 1 (${part.component}) で食い違いました。厳しい側を取ります`);
+  return strict(stage0, stage1);
+}
+
 // Stage 1 のコンポーネントを、生成された契約 (アダプター) として読み込む。使えなければ undefined
 export async function stage1Adapter(component: string, url = adapterUrl(component)): Promise<Adapter | undefined> {
   if (process.env.CLP_STAGE === "0") return undefined;
   // 使うのは、検証に合格した、いまの仕様の版だけ。作りかけのコードや、合格のあとで書き換えられたコードは使わない
   if (url === adapterUrl(component)) {
-    const stale = staleness(fileURLToPath(new URL(`../self/clp/${component}.verified.json`, import.meta.url)), fileURLToPath(new URL("../self/specs", import.meta.url)));
+    const record = fileURLToPath(new URL(`../self/clp/${component}.verified.json`, import.meta.url));
+    const grading = component in R1_COMPONENTS ? { stage0: stage0HashOf(component) } : undefined;
+    const stale = staleness(record, fileURLToPath(new URL("../self/specs", import.meta.url)), grading);
     if (stale !== undefined) return fallback(component, new Error(stale));
   }
   try {
@@ -424,6 +457,93 @@ export const requestPlan: Stage1Part<RequestFacts, RequestSections> = {
     return answer as RequestSections;
   },
 };
+
+// ミューテーションの合否 (mutation-judge、採点の部品)。報告は、直前に渡した事実についてのもの
+export const judgePart: Stage1Part<JudgeEvent[], JudgeReport[]> = {
+  component: "mutation-judge",
+  async run(adapter, events) {
+    const found: JudgeReport[] = [];
+    let current: JudgeEvent;
+    const report = (code: JudgeReport["code"]) => () => void found.push({ code, event: current });
+    await adapter.setupIsolation({ queries: {}, effects: { Survived: report("survived"), InAdapter: report("in-adapter"), Ineffective: report("ineffective") } });
+    try {
+      for (const event of events) {
+        current = event;
+        await adapter.executeCommand({ name: event.name, input: event.input });
+      }
+    } finally {
+      await adapter.teardownIsolation();
+    }
+    return found;
+  },
+};
+// 合否を下す: Stage 0 と Stage 1 の報告を合わせる（どちらかが報告したものは、報告する）
+export async function judgeDecided(events: JudgeEvent[]): Promise<JudgeReport[]> {
+  const key = (found: JudgeReport) => `${found.code}\u0000${events.indexOf(found.event)}`;
+  const union = (a: JudgeReport[], b: JudgeReport[]) => {
+    const seen = new Set(a.map(key));
+    return [...a, ...b.filter((found) => !seen.has(key(found)))].sort((x, y) => events.indexOf(x.event) - events.indexOf(y.event));
+  };
+  const same = (a: JudgeReport[], b: JudgeReport[]) => a.length === b.length && a.every((found, index) => key(found) === key(b[index]));
+  return grade(judgePart, events, judgeStage0(events), union, same);
+}
+
+// 採点の部品の事例の集まり (R3)。事例は入力だけ（期待値は持たない: 同じ入力で Stage 0 が判断したもの）。
+// compare は、1つの事例を Stage 0 と、渡したアダプターの両方で判断し、食い違えばその説明を返す
+export const R1_CASES: Record<string, { compare(adapter: Adapter, given: unknown): Promise<string | undefined> }> = {
+  "mutation-judge": {
+    async compare(adapter, given) {
+      const { mutants, values, adapter: adapterSource, shared } = given as { mutants: { value?: string | number; killed: boolean }[]; values: (string | number)[]; adapter: string; shared: boolean };
+      const report = { strategy: "cases", mutants: mutants.map((mutant, index) => ({ file: "src/x.ts", line: index + 1, original: String(mutant.value ?? index), mutated: "", killed: mutant.killed, ...(mutant.value === undefined ? {} : { value: mutant.value }) })) };
+      const events = [...judgeEvents(report, values, adapterSource, shared)];
+      const key = (found: JudgeReport) => `${found.code}@${events.indexOf(found.event)}`;
+      const stage0 = judgeStage0(events).map(key);
+      const stage1 = (await judgePart.run(adapter, events)).map(key);
+      return JSON.stringify(stage0) === JSON.stringify(stage1) ? undefined : `Stage 0 ${JSON.stringify(stage0)}、Stage 1 ${JSON.stringify(stage1)}`;
+    },
+  },
+};
+
+// 事例の集まりを、いま作ったコードで流す（別のプロセスで、実行した関数を記録しながら）。
+// problem: Stage 0 と食い違った（記録を書かない）。unexecuted: 一度も実行されなかった関数（事例を足すのは人）
+export function runCases(specsDir: string, ws: Workspace, component: string): { problem?: string; unexecuted: string[] } {
+  const cases = join(specsDir, "..", "cases", `${component}.json`);
+  if (!existsSync(cases)) return { problem: `事例の集まりがありません (${cases})`, unexecuted: [] };
+  const coverage = mkdtempSync(join(tmpdir(), "clp-cases-"));
+  try {
+    const run = spawnSync(process.execPath, [CLP_BIN, "__cases", "--component", component, "--adapter", join(ws.root, ws.paths.adapter), "--cases", cases], {
+      encoding: "utf8",
+      timeout: 300_000,
+      env: { ...process.env, NODE_V8_COVERAGE: coverage },
+    });
+    if (run.status !== 0) return { problem: `事例を流せませんでした: ${(run.stderr ?? "").trim().slice(-500)}`, unexecuted: [] };
+    const result = JSON.parse(run.stdout) as { problem?: string };
+    return { ...result, unexecuted: unexecutedFunctions(coverage, ws) };
+  } finally {
+    rmSync(coverage, { recursive: true, force: true });
+  }
+}
+// 本番コードのうち、読み込まれたファイルの中で、一度も呼ばれなかった関数（モジュールそのものは除く）
+function unexecutedFunctions(dir: string, ws: Workspace): string[] {
+  type Fn = { functionName: string; ranges: { startOffset: number; endOffset: number; count: number }[] };
+  const root = realpathSync(ws.root);
+  const found: string[] = [];
+  for (const name of readdirSync(dir)) {
+    const report = JSON.parse(readFileSync(join(dir, name), "utf8")) as { result?: { url: string; functions: Fn[] }[] };
+    for (const script of report.result ?? []) {
+      if (!script.url.startsWith("file://")) continue;
+      const rel = relative(root, fileURLToPath(script.url)).split(sep).join("/");
+      if (rel.startsWith("..") || !isSource(ws, rel) || script.functions.length === 0) continue;
+      const size = (fn: Fn) => fn.ranges[0].endOffset - fn.ranges[0].startOffset;
+      const module = script.functions.reduce((widest, fn) => (size(fn) > size(widest) ? fn : widest));
+      // 読み出し (get / set) は、判断ではないので数えない（状態を外から見るためのもの）
+      for (const fn of script.functions) {
+        if (fn !== module && fn.ranges[0].count === 0 && fn.functionName !== "" && !/^[gs]et /.test(fn.functionName)) found.push(`${rel}: ${fn.functionName}`);
+      }
+    }
+  }
+  return [...new Set(found)].sort();
+}
 
 // これまでの呼び方（テストが、偽のアダプターの場所を渡して使う）
 export const stage1References = (input: SpecInput, url = STAGE1_ADAPTER) => runStage1(referenceCheck, input, url);

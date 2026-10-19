@@ -123,6 +123,89 @@ export function selectMutation(name: string): MutationStrategy | undefined {
 }
 
 // 合否の基準。どの Strategy でも共通で、ゲートが持つ。メッセージはエージェントに渡すため英語。
+// 合否の判断に渡す事実の列（判断を持たない糊）。Stage 0 も Stage 1 (self/specs/mutation-judge.*) も、同じ列を受け取る。
+// where は文面のためだけに持つ
+export type JudgeEvent =
+  | { name: "BeginValue"; input: { numeric: boolean; inAdapter: boolean }; where: { value: DecisionValue } }
+  | { name: "Site"; input: { killed: boolean }; where: {} }
+  | { name: "EndValue"; input: {}; where: { value: DecisionValue } }
+  | { name: "Mutant"; input: { killed: boolean }; where: {} }
+  | { name: "Finish"; input: { shared: boolean }; where: {} };
+export function* judgeEvents(report: MutationReport, values: DecisionValue[], adapterSource: string, shared = false): Generator<JudgeEvent> {
+  const adapterNumbers = new Set(
+    runtimeLiterals(adapterSource)
+      .filter((token) => token.kind === "number")
+      .map(valueOf),
+  );
+  for (const value of values) {
+    yield { name: "BeginValue", input: { numeric: typeof value === "number", inAdapter: typeof value === "number" && adapterNumbers.has(value) }, where: { value } };
+    for (const mutant of report.mutants) if (mutant.value === value) yield { name: "Site", input: { killed: mutant.killed }, where: {} };
+    yield { name: "EndValue", input: {}, where: { value } };
+  }
+  for (const mutant of report.mutants) yield { name: "Mutant", input: { killed: mutant.killed }, where: {} };
+  yield { name: "Finish", input: { shared }, where: {} };
+}
+
+// 合否の判断。値ごと: その値を変えたどの箇所でもテストが落ちない (survived)、本番コードに無くアダプターにだけある (in-adapter)。
+// 全体: 決定表の値が本番コードに1つも見つからず、どの変異も検出されない (ineffective。共有していて壊す範囲を絞れていないときは見ない)
+export type JudgeReport = { code: "survived" | "in-adapter" | "ineffective"; event: JudgeEvent };
+export function judgeStage0(events: Iterable<JudgeEvent>): JudgeReport[] {
+  const found: JudgeReport[] = [];
+  let sawSite = false;
+  let siteKilled = false;
+  let inAdapter = false;
+  let located = false;
+  let anyKilled = false;
+  for (const event of events) {
+    switch (event.name) {
+      case "BeginValue":
+        [sawSite, siteKilled, inAdapter] = [false, false, event.input.inAdapter];
+        break;
+      case "Site":
+        sawSite = true;
+        siteKilled ||= event.input.killed;
+        break;
+      case "EndValue":
+        if (sawSite) {
+          located = true;
+          if (!siteKilled) found.push({ code: "survived", event });
+        } else if (inAdapter) found.push({ code: "in-adapter", event });
+        break;
+      case "Mutant":
+        anyKilled ||= event.input.killed;
+        break;
+      case "Finish":
+        // 決定表の値が本番コードに1つも見つからない場合（別の表現で書かれている等）は、一般的な変異が1つでも検出されることだけを求める。
+        // 本番コードをほかのコンポーネントと共有していて、壊す範囲を絞れていないときは、この基準は使わない:
+        // 壊した箇所の多くはほかのコンポーネントのコードで、このコンポーネントのテストでは検出できなくて当然だからである
+        if (!located && !event.input.shared && !anyKilled) found.push({ code: "ineffective", event });
+        break;
+    }
+  }
+  return found;
+}
+
+// 判断に、文面を付ける
+export function judgeMessages(decided: JudgeReport[], report: MutationReport, adapterFile = "adapter", sources = "src/"): Violation[] {
+  return decided.map(({ code, event }): Violation => {
+    if (code === "ineffective") {
+      return { file: sources, rule: "mutation-ineffective", message: `No change to production code makes the tests fail, so the tested behaviour does not come from ${sources}.` };
+    }
+    const value = (event.where as { value: DecisionValue }).value;
+    if (code === "in-adapter") {
+      return { file: adapterFile, rule: "decision-in-adapter", message: `The decision value ${value} appears in the adapter but not in production code. Business decisions must be made in ${sources}.` };
+    }
+    const sites = report.mutants.filter((mutant) => mutant.value === value);
+    const where = sites.map((mutant) => `line ${mutant.line}`).join(", ");
+    return {
+      file: sites[0].file,
+      rule: "mutation-survived",
+      message: `Changing ${sites[0].original} (${where}) does not make the tests fail, so this value is not actually decided by production code. Business decisions must be made in ${sources}, not in the adapter, and production code must not contain dead logic.`,
+    };
+  });
+}
+
+// 合否の決まり。decided: 判断（無ければ Stage 0 が下す）
 export function judge(
   report: MutationReport,
   values: DecisionValue[],
@@ -132,47 +215,7 @@ export function judge(
   sources = "src/",
   // true なら、本番コードをほかのコンポーネントと共有していて、しかも実行した範囲に絞れていない
   shared = false,
+  decided?: JudgeReport[],
 ): Violation[] {
-  const violations: Violation[] = [];
-  const adapterNumbers = new Set(
-    runtimeLiterals(adapterSource)
-      .filter((token) => token.kind === "number")
-      .map(valueOf),
-  );
-  let located = false;
-
-  for (const value of values) {
-    const sites = report.mutants.filter((mutant) => mutant.value === value);
-    if (sites.length > 0) {
-      located = true;
-      // その値の出現箇所をどれを変えても合格する = その値は本番コードで決まっていない
-      if (sites.every((mutant) => !mutant.killed)) {
-        const where = sites.map((mutant) => `line ${mutant.line}`).join(", ");
-        violations.push({
-          file: sites[0].file,
-          rule: "mutation-survived",
-          message: `Changing ${sites[0].original} (${where}) does not make the tests fail, so this value is not actually decided by production code. Business decisions must be made in ${sources}, not in the adapter, and production code must not contain dead logic.`,
-        });
-      }
-    } else if (typeof value === "number" && adapterNumbers.has(value)) {
-      violations.push({
-        file: adapterFile,
-        rule: "decision-in-adapter",
-        message: `The decision value ${value} appears in the adapter but not in production code. Business decisions must be made in ${sources}.`,
-      });
-    }
-  }
-
-  // 決定表の値が本番コードに1つも見つからない場合（別の表現で書かれている等）は、
-  // 一般的な変異が1つでも検出されることだけを求める。
-  // 本番コードをほかのコンポーネントと共有していて、壊す範囲を絞れていないときは、この基準は使わない:
-  // 壊した箇所の多くはほかのコンポーネントのコードで、このコンポーネントのテストでは検出できなくて当然だからである
-  if (!located && !shared && !report.mutants.some((mutant) => mutant.killed)) {
-    violations.push({
-      file: sources,
-      rule: "mutation-ineffective",
-      message: `No change to production code makes the tests fail, so the tested behaviour does not come from ${sources}.`,
-    });
-  }
-  return violations;
+  return judgeMessages(decided ?? judgeStage0(judgeEvents(report, values, adapterSource, shared)), report, adapterFile, sources);
 }

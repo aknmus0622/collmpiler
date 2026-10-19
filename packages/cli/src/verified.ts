@@ -23,10 +23,14 @@ export type Verified = {
   code: string;
   // code に含めたファイル
   files: string[];
+  // 採点した側 (R2)。採点の部品を作り直す実行は、Stage 0 だけで採点する (R1)
+  gradedBy?: "stage0" | "stage1";
+  // 採点の部品だけ: 対になる Stage 0 (手書き) のファイルのハッシュ (R5)。人が Stage 0 を直したら、記録は古くなる
+  stage0?: string;
 };
 
 const toPosix = (path: string) => path.split(sep).join("/");
-function hashFiles(base: string, files: readonly string[]): string {
+export function hashFiles(base: string, files: readonly string[]): string {
   const hash = createHash("sha256");
   for (const file of [...files].sort()) hash.update(`${file}\0`).update(readFileSync(join(base, file))).update("\0");
   return `sha256:${hash.digest("hex")}`;
@@ -47,17 +51,25 @@ export function specClosure(specsDir: string, roots: readonly string[]): string[
 }
 
 // 合格したコンポーネントの記録を書く。roots: そのコンポーネントの仕様の起点（Layer 1 と解釈のファイル）
-export function writeVerified(ws: Workspace, specsDir: string, roots: readonly string[]): void {
+export function writeVerified(ws: Workspace, specsDir: string, roots: readonly string[], grading: { gradedBy: "stage0" | "stage1"; stage0?: string } = { gradedBy: "stage1" }): void {
   const record = join(ws.root, ws.paths.verified);
   const files = [...sourceFiles(ws), ws.paths.adapter].map((rel) => toPosix(relative(dirname(record), join(ws.root, rel)))).sort();
   const sortedRoots = [...roots].map(toPosix).sort();
-  const verified: Verified = { roots: sortedRoots, specs: hashFiles(specsDir, specClosure(specsDir, sortedRoots)), code: hashFiles(dirname(record), files), files };
+  const verified: Verified = {
+    roots: sortedRoots,
+    specs: hashFiles(specsDir, specClosure(specsDir, sortedRoots)),
+    code: hashFiles(dirname(record), files),
+    files,
+    gradedBy: grading.gradedBy,
+    ...(grading.stage0 === undefined ? {} : { stage0: grading.stage0 }),
+  };
   writeFileSync(record, `${JSON.stringify(verified, null, 2)}\n`);
 }
 export const clearVerified = (ws: Workspace) => rmSync(join(ws.root, ws.paths.verified), { force: true });
 
 // 記録が、いまの仕様とコードのものかを確かめる。合わなければ、その理由（利用者向け）を返す
-export function staleness(record: string, specsDir: string): string | undefined {
+// grading: 採点の部品の記録に求めること（Stage 0 が採点したこと (R2)、Stage 0 のファイルが変わっていないこと (R5)）
+export function staleness(record: string, specsDir: string, grading?: { stage0: string }): string | undefined {
   if (!existsSync(record)) return "検証に合格した記録がありません";
   let verified: Verified;
   try {
@@ -72,5 +84,9 @@ export function staleness(record: string, specsDir: string): string | undefined 
   const missing = verified.files.find((file) => !existsSync(posix.join(toPosix(base), file)));
   if (missing !== undefined) return `合格したときのコードがありません (${missing})`;
   if (hashFiles(base, verified.files) !== verified.code) return "合格したあとで、コードが変わっています";
+  if (grading) {
+    if (verified.gradedBy !== "stage0") return "採点の部品なのに、Stage 0 が採点した記録ではありません (R2)";
+    if (verified.stage0 !== grading.stage0) return "合格したあとで、対になる Stage 0 (手書き) が変わっています (R5)";
+  }
   return undefined;
 }

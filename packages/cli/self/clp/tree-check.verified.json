@@ -4,7 +4,7 @@
     "tree-check.interpretation.ts"
   ],
   "specs": "sha256:d77ed93ba84e1e3602b21e5b9e42ccafa82847749fc94e54f51b1683c34e2597",
-  "code": "sha256:cb5b43f2614cbdc77f618fca25b52c53c868209b6a8d322440c40735b9109489",
+  "code": "sha256:31a8e2d6607324e37d5419ee6a838c4712a23d7bdc3490e5a15ba6114368db8a",
   "files": [
     "../src/graph-check/graph-check.ts",
     "../src/graph-check/rules.ts",
@@ -15,6 +15,9 @@
     "../src/leaf-check/leaf-check.ts",
     "../src/leaf-check/rules.ts",
     "../src/leaf-check/types.ts",
+    "../src/mutation-judge/judgement.ts",
+    "../src/mutation-judge/mutation-judge.ts",
+    "../src/mutation-judge/types.ts",
     "../src/mutation-verdict/judgement.ts",
     "../src/mutation-verdict/mutation-verdict.ts",
     "../src/mutation-verdict/types.ts",
@@ -40,5 +43,6 @@
     "../src/value-writer/types.ts",
     "../src/value-writer/value-writer.ts",
     "tree-check.adapter.ts"
-  ]
+  ],
+  "gradedBy": "stage0"
 }

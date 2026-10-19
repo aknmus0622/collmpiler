@@ -21,6 +21,7 @@ const COMMANDS: Record<string, () => Promise<Command>> = {
 // 内部用（clp 自身が、別プロセスとして呼ぶ）
 const INTERNAL: Record<string, () => Promise<Command>> = {
   __compare: () => import("../src/commands/compare.ts"),
+  __cases: () => import("../src/commands/cases.ts"),
 };
 
 async function overview() {
