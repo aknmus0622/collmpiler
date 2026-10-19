@@ -8,6 +8,8 @@ import { GRAMMAR, leafEvents, leafMessage, leafQueries, slotOf, treeDiagnostic }
 import type { LeafFacts, LeafReport, Node, TreeReport } from "@clp/core";
 import type { LoadJudges } from "./loader.ts";
 import { staleness } from "./verified.ts";
+import { declaredEvents, failureEvents, failureKey } from "./declared.ts";
+import type { DeclaredEvent, DeclaredReport } from "./declared.ts";
 import { transitions, vocabularyFacts } from "./graph.ts";
 import type { GraphReport } from "./graph.ts";
 
@@ -351,10 +353,48 @@ export const leafCheckPart: Stage1Part<LeafFacts, LeafReport[]> = {
   },
 };
 
+// 宣言の検査 (type-check)。事実の列を1つの隔離で順に渡す。報告は、直前に渡した事実についてのもの
+export const typeCheck: Stage1Part<DeclaredEvent[], DeclaredReport[]> = {
+  component: "type-check",
+  async run(adapter, events) {
+    const found: DeclaredReport[] = [];
+    let current: DeclaredEvent;
+    await adapter.setupIsolation({
+      queries: {},
+      effects: { Report: ({ code, owner }: { code: DeclaredReport["code"]; owner: string }) => void found.push({ code, owner, event: current }) },
+    });
+    try {
+      for (const event of events) {
+        current = event;
+        await adapter.executeCommand({ name: event.name, input: event.input });
+      }
+    } finally {
+      await adapter.teardownIsolation();
+    }
+    return found;
+  },
+};
+// IR を作るときの宣言の検査（型・列・約束と、失敗の条件）を Stage 1 で。失敗の条件は、どれについての判断かを鍵で引く
+async function stage1Declared(input: SpecInput): Promise<{ reports: DeclaredReport[]; failures: Map<string, DeclaredReport[]> } | undefined> {
+  if (!input.model) return undefined;
+  const reports = await runStage1(typeCheck, [...declaredEvents(input)]);
+  const failureFacts = [...failureEvents(input)];
+  const decided = await runStage1(typeCheck, failureFacts);
+  if (!reports || !decided) return undefined;
+  const failures = new Map<string, DeclaredReport[]>();
+  for (const event of failureFacts) {
+    if (event.name !== "Failure") continue;
+    const key = failureKey(event.where.behavior, event.where.caseName, event.where.sentence);
+    failures.set(key, decided.filter((found) => found.event === event));
+  }
+  return { reports, failures };
+}
+
 // 仕様を読み込むときの判断（木の検査と葉の検査）を、使える中でいちばん新しい Stage で下す。loadSpecs の judges に渡す
 export const loadJudges: LoadJudges = {
   tree: async (tree) => (await runStage1(treeCheck, tree))?.map(treeDiagnostic),
   leaf: async (facts) => (await runStage1(leafCheckPart, facts))?.map(leafMessage),
+  claims: (events) => runStage1(typeCheck, events),
 };
 
 // これまでの呼び方（テストが、偽のアダプターの場所を渡して使う）
@@ -364,6 +404,6 @@ export const stage1Values = (input: SpecInput, url?: string) => runStage1(valueW
 
 // IR を作るときの判断を、使える中でいちばん新しい Stage で実行した結果を、extract に渡す形で返す
 export const references = async (input: SpecInput) => {
-  const [found, payloads, values] = [await runStage1(referenceCheck, input), await runStage1(payloadCheck, input), await runStage1(valueWriter, input)];
-  return { ...(found ? { references: found } : {}), ...(payloads ? { payloads } : {}), ...(values ? { values } : {}) };
+  const [found, payloads, values, declared] = [await runStage1(referenceCheck, input), await runStage1(payloadCheck, input), await runStage1(valueWriter, input), await stage1Declared(input)];
+  return { ...(found ? { references: found } : {}), ...(payloads ? { payloads } : {}), ...(values ? { values } : {}), ...(declared ? { declared } : {}) };
 };

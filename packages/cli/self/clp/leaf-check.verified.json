@@ -4,7 +4,7 @@
     "leaf-check.interpretation.ts"
   ],
   "specs": "sha256:54cf7f971d120b60edee7c22b20dd7753d21c8f2306b4bb9bb4708a277ede6d8",
-  "code": "sha256:26fa115a6657008ba9acdce4fc4f2166ca5259b37767c0ebad8d968c4ea82de6",
+  "code": "sha256:935ddb3144bc8bb136cc8e85be0ed904af6d71f6d94fd8ab5deb75142398d872",
   "files": [
     "../src/graph-check/graph-check.ts",
     "../src/graph-check/rules.ts",
@@ -27,6 +27,9 @@
     "../src/tree-check/rules.ts",
     "../src/tree-check/tree-check.ts",
     "../src/tree-check/types.ts",
+    "../src/type-check/rules.ts",
+    "../src/type-check/type-check.ts",
+    "../src/type-check/types.ts",
     "../src/value-writer/reference-text.ts",
     "../src/value-writer/types.ts",
     "../src/value-writer/value-writer.ts",

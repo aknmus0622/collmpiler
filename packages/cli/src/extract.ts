@@ -1,4 +1,6 @@
 import { compositionOf, partsOfComposition } from "@clp/core";
+import { declaredEvents, declaredMessage, declaredReportsStage0, failureEventFor, failureKey } from "./declared.ts";
+import type { DeclaredReport } from "./declared.ts";
 import type { BoundSpecification, Composition, Constant, Declaration, FieldSchema, Fields, GoTo, OutputSchema, Table } from "@clp/core";
 import { relative } from "node:path";
 import type { Asset } from "./assets.ts";
@@ -458,7 +460,8 @@ export function payloadDiagnostics(input: SpecInput): PayloadDiagnostic[] {
 // 省略時は Stage 0 で判断する。入口 (compile / implement) は、Stage 1 の結果を渡す (stage1.ts)
 export function extract(
   input: SpecInput,
-  options: { references?: ReferenceDiagnostic[]; payloads?: PayloadDiagnostic[]; values?: Map<string, unknown> } = {},
+  // declared: 宣言の検査の判断（型・列・約束 = reports、失敗の条件 = failures。鍵は failureKey）
+  options: { references?: ReferenceDiagnostic[]; payloads?: PayloadDiagnostic[]; values?: Map<string, unknown>; declared?: { reports: DeclaredReport[]; failures: Map<string, DeclaredReport[]> } } = {},
 ) {
   const diagnostics: Diagnostic[] = [];
   const report = (code: string, behavior: string, caseName: string, message: string) =>
@@ -487,13 +490,13 @@ export function extract(
     if (composition) {
       compositions[name] = composition;
       // 失敗の条件 (W8): 失敗することがある (mayFail) 問い合わせで、そのコマンドが読めるもの
-      if ("failed" in composition) {
-        const asked = input.behaviors[behavior]?.asks?.[composition.failed];
-        const query = model.queries[asked?.query ?? composition.failed];
-        const where = behavior === "" ? "" : behavior;
-        if (!query) report("unknown-query", where, caseName, `${name}: "${composition.failed}" は、queries にも、このコマンドの asks にもありません`);
-        else if (query.mayFail !== true) report("bad-failure", where, caseName, `${name}: 問い合わせ ${asked?.query ?? composition.failed} は失敗しません。失敗することがあるなら、mayFail: true と宣言してください`);
-        else if (!asked && Object.keys(query.input).length > 0) report("bad-failure", where, caseName, `${name}: 問い合わせ ${composition.failed} には引数があります。asks で尋ねたもの (.as で付けた名前) の failed を使ってください`);
+      const failure = failureEventFor(input, behavior, caseName, name);
+      if (failure) {
+        const decided = options.declared?.failures.get(failureKey(behavior, caseName, name)) ?? declaredReportsStage0([failure]);
+        for (const found of decided) {
+          const worded = declaredMessage({ ...found, event: failure });
+          report(worded.code, worded.behavior, worded.caseName, worded.message);
+        }
       }
       // 組み合わせの意味は自動で決まるので、組み合わせる前の条件を確かめる
       for (const part of partsOfComposition(composition)) condition(behavior, caseName, part);
@@ -706,59 +709,20 @@ export function extract(
     });
   }
 
-  // 型そのものの誤り: 範囲の矛盾、空の列挙、範囲の外のしきい値。型を書ける所をすべて見る
-  const typeProblems = (schema: FieldSchema): string[] => {
-    if (isEnum(schema)) return schema.length === 0 ? ["列挙が空です。取り得る値を1つ以上書いてください"] : [];
-    if (typeof schema !== "object") return [];
-    if ("oneOf" in schema) {
-      const variants = Object.entries(schema.oneOf);
-      if (variants.length === 0) return ["oneOf に形がありません。形を1つ以上書いてください"];
-      return variants.flatMap(([variant, inner]) => typeProblems(inner).map((problem) => `${variant}: ${problem}`));
-    }
-    if ("list" in schema) return typeProblems(schema.list);
-    if ("optional" in schema && !("record" in schema)) return typeProblems(schema.optional as FieldSchema);
-    if ("record" in schema) return Object.entries(schema.record).flatMap(([field, inner]) => typeProblems(inner).map((problem) => `${field}: ${problem}`));
-    const { min, max, around } = schema as { min?: number; max?: number; around?: readonly number[] };
-    const found: string[] = [];
-    if (min !== undefined && max !== undefined && min > max) found.push(`最小値 (min: ${min}) が、最大値 (max: ${max}) より大きいので、取り得る値がありません`);
-    for (const value of around ?? []) {
-      if ((min !== undefined && value < min) || (max !== undefined && value > max)) found.push(`しきい値 (around) の ${value} が、範囲の外です`);
-    }
-    return found;
+  // 宣言そのものの誤り: 型（範囲の矛盾、空の列挙、範囲の外のしきい値）、決定表の列の種類、約束（判断は Stage 1 か Stage 0。declared.ts）
+  const declared = options.declared?.reports ?? declaredReportsStage0(declaredEvents(input));
+  const say = (found: DeclaredReport) => {
+    const worded = declaredMessage(found);
+    report(worded.code, worded.behavior, worded.caseName, worded.message);
   };
-  const typed: [string, FieldSchema][] = [
-    ...Object.entries(model.data).map(([name, schema]): [string, FieldSchema] => [`data.${name}`, schema]),
-    ...Object.entries(model.commands).flatMap(([command, fields]) => Object.entries(fields).map(([field, schema]): [string, FieldSchema] => [`commands.${command}.input.${field}`, schema])),
-    ...Object.entries(model.queries).flatMap(([query, { input: fields, output }]) => [
-      ...Object.entries(fields).map(([field, schema]): [string, FieldSchema] => [`queries.${query}.input.${field}`, schema]),
-      [`queries.${query}.output`, output] as [string, FieldSchema],
-    ]),
-    ...Object.entries(model.effects).flatMap(([effect, fields]) => Object.entries(fields).map(([field, schema]): [string, FieldSchema] => [`effects.${effect}.input.${field}`, schema])),
-    ...Object.entries(model.calculations ?? {}).map(([name, calculation]): [string, FieldSchema] => [`calculations.${name}.output`, calculation.type]),
-    ...Object.entries(model.outputs ?? {}).map(([command, schema]): [string, FieldSchema] => [`commands.${command}.output`, schema]),
-  ];
-  for (const [where, schema] of typed) for (const problem of typeProblems(schema)) report("bad-type", "", "", `${where}: ${problem}`);
-  // 決定表の列は、どの行でも同じ種類の値（null は「この行では値が無い」）
-  for (const [name, table] of Object.entries(input.decisions)) {
-    for (const column of Object.keys(table.otherwise ?? {})) {
-      const kinds = [...new Set(Object.values(table).map((row) => row[column]).filter((cell) => cell !== null && cell !== undefined).map((cell) => typeof cell))];
-      if (kinds.length > 1) report("bad-decision", "", "", `決定表 ${name} の列 ${column}: 行によって値の種類が違います (${kinds.join(" と ")})。どの行も同じ種類の値にしてください`);
-    }
-  }
+  for (const found of declared) if (found.event.name !== "Promise") say(found);
 
   // 覚えるデータの、はじめの値は、その型に合う
   for (const [field, value] of Object.entries(model.initial ?? {})) {
     if (!conforms(model.data[field], value)) report("bad-value", "", "", `data.${field} の initially: ${JSON.stringify(value)} は ${describe(model.data[field])} に入りません`);
   }
   // 問い合わせの約束: fresh は文字列か整数、increasing は数に付けられる。引数つきの問い合わせには、まだ付けられない
-  for (const [name, query] of Object.entries(model.queries)) {
-    if (query.promise === undefined) continue;
-    const kind = kindOf(query.output);
-    if (isStructured(query.output) || isEnum(query.output) || kind === "boolean" || (query.promise === "increasing" && kind === "string") || (query.promise === "fresh" && kind === "number")) {
-      report("bad-promise", "", "", `問い合わせ ${name} の ${query.promise}(): ${describe(query.output)} には付けられません（fresh は文字列か整数、increasing は整数か数値）`);
-    }
-    if (Object.keys(query.input).length > 0) report("bad-promise", "", "", `問い合わせ ${name} の ${query.promise}(): 引数つきの問い合わせには、まだ付けられません`);
-  }
+  for (const found of declared) if (found.event.name === "Promise") say(found);
 
   const decisions: Record<string, unknown> = {};
   for (const [name, table] of Object.entries(input.decisions)) {

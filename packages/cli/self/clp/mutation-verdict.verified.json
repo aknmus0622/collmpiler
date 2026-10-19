@@ -4,7 +4,7 @@
     "mutation-verdict.interpretation.ts"
   ],
   "specs": "sha256:8d17d595afebe7ed06d0bd62a9a4a03b87852a7e468351d5335c17b74774be86",
-  "code": "sha256:6a2fc6651274e40788acd5c673c3a33223dc1e15e8297b00d8cb53b16ea3f360",
+  "code": "sha256:0b11c92cf43df9116506b06187b9c552c29a9563b31e52523f4e6cc0d949c545",
   "files": [
     "../src/graph-check/graph-check.ts",
     "../src/graph-check/rules.ts",
@@ -27,6 +27,9 @@
     "../src/tree-check/rules.ts",
     "../src/tree-check/tree-check.ts",
     "../src/tree-check/types.ts",
+    "../src/type-check/rules.ts",
+    "../src/type-check/type-check.ts",
+    "../src/type-check/types.ts",
     "../src/value-writer/reference-text.ts",
     "../src/value-writer/types.ts",
     "../src/value-writer/value-writer.ts",

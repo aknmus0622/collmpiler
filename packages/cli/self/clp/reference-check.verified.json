@@ -4,7 +4,7 @@
     "reference-check.interpretation.ts"
   ],
   "specs": "sha256:972035f913c35ed8f6ca9e786a11512f48bcb9d5c697adeff29ee88d41c8b45b",
-  "code": "sha256:9a0e3695e31176aa695422ba90a407f12ffab41364e68cf3afaf064e97514bef",
+  "code": "sha256:8229bf7733a4c782e42b306ecaaef3817b4dbe4500e8d76a68d5ca297180c401",
   "files": [
     "../src/graph-check/graph-check.ts",
     "../src/graph-check/rules.ts",
@@ -27,6 +27,9 @@
     "../src/tree-check/rules.ts",
     "../src/tree-check/tree-check.ts",
     "../src/tree-check/types.ts",
+    "../src/type-check/rules.ts",
+    "../src/type-check/type-check.ts",
+    "../src/type-check/types.ts",
     "../src/value-writer/reference-text.ts",
     "../src/value-writer/types.ts",
     "../src/value-writer/value-writer.ts",

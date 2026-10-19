@@ -7,6 +7,8 @@ import type { AssetDeclaration, BoundSpecification, Diagnostic as TreeDiagnostic
 import { resolveAssets } from "./assets.ts";
 import { stableStringify } from "./extract.ts";
 import type { SpecAsk, SpecEffect, SpecInput, SpecModel, SpecOutcome, SpecValue } from "./extract.ts";
+import { claimEvents, declaredMessage, declaredReportsStage0 } from "./declared.ts";
+import type { DeclaredEvent, DeclaredReport } from "./declared.ts";
 
 // 下書き (LLM が導き、人がまだ確定していない解釈) のファイル名
 export const DRAFT_SUFFIX = ".draft.ts";
@@ -141,6 +143,8 @@ export async function listComponents(dir: string, options: { drafts?: boolean } 
 export type LoadJudges = {
   tree?: (tree: Node) => Promise<TreeDiagnostic[] | undefined>;
   leaf?: (facts: LeafFacts) => Promise<string[] | undefined>;
+  // 名前の衝突（宣言の検査の、名前を主張する事実の列）
+  claims?: (events: DeclaredEvent[]) => Promise<DeclaredReport[] | undefined>;
 };
 
 // 仕様の読み込みはここ1箇所に閉じ込める。パスは process.cwd() 基準。
@@ -181,7 +185,7 @@ export async function loadSpecs(
   // 同じコンポーネントの解釈が、このプロセスに2つ読み込まれていることがある（確定版と下書き）。使うほうを選ぶ
   if (bound && options.bindings !== false) activate(bound.binding);
   const usedBinding = options.bindings === false ? undefined : bound?.binding;
-  const input = normalize(exportName, declaration, usedBinding, await incompleteOf(usedBinding));
+  const input = await normalize(exportName, declaration, usedBinding, await incompleteOf(usedBinding), judges);
   input.name = name;
   // 木の検査: 文法に合わない所と、まだ使えない書き方（次の書き方で書かれたものだけ）
   const grammar = [...(input.grammar ?? []), ...(isComponent(written) ? await grammarOf(written) : []), ...(bound && options.bindings !== false ? await grammarOf(bound.binding) : [])];
@@ -232,7 +236,7 @@ export async function loadSpecs(
         continue;
       }
       const childBinding = bindings.find(({ binding }) => binding.source === written)?.binding;
-      const child = normalize(inner.exportName, isComponent(written) ? layer1Of(written) : written, childBinding, await incompleteOf(childBinding));
+      const child = await normalize(inner.exportName, isComponent(written) ? layer1Of(written) : written, childBinding, await incompleteOf(childBinding), judges);
       child.name = inner.name;
       if (!child.model) {
         problems.push(`含む部品 "${part}" (${inner.name}) の解釈が無いか、Layer 1 と合いません。先に、その部品を clp interpret してください`);
@@ -276,7 +280,7 @@ function effectsOf(component: string, where: string, structure: Structure): Spec
 // Layer 1 に解釈を重ねたコンポーネントを、抽出と検証が扱う形に正規化する。
 // 解釈が無い、または Layer 1 と合わないときは、語彙を作らずに、その旨だけを持たせる（報告は extract が行う）
 // incomplete: 葉の検査の結果（判断したのは Stage 1 か Stage 0）
-function normalize(name: string, layer1: object, binding: BoundSpecification | undefined, incomplete: string[] | undefined): SpecInput {
+async function normalize(name: string, layer1: object, binding: BoundSpecification | undefined, incomplete: string[] | undefined, judges: LoadJudges = {}): Promise<SpecInput> {
   if (!binding) return { behaviors: {}, decisions: {}, layer1 };
   // 重ね合わせの誤りか、書き残し（葉の検査）があれば、語彙は作らない（報告は extract が行う）
   if (binding.problems.length > 0 || (incomplete?.length ?? 0) > 0) {
@@ -301,7 +305,10 @@ function normalize(name: string, layer1: object, binding: BoundSpecification | u
   const routes = Object.fromEntries(Object.entries(component.commands).flatMap(([command, decl]) => (decl.route === undefined ? [] : [[command, decl.route]])));
   if (Object.keys(routes).length > 0) model.routes = routes;
   if (component.initial) model.initial = component.initial;
-  const vocabulary = validateModel(name, model, Object.values(component.commands).flatMap((decl) => Object.keys(decl.asks ?? {})), component.decisions, Object.keys(component.parts ?? {}));
+  const asked = Object.values(component.commands).flatMap((decl) => Object.keys(decl.asks ?? {}));
+  const claims = [...claimEvents(model, asked, Object.keys(component.parts ?? {}))];
+  const collisions = (await judges.claims?.(claims)) ?? declaredReportsStage0(claims);
+  const vocabulary = validateModel(name, model, component.decisions, collisions);
   if (vocabulary.length > 0) return { behaviors: {}, decisions: {}, layer1, binding, grammar: vocabulary };
 
   const behaviors: SpecInput["behaviors"] = {};
@@ -334,7 +341,9 @@ function normalize(name: string, layer1: object, binding: BoundSpecification | u
 
 // 語彙の誤り。読み込みを止めずに、ほかの診断と一緒に報告する（場所と直し方を添える）
 type VocabularyProblem = { code: string; message: string };
-function validateModel(name: string, model: SpecModel, asked: string[], decisions: Record<string, Record<string, unknown>>, parts: string[] = []): VocabularyProblem[] {
+// collisions: 名前の衝突の判断（Stage 1 か Stage 0。declared.ts）
+function validateModel(name: string, model: SpecModel, decisions: Record<string, Record<string, unknown>>, collisions: DeclaredReport[]): VocabularyProblem[] {
+  void name;
   const problems: VocabularyProblem[] = [];
   if (!model.states.includes(model.init)) {
     problems.push({ code: "unknown-state", message: `初期状態 (init) の "${model.init}" が、states にありません` });
@@ -343,26 +352,10 @@ function validateModel(name: string, model: SpecModel, asked: string[], decision
     if (!table.otherwise) problems.push({ code: "bad-decision", message: `決定表 "${decision}" に otherwise がありません。どの行にも当たらないときの値を、otherwise の行に書いてください` });
   }
   // 条件と計算からは、data・引数の無い問い合わせ・入力・尋ねた答えに付けた名前が同じ階層で見えるため、名前が重なると区別できない
-  const owners = new Map<string, string>([["status", "予約語"]]);
-  const claim = (field: string, owner: string, shared = false) => {
-    const taken = owners.get(field);
-    if (taken !== undefined && !(shared && taken === owner)) {
-      problems.push({
-        code: "name-collision",
-        message: `"${field}" が重複しています (${taken} と ${owner})。条件と計算からは同じ名前に見えるので、どちらかの名前を変えてください`,
-      });
-      return;
-    }
-    owners.set(field, owner);
-  };
-  for (const field of Object.keys(model.data)) claim(field, "data");
-  for (const [field, query] of Object.entries(model.queries)) if (Object.keys(query.input).length === 0) claim(field, "queries");
-  // 尋ねた答えに付けた名前どうしは、コマンドが違えば同名でよい
-  for (const alias of asked) claim(alias, "asks", true);
-  // 含む部品の名前（呼んだ答えを state.<部品>.<コマンド> で読む）
-  for (const part of parts) claim(part, "parts");
-  // 入力どうしはコマンドが違えば同名でよい
-  for (const fields of Object.values(model.commands)) for (const field of Object.keys(fields)) claim(field, "input", true);
+  for (const found of collisions) {
+    const worded = declaredMessage(found);
+    problems.push({ code: worded.code, message: worded.message });
+  }
   return problems;
 }
 

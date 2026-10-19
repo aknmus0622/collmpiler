@@ -985,6 +985,7 @@ function shapeOfEntry(node: Node, into: Collected): Shape {
       case "record":
       case "list":
       case "optional":
+      case "oneOf":
         shape.type = schemaOf(item, into);
         break;
       case "input":

@@ -6,11 +6,13 @@ import { pathToFileURL } from "node:url";
 import { after, test } from "node:test";
 import { extract, payloadDiagnostics, referenceDiagnostics, referenceEvents, serialize, stableStringify, structuredVocabulary, valuesToWrite } from "../src/extract.ts";
 import { listComponents, loadSpecs } from "../src/loader.ts";
-import { graphCheck, leafCheckPart, mutationVerdict, treeCheck, references, runStage1, stage1Payloads, stage1References, stage1Values } from "../src/stage1.ts";
+import { graphCheck, leafCheckPart, mutationVerdict, treeCheck, typeCheck, references, runStage1, stage1Payloads, stage1References, stage1Values } from "../src/stage1.ts";
 import { verdictStage0 } from "../src/runtime.ts";
 import { checkReports, commands, leafEvents, leafFactsOf, leafReportsStage0, otherwise, service, states, treeOf } from "@clp/core";
 import type { Node } from "@clp/core";
 import { graphReportsStage0, providedData } from "../src/graph.ts";
+import { claimEvents, declaredEvents, declaredReportsStage0, failureEvents } from "../src/declared.ts";
+import type { DeclaredEvent } from "../src/declared.ts";
 import type { CellTrial } from "../src/runtime.ts";
 import { implement } from "../src/loop.ts";
 import type { ImplementationStrategy } from "../src/strategy.ts";
@@ -306,6 +308,7 @@ test("自分自身の検証: 自分の生成物の上で動くフレームワー
     "pipeline:implementation:0:ok",
     "reference-check:implementation:0:ok",
     "tree-check:implementation:0:ok",
+    "type-check:implementation:0:ok",
     "value-writer:implementation:0:ok",
   ]);
   // ミューテーションのゲートも通っている（壊した範囲は、それぞれが使うコードだけ）
@@ -675,4 +678,44 @@ export const Interpretation = interpretation(Thing, [If.big.means(() => true)]);
     assert.deepEqual(stage1, stage0);
   }
   assert.ok(facts.length >= 10 && reports >= 6, `${facts.length} specs, ${reports} reports`);
+});
+
+test("Stage 1: 宣言の検査（型、決定表の列、約束、失敗の条件、名前の衝突）は、手書きの版 (Stage 0) と同じ報告を返す (N10e)", async () => {
+  // 誤りのある宣言: 空の列挙、範囲の矛盾、範囲の外のしきい値、種類の混ざった列、守れない約束、失敗しない問い合わせの failed、名前の衝突
+  const dir = mkdtempSync(join(tmpRoot, "declared-"));
+  writeFileSync(
+    join(dir, "x.component.ts"),
+    `import { all, commands, conditions, data, decisions, input, integer, interpretation, not, oneOf, otherwise, queries, record, service } from "@clp/core";
+export const If = conditions({ big: "It is big" });
+export const Decision = decisions({ t: [If.big.then({ v: 1, w: null }), otherwise({ v: "x", w: true })] });
+export const Data = data({ level: integer({ min: 5, max: 1, around: [9] }), kind: [] as never, shape: oneOf({}), n: "integer" });
+export const Query = queries({ now: { output: "boolean", increasing: true }, id: { output: "string", fresh: true, input: input({ k: "string" }) }, region: "string" });
+export const When = conditions({ lost: all(If.big, Query.region.failed) });
+export const Command = commands({ Go: { input: input({ m: "integer" }), cases: [When.lost.then({ nothing: true }), otherwise({ nothing: true })] } });
+export const X = service({ uses: [Data, Query, Decision, If, When, Command] });
+export const Interpretation = interpretation(X, [If.big.means(() => true)]);
+`,
+  );
+  const specs: Awaited<ReturnType<typeof loadSpecs>>[] = [];
+  for (const root of [specsDir, selfSpecs, join(repoRoot, "examples/library-ts/specs"), join(repoRoot, "examples/todo-db-ts/specs")]) {
+    for (const component of await listComponents(root)) specs.push(await loadSpecs(root, { component }));
+  }
+  const broken = await loadSpecs(dir);
+  assert.ok(broken.model, "壊れた宣言の仕様にも、語彙はある");
+  specs.push(broken);
+  const lists: DeclaredEvent[][] = specs.filter((spec) => spec.model).flatMap((spec) => [[...declaredEvents(spec)], [...failureEvents(spec)]]);
+  // 名前の衝突（衝突があるとモデルが作られないので、事実の列を直接作る）
+  const model = { init: "READY", states: ["READY"], data: { n: "integer", level: "integer" }, commands: { Go: { n: "integer" }, Stop: { n: "integer" }, Again: { status: "string" } }, queries: { n: { input: {}, output: "integer" } }, effects: {} } as never;
+  lists.push([...claimEvents(model, ["answer", "answer", "n"], ["todos", "level"])]);
+  const reports: string[] = [];
+  for (const events of lists) {
+    const stage0 = declaredReportsStage0(events);
+    reports.push(...stage0.map((found) => found.code));
+    const stage1 = await runStage1(typeCheck, events);
+    assert.ok(stage1, "Stage 1 が実行できること");
+    assert.deepEqual(stage1.map(({ code, owner, event }) => [code, owner, events.indexOf(event)]), stage0.map(({ code, owner, event }) => [code, owner, events.indexOf(event)]));
+  }
+  for (const code of ["empty-enum", "empty-one-of", "min-above-max", "around-outside", "mixed-column", "promise-kind", "promise-input", "failure-not-may-fail", "name-collision"]) {
+    assert.ok(reports.includes(code), `${code}: ${reports.join(", ")}`);
+  }
 });

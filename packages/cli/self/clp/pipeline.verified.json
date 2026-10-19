@@ -4,7 +4,7 @@
     "pipeline.interpretation.ts"
   ],
   "specs": "sha256:cd2a330ce6f8bb602beb0281b621b0dc25debef9ecbba63578f8ad77c236b594",
-  "code": "sha256:d83b0715962cd90cac75ee0d05d93799db45767072ac254434df197c2da00b59",
+  "code": "sha256:a322f9749dc00bcc8596da7cac7f171938e92a972aaf19664eb15c8519d81ec6",
   "files": [
     "../src/graph-check/graph-check.ts",
     "../src/graph-check/rules.ts",
@@ -27,6 +27,9 @@
     "../src/tree-check/rules.ts",
     "../src/tree-check/tree-check.ts",
     "../src/tree-check/types.ts",
+    "../src/type-check/rules.ts",
+    "../src/type-check/type-check.ts",
+    "../src/type-check/types.ts",
     "../src/value-writer/reference-text.ts",
     "../src/value-writer/types.ts",
     "../src/value-writer/value-writer.ts",
