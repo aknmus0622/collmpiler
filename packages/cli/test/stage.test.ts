@@ -6,8 +6,9 @@ import { pathToFileURL } from "node:url";
 import { after, test } from "node:test";
 import { extract, payloadDiagnostics, referenceDiagnostics, referenceEvents, serialize, stableStringify, structuredVocabulary, valuesToWrite } from "../src/extract.ts";
 import { listComponents, loadSpecs } from "../src/loader.ts";
-import { mutationVerdict, references, runStage1, stage1Payloads, stage1References, stage1Values } from "../src/stage1.ts";
+import { graphCheck, mutationVerdict, references, runStage1, stage1Payloads, stage1References, stage1Values } from "../src/stage1.ts";
 import { verdictStage0 } from "../src/runtime.ts";
+import { graphReportsStage0, providedData } from "../src/graph.ts";
 import type { CellTrial } from "../src/runtime.ts";
 import { implement } from "../src/loop.ts";
 import type { ImplementationStrategy } from "../src/strategy.ts";
@@ -296,6 +297,7 @@ test("自分自身の検証: 自分の生成物の上で動くフレームワー
   assert.equal(result.status, "pass");
   assert.deepEqual(called, []);
   assert.deepEqual(result.attempts.map((a) => `${a.component}:${a.phase}:${a.attempt}:${a.feedback?.kind ?? "ok"}`), [
+    "graph-check:implementation:0:ok",
     "mutation-verdict:implementation:0:ok",
     "payload-check:implementation:0:ok",
     "pipeline:implementation:0:ok",
@@ -559,4 +561,46 @@ test("Stage 1: 仕様のミューテーションの判定は、手書きの版 (
   // 頼む試行も、同じ順に同じだけ
   assert.deepEqual(stage1Asked, stage0Asked);
   assert.ok(stage0.length >= 6);
+});
+
+test("Stage 1: グラフの検査は、手書きの版 (Stage 0) と同じ報告を、同じ順に返す (N10c)", async () => {
+  // 誤りのある仕様: たどり着けない状態とコマンド、出口の無い状態、使われない語彙（Layer 1 のものと、解釈が足したもの）
+  const dir = mkdtempSync(join(tmpRoot, "graph-"));
+  writeFileSync(
+    join(dir, "trip.component.ts"),
+    `import { commands, conditions, data, effects, input, interpretation, otherwise, queries, service, states } from "@clp/core";
+export const State = states({ PLANNED: "p", STARTED: "s", STUCK: "x", DONE: { description: "d", final: true }, ARCHIVED: "a" });
+export const If = conditions({ rains: "It rains" });
+export const Data = data({ memo: "string" });
+export const Query = queries({ weather: { input: input({ place: "string" }), output: "string" }, now: "integer" });
+export const Effect = effects({ Notify: input({}) });
+export const Command = commands({
+  Start: { from: State.PLANNED, goTo: State.STARTED },
+  Stall: { from: State.STARTED, cases: [If.rains.then({ goTo: State.STUCK }), otherwise({ goTo: State.DONE })] },
+  Wait: { from: State.STUCK, nothing: true },
+  Restore: { from: State.ARCHIVED, goTo: State.PLANNED },
+  Never: { from: [] },
+});
+export const Trip = service({ init: State.PLANNED, uses: [State, Data, Query, Effect, If, Command] });
+const Added = effects({ Extra: input({}) });
+const AddedData = data({ note: "string" });
+export const Interpretation = interpretation(Trip, [If.rains.means(() => false)]);
+void Added; void AddedData;
+`,
+  );
+  const cases: { spec: Awaited<ReturnType<typeof loadSpecs>>; provided?: ReadonlySet<string> }[] = [{ spec: await loadSpecs(dir) }];
+  for (const specs of [specsDir, selfSpecs, join(repoRoot, "examples/library-ts/specs"), join(repoRoot, "examples/todo-db-ts/specs")]) {
+    const loaded = await Promise.all((await listComponents(specs)).map((component) => loadSpecs(specs, { component })));
+    const provided = providedData(loaded);
+    for (const spec of loaded) cases.push({ spec, provided: provided.get(spec.name!) });
+  }
+  let reports = 0;
+  for (const { spec, provided } of cases) {
+    for (const strict of [false, true]) {
+      const stage0 = graphReportsStage0(spec, provided, strict);
+      reports += stage0.length;
+      assert.deepEqual(await runStage1(graphCheck, { spec, provided, strict }), stage0, `${spec.name} strict=${strict}`);
+    }
+  }
+  assert.ok(reports >= 10, `報告のある場合を含むこと (${reports})`);
 });

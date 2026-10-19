@@ -5,6 +5,8 @@ import { EXTRA_SEEDS } from "./runtime.ts";
 import type { Adapter, CellTrial, Unobservable } from "./runtime.ts";
 import { fileURLToPath } from "node:url";
 import { staleness } from "./verified.ts";
+import { transitions, vocabularyFacts } from "./graph.ts";
+import type { GraphReport } from "./graph.ts";
 
 // Stage 1: フレームワーク自身の仕様 (packages/cli/self/specs) から生成したコードで、フレームワークの判断を下す。
 //
@@ -196,6 +198,58 @@ export const mutationVerdict: Stage1Part<CellTrial[], Unobservable[]> = {
           if (++runs > 1 + EXTRA_SEEDS) throw new Error(`mutation-verdict が、値 ${table}.${row}.${column} について、試行を ${runs} 回頼みました`);
           await adapter.executeCommand({ name: "Tried", input: await trial.run(request.extra) });
         }
+      }
+    } finally {
+      await adapter.teardownIsolation();
+    }
+    return found;
+  },
+};
+
+// グラフの検査 (graph-check)。事実を1つずつ渡す。たどり着ける状態を探す繰り返しは、部品が頼む (RunRound)。
+// 判断のあとの事実（状態、コマンド、出口、語彙）は、部品が「たどり着ける状態が分かった」と言ってから (ReachingDone) 渡す
+export type GraphInput = { spec: SpecInput; provided?: ReadonlySet<string>; strict?: boolean };
+export const graphCheck: Stage1Part<GraphInput, GraphReport[]> = {
+  component: "graph-check",
+  inScope: ({ spec }) => spec.model !== undefined,
+  async run(adapter, { spec, provided = new Set(), strict = false }) {
+    const model = spec.model!;
+    const edges = transitions(spec);
+    const found: GraphReport[] = [];
+    const requested: string[] = [];
+    await adapter.setupIsolation({
+      queries: { stateDeclared: ({ name }: { name: string }) => model.states.includes(name) },
+      effects: {
+        RunRound: () => void requested.push("RunRound"),
+        ReachingDone: () => void requested.push("ReachingDone"),
+        Report: (report: GraphReport) => void found.push({ code: report.code, subject: report.subject, severity: report.severity }),
+      },
+    });
+    const send = (name: string, input: object = {}) => adapter.executeCommand({ name, input });
+    try {
+      await send("Begin", { init: model.init, strict, finalsDeclared: model.final !== undefined });
+      let rounds = 0;
+      while (requested.length > 0) {
+        const request = requested.shift()!;
+        if (request === "RunRound") {
+          // 1回ごとに、たどり着ける状態は1つ以上増える。状態の数より多く頼まれたら、部品の誤り
+          if (++rounds > model.states.length + 1) throw new Error(`graph-check が、繰り返しを ${rounds} 回頼みました`);
+          for (const edge of edges) await send("Edge", edge);
+          await send("RoundEnd");
+          continue;
+        }
+        for (const name of model.states) await send("CheckState", { name });
+        for (const [name, behavior] of Object.entries(spec.behaviors)) {
+          await send("BeginCommand", { name });
+          for (const state of behavior.from ?? model.states) await send("From", { state });
+          await send("EndCommand");
+        }
+        for (const state of model.states) {
+          await send("BeginExits", { state, final: model.final?.includes(state) ?? false });
+          for (const edge of edges) await send("Exit", edge);
+          await send("EndExits");
+        }
+        for (const entry of vocabularyFacts(spec, provided)) await send("Vocabulary", entry);
       }
     } finally {
       await adapter.teardownIsolation();

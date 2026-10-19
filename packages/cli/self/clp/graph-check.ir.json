@@ -1,0 +1,487 @@
+{
+  "behaviors": [
+    {
+      "from": [
+        "IDLE"
+      ],
+      "name": "Begin",
+      "onlyIf": [],
+      "when": {
+        "otherwise": {
+          "does": "A specification is checked. Only its initial state is reached so far (it counts as reached whether or not it is declared). Whether the check is strict and whether the specification declares final states are remembered. A first round over the transitions is asked for.",
+          "emits": [
+            {
+              "effect": "RunRound",
+              "input": {}
+            }
+          ],
+          "goTo": "REACHING",
+          "set": {
+            "finalsAreDeclared": {
+              "$ref": "input:finalsDeclared"
+            },
+            "foundNew": false,
+            "reached": {
+              "$ref": "calculation:initiallyReached"
+            },
+            "strictCheck": {
+              "$ref": "input:strict"
+            }
+          }
+        }
+      }
+    },
+    {
+      "from": [
+        "JUDGING"
+      ],
+      "name": "BeginCommand",
+      "onlyIf": [],
+      "when": {
+        "otherwise": {
+          "does": "A command is judged next: the states it can be executed in follow.",
+          "set": {
+            "allFromDeclared": true,
+            "anyFromReached": false,
+            "commandName": {
+              "$ref": "input:name"
+            }
+          }
+        }
+      }
+    },
+    {
+      "from": [
+        "JUDGING"
+      ],
+      "name": "BeginExits",
+      "onlyIf": [],
+      "when": {
+        "otherwise": {
+          "does": "A state is judged for whether it can be left: the transitions follow.",
+          "set": {
+            "exitFinal": {
+              "$ref": "input:final"
+            },
+            "exitState": {
+              "$ref": "input:state"
+            },
+            "left": false
+          }
+        }
+      }
+    },
+    {
+      "description": "One of the declared states (only declared states are given here). If it is not reached, it is reported as unreachable-state, an error, about that state.",
+      "from": [
+        "JUDGING"
+      ],
+      "name": "CheckState",
+      "onlyIf": [],
+      "when": {
+        "The state is not reached": {
+          "emits": [
+            {
+              "effect": "Report",
+              "input": {
+                "code": "unreachable-state",
+                "severity": "error",
+                "subject": {
+                  "$ref": "input:name"
+                }
+              }
+            }
+          ]
+        },
+        "otherwise": {}
+      }
+    },
+    {
+      "asks": {
+        "toDeclared": {
+          "input": {
+            "name": {
+              "$ref": "input:to"
+            }
+          },
+          "query": "stateDeclared"
+        }
+      },
+      "description": "A transition: a command that can be executed in the state `from` can go to the state `to`. If `from` is reached (declared or not) and `to` is a declared state (as the dependency answers for `to`; any name, the empty one included, can be declared) that is not reached yet, `to` becomes reached, and the round has found something new. Nothing else changes.",
+      "from": [
+        "REACHING"
+      ],
+      "name": "Edge",
+      "onlyIf": [],
+      "when": {
+        "`from` is reached and `to` is a declared state that is not reached yet": {
+          "set": {
+            "foundNew": true,
+            "reached": {
+              "$ref": "calculation:reachedWithTo"
+            }
+          }
+        },
+        "otherwise": {}
+      }
+    },
+    {
+      "description": "If every state the command can be executed in is declared (which holds when there is none), and none of them is reached, the command is reported as unreachable-command, an error, about that command. An undeclared state is reported elsewhere. EndCommand always follows a BeginCommand.",
+      "from": [
+        "JUDGING"
+      ],
+      "name": "EndCommand",
+      "onlyIf": [
+        "A command has been begun (a BeginCommand was executed before)"
+      ],
+      "when": {
+        "Every state the command can be executed in is declared, and none of them is reached": {
+          "emits": [
+            {
+              "effect": "Report",
+              "input": {
+                "code": "unreachable-command",
+                "severity": "error",
+                "subject": {
+                  "$ref": "data:commandName"
+                }
+              }
+            }
+          ]
+        },
+        "otherwise": {}
+      }
+    },
+    {
+      "description": "Only if the specification declares final states: a reached state that is not final and that no transition leaves is reported as dead-end-state, an error, about that state. EndExits always follows a BeginExits.",
+      "from": [
+        "JUDGING"
+      ],
+      "name": "EndExits",
+      "onlyIf": [
+        "A state has been begun for its exits (a BeginExits was executed before)"
+      ],
+      "when": {
+        "The specification declares final states, and the state being judged is reached, not final, and no transition leaves it": {
+          "emits": [
+            {
+              "effect": "Report",
+              "input": {
+                "code": "dead-end-state",
+                "severity": "error",
+                "subject": {
+                  "$ref": "data:exitState"
+                }
+              }
+            }
+          ]
+        },
+        "otherwise": {}
+      }
+    },
+    {
+      "description": "A transition. It leaves the state being judged if it goes from that state to a different state.",
+      "from": [
+        "JUDGING"
+      ],
+      "name": "Exit",
+      "onlyIf": [],
+      "when": {
+        "The transition goes from the state being judged to a different state": {
+          "set": {
+            "left": true
+          }
+        },
+        "otherwise": {}
+      }
+    },
+    {
+      "asks": {
+        "fromDeclared": {
+          "input": {
+            "name": {
+              "$ref": "input:state"
+            }
+          },
+          "query": "stateDeclared"
+        }
+      },
+      "from": [
+        "JUDGING"
+      ],
+      "name": "From",
+      "onlyIf": [
+        "A command has been begun (a BeginCommand was executed before)"
+      ],
+      "when": {
+        "otherwise": {
+          "does": "One state the command can be executed in. Whether it is declared, and whether it is reached (declared or not), is taken into account. It always follows a BeginCommand.",
+          "set": {
+            "allFromDeclared": {
+              "$ref": "calculation:allFromDeclaredNow"
+            },
+            "anyFromReached": {
+              "$ref": "calculation:anyFromReachedNow"
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "The round is over. If it found something new, another round is asked for (and the next round starts having found nothing). Otherwise the reachable states are known: the check moves on to judging, and says so.",
+      "from": [
+        "REACHING"
+      ],
+      "name": "RoundEnd",
+      "onlyIf": [],
+      "when": {
+        "The round found something new": {
+          "emits": [
+            {
+              "effect": "RunRound",
+              "input": {}
+            }
+          ],
+          "set": {
+            "foundNew": false
+          }
+        },
+        "otherwise": {
+          "emits": [
+            {
+              "effect": "ReachingDone",
+              "input": {}
+            }
+          ],
+          "goTo": "JUDGING"
+        }
+      }
+    },
+    {
+      "description": "An entry of the vocabulary, with whether it is used (an effect emitted, data set or given by a containing component, a query asked), whether Layer 1 lists it, and whether it takes an input. An effect that is not used is reported as unused-effect, data that is not used as unset-data, and a query that takes an input and is not used as unasked-query; a query without input is never reported. What is reported is a warning, except in a strict check, where an entry Layer 1 does not list (the interpretation added it) is an error; an entry Layer 1 lists stays a warning even then.",
+      "from": [
+        "JUDGING"
+      ],
+      "name": "Vocabulary",
+      "onlyIf": [],
+      "when": {
+        "The entry is a query that takes an input and is not used": {
+          "emits": [
+            {
+              "effect": "Report",
+              "input": {
+                "code": "unasked-query",
+                "severity": {
+                  "$ref": "calculation:severity"
+                },
+                "subject": {
+                  "$ref": "input:name"
+                }
+              }
+            }
+          ]
+        },
+        "The entry is an effect that is not used": {
+          "emits": [
+            {
+              "effect": "Report",
+              "input": {
+                "code": "unused-effect",
+                "severity": {
+                  "$ref": "calculation:severity"
+                },
+                "subject": {
+                  "$ref": "input:name"
+                }
+              }
+            }
+          ]
+        },
+        "The entry is data that is not used": {
+          "emits": [
+            {
+              "effect": "Report",
+              "input": {
+                "code": "unset-data",
+                "severity": {
+                  "$ref": "calculation:severity"
+                },
+                "subject": {
+                  "$ref": "input:name"
+                }
+              }
+            }
+          ]
+        },
+        "otherwise": {}
+      }
+    }
+  ],
+  "decisions": {},
+  "descriptions": {
+    "component": "Checks what follows from the written structure of a specification: states that cannot be reached from the initial state, commands that can never be executed, states that cannot be left, and vocabulary that is never used.",
+    "data.allFromDeclared": "Whether every state given so far for the command being judged is declared.",
+    "data.anyFromReached": "Whether some state given so far for the command being judged is reached.",
+    "data.commandName": "The command being judged.",
+    "data.exitFinal": "Whether the state being judged is final.",
+    "data.exitState": "The state being judged for whether it can be left.",
+    "data.finalsAreDeclared": "Whether the specification declares final states.",
+    "data.foundNew": "Whether the current round has found something new.",
+    "data.left": "Whether a transition given so far leaves the state being judged.",
+    "data.reached": "The states reached so far, in the order they were reached (the initial state first).",
+    "data.strictCheck": "Whether the check is strict.",
+    "effects.ReachingDone": "The reachable states are known: feed the states, the commands, the exits and the vocabulary to be judged.",
+    "effects.Report": "Something is reported about the specification: what it is, about which name, and how serious it is.",
+    "effects.RunRound": "Feed every transition (Edge) once more, then RoundEnd.",
+    "queries.stateDeclared": "Whether the specification declares a state with this name.",
+    "states.IDLE": "Nothing has been checked yet.",
+    "states.JUDGING": "The reachable states are known; states, commands and the vocabulary are being judged one by one.",
+    "states.REACHING": "The states that can be reached from the initial state are being found, one round over the transitions at a time."
+  },
+  "irVersion": 7,
+  "model": {
+    "calculations": {
+      "allFromDeclaredNow": {
+        "description": "Whether every state given so far, the one just given included, is declared",
+        "output": "boolean"
+      },
+      "anyFromReachedNow": {
+        "description": "Whether some state given so far, the one just given included, is reached",
+        "output": "boolean"
+      },
+      "initiallyReached": {
+        "description": "A list holding only the initial state",
+        "output": {
+          "list": "string"
+        }
+      },
+      "reachedWithTo": {
+        "description": "The reached states, followed by `to`",
+        "output": {
+          "list": "string"
+        }
+      },
+      "severity": {
+        "description": "An error in a strict check for an entry Layer 1 does not list; a warning otherwise",
+        "output": [
+          "error",
+          "warning"
+        ]
+      }
+    },
+    "commands": {
+      "Begin": {
+        "finalsDeclared": "boolean",
+        "init": "string",
+        "strict": "boolean"
+      },
+      "BeginCommand": {
+        "name": "string"
+      },
+      "BeginExits": {
+        "final": "boolean",
+        "state": {
+          "among": {
+            "data": "reached"
+          },
+          "type": "string"
+        }
+      },
+      "CheckState": {
+        "name": {
+          "among": {
+            "data": "reached"
+          },
+          "type": "string"
+        }
+      },
+      "Edge": {
+        "from": {
+          "among": {
+            "data": "reached"
+          },
+          "type": "string"
+        },
+        "to": "string"
+      },
+      "EndCommand": {},
+      "EndExits": {},
+      "Exit": {
+        "from": {
+          "among": {
+            "data": "reached"
+          },
+          "type": "string"
+        },
+        "to": "string"
+      },
+      "From": {
+        "state": {
+          "among": {
+            "data": "reached"
+          },
+          "type": "string"
+        }
+      },
+      "RoundEnd": {},
+      "Vocabulary": {
+        "group": [
+          "effects",
+          "data",
+          "queries"
+        ],
+        "listed": "boolean",
+        "name": "string",
+        "takesInput": "boolean",
+        "used": "boolean"
+      }
+    },
+    "data": {
+      "allFromDeclared": "boolean",
+      "anyFromReached": "boolean",
+      "commandName": "string",
+      "exitFinal": "boolean",
+      "exitState": "string",
+      "finalsAreDeclared": "boolean",
+      "foundNew": "boolean",
+      "left": "boolean",
+      "reached": {
+        "list": "string"
+      },
+      "strictCheck": "boolean"
+    },
+    "effects": {
+      "ReachingDone": {},
+      "Report": {
+        "code": [
+          "unreachable-state",
+          "unreachable-command",
+          "dead-end-state",
+          "unused-effect",
+          "unset-data",
+          "unasked-query"
+        ],
+        "severity": [
+          "error",
+          "warning"
+        ],
+        "subject": "string"
+      },
+      "RunRound": {}
+    },
+    "init": "IDLE",
+    "queries": {
+      "stateDeclared": {
+        "input": {
+          "name": "string"
+        },
+        "output": "boolean"
+      }
+    },
+    "states": [
+      "IDLE",
+      "REACHING",
+      "JUDGING"
+    ]
+  }
+}

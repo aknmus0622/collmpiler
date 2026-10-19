@@ -6,7 +6,7 @@ import { listComponents, loadSpecs } from "../loader.ts";
 import { seedOf } from "../generate.ts";
 import type { Ir } from "../generate.ts";
 import { describeUnobservable, observability, selfCheck, unreachedCases } from "../runtime.ts";
-import { mutationVerdict, references, runStage1 } from "../stage1.ts";
+import { graphCheck, mutationVerdict, references, runStage1 } from "../stage1.ts";
 import { typecheckSpecs } from "../typecheck.ts";
 
 export const summary = "仕様を検査して、IR を標準出力に出す";
@@ -44,7 +44,10 @@ for (const name of names) {
   const { ir, diagnostics } = extract(spec, await references(spec));
   const tag = names.length > 1 ? `${name}: ` : "";
   // グラフの検査: たどり着けない状態とコマンド、使われない語彙（ほかの誤りが無いときに）
-  const structural = diagnostics.some((d) => d.severity === "error") ? [] : graphDiagnostics(spec, provided.get(name), values["strict-added"]);
+  const strict = values["strict-added"];
+  const structural = diagnostics.some((d) => d.severity === "error")
+    ? []
+    : graphDiagnostics(spec, provided.get(name), strict, await runStage1(graphCheck, { spec, provided: provided.get(name), strict }));
   for (const d of [...diagnostics, ...structural]) console.error(`${d.severity}[${d.code}] ${tag}${whereOf(d)}${d.message}`);
   if ([...diagnostics, ...structural].some((d) => d.severity === "error")) process.exitCode = 1;
   irs[name] = ir;

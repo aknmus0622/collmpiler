@@ -16,7 +16,7 @@ import type { MutationStrategy } from "./mutation.ts";
 import { PHASES } from "./request.ts";
 import type { Phase } from "./request.ts";
 import { DEFAULT_RUNS, defaultRuns, describeUnobservable, observability, selfCheck, unreachedCases } from "./runtime.ts";
-import { mutationVerdict, references, runStage1, stage1Adapter, stage1Unavailable } from "./stage1.ts";
+import { graphCheck, mutationVerdict, references, runStage1, stage1Adapter, stage1Unavailable } from "./stage1.ts";
 import type { StaticCheckStrategy } from "./static-check.ts";
 import { clearVerified, writeVerified } from "./verified.ts";
 import type { ImplementationStrategy } from "./strategy.ts";
@@ -119,7 +119,7 @@ export async function implement(options: ImplementOptions) {
       throw new Error(`仕様 (${name}) にエラーがあります:\n${errors.map((d) => `  ${whereOf(d)}${d.message}`).join("\n")}`);
     }
     // グラフの検査: たどり着けない状態やコマンドは、仕様の誤り。使われない語彙は、知らせるだけ
-    const structural = graphDiagnostics(spec, provided.get(name));
+    const structural = graphDiagnostics(spec, provided.get(name), false, await runStage1(graphCheck, { spec, provided: provided.get(name) }));
     for (const d of structural.filter((entry) => entry.severity === "warning")) log(`注意 (${name}): ${d.message}`);
     if (structural.some((d) => d.severity === "error")) {
       throw new Error(`仕様 (${name}) にエラーがあります:\n${structural.filter((d) => d.severity === "error").map((d) => `  ${d.message}`).join("\n")}`);

@@ -4,8 +4,11 @@
     "reference-check.interpretation.ts"
   ],
   "specs": "sha256:972035f913c35ed8f6ca9e786a11512f48bcb9d5c697adeff29ee88d41c8b45b",
-  "code": "sha256:4e794dad4785b4765b80f549fc869fdd1c1353c1d44ada542ec3b5c735862721",
+  "code": "sha256:a1f906333cae66734a3544123b96acbc67ab1f206691181a0bc0527963a6b6d0",
   "files": [
+    "../src/graph-check/graph-check.ts",
+    "../src/graph-check/rules.ts",
+    "../src/graph-check/types.ts",
     "../src/mutation-verdict/judgement.ts",
     "../src/mutation-verdict/mutation-verdict.ts",
     "../src/mutation-verdict/types.ts",
