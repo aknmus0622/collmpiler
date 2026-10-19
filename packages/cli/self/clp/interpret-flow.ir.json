@@ -1,0 +1,661 @@
+{
+  "behaviors": [
+    {
+      "description": "A later session has been compared (ok or not, it counts as done). The next session starts (pinned), or, after the last one, interpreting finishes as interpreted.",
+      "from": [
+        "SESSIONS"
+      ],
+      "name": "Compared",
+      "onlyIf": [],
+      "when": {
+        "The running session is not the last": {
+          "emits": [
+            {
+              "effect": "StartSession",
+              "input": {
+                "attempt": 1,
+                "mode": "pinned",
+                "session": {
+                  "$ref": "calculation:nextSession"
+                }
+              }
+            }
+          ],
+          "set": {
+            "runningAttempt": 1,
+            "runningSession": {
+              "$ref": "calculation:nextSession"
+            }
+          }
+        },
+        "otherwise": {
+          "emits": [
+            {
+              "effect": "Finish",
+              "input": {
+                "status": "interpreted"
+              }
+            }
+          ],
+          "goTo": "DONE"
+        }
+      }
+    },
+    {
+      "description": "A component, in name order. A component without an interpretation (neither a draft nor an accepted one) is chosen, to be interpreted from a skeleton: its first session starts (attempt 1). A component with one has it checked first.",
+      "from": [
+        "CHOOSING"
+      ],
+      "name": "Consider",
+      "onlyIf": [],
+      "when": {
+        "The component has no interpretation (neither a draft nor an accepted one)": {
+          "emits": [
+            {
+              "effect": "StartSession",
+              "input": {
+                "attempt": 1,
+                "mode": "skeleton",
+                "session": 1
+              }
+            }
+          ],
+          "goTo": "SESSIONS",
+          "set": {
+            "runningAttempt": 1,
+            "runningSession": 1,
+            "startsFromCurrent": false
+          }
+        },
+        "otherwise": {
+          "emits": [
+            {
+              "effect": "CheckCurrent",
+              "input": {}
+            }
+          ],
+          "goTo": "CHECKING"
+        }
+      }
+    },
+    {
+      "description": "A component to accept. Without a draft or an interpretation, it is refused (no-interpretation). If its draft (or, without a draft, its interpretation) has questions or disagreements left open, it is refused (open-reviews). Without a draft, an interpretation whose stamp is already the current Layer 1 needs nothing: the next component is asked for. Otherwise it is checked. Every refusal counts as a component that could not be accepted in this round, and the next component is asked for.",
+      "from": [
+        "ACCEPTING"
+      ],
+      "name": "ConsiderAccepting",
+      "onlyIf": [],
+      "when": {
+        "The component has a draft or an interpretation, and it has questions or disagreements left open": {
+          "emits": [
+            {
+              "effect": "RefuseAccepting",
+              "input": {
+                "reason": "open-reviews"
+              }
+            },
+            {
+              "effect": "NextToAccept",
+              "input": {}
+            }
+          ],
+          "set": {
+            "failedInRound": true
+          }
+        },
+        "The component has neither a draft nor an interpretation": {
+          "emits": [
+            {
+              "effect": "RefuseAccepting",
+              "input": {
+                "reason": "no-interpretation"
+              }
+            },
+            {
+              "effect": "NextToAccept",
+              "input": {}
+            }
+          ],
+          "set": {
+            "failedInRound": true
+          }
+        },
+        "The component has no draft, has an interpretation without anything left open, and its stamp is already the current Layer 1": {
+          "emits": [
+            {
+              "effect": "NextToAccept",
+              "input": {}
+            }
+          ]
+        },
+        "otherwise": {
+          "emits": [
+            {
+              "effect": "CheckDraft",
+              "input": {}
+            }
+          ],
+          "goTo": "VERIFYING"
+        }
+      }
+    },
+    {
+      "description": "If the current interpretation passed the check, nothing is to be done for this component: the next one is asked for. Otherwise the component is chosen, to be interpreted from its current interpretation (update): its first session starts.",
+      "from": [
+        "CHECKING"
+      ],
+      "name": "CurrentChecked",
+      "onlyIf": [],
+      "when": {
+        "The check passed": {
+          "emits": [
+            {
+              "effect": "ConsiderNext",
+              "input": {}
+            }
+          ],
+          "goTo": "CHOOSING"
+        },
+        "otherwise": {
+          "emits": [
+            {
+              "effect": "StartSession",
+              "input": {
+                "attempt": 1,
+                "mode": "update",
+                "session": 1
+              }
+            }
+          ],
+          "goTo": "SESSIONS",
+          "set": {
+            "runningAttempt": 1,
+            "runningSession": 1,
+            "startsFromCurrent": true
+          }
+        }
+      }
+    },
+    {
+      "from": [
+        "VERIFYING"
+      ],
+      "name": "DraftChecked",
+      "onlyIf": [],
+      "when": {
+        "otherwise": {
+          "does": "If it passed, it is accepted, which counts as a component accepted in this round; otherwise it is refused (does-not-fit), which counts as one that could not be accepted. The next component is asked for.",
+          "emits": [
+            {
+              "effect": "Accept",
+              "input": {},
+              "onlyWhen": {
+                "$ref": "input:passed"
+              }
+            },
+            {
+              "effect": "RefuseAccepting",
+              "input": {
+                "reason": "does-not-fit"
+              },
+              "onlyWhen": "The check did not pass"
+            },
+            {
+              "effect": "NextToAccept",
+              "input": {}
+            }
+          ],
+          "goTo": "ACCEPTING",
+          "set": {
+            "acceptedInRound": {
+              "$ref": "calculation:acceptedAfterCheck"
+            },
+            "failedInRound": {
+              "$ref": "calculation:failedAfterCheck"
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "The round is over. If some component could not be accepted and some was accepted in this round (a component that contains another may fit only once the other is accepted), another round runs over those that could not be accepted, starting again with nothing accepted or refused in it. Otherwise accepting is over.",
+      "from": [
+        "ACCEPTING"
+      ],
+      "name": "EndRound",
+      "onlyIf": [],
+      "when": {
+        "Some component could not be accepted and some was accepted in this round": {
+          "emits": [
+            {
+              "effect": "RetryRefused",
+              "input": {}
+            },
+            {
+              "effect": "NextToAccept",
+              "input": {}
+            }
+          ],
+          "set": {
+            "acceptedInRound": false,
+            "failedInRound": false
+          }
+        },
+        "otherwise": {
+          "emits": [
+            {
+              "effect": "AcceptingDone",
+              "input": {}
+            }
+          ],
+          "goTo": "ACCEPTED"
+        }
+      }
+    },
+    {
+      "from": [
+        "CHOOSING"
+      ],
+      "name": "NoMoreComponents",
+      "onlyIf": [],
+      "when": {
+        "otherwise": {
+          "does": "Every component's interpretation fits: interpreting finishes as up-to-date.",
+          "emits": [
+            {
+              "effect": "Finish",
+              "input": {
+                "status": "up-to-date"
+              }
+            }
+          ],
+          "goTo": "DONE"
+        }
+      }
+    },
+    {
+      "description": "An attempt of the running session is over. If it was not ok and attempts remain, the next attempt of the same session starts, in the same mode. If the first session ends without an ok attempt, interpreting finishes as failed. When the first session is ok: with one session, or when it gave no vocabulary (hasModel false), interpreting finishes as interpreted; otherwise the second session starts (attempt 1, pinned). When a later session is ok, it is compared with the first. When a later session ends without an ok attempt, it is recorded as uncompared, and the next session starts (pinned), or, after the last one, interpreting finishes as interpreted.",
+      "from": [
+        "SESSIONS"
+      ],
+      "name": "SessionChecked",
+      "onlyIf": [],
+      "when": {
+        "The attempt was not ok and attempts remain": {
+          "emits": [
+            {
+              "effect": "StartSession",
+              "input": {
+                "attempt": {
+                  "$ref": "calculation:nextAttempt"
+                },
+                "mode": {
+                  "$ref": "calculation:sessionMode"
+                },
+                "session": {
+                  "$ref": "data:runningSession"
+                }
+              }
+            }
+          ],
+          "set": {
+            "runningAttempt": {
+              "$ref": "calculation:nextAttempt"
+            }
+          }
+        },
+        "The attempt was not ok, no attempt remains, and the running session is the first": {
+          "emits": [
+            {
+              "effect": "Finish",
+              "input": {
+                "status": "failed"
+              }
+            }
+          ],
+          "goTo": "DONE"
+        },
+        "The attempt was not ok, no attempt remains, the running session is a later one, and it is not the last": {
+          "emits": [
+            {
+              "effect": "RecordUncompared",
+              "input": {
+                "session": {
+                  "$ref": "data:runningSession"
+                }
+              }
+            },
+            {
+              "effect": "StartSession",
+              "input": {
+                "attempt": 1,
+                "mode": "pinned",
+                "session": {
+                  "$ref": "calculation:nextSession"
+                }
+              }
+            }
+          ],
+          "set": {
+            "runningAttempt": 1,
+            "runningSession": {
+              "$ref": "calculation:nextSession"
+            }
+          }
+        },
+        "The attempt was ok and the running session is a later one": {
+          "emits": [
+            {
+              "effect": "Compare",
+              "input": {
+                "session": {
+                  "$ref": "data:runningSession"
+                }
+              }
+            }
+          ]
+        },
+        "The attempt was ok, the running session is the first, and there is one session or it gave no vocabulary": {
+          "emits": [
+            {
+              "effect": "Finish",
+              "input": {
+                "status": "interpreted"
+              }
+            }
+          ],
+          "goTo": "DONE"
+        },
+        "The attempt was ok, the running session is the first, there is more than one session, and it gave vocabulary": {
+          "emits": [
+            {
+              "effect": "StartSession",
+              "input": {
+                "attempt": 1,
+                "mode": "pinned",
+                "session": 2
+              }
+            }
+          ],
+          "set": {
+            "runningAttempt": 1,
+            "runningSession": 2
+          }
+        },
+        "otherwise": {
+          "emits": [
+            {
+              "effect": "RecordUncompared",
+              "input": {
+                "session": {
+                  "$ref": "data:runningSession"
+                }
+              }
+            },
+            {
+              "effect": "Finish",
+              "input": {
+                "status": "interpreted"
+              }
+            }
+          ],
+          "goTo": "DONE"
+        }
+      }
+    },
+    {
+      "from": [
+        "IDLE"
+      ],
+      "name": "Start",
+      "onlyIf": [],
+      "when": {
+        "otherwise": {
+          "does": "Interpreting starts with the number of sessions and of attempts per session. The first component is asked for.",
+          "emits": [
+            {
+              "effect": "ConsiderNext",
+              "input": {}
+            }
+          ],
+          "goTo": "CHOOSING",
+          "set": {
+            "attemptLimit": {
+              "$ref": "input:maxAttempts"
+            },
+            "sessionCount": {
+              "$ref": "input:sessions"
+            }
+          }
+        }
+      }
+    },
+    {
+      "from": [
+        "IDLE"
+      ],
+      "name": "StartAccepting",
+      "onlyIf": [],
+      "when": {
+        "otherwise": {
+          "does": "Accepting starts: a round over every component. The first component is asked for.",
+          "emits": [
+            {
+              "effect": "NextToAccept",
+              "input": {}
+            }
+          ],
+          "goTo": "ACCEPTING"
+        }
+      }
+    }
+  ],
+  "decisions": {},
+  "descriptions": {
+    "component": "Decides how `clp interpret` proceeds: which component to interpret and from what, how sessions and attempts follow each other and when sessions are compared; and for `clp interpret --accept`, which drafts are accepted, round after round.",
+    "data.acceptedInRound": "Whether some component was accepted in the accepting round being run.",
+    "data.attemptLimit": "How many attempts a session has before it gives up.",
+    "data.failedInRound": "Whether some component could not be accepted in the accepting round being run.",
+    "data.runningAttempt": "Its attempt.",
+    "data.runningSession": "The session running (1 is the one kept as the draft).",
+    "data.sessionCount": "How many sessions interpret the component (the first is kept as the draft; the others are compared with it).",
+    "data.startsFromCurrent": "Whether the chosen component starts from its current interpretation (rather than from a skeleton).",
+    "effects.Accept": "Accept it: the draft becomes the interpretation, stamped with the current Layer 1.",
+    "effects.AcceptingDone": "Accepting is over.",
+    "effects.CheckCurrent": "Check the current interpretation of the component being considered, and answer with CurrentChecked.",
+    "effects.CheckDraft": "Check the draft (or the re-stamped interpretation) of the component being accepted, and answer with DraftChecked.",
+    "effects.Compare": "Compare the interpretation of this session with the first one, and answer with Compared.",
+    "effects.ConsiderNext": "Give the next component (Consider), or NoMoreComponents if there is none.",
+    "effects.Finish": "Interpreting is over, with this outcome.",
+    "effects.NextToAccept": "Give the next component to accept (ConsiderAccepting), or EndRound if there is none in this round.",
+    "effects.RecordUncompared": "This session could not be compared (it found no interpretation that passed).",
+    "effects.RefuseAccepting": "The component is not accepted, for this reason.",
+    "effects.RetryRefused": "Run another round over the components that were not accepted.",
+    "effects.StartSession": "Run an attempt of an interpretation session, and answer with SessionChecked. `mode`: from a skeleton, from the current interpretation (update), or from a skeleton with the first session's vocabulary fixed (pinned).",
+    "states.ACCEPTED": "Accepting is over.",
+    "states.ACCEPTING": "Drafts are being accepted, one component after another, round after round.",
+    "states.CHECKING": "The current interpretation of a component is being checked.",
+    "states.CHOOSING": "Components are being looked at in order, to find the first one whose interpretation is missing or does not fit.",
+    "states.DONE": "Interpreting is over.",
+    "states.IDLE": "Nothing is being done.",
+    "states.SESSIONS": "Interpretation sessions are running.",
+    "states.VERIFYING": "A draft (or a re-stamped interpretation) is being checked before it is accepted."
+  },
+  "irVersion": 7,
+  "model": {
+    "calculations": {
+      "acceptedAfterCheck": {
+        "description": "Whether some component was accepted in this round, counting the one just checked if it passed",
+        "output": "boolean"
+      },
+      "failedAfterCheck": {
+        "description": "Whether some component could not be accepted in this round, counting the one just checked if it did not pass",
+        "output": "boolean"
+      },
+      "nextAttempt": {
+        "description": "The running attempt plus one",
+        "output": "integer"
+      },
+      "nextSession": {
+        "description": "The running session plus one",
+        "output": "integer"
+      },
+      "sessionMode": {
+        "description": "The mode of the running session: for the first session, update if it starts from the current interpretation and skeleton otherwise; pinned for a later session",
+        "output": [
+          "skeleton",
+          "update",
+          "pinned"
+        ]
+      }
+    },
+    "commands": {
+      "Compared": {
+        "ok": "boolean"
+      },
+      "Consider": {
+        "hasCurrent": "boolean"
+      },
+      "ConsiderAccepting": {
+        "hasDraft": "boolean",
+        "hasInterpretation": "boolean",
+        "openReviews": {
+          "max": 10,
+          "min": 0,
+          "type": "integer"
+        },
+        "stampCurrent": "boolean"
+      },
+      "CurrentChecked": {
+        "passed": "boolean"
+      },
+      "DraftChecked": {
+        "passed": "boolean"
+      },
+      "EndRound": {},
+      "NoMoreComponents": {},
+      "SessionChecked": {
+        "hasModel": "boolean",
+        "outcome": [
+          "ok",
+          "missing",
+          "foreign-change",
+          "check-failed",
+          "boundary-changed"
+        ]
+      },
+      "Start": {
+        "maxAttempts": {
+          "max": 3,
+          "min": 1,
+          "type": "integer"
+        },
+        "sessions": {
+          "max": 3,
+          "min": 1,
+          "type": "integer"
+        }
+      },
+      "StartAccepting": {}
+    },
+    "data": {
+      "acceptedInRound": "boolean",
+      "attemptLimit": {
+        "max": 3,
+        "min": 1,
+        "type": "integer"
+      },
+      "failedInRound": "boolean",
+      "runningAttempt": {
+        "max": 3,
+        "min": 1,
+        "type": "integer"
+      },
+      "runningSession": {
+        "max": 3,
+        "min": 1,
+        "type": "integer"
+      },
+      "sessionCount": {
+        "max": 3,
+        "min": 1,
+        "type": "integer"
+      },
+      "startsFromCurrent": "boolean"
+    },
+    "effects": {
+      "Accept": {},
+      "AcceptingDone": {},
+      "CheckCurrent": {},
+      "CheckDraft": {},
+      "Compare": {
+        "session": {
+          "max": 3,
+          "min": 1,
+          "type": "integer"
+        }
+      },
+      "ConsiderNext": {},
+      "Finish": {
+        "status": [
+          "up-to-date",
+          "interpreted",
+          "failed"
+        ]
+      },
+      "NextToAccept": {},
+      "RecordUncompared": {
+        "session": {
+          "max": 3,
+          "min": 1,
+          "type": "integer"
+        }
+      },
+      "RefuseAccepting": {
+        "reason": [
+          "no-interpretation",
+          "open-reviews",
+          "does-not-fit"
+        ]
+      },
+      "RetryRefused": {},
+      "StartSession": {
+        "attempt": {
+          "max": 3,
+          "min": 1,
+          "type": "integer"
+        },
+        "mode": [
+          "skeleton",
+          "update",
+          "pinned"
+        ],
+        "session": {
+          "max": 3,
+          "min": 1,
+          "type": "integer"
+        }
+      }
+    },
+    "final": [
+      "DONE",
+      "ACCEPTED"
+    ],
+    "init": "IDLE",
+    "initial": {
+      "acceptedInRound": false,
+      "failedInRound": false
+    },
+    "queries": {},
+    "states": [
+      "IDLE",
+      "CHOOSING",
+      "CHECKING",
+      "SESSIONS",
+      "DONE",
+      "ACCEPTING",
+      "VERIFYING",
+      "ACCEPTED"
+    ]
+  }
+}

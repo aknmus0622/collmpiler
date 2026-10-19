@@ -4,11 +4,14 @@
     "pipeline.interpretation.ts"
   ],
   "specs": "sha256:cd2a330ce6f8bb602beb0281b621b0dc25debef9ecbba63578f8ad77c236b594",
-  "code": "sha256:5d8d2429aff2636a5ec9a3da28a4d74714cd7214cea74731c234c4bdd2d1479b",
+  "code": "sha256:86818fb64b88a37ed5e9f0c0021630b43498c5753ef1516f898ef3dfd7a1a306",
   "files": [
     "../src/graph-check/graph-check.ts",
     "../src/graph-check/rules.ts",
     "../src/graph-check/types.ts",
+    "../src/interpret-flow/interpret-flow.ts",
+    "../src/interpret-flow/plan.ts",
+    "../src/interpret-flow/types.ts",
     "../src/leaf-check/leaf-check.ts",
     "../src/leaf-check/rules.ts",
     "../src/leaf-check/types.ts",

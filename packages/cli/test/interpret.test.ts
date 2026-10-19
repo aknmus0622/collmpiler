@@ -435,3 +435,36 @@ test("解釈: コンポーネントが複数あれば、解釈が要る最初の
   const chosen = await interpret({ specs: dir, component: "order", strategy: scripted([reviewed]).strategy });
   assert.deepEqual(chosen, { status: "up-to-date" });
 });
+
+test("進め方 (N10g): 生成した状態機械 (Stage 1) は、手書きの手続き (Stage 0) と同じ順にセッションと試行を進め、同じ結果を返す", async () => {
+  const typo = reviewed.replace("state.paymentModuleActive", "state.paymentModuleActiv");
+  const always = reviewed.replace("Effect.Refund().onlyWhen(was(State.PAID))", "Effect.Refund()");
+  const widened = reviewed
+    .replace("Command.Cancel.with({ from: [State.PENDING, State.PAID],", 'Command.Cancel.with({ input: input({ reason: "string" }), from: [State.PENDING, State.PAID],')
+    .replace("import { interpretation,", "import { input, interpretation,");
+  // 1つ目: 1回落ちてから通る。2つ目: 語彙を変え続けて、比べられない。3つ目: 通って、比べられる
+  const run = async (stage: string) => {
+    const previous = process.env.CLP_STAGE;
+    process.env.CLP_STAGE = stage;
+    try {
+      const dir = specDir();
+      const { strategy, seen } = scripted([typo, reviewed, widened, widened, always]);
+      const result = await interpret({ specs: dir, strategy, sessions: 3, maxAttempts: 2 });
+      const draft = readFileSync(join(dir, DRAFT), "utf8");
+      // 確定: 食い違いの印が残っているので断り、印を確かめれば確定できる
+      const refused = await accept({ specs: dir });
+      writeFileSync(join(dir, DRAFT), draft.replaceAll("// REVIEW(clp):", "// REVIEWED(clp):"));
+      const accepted = await accept({ specs: dir });
+      const strip = (value: unknown) => JSON.parse(JSON.stringify(value).replaceAll(dir, "<dir>"));
+      return strip({ result, seen: seen.map((entry) => [entry.attempt, entry.request.split("\n")[0]]), draft, refused, accepted });
+    } finally {
+      if (previous === undefined) delete process.env.CLP_STAGE;
+      else process.env.CLP_STAGE = previous;
+    }
+  };
+  const stage0 = await run("0");
+  const stage1 = await run("");
+  assert.equal(stage0.result.status, "interpreted");
+  assert.deepEqual(stage0.result.comparisons.map((c: { session: number; status: string }) => [c.session, c.status]), [[2, "failed"], [3, "compared"]]);
+  assert.deepEqual(stage1, stage0);
+});

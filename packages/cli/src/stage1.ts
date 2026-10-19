@@ -52,7 +52,7 @@ export async function stage1Adapter(component: string, url = adapterUrl(componen
   }
 }
 // 読み込めたが、動かし始められなかったとき
-export const stage1Unavailable = (error: unknown) => void fallback("pipeline", error);
+export const stage1Unavailable = (component: string, error?: unknown) => (error === undefined ? void fallback("pipeline", component) : void fallback(component, error));
 
 // --- 登録の表 (SELF_HOSTING.md §11) ---
 // Stage 1 で動かす判断は、部品ごとに、ここに1つずつ登録する。手順（読み込み、範囲の外かどうか、実行、

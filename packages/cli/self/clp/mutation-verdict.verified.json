@@ -4,11 +4,14 @@
     "mutation-verdict.interpretation.ts"
   ],
   "specs": "sha256:8d17d595afebe7ed06d0bd62a9a4a03b87852a7e468351d5335c17b74774be86",
-  "code": "sha256:12f72cb91546efa177c1adfc86e77ff8e7492f226c10f165f909927b7501995c",
+  "code": "sha256:a121c75178e5c5af22fcc319d18877789ca9e801e5255714160fdff99f4f8c65",
   "files": [
     "../src/graph-check/graph-check.ts",
     "../src/graph-check/rules.ts",
     "../src/graph-check/types.ts",
+    "../src/interpret-flow/interpret-flow.ts",
+    "../src/interpret-flow/plan.ts",
+    "../src/interpret-flow/types.ts",
     "../src/leaf-check/leaf-check.ts",
     "../src/leaf-check/rules.ts",
     "../src/leaf-check/types.ts",

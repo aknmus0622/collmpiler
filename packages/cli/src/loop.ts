@@ -345,7 +345,7 @@ async function reconcileStage1(ctx: GateContext, options: ImplementOptions, atte
     });
     await adapter.executeCommand({ name: "Start", input: { attemptsPerPhase: maxAttempts, rounds: maxRounds } });
   } catch (error) {
-    stage1Unavailable(error);
+    stage1Unavailable("pipeline", error);
     return undefined;
   }
 

@@ -4,11 +4,14 @@
     "leaf-check.interpretation.ts"
   ],
   "specs": "sha256:54cf7f971d120b60edee7c22b20dd7753d21c8f2306b4bb9bb4708a277ede6d8",
-  "code": "sha256:8124f3965792b0b5b01c55f852ae1dd190513adc3554e74d5d5d5feae5883589",
+  "code": "sha256:e8599a864dfe325ae790b227a66fe430da20ddfe881f983a578b9bea7602665b",
   "files": [
     "../src/graph-check/graph-check.ts",
     "../src/graph-check/rules.ts",
     "../src/graph-check/types.ts",
+    "../src/interpret-flow/interpret-flow.ts",
+    "../src/interpret-flow/plan.ts",
+    "../src/interpret-flow/types.ts",
     "../src/leaf-check/leaf-check.ts",
     "../src/leaf-check/rules.ts",
     "../src/leaf-check/types.ts",

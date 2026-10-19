@@ -4,11 +4,14 @@
     "payload-check.interpretation.ts"
   ],
   "specs": "sha256:7c10d82826d0de89bfa16c287120445a25e056c78a5076f7492e8224b3e01a5d",
-  "code": "sha256:c9c324e260d134d8debb94d2a91db4c5519864c4206792787af8e85569f93f76",
+  "code": "sha256:99139b061c23427b87e43e71741bc76092e39d3af90ada343330bc11c122009d",
   "files": [
     "../src/graph-check/graph-check.ts",
     "../src/graph-check/rules.ts",
     "../src/graph-check/types.ts",
+    "../src/interpret-flow/interpret-flow.ts",
+    "../src/interpret-flow/plan.ts",
+    "../src/interpret-flow/types.ts",
     "../src/leaf-check/leaf-check.ts",
     "../src/leaf-check/rules.ts",
     "../src/leaf-check/types.ts",

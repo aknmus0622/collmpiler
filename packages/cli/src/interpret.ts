@@ -15,6 +15,7 @@ import { DRAFT_SUFFIX, STAMP, layer1Hash, listComponents, loadSpecs, openReviews
 import { ASSETS_DIR, renderAssets } from "./request.ts";
 import type { Difference } from "./runtime.ts";
 import type { ImplementationStrategy } from "./strategy.ts";
+import { stage1Adapter, stage1Unavailable } from "./stage1.ts";
 
 // 解釈 (Layer 2) を LLM に導かせる。実装のループとは別の、仕様を書く人のための工程。
 // 人が書くのは Layer 1 だけ。解釈は、Layer 1 が構造として書かなかった分 (構造) と、名前の意味 (関数) を持つ。
@@ -650,63 +651,79 @@ type Session = {
   firstProblems?: string;
 };
 
-// 1つのセッション: エージェントに下書きを書かせ、検査に通るまで差し戻す
-async function session(s: Session): Promise<{ ok: boolean; attempts: number; problems?: string; ir?: CheckedIr }> {
+// 1回の試行の結果: ok、下書きが無い、ほかの仕様を書き換えた、検査に落ちた、固定した境界を変えた
+type Outcome = "ok" | "missing" | "foreign-change" | "check-failed" | "boundary-changed";
+
+// 1回の試行: エージェントに下書きを書かせ、検査する
+async function attemptOnce(s: Session, attempt: number, problems: string | undefined): Promise<{ outcome: Outcome; problems?: string; ir?: CheckedIr }> {
   const { specsDir, target, draftFile, options } = s;
   const log = options.log ?? (() => {});
-  const maxAttempts = options.maxAttempts ?? 3;
   const hiddenPaths = [...new Set([process.cwd(), specsDir, target])];
   // 作業場所には、ほかの下書きと、この下書きが置き換える確定版は置かない（同じ export が2つあると紛らわしい）
   const specFiles = (readdirSync(specsDir, { recursive: true }) as string[]).filter(
     (file) => file.endsWith(".ts") && !file.endsWith(DRAFT_SUFFIX) && file !== s.hidden,
   );
+  const dir = mkdtempSync(join(realpathSync(tmpdir()), "clp-"));
+  let outcome: Outcome = "ok";
+  let ir: CheckedIr | undefined;
+  let found: string | undefined;
+  try {
+    const originals: Record<string, string> = {};
+    for (const file of specFiles) {
+      originals[file] = readFileSync(join(specsDir, file), "utf8");
+      mkdirSync(dirname(join(dir, SPEC_DIR, file)), { recursive: true });
+      writeFileSync(join(dir, SPEC_DIR, file), originals[file]);
+    }
+    const previous = join(target, draftFile);
+    // 2回目からは、前回の試行の成果から始める
+    writeFileSync(join(dir, SPEC_DIR, draftFile), existsSync(previous) && attempt > 1 ? stripHeader(readFileSync(previous, "utf8")) : s.start);
+    mkdirSync(join(dir, TEST_DIR), { recursive: true });
+    for (const asset of s.assets) {
+      if (asset.kind !== "file") continue;
+      mkdirSync(dirname(join(dir, ASSETS_DIR, asset.name)), { recursive: true });
+      writeFileSync(join(dir, ASSETS_DIR, asset.name), asset.content);
+    }
+    writeFileSync(join(dir, REQUEST), request(draftFile, s.componentFile, attempt, s.assets, problems, { update: s.update, pinned: s.pinned !== undefined }));
+
+    log(`[${s.label} #${attempt}] ${options.strategy.name} (in ${dir})`);
+    await options.strategy.run({ dir, phase: s.index === 1 ? "interpretation" : `interpretation-${s.index}`, attempt, env: scrubEnv(process.env, hiddenPaths) });
+
+    // 取り出すのは下書きだけ。仕様のファイルを書き換えていたら差し戻す
+    const changed = specFiles.filter(
+      (file) => !existsSync(join(dir, SPEC_DIR, file)) || readFileSync(join(dir, SPEC_DIR, file), "utf8") !== originals[file],
+    );
+    if (!existsSync(join(dir, SPEC_DIR, draftFile))) {
+      outcome = "missing";
+      found = `${draftFile} is missing.`;
+    } else if (changed.length > 0) {
+      outcome = "foreign-change";
+      found = `Only ${draftFile} may be edited, but these files were changed: ${changed.join(", ")}`;
+    } else {
+      writeFileSync(previous, header(s.hash) + stripHeader(readFileSync(join(dir, SPEC_DIR, draftFile), "utf8")));
+      const checked = check(target, true, s.component);
+      found = checked.problems;
+      ir = checked.ir;
+      if (found) outcome = "check-failed";
+      else if (s.pinned && boundaryOf(withoutThresholds(ir ?? {})) !== boundaryOf({ model: s.pinned })) {
+        outcome = "boundary-changed";
+        found = "The fixed vocabulary was changed. Keep `states`, `init`, `queries`, `effects`, the command names and each command's `input` exactly as they were given.";
+      }
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  log(`[${s.label} #${attempt}] ${outcome === "ok" ? "ok" : "rejected"}`);
+  return { outcome, ...(found === undefined ? {} : { problems: found }), ...(ir ? { ir } : {}) };
+}
+
+// 1つのセッション (Stage 0): 検査に通るまで差し戻す
+async function session(s: Session): Promise<{ ok: boolean; attempts: number; problems?: string; ir?: CheckedIr }> {
+  const maxAttempts = s.options.maxAttempts ?? 3;
   let problems = s.firstProblems;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const dir = mkdtempSync(join(realpathSync(tmpdir()), "clp-"));
-    let ir: CheckedIr | undefined;
-    try {
-      const originals: Record<string, string> = {};
-      for (const file of specFiles) {
-        originals[file] = readFileSync(join(specsDir, file), "utf8");
-        mkdirSync(dirname(join(dir, SPEC_DIR, file)), { recursive: true });
-        writeFileSync(join(dir, SPEC_DIR, file), originals[file]);
-      }
-      const previous = join(target, draftFile);
-      // 2回目からは、前回の試行の成果から始める
-      writeFileSync(join(dir, SPEC_DIR, draftFile), existsSync(previous) && attempt > 1 ? stripHeader(readFileSync(previous, "utf8")) : s.start);
-      mkdirSync(join(dir, TEST_DIR), { recursive: true });
-      for (const asset of s.assets) {
-        if (asset.kind !== "file") continue;
-        mkdirSync(dirname(join(dir, ASSETS_DIR, asset.name)), { recursive: true });
-        writeFileSync(join(dir, ASSETS_DIR, asset.name), asset.content);
-      }
-      writeFileSync(join(dir, REQUEST), request(draftFile, s.componentFile, attempt, s.assets, problems, { update: s.update, pinned: s.pinned !== undefined }));
-
-      log(`[${s.label} #${attempt}] ${options.strategy.name} (in ${dir})`);
-      await options.strategy.run({ dir, phase: s.index === 1 ? "interpretation" : `interpretation-${s.index}`, attempt, env: scrubEnv(process.env, hiddenPaths) });
-
-      // 取り出すのは下書きだけ。仕様のファイルを書き換えていたら差し戻す
-      const changed = specFiles.filter(
-        (file) => !existsSync(join(dir, SPEC_DIR, file)) || readFileSync(join(dir, SPEC_DIR, file), "utf8") !== originals[file],
-      );
-      if (!existsSync(join(dir, SPEC_DIR, draftFile))) {
-        problems = `${draftFile} is missing.`;
-      } else if (changed.length > 0) {
-        problems = `Only ${draftFile} may be edited, but these files were changed: ${changed.join(", ")}`;
-      } else {
-        writeFileSync(previous, header(s.hash) + stripHeader(readFileSync(join(dir, SPEC_DIR, draftFile), "utf8")));
-        const checked = check(target, true, s.component);
-        problems = checked.problems;
-        ir = checked.ir;
-        if (!problems && s.pinned && boundaryOf(withoutThresholds(ir ?? {})) !== boundaryOf({ model: s.pinned })) {
-          problems = "The fixed vocabulary was changed. Keep `states`, `init`, `queries`, `effects`, the command names and each command's `input` exactly as they were given.";
-        }
-      }
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-    log(`[${s.label} #${attempt}] ${problems === undefined ? "ok" : "rejected"}`);
-    if (problems === undefined) return { ok: true, attempts: attempt, ir };
+    const tried = await attemptOnce(s, attempt, problems);
+    problems = tried.problems;
+    if (tried.outcome === "ok") return { ok: true, attempts: attempt, ir: tried.ir };
   }
   return { ok: false, attempts: maxAttempts, problems };
 }
@@ -715,117 +732,239 @@ async function session(s: Session): Promise<{ ok: boolean; attempts: number; pro
 const interpretationFile = (componentFile: string) =>
   join(dirname(componentFile), `${basename(componentFile).replace(/(\.component)?\.ts$/, "")}${INTERPRETATION}.ts`);
 
-export async function interpret(options: InterpretOptions): Promise<InterpretResult> {
-  const specsDir = resolve(process.cwd(), options.specs);
-  const log = options.log ?? (() => {});
+// --- 判断を持たない手順（Stage 0 も Stage 1 も使う） ---
 
-  // コンポーネントを名前順に見て、解釈が要る最初のものを選ぶ。Layer 1 だけを読む
-  const names = options.component === undefined ? await listComponents(specsDir) : [options.component];
-  if (names.length === 0) throw new Error("仕様にコンポーネントがありません");
-  let chosen: { spec: SpecInput; name: string; current?: string; problems?: string; before?: CheckedIr } | undefined;
-  for (const name of names) {
-    const spec = await loadSpecs(specsDir, { bindings: false, component: name });
-    const component = spec.sources?.component;
-    if (!component) continue;
-    // いま有効な解釈: 下書きがあればそれ、無ければ確定版。Layer 1 に合っていれば、何もしない
-    const final = spec.sources?.binding ?? interpretationFile(component.file);
-    const draft = final.replace(/\.ts$/, DRAFT_SUFFIX);
-    const current = existsSync(join(specsDir, draft)) ? draft : existsSync(join(specsDir, final)) ? final : undefined;
-    if (current === undefined) {
-      chosen = { spec, name };
-      break;
-    }
-    const checked = check(specsDir, current === draft, name);
-    if (checked.problems === undefined) continue;
-    chosen = { spec, name, current, problems: checked.problems, before: checked.ir };
-    break;
-  }
-  if (!chosen) return { status: "up-to-date" };
+// コンポーネント1つについて: いま有効な解釈（下書きがあればそれ、無ければ確定版）
+async function considered(specsDir: string, name: string): Promise<{ spec: SpecInput; name: string; current?: string } | undefined> {
+  const spec = await loadSpecs(specsDir, { bindings: false, component: name });
+  const component = spec.sources?.component;
+  if (!component) return undefined;
+  const final = spec.sources?.binding ?? interpretationFile(component.file);
+  const draft = final.replace(/\.ts$/, DRAFT_SUFFIX);
+  const current = existsSync(join(specsDir, draft)) ? draft : existsSync(join(specsDir, final)) ? final : undefined;
+  return { spec, name, ...(current === undefined ? {} : { current }) };
+}
+const checkCurrent = (specsDir: string, found: { name: string; current?: string }) => check(specsDir, found.current?.endsWith(DRAFT_SUFFIX) === true, found.name);
 
+type Chosen = { spec: SpecInput; name: string; current?: string; problems?: string; before?: CheckedIr };
+// 選んだコンポーネントの、セッションに共通の材料
+async function prepared(specsDir: string, options: InterpretOptions, chosen: Chosen) {
   const { spec, name } = chosen;
   const component = spec.sources!.component!;
   const layer1 = spec.layer1 as Layer1;
-  const hash = layer1Hash(layer1);
   const final = spec.sources?.binding ?? interpretationFile(component.file);
   const draftFile = final.replace(/\.ts$/, DRAFT_SUFFIX);
   const update = chosen.current !== undefined;
   const componentFile = basename(component.file);
   const exported = await exportsFor(specsDir, component.file);
   const assets = assetsFor(mergeAssets(spec.assets ?? [], options.assets ?? []), "design");
-  const updates = update && chosen.current === final ? { updates: join(specsDir, final) } : {};
-
-  const first = await session({
-    specsDir,
-    target: specsDir,
-    component: name,
-    componentFile,
-    draftFile,
-    start: update ? withoutClpReviews(stripHeader(readFileSync(join(specsDir, chosen.current!), "utf8"))) : skeleton(layer1, componentFile, component.exportName, exported),
-    hash,
-    update,
-    hidden: final,
-    assets,
-    options,
-    label: "interpretation",
-    index: 1,
-    firstProblems: chosen.problems,
-  });
-  const draft = join(specsDir, draftFile);
-  const questions = existsSync(draft) ? questionsIn(readFileSync(draft, "utf8")) : [];
-  if (!first.ok) return { status: "failed", component: name, draft, attempts: first.attempts, problems: first.problems, questions, ...updates };
-  const changes = chosen.before && first.ir ? structureChanges(chosen.before, first.ir) : {};
-  const result = { status: "interpreted" as const, component: name, draft, attempts: first.attempts, questions, ...updates, ...changes };
-  const sessions = Math.max(1, Math.floor(options.sessions ?? 1));
-  if (sessions < 2 || !first.ir?.model) return result;
-
-  // ほかの解釈: 仕様の写しの中で、同じ境界のもとに、独立に導かせる（1つ目の下書きも、ほかの解釈も見せない）。
-  // 写しは仕様のとなりに置く（@clp/core を解決できる場所。名前は .tmp で始め、バージョン管理の対象外）
-  const comparisons: Comparison[] = [];
-  for (let index = 2; index <= sessions; index++) {
-    const copy = mkdtempSync(join(dirname(specsDir), ".tmp-clp-interpret-"));
-    try {
+  const base = { specsDir, component: name, componentFile, draftFile, hash: layer1Hash(layer1), hidden: final, assets, options };
+  return {
+    name,
+    draft: join(specsDir, draftFile),
+    updates: update && chosen.current === final ? { updates: join(specsDir, final) } : {},
+    // 1つ目のセッション: いまの解釈か、雛形から
+    first: (): Session => ({
+      ...base,
+      target: specsDir,
+      start: update ? withoutClpReviews(stripHeader(readFileSync(join(specsDir, chosen.current!), "utf8"))) : skeleton(layer1, componentFile, component.exportName, exported),
+      update,
+      label: "interpretation",
+      index: 1,
+      firstProblems: chosen.problems,
+    }),
+    // ほかの解釈: 仕様の写しの中で、同じ境界のもとに、独立に導かせる（1つ目の下書きも、ほかの解釈も見せない）。
+    // 写しは仕様のとなりに置く（@clp/core を解決できる場所。名前は .tmp で始め、バージョン管理の対象外）
+    later: (index: number, vocabulary: SpecModel): { session: Session; copy: string } => {
+      const copy = mkdtempSync(join(dirname(specsDir), ".tmp-clp-interpret-"));
       for (const file of readdirSync(specsDir, { recursive: true }) as string[]) {
         if (!file.endsWith(".ts") || file === draftFile) continue;
         mkdirSync(dirname(join(copy, file)), { recursive: true });
         cpSync(join(specsDir, file), join(copy, file));
       }
-      const vocabulary = withoutThresholds(first.ir.model);
-      const other = await session({
-        specsDir,
-        target: copy,
-        component: name,
-        componentFile,
-        draftFile,
-        start: skeleton(layer1, componentFile, component.exportName, exported, vocabulary),
-        hash,
-        update: false,
-        pinned: vocabulary,
-        hidden: final,
-        assets,
-        options,
-        label: `interpretation ${index}`,
-        index,
-      });
-      const compared = other.ok
-        ? spawnSync(process.execPath, [CLP, "__compare", specsDir, copy, "--component", name], { encoding: "utf8", timeout: 300_000 })
-        : undefined;
-      if (compared && compared.status !== 0) log(`[compare ${index}] failed: ${(compared.stderr ?? "").trim().slice(-500)}`);
-      comparisons.push(
-        compared?.status === 0
-          ? { session: index, status: "compared", differences: JSON.parse(compared.stdout) as Difference[] }
-          : { session: index, status: "failed", differences: [] },
-      );
+      const pinned = withoutThresholds(vocabulary);
+      return {
+        copy,
+        session: { ...base, target: copy, start: skeleton(layer1, componentFile, component.exportName, exported, pinned), update: false, pinned, label: `interpretation ${index}`, index },
+      };
+    },
+    compare: (index: number, copy: string): Comparison => {
+      const log = options.log ?? (() => {});
+      const compared = spawnSync(process.execPath, [CLP, "__compare", specsDir, copy, "--component", name], { encoding: "utf8", timeout: 300_000 });
+      if (compared.status !== 0) log(`[compare ${index}] failed: ${(compared.stderr ?? "").trim().slice(-500)}`);
+      return compared.status === 0 ? { session: index, status: "compared", differences: JSON.parse(compared.stdout) as Difference[] } : { session: index, status: "failed", differences: [] };
+    },
+  };
+}
+
+// 解釈を導く。進め方の判断は、生成した状態機械 (Stage 1、self/specs/interpret-flow.*) か、手書きの手続き (Stage 0)
+export async function interpret(options: InterpretOptions): Promise<InterpretResult> {
+  return (await interpretStage1(options)) ?? interpretStage0(options);
+}
+
+export async function interpretStage0(options: InterpretOptions): Promise<InterpretResult> {
+  const specsDir = resolve(process.cwd(), options.specs);
+
+  // コンポーネントを名前順に見て、解釈が要る最初のものを選ぶ。Layer 1 だけを読む
+  const names = options.component === undefined ? await listComponents(specsDir) : [options.component];
+  if (names.length === 0) throw new Error("仕様にコンポーネントがありません");
+  let chosen: Chosen | undefined;
+  for (const name of names) {
+    const found = await considered(specsDir, name);
+    if (!found) continue;
+    if (found.current === undefined) {
+      chosen = found;
+      break;
+    }
+    const checked = checkCurrent(specsDir, found);
+    if (checked.problems === undefined) continue;
+    chosen = { ...found, problems: checked.problems, before: checked.ir };
+    break;
+  }
+  if (!chosen) return { status: "up-to-date" };
+
+  const work = await prepared(specsDir, options, chosen);
+  const first = await session(work.first());
+  const questions = existsSync(work.draft) ? questionsIn(readFileSync(work.draft, "utf8")) : [];
+  if (!first.ok) return { status: "failed", component: work.name, draft: work.draft, attempts: first.attempts, problems: first.problems, questions, ...work.updates };
+  const changes = chosen.before && first.ir ? structureChanges(chosen.before, first.ir) : {};
+  const result = { status: "interpreted" as const, component: work.name, draft: work.draft, attempts: first.attempts, questions, ...work.updates, ...changes };
+  const sessions = Math.max(1, Math.floor(options.sessions ?? 1));
+  if (sessions < 2 || !first.ir?.model) return result;
+
+  const comparisons: Comparison[] = [];
+  for (let index = 2; index <= sessions; index++) {
+    const { session: config, copy } = work.later(index, first.ir.model);
+    try {
+      const other = await session(config);
+      comparisons.push(other.ok ? work.compare(index, copy) : { session: index, status: "failed", differences: [] });
     } finally {
       rmSync(copy, { recursive: true, force: true });
     }
   }
-  markComparisons(draft, comparisons);
+  markComparisons(work.draft, comparisons);
   return { ...result, comparisons };
+}
+
+// Stage 1: 進め方を、生成した状態機械 (interpret-flow) に任せる。状態機械が頼んだこと（検査、試行、比較）を実行し、
+// 結果をコマンドで返す。使えないとき（読み込めない、仕様の範囲の外の回数、動かし始められない）は undefined
+async function interpretStage1(options: InterpretOptions): Promise<InterpretResult | undefined> {
+  const sessions = Math.max(1, Math.floor(options.sessions ?? 1));
+  const maxAttempts = options.maxAttempts ?? 3;
+  const inRange = (count: number) => Number.isInteger(count) && count >= 1 && count <= 3;
+  if (!inRange(sessions) || !inRange(maxAttempts)) return undefined;
+  const adapter = await stage1Adapter("interpret-flow");
+  if (!adapter) return undefined;
+  const specsDir = resolve(process.cwd(), options.specs);
+  const names = options.component === undefined ? await listComponents(specsDir) : [options.component];
+  if (names.length === 0) throw new Error("仕様にコンポーネントがありません");
+
+  type Request = { name: string; input: Record<string, unknown> };
+  const requested: Request[] = [];
+  const effect = (name: string) => (input: Record<string, unknown> = {}) => void requested.push({ name, input });
+  try {
+    await adapter.setupIsolation({
+      queries: {},
+      effects: Object.fromEntries(["ConsiderNext", "CheckCurrent", "StartSession", "Compare", "RecordUncompared", "Finish"].map((name) => [name, effect(name)])),
+    });
+    await adapter.executeCommand({ name: "Start", input: { sessions, maxAttempts } });
+  } catch (error) {
+    stage1Unavailable("interpret-flow", error);
+    return undefined;
+  }
+  const send = (name: string, input: Record<string, unknown> = {}) => adapter.executeCommand({ name, input });
+
+  let next = 0;
+  let found: Awaited<ReturnType<typeof considered>>;
+  let chosen: Chosen | undefined;
+  let work: Awaited<ReturnType<typeof prepared>> | undefined;
+  let first: { attempts: number; ir?: CheckedIr; problems?: string } | undefined;
+  const configs = new Map<number, { session: Session; copy?: string; problems?: string; attempts: number }>();
+  const comparisons: Comparison[] = [];
+  let finished: InterpretResult | undefined;
+  try {
+    while (requested.length > 0 && !finished) {
+      const request = requested.shift()!;
+      switch (request.name) {
+        case "ConsiderNext": {
+          found = undefined;
+          while (next < names.length && !found) found = await considered(specsDir, names[next++]);
+          if (found) await send("Consider", { hasCurrent: found.current !== undefined });
+          else await send("NoMoreComponents");
+          break;
+        }
+        case "CheckCurrent": {
+          const checked = checkCurrent(specsDir, found!);
+          if (checked.problems !== undefined) chosen = { ...found!, problems: checked.problems, before: checked.ir };
+          await send("CurrentChecked", { passed: checked.problems === undefined });
+          break;
+        }
+        case "StartSession": {
+          const { session: index, attempt } = request.input as { session: number; attempt: number };
+          if (!work) {
+            chosen ??= found!;
+            work = await prepared(specsDir, options, chosen);
+          }
+          let config = configs.get(index);
+          if (!config) {
+            config = index === 1 ? { session: work.first(), problems: chosen!.problems, attempts: 0 } : { ...work.later(index, first!.ir!.model!), attempts: 0 };
+            configs.set(index, config);
+          }
+          const tried = await attemptOnce(config.session, attempt, config.problems);
+          config.problems = tried.problems;
+          config.attempts = attempt;
+          if (index === 1) first = { attempts: attempt, ...(tried.ir ? { ir: tried.ir } : {}), ...(tried.problems ? { problems: tried.problems } : {}) };
+          await send("SessionChecked", { outcome: tried.outcome, hasModel: tried.ir?.model !== undefined });
+          break;
+        }
+        case "Compare":
+        case "RecordUncompared": {
+          const index = (request.input as { session: number }).session;
+          const config = configs.get(index)!;
+          try {
+            comparisons.push(request.name === "Compare" ? work!.compare(index, config.copy!) : { session: index, status: "failed", differences: [] });
+          } finally {
+            rmSync(config.copy!, { recursive: true, force: true });
+          }
+          if (request.name === "Compare") await send("Compared", { ok: comparisons.at(-1)!.status === "compared" });
+          break;
+        }
+        case "Finish": {
+          const status = (request.input as { status: "up-to-date" | "interpreted" | "failed" }).status;
+          if (status === "up-to-date") {
+            finished = { status };
+            break;
+          }
+          const questions = existsSync(work!.draft) ? questionsIn(readFileSync(work!.draft, "utf8")) : [];
+          if (status === "failed") {
+            finished = { status, component: work!.name, draft: work!.draft, attempts: first!.attempts, problems: first!.problems, questions, ...work!.updates };
+            break;
+          }
+          const changes = chosen?.before && first?.ir ? structureChanges(chosen.before, first.ir) : {};
+          finished = { status, component: work!.name, draft: work!.draft, attempts: first!.attempts, questions, ...work!.updates, ...changes };
+          if (configs.size > 1) {
+            markComparisons(work!.draft, comparisons);
+            finished = { ...finished, comparisons };
+          }
+          break;
+        }
+      }
+    }
+  } finally {
+    for (const config of configs.values()) if (config.copy) rmSync(config.copy, { recursive: true, force: true });
+    await adapter.teardownIsolation();
+  }
+  if (!finished) throw new Error("interpret-flow が、終わりを告げずに止まりました");
+  return finished;
 }
 
 // 確定する: 下書きを確定版に置き換え、いまの Layer 1 のハッシュを記す。
 // 下書きが無くても、確定版のハッシュを記し直す（Layer 1 の文を直したが、解釈はそのままでよいと人が判断したとき）
 export async function accept(options: { specs: string; component?: string }): Promise<{ accepted: string[]; problems: string[] }> {
+  return (await acceptStage1(options)) ?? acceptStage0(options);
+}
+
+export async function acceptStage0(options: { specs: string; component?: string }): Promise<{ accepted: string[]; problems: string[] }> {
   const specsDir = resolve(process.cwd(), options.specs);
   const names = options.component === undefined ? await listComponents(specsDir) : [options.component];
   const accepted: string[] = [];
@@ -850,35 +989,121 @@ export async function accept(options: { specs: string; component?: string }): Pr
   return { accepted, problems };
 }
 
-async function acceptOne(specsDir: string, name: string): Promise<{ accepted?: string; problem?: string }> {
+// 確定するかを決める材料（判断を持たない、ファイルの読み出し）
+async function acceptFacts(specsDir: string, name: string) {
   const spec = await loadSpecs(specsDir, { bindings: false, component: name });
   const component = spec.sources?.component;
-  if (!component || !spec.layer1) return {};
+  if (!component || !spec.layer1) return undefined;
   const final = spec.sources?.binding ?? interpretationFile(component.file);
   const draft = final.replace(/\.ts$/, DRAFT_SUFFIX);
   const hasDraft = existsSync(join(specsDir, draft));
-  if (!hasDraft && !existsSync(join(specsDir, final))) {
-    return { problem: `${name}: 解釈がありません（先に clp interpret で導いてください）` };
-  }
+  const hasInterpretation = hasDraft || existsSync(join(specsDir, final));
   const source = join(specsDir, hasDraft ? draft : final);
-  const text = readFileSync(source, "utf8");
-  // 人が確かめていない疑問点・食い違いが残っていれば、確定しない
+  const text = hasInterpretation ? readFileSync(source, "utf8") : "";
   const open = openReviews(text);
-  if (open.length > 0) {
-    const where = open.map((review) => `\n  ${source}:${review.line}: ${review.text}`).join("");
-    return {
-      problem: `${name}: 確かめていない疑問点・食い違いが ${open.length} 件あります。Layer 1 を詳しくして clp interpret で導き直すか、その読み方でよければ、その行の REVIEW を REVIEWED に書き換えてから確定してください${where}`,
-    };
-  }
   const hash = layer1Hash(spec.layer1);
-  if (!hasDraft && stampIn(text) === hash) return {};
-  // 確定する前に、いまの Layer 1 のもとで検査に通ることを確かめる
-  writeFileSync(source, header(hash) + stripHeader(text));
-  const failed = check(specsDir, hasDraft, name).problems;
-  if (failed !== undefined) {
-    writeFileSync(source, text);
-    return { problem: `${name}: 解釈が、いまの Layer 1 に合いません。clp interpret で導き直してください\n${failed}` };
+  return { final: join(specsDir, final), hasDraft, hasInterpretation, source, text, open, hash, stampCurrent: stampIn(text) === hash };
+}
+type AcceptFacts = NonNullable<Awaited<ReturnType<typeof acceptFacts>>>;
+const refusal = (name: string, facts: AcceptFacts, reason: "no-interpretation" | "open-reviews" | "does-not-fit", failed?: string) =>
+  reason === "no-interpretation"
+    ? `${name}: 解釈がありません（先に clp interpret で導いてください）`
+    : reason === "open-reviews"
+      ? `${name}: 確かめていない疑問点・食い違いが ${facts.open.length} 件あります。Layer 1 を詳しくして clp interpret で導き直すか、その読み方でよければ、その行の REVIEW を REVIEWED に書き換えてから確定してください${facts.open.map((review) => `\n  ${facts.source}:${review.line}: ${review.text}`).join("")}`
+      : `${name}: 解釈が、いまの Layer 1 に合いません。clp interpret で導き直してください\n${failed}`;
+// 確定する前に、いまの Layer 1 のもとで検査に通ることを確かめる（印を書き換えて検査し、落ちたら元に戻す）
+function checkStamped(specsDir: string, name: string, facts: AcceptFacts): string | undefined {
+  writeFileSync(facts.source, header(facts.hash) + stripHeader(facts.text));
+  const failed = check(specsDir, facts.hasDraft, name).problems;
+  if (failed !== undefined) writeFileSync(facts.source, facts.text);
+  return failed;
+}
+function acceptChecked(facts: AcceptFacts): string {
+  if (facts.hasDraft) renameSync(facts.source, facts.final);
+  return facts.final;
+}
+
+async function acceptOne(specsDir: string, name: string): Promise<{ accepted?: string; problem?: string }> {
+  const facts = await acceptFacts(specsDir, name);
+  if (!facts) return {};
+  if (!facts.hasInterpretation) return { problem: refusal(name, facts, "no-interpretation") };
+  // 人が確かめていない疑問点・食い違いが残っていれば、確定しない
+  if (facts.open.length > 0) return { problem: refusal(name, facts, "open-reviews") };
+  if (!facts.hasDraft && facts.stampCurrent) return {};
+  const failed = checkStamped(specsDir, name, facts);
+  if (failed !== undefined) return { problem: refusal(name, facts, "does-not-fit", failed) };
+  return { accepted: acceptChecked(facts) };
+}
+
+// Stage 1: 確定の進め方を、生成した状態機械 (interpret-flow) に任せる
+async function acceptStage1(options: { specs: string; component?: string }): Promise<{ accepted: string[]; problems: string[] } | undefined> {
+  const adapter = await stage1Adapter("interpret-flow");
+  if (!adapter) return undefined;
+  const specsDir = resolve(process.cwd(), options.specs);
+  const names = options.component === undefined ? await listComponents(specsDir) : [options.component];
+  const requested: { name: string; input: Record<string, unknown> }[] = [];
+  const effect = (name: string) => (input: Record<string, unknown> = {}) => void requested.push({ name, input });
+  try {
+    await adapter.setupIsolation({
+      queries: {},
+      effects: Object.fromEntries(["CheckDraft", "Accept", "RefuseAccepting", "NextToAccept", "RetryRefused", "AcceptingDone"].map((name) => [name, effect(name)])),
+    });
+    await adapter.executeCommand({ name: "StartAccepting", input: {} });
+  } catch (error) {
+    stage1Unavailable("interpret-flow", error);
+    return undefined;
   }
-  if (hasDraft) renameSync(source, join(specsDir, final));
-  return { accepted: join(specsDir, final) };
+  const send = (name: string, input: Record<string, unknown> = {}) => adapter.executeCommand({ name, input });
+  const accepted: string[] = [];
+  let problems: string[] = [];
+  let round = names;
+  let refused: string[] = [];
+  let position = 0;
+  let current: { name: string; facts: AcceptFacts } | undefined;
+  let failedCheck: string | undefined;
+  let done = false;
+  try {
+    while (requested.length > 0 && !done) {
+      const request = requested.shift()!;
+      switch (request.name) {
+        case "NextToAccept": {
+          current = undefined;
+          while (position < round.length && !current) {
+            const name = round[position++];
+            const facts = await acceptFacts(specsDir, name);
+            if (facts) current = { name, facts };
+          }
+          if (current) {
+            const { facts } = current;
+            await send("ConsiderAccepting", { hasDraft: facts.hasDraft, hasInterpretation: facts.hasInterpretation, openReviews: Math.min(facts.open.length, 10), stampCurrent: facts.stampCurrent });
+          } else await send("EndRound");
+          break;
+        }
+        case "CheckDraft":
+          failedCheck = checkStamped(specsDir, current!.name, current!.facts);
+          await send("DraftChecked", { passed: failedCheck === undefined });
+          break;
+        case "Accept":
+          accepted.push(acceptChecked(current!.facts));
+          break;
+        case "RefuseAccepting":
+          problems.push(refusal(current!.name, current!.facts, (request.input as { reason: "no-interpretation" | "open-reviews" | "does-not-fit" }).reason, failedCheck));
+          refused.push(current!.name);
+          break;
+        case "RetryRefused":
+          round = refused;
+          refused = [];
+          problems = [];
+          position = 0;
+          break;
+        case "AcceptingDone":
+          done = true;
+          break;
+      }
+    }
+  } finally {
+    await adapter.teardownIsolation();
+  }
+  if (!done) throw new Error("interpret-flow が、確定の終わりを告げずに止まりました");
+  return { accepted, problems };
 }

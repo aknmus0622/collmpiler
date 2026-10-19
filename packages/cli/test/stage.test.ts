@@ -302,6 +302,7 @@ test("自分自身の検証: 自分の生成物の上で動くフレームワー
   assert.deepEqual(called, []);
   assert.deepEqual(result.attempts.map((a) => `${a.component}:${a.phase}:${a.attempt}:${a.feedback?.kind ?? "ok"}`), [
     "graph-check:implementation:0:ok",
+    "interpret-flow:implementation:0:ok",
     "leaf-check:implementation:0:ok",
     "mutation-verdict:implementation:0:ok",
     "payload-check:implementation:0:ok",
