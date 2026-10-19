@@ -4,7 +4,7 @@
     "interpret-flow.interpretation.ts"
   ],
   "specs": "sha256:9b1e8fb7169d5855b3164da20488eec9e298f12581687050ff3974ff0ccd9937",
-  "code": "sha256:5d5fa1fe4726b1e7f6940b0c2b171caeed23fd5191d456d6d7e4ba35a32a0c32",
+  "code": "sha256:6713e9a47c4884fc2aa9e45dc7056d7f984d935b17458bf21a1fb67e506c9a4c",
   "files": [
     "../src/graph-check/graph-check.ts",
     "../src/graph-check/rules.ts",
@@ -27,6 +27,9 @@
     "../src/reference-check/reference-check.ts",
     "../src/reference-check/types.ts",
     "../src/reference-check/verdict.ts",
+    "../src/text-plan/plan.ts",
+    "../src/text-plan/text-plan.ts",
+    "../src/text-plan/types.ts",
     "../src/tree-check/rules.ts",
     "../src/tree-check/tree-check.ts",
     "../src/tree-check/types.ts",

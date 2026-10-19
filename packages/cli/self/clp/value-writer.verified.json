@@ -4,7 +4,7 @@
     "value-writer.interpretation.ts"
   ],
   "specs": "sha256:cc963f70a0017e698b6a0ca27dfdff02adfdcef7de8c18ed5c196bd769f58e51",
-  "code": "sha256:5afdabe784939375ff1ddc3bd75fa9a27965ec50be139b6a7e38f0d90fb4dec3",
+  "code": "sha256:3ad061f7811e919e117dc3f6928a902510698dbfdc21a68af53ffb8663b71b35",
   "files": [
     "../src/graph-check/graph-check.ts",
     "../src/graph-check/rules.ts",
@@ -27,6 +27,9 @@
     "../src/reference-check/reference-check.ts",
     "../src/reference-check/types.ts",
     "../src/reference-check/verdict.ts",
+    "../src/text-plan/plan.ts",
+    "../src/text-plan/text-plan.ts",
+    "../src/text-plan/types.ts",
     "../src/tree-check/rules.ts",
     "../src/tree-check/tree-check.ts",
     "../src/tree-check/types.ts",

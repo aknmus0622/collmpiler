@@ -13,6 +13,7 @@ import type { Ir } from "./generate.ts";
 import { decisionValues, judge } from "./mutation.ts";
 import type { MutationStrategy } from "./mutation.ts";
 import { ASSETS_DIR, renderRequest } from "./request.ts";
+import type { RequestSections } from "./request.ts";
 import type { Phase } from "./request.ts";
 import type { PbtResult } from "./runtime.ts";
 import type { StaticCheckStrategy } from "./static-check.ts";
@@ -116,7 +117,17 @@ function filesUnder(root: string): { rel: string; entry: Dirent }[] {
     .sort((a, b) => (a.rel < b.rel ? -1 : 1));
 }
 
-export function entryGate(ctx: GateContext, phase: Phase, attempt: number, feedback: Feedback | undefined): Sandbox {
+// 依頼文の節を決める事実（Stage 1 が判断を前もって下すため、入口の外でも作れるようにしてある）
+export const requestFactsOf = (ctx: GateContext, phase: Phase, attempt: number, feedback: Feedback | undefined) => ({
+  phase,
+  attempt,
+  hasFeedback: feedback !== undefined,
+  others: visibleOthers(ctx).length,
+  partFiles: (ctx.partFiles ?? []).length,
+});
+
+// sections: 依頼文の節についての、Stage 1 の判断（無ければ Stage 0）
+export function entryGate(ctx: GateContext, phase: Phase, attempt: number, feedback: Feedback | undefined, sections?: RequestSections): Sandbox {
   const { ws } = ctx;
   const hidden = [...new Set([process.cwd(), ctx.specsDir, ws.root])];
   const dir = mkdtempSync(join(realpathSync(tmpdir()), "clp-"));
@@ -132,7 +143,7 @@ export function entryGate(ctx: GateContext, phase: Phase, attempt: number, feedb
       incremental: ctx.incremental,
       others: visibleOthers(ctx).map((other) => other.ws.paths.ir),
       partFiles: ctx.partFiles ?? [],
-    }),
+    }, sections),
   };
   for (const asset of assets) if (asset.kind === "file") inputs[`${ASSETS_DIR}/${asset.name}`] = asset.content;
   if (phase === "wiring") {

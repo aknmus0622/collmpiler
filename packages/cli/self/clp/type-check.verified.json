@@ -4,7 +4,7 @@
     "type-check.interpretation.ts"
   ],
   "specs": "sha256:36faa2eaa25778c581911bdaee6aa72a52617a4b172beab2c1dbf0da15270e4b",
-  "code": "sha256:9e407ce80725ef817eb74650717f75f7aa2f5fad1a4db1e7af06c380e4a8e08d",
+  "code": "sha256:d05cdac3f5ed5d7fa0ed1fa1405111e1cac5e1cc740239e6885218d1bc3358ce",
   "files": [
     "../src/graph-check/graph-check.ts",
     "../src/graph-check/rules.ts",
@@ -27,6 +27,9 @@
     "../src/reference-check/reference-check.ts",
     "../src/reference-check/types.ts",
     "../src/reference-check/verdict.ts",
+    "../src/text-plan/plan.ts",
+    "../src/text-plan/text-plan.ts",
+    "../src/text-plan/types.ts",
     "../src/tree-check/rules.ts",
     "../src/tree-check/tree-check.ts",
     "../src/tree-check/types.ts",

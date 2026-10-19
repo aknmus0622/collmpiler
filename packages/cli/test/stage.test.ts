@@ -308,6 +308,7 @@ test("自分自身の検証: 自分の生成物の上で動くフレームワー
     "payload-check:implementation:0:ok",
     "pipeline:implementation:0:ok",
     "reference-check:implementation:0:ok",
+    "text-plan:implementation:0:ok",
     "tree-check:implementation:0:ok",
     "type-check:implementation:0:ok",
     "value-writer:implementation:0:ok",
@@ -767,4 +768,46 @@ export const Interpretation = interpretation(Shop, [If.big.means(() => true), Ca
   assert.deepEqual(await stage1Payloads(shop), stage0);
   // 診断の全体（文面を含む）も、どちらの Stage で動かしても同じ
   assert.deepEqual(extract(shop, await references(shop)), extract(shop));
+});
+
+test("Stage 1: 文面の判断（契約の型の書き方・注記・節、依頼文の節）は、手書きの版 (Stage 0) と同じ文面を作る (N10h)", async () => {
+  const { contractPlan, requestPlan } = await import("../src/stage1.ts");
+  const { generateContract, queryNotesStage0, contractSectionsStage0, registerContractPlan, typeTextStage0 } = await import("../src/generate.ts");
+  const { requestSectionsStage0 } = await import("../src/request.ts");
+  let compared = 0;
+  for (const root of [specsDir, selfSpecs, join(repoRoot, "examples/library-ts/specs"), join(repoRoot, "examples/todo-ts/specs"), join(repoRoot, "examples/todo-db-ts/specs")]) {
+    for (const component of await listComponents(root)) {
+      const spec = await loadSpecs(root, { component });
+      const ir = JSON.parse(stableStringify(extract(spec).ir));
+      const stage0 = generateContract(ir);
+      const plan = await runStage1(contractPlan, ir);
+      assert.ok(plan, "Stage 1 が実行できること");
+      // 判断ごとに、Stage 0 と同じ
+      for (const [key, text] of plan.types) assert.equal(text, typeTextStage0(JSON.parse(key)), key);
+      for (const [key, notes] of plan.notes) assert.deepEqual(notes, queryNotesStage0(JSON.parse(key)), key);
+      for (const [key, sections] of plan.sections) assert.deepEqual(sections, contractSectionsStage0(JSON.parse(key)), key);
+      // 登録したあとの契約も、バイト一致する
+      registerContractPlan(ir, plan);
+      assert.equal(generateContract(ir), stage0, `${component}`);
+      compared += plan.types.size;
+    }
+  }
+  assert.ok(compared > 50, `${compared} types`);
+  // 型の書き方の、端の場合
+  const edge = [
+    { kind: "one-of", name: "", inner: "", entries: [], members: [] },
+    { kind: "record", name: "", inner: "", entries: [], members: [] },
+    { kind: "enum", name: "", inner: "", entries: [], members: [] },
+    { kind: "list", name: "", inner: "{ a: string }", entries: [], members: [] },
+    { kind: "list", name: "", inner: "string | null", entries: [], members: [] },
+    { kind: "record", name: "", inner: "", entries: [{ name: "b", text: "number", optional: true }, { name: "a", text: "string", optional: false }], members: [] },
+  ] as const;
+  const { session } = await import("../src/stage1.ts");
+  const texts = await runStage1({ component: "text-plan", run: (adapter, facts: readonly object[]) => session(adapter, { queries: {}, effects: {} }, facts.map((input) => ({ name: "TypeText", input }))) }, edge);
+  assert.deepEqual(texts, edge.map((facts) => typeTextStage0(facts as never)));
+  for (const phase of ["design", "wiring", "implementation"] as const) {
+    for (const facts of [{ phase, attempt: 1, hasFeedback: false, others: 0, partFiles: 0 }, { phase, attempt: 1, hasFeedback: true, others: 2, partFiles: 0 }, { phase, attempt: 3, hasFeedback: true, others: 0, partFiles: 1 }]) {
+      assert.deepEqual(await runStage1(requestPlan, facts), requestSectionsStage0(facts), JSON.stringify(facts));
+    }
+  }
 });

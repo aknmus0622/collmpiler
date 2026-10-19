@@ -4,7 +4,7 @@
     "payload-check.interpretation.ts"
   ],
   "specs": "sha256:7c10d82826d0de89bfa16c287120445a25e056c78a5076f7492e8224b3e01a5d",
-  "code": "sha256:99139b061c23427b87e43e71741bc76092e39d3af90ada343330bc11c122009d",
+  "code": "sha256:dbbf5297b86e053040f67975747ff58592aed89b729a724553ba3bf484bec0ef",
   "files": [
     "../src/graph-check/graph-check.ts",
     "../src/graph-check/rules.ts",
@@ -27,6 +27,9 @@
     "../src/reference-check/reference-check.ts",
     "../src/reference-check/types.ts",
     "../src/reference-check/verdict.ts",
+    "../src/text-plan/plan.ts",
+    "../src/text-plan/text-plan.ts",
+    "../src/text-plan/types.ts",
     "../src/tree-check/rules.ts",
     "../src/tree-check/tree-check.ts",
     "../src/tree-check/types.ts",

@@ -6,7 +6,7 @@ import { boundaryOf, extract, stableStringify, whereOf } from "./extract.ts";
 import { graphDiagnostics, providedData } from "./graph.ts";
 import { mergeAssets } from "./assets.ts";
 import type { Asset } from "./assets.ts";
-import { entryGate, exitGate, partFilesOf, verifyGate } from "./gates.ts";
+import { entryGate, exitGate, partFilesOf, requestFactsOf, verifyGate } from "./gates.ts";
 import type { Feedback, GateContext, MutationSummary } from "./gates.ts";
 import { requireModel, seedOf } from "./generate.ts";
 import type { Ir } from "./generate.ts";
@@ -16,7 +16,7 @@ import type { MutationStrategy } from "./mutation.ts";
 import { PHASES } from "./request.ts";
 import type { Phase } from "./request.ts";
 import { DEFAULT_RUNS, defaultRuns, describeUnobservable, observability, selfCheck, unreachedCases } from "./runtime.ts";
-import { graphCheck, loadJudges, mutationVerdict, references, runStage1, stage1Adapter, stage1Unavailable } from "./stage1.ts";
+import { graphCheck, loadJudges, mutationVerdict, planContract, requestPlan, references, runStage1, stage1Adapter, stage1Unavailable } from "./stage1.ts";
 import type { StaticCheckStrategy } from "./static-check.ts";
 import { clearVerified, writeVerified } from "./verified.ts";
 import type { ImplementationStrategy } from "./strategy.ts";
@@ -125,6 +125,8 @@ export async function implement(options: ImplementOptions) {
       throw new Error(`仕様 (${name}) にエラーがあります:\n${structural.filter((d) => d.severity === "error").map((d) => `  ${d.message}`).join("\n")}`);
     }
     const ir = JSON.parse(stableStringify(extracted)) as Ir;
+    // 契約の文面の判断を、使える中でいちばん新しい Stage で前もって下す（生成は同期なので、ここで登録しておく）
+    await planContract(ir);
     requireModel(ir);
     const checked = await selfCheck(spec, { seed: 1 });
     if (!checked.ok) {
@@ -280,7 +282,8 @@ async function session(
   log: (line: string) => void,
 ): Promise<Feedback | undefined> {
   const { phase, round, attempt } = at;
-  const sandbox = entryGate(ctx, phase, attempt, previous);
+  // 依頼文の節は、使える中でいちばん新しい Stage で決める
+  const sandbox = entryGate(ctx, phase, attempt, previous, await runStage1(requestPlan, requestFactsOf(ctx, phase, attempt, previous)));
   let feedback: Feedback | undefined;
   let mutation: MutationSummary | undefined;
   let staticCheck: string | undefined;

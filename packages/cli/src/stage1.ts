@@ -6,9 +6,12 @@ import { EXTRA_SEEDS } from "./runtime.ts";
 import type { Adapter, CellTrial, Unobservable } from "./runtime.ts";
 import { fileURLToPath } from "node:url";
 import { GRAMMAR, leafEvents, leafMessage, leafQueries, slotOf, treeDiagnostic } from "@clp/core";
-import type { LeafFacts, LeafReport, Node, TreeReport } from "@clp/core";
+import type { FieldSchema, LeafFacts, LeafReport, Node, TreeReport } from "@clp/core";
 import type { LoadJudges } from "./loader.ts";
 import { staleness } from "./verified.ts";
+import { contractFacts, innerSchemas, registerContractPlan, typeFactsOf } from "./generate.ts";
+import type { ContractPlan, ContractSections, Ir, NoteId } from "./generate.ts";
+import type { RequestFacts, RequestSections } from "./request.ts";
 import { declaredEvents, failureEvents, failureKey } from "./declared.ts";
 import type { DeclaredEvent, DeclaredReport } from "./declared.ts";
 import { transitions, vocabularyFacts } from "./graph.ts";
@@ -375,6 +378,51 @@ export const loadJudges: LoadJudges = {
   tree: async (tree) => (await runStage1(treeCheck, tree))?.map(treeDiagnostic),
   leaf: async (facts) => (await runStage1(leafCheckPart, facts))?.map(leafMessage),
   claims: (events) => runStage1(typeCheck, events),
+};
+
+// 文面の判断 (text-plan)。契約に現れる型を、中から順に書き、注記と節を決める。結果は、生成の前に登録する
+export const contractPlan: Stage1Part<Ir, ContractPlan> = {
+  component: "text-plan",
+  async run(adapter, ir) {
+    const facts = contractFacts(ir);
+    const plan: ContractPlan = { types: new Map(), notes: new Map(), sections: new Map() };
+    const written = new Map<string, string>();
+    await adapter.setupIsolation({ queries: {}, effects: {} });
+    try {
+      // 中の型を先に書き、その文を使って外の型の事実を作る
+      const write = async (schema: FieldSchema): Promise<string> => {
+        const key = JSON.stringify(schema);
+        if (written.has(key)) return written.get(key)!;
+        for (const inner of innerSchemas(schema)) await write(inner);
+        const typeFacts = typeFactsOf(schema, (inner) => written.get(JSON.stringify(inner))!);
+        const text = (await adapter.executeCommand({ name: "TypeText", input: typeFacts })) as string;
+        written.set(key, text);
+        plan.types.set(JSON.stringify(typeFacts), text);
+        return text;
+      };
+      for (const schema of facts.schemas) await write(schema);
+      for (const noted of facts.notes) {
+        const key = JSON.stringify(noted);
+        if (!plan.notes.has(key)) plan.notes.set(key, (await adapter.executeCommand({ name: "QueryNotes", input: noted })) as NoteId[]);
+      }
+      plan.sections.set(JSON.stringify(facts.sections), (await adapter.executeCommand({ name: "ContractSections", input: facts.sections })) as ContractSections);
+    } finally {
+      await adapter.teardownIsolation();
+    }
+    return plan;
+  },
+};
+// 契約の判断を Stage 1 で下して、登録する（使えなければ、何もしない: 生成は Stage 0 の判断で行う）
+export async function planContract(ir: Ir): Promise<void> {
+  const plan = await runStage1(contractPlan, ir);
+  if (plan) registerContractPlan(ir, plan);
+}
+export const requestPlan: Stage1Part<RequestFacts, RequestSections> = {
+  component: "text-plan",
+  async run(adapter, facts) {
+    const [answer] = await session(adapter, { queries: {}, effects: {} }, [{ name: "RequestSections", input: { ...facts, attempt: Math.min(facts.attempt, 10) } }]);
+    return answer as RequestSections;
+  },
 };
 
 // これまでの呼び方（テストが、偽のアダプターの場所を渡して使う）

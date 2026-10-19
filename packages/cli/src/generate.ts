@@ -55,33 +55,120 @@ function header(ir: Ir): string {
 }
 
 const union = (values: readonly (string | number)[]) => values.map((value) => JSON.stringify(value)).join(" | ") || "never";
-// 何でも入る値（JSON で書ける値）
-const VALUE_TYPE = "null | boolean | number | string | unknown[] | { [field: string]: unknown }";
 
-function fieldType(schema: FieldSchema): string {
-  if (schema === "value") return VALUE_TYPE;
-  if (isOneOf(schema)) return Object.keys(schema.oneOf).sort().map((variant) => `{ ${variant}: ${fieldType(schema.oneOf[variant])} }`).join(" | ") || "never";
-  if (isOptional(schema)) return `${fieldType(schema.optional)} | null`;
-  if (isList(schema)) {
-    const item = fieldType(schema.list);
-    return /[ |]/.test(item) && !item.startsWith("{") ? `(${item})[]` : `${item}[]`;
-  }
-  if (isRecord(schema)) {
-    const fields = Object.keys(schema.record).sort().map((field) => `${field}: ${fieldType(schema.record[field])}${schema.optional?.includes(field) ? " | null" : ""}`);
-    return fields.length === 0 ? "{}" : `{ ${fields.join("; ")} }`;
-  }
-  if (isEnum(schema)) return union(schema);
-  if (isStringSchema(schema)) return "string";
-  if (isNumberSchema(schema) || schema === "integer") return "number";
-  return schema as string;
+// 型の書き方 (N10h): 型1つについての事実（中の型は、書き上げた文で）と、その書き方の判断。
+// 判断は Stage 0 (typeTextStage0) か、フレームワーク自身の仕様から生成した部品 (Stage 1、self/specs/text-plan.*)
+export type TypeFacts = {
+  kind: "value" | "one-of" | "optional" | "list" | "record" | "enum" | "string" | "number" | "primitive";
+  name: string;
+  inner: string;
+  entries: { name: string; text: string; optional: boolean }[];
+  members: string[];
+};
+// 中の型（事実を作る前に書いておくもの）
+export function innerSchemas(schema: FieldSchema): FieldSchema[] {
+  if (schema === "value") return [];
+  if (isOneOf(schema)) return Object.values(schema.oneOf);
+  if (isOptional(schema)) return [schema.optional];
+  if (isList(schema)) return [schema.list];
+  if (isRecord(schema)) return Object.values(schema.record);
+  return [];
 }
+export function typeFactsOf(schema: FieldSchema, text: (inner: FieldSchema) => string): TypeFacts {
+  const facts: TypeFacts = { kind: "primitive", name: "", inner: "", entries: [], members: [] };
+  if (schema === "value") return { ...facts, kind: "value" };
+  if (isOneOf(schema)) return { ...facts, kind: "one-of", entries: Object.entries(schema.oneOf).map(([name, inner]) => ({ name, text: text(inner), optional: false })) };
+  if (isOptional(schema)) return { ...facts, kind: "optional", inner: text(schema.optional) };
+  if (isList(schema)) return { ...facts, kind: "list", inner: text(schema.list) };
+  if (isRecord(schema)) {
+    const optional = schema.optional ?? [];
+    return { ...facts, kind: "record", entries: Object.entries(schema.record).map(([name, inner]) => ({ name, text: text(inner), optional: optional.includes(name) })) };
+  }
+  if (isEnum(schema)) return { ...facts, kind: "enum", members: schema.map((value) => JSON.stringify(value)) };
+  if (isStringSchema(schema)) return { ...facts, kind: "string" };
+  if (isNumberSchema(schema) || schema === "integer") return { ...facts, kind: "number" };
+  return { ...facts, name: schema as string };
+}
+// 判断 (Stage 0、手書き)
+const VALUE_TYPE = "null | boolean | number | string | unknown[] | { [field: string]: unknown }";
+const byName = <T extends { name: string }>(entries: T[]) => [...entries].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+export function typeTextStage0(facts: TypeFacts): string {
+  switch (facts.kind) {
+    case "value":
+      return VALUE_TYPE;
+    case "one-of":
+      return byName(facts.entries).map((entry) => `{ ${entry.name}: ${entry.text} }`).join(" | ") || "never";
+    case "optional":
+      return `${facts.inner} | null`;
+    case "list":
+      return /[ |]/.test(facts.inner) && !facts.inner.startsWith("{") ? `(${facts.inner})[]` : `${facts.inner}[]`;
+    case "record": {
+      const fields = byName(facts.entries).map((entry) => `${entry.name}: ${entry.text}${entry.optional ? " | null" : ""}`);
+      return fields.length === 0 ? "{}" : `{ ${fields.join("; ")} }`;
+    }
+    case "enum":
+      return facts.members.join(" | ") || "never";
+    case "string":
+      return "string";
+    case "number":
+      return "number";
+    case "primitive":
+      return facts.name;
+  }
+}
+export type QueryNotesFacts = { promise: "none" | "fresh" | "increasing"; mayFail: boolean };
+export type NoteId = "fresh" | "increasing" | "may-fail";
+export const queryNotesStage0 = ({ promise, mayFail }: QueryNotesFacts): NoteId[] => [...(promise === "none" ? [] : [promise]), ...(mayFail ? (["may-fail"] as const) : [])];
+export type ContractFacts = { outputs: number; routes: number; parts: number; restarts: boolean };
+export type ContractSections = { commandOutput: boolean; routes: boolean; partsNote: boolean; restarts: boolean };
+export const contractSectionsStage0 = (facts: ContractFacts): ContractSections => ({
+  commandOutput: facts.outputs > 0,
+  routes: facts.routes > 0,
+  partsNote: facts.parts > 0,
+  restarts: facts.restarts,
+});
 
-function shape(fields: Record<string, FieldSchema>): string {
-  const entries = Object.keys(fields).sort().map((key) => `${key}: ${fieldType(fields[key])}`);
-  return entries.length === 0 ? "{}" : `{ ${entries.join("; ")} }`;
+// 判断の差し替え: Stage 1 が、この IR の契約について前もって下した判断（入口が、生成の前に登録する）
+export type ContractPlan = { types: Map<string, string>; notes: Map<string, NoteId[]>; sections: Map<string, ContractSections> };
+const PLANS = new Map<string, ContractPlan>();
+export const registerContractPlan = (ir: Ir, plan: ContractPlan) => void PLANS.set(specHash(ir), plan);
+const planFor = (ir: Ir) => PLANS.get(specHash(ir));
+
+// 契約に現れる型と、問い合わせの注記と、節を決める事実。Stage 1 の入口が、前もって判断を集めるのに使う
+export function contractFacts(ir: Ir): { schemas: FieldSchema[]; notes: QueryNotesFacts[]; sections: ContractFacts } {
+  const model = requireModel(ir);
+  const { queries, effects } = dependenciesIn(model);
+  return {
+    schemas: [
+      ...Object.values(model.commands).map((fields) => ({ record: fields }) as FieldSchema),
+      ...Object.values(queries).flatMap((query) => [{ record: query.input } as FieldSchema, query.output]),
+      ...Object.values(effects).map((fields) => ({ record: fields }) as FieldSchema),
+      ...Object.values(model.outputs ?? {}),
+    ],
+    notes: Object.values(queries).map(notesFacts),
+    sections: { outputs: Object.keys(model.outputs ?? {}).length, routes: Object.keys(model.routes ?? {}).length, parts: Object.keys(model.parts ?? {}).length, restarts: restartsIn(model) },
+  };
+}
+const notesFacts = (query: { promise?: "fresh" | "increasing"; mayFail?: true }): QueryNotesFacts => ({ promise: query.promise ?? "none", mayFail: query.mayFail === true });
+// 含む部品の依存も、部品の名前で修飾して並ぶ（todos.newId）
+function dependenciesIn(model: IrModel) {
+  const queries = { ...model.queries };
+  const effects = { ...model.effects };
+  for (const [part, boundary] of Object.entries(model.parts ?? {})) {
+    for (const [name, query] of Object.entries(boundary.queries)) queries[`${part}.${name}`] = query;
+    for (const [name, fields] of Object.entries(boundary.effects)) effects[`${part}.${name}`] = fields;
+  }
+  return { queries, effects };
 }
 
 const members = (lines: string[]) => (lines.length === 0 ? "{}" : `{\n${lines.map((line) => `    ${line};`).join("\n")}\n  }`);
+
+// 問い合わせの注記の文（決まった文。どれを付けるかは判断）
+const NOTES = {
+  fresh: "Never answers with the same value twice.",
+  increasing: "Never answers with less than it answered before.",
+  "may-fail": "May fail: throws when the dependency is unavailable. Let the exception reach the production code.",
+} as const;
 
 // 再起動を越えて残るものを含むか（その部品か、含む部品のどれかが durable。W7）。含むなら、検証は途中で再起動する
 export const restartsIn = (model: IrModel): boolean => model.durable !== undefined || Object.values(model.parts ?? {}).some((part) => part.durable === true);
@@ -90,22 +177,24 @@ export const restartsIn = (model: IrModel): boolean => model.durable !== undefin
 export function generateContract(ir: Ir): string {
   const model = requireModel(ir);
   const behaviors = [...ir.behaviors].sort((a, b) => (a.name < b.name ? -1 : 1));
-  const restarts = restartsIn(model);
+  // 判断: Stage 1 が前もって下したものがあれば、それを使う
+  const plan = planFor(ir);
+  const fieldType = (schema: FieldSchema): string => {
+    const facts = typeFactsOf(schema, fieldType);
+    return plan?.types.get(JSON.stringify(facts)) ?? typeTextStage0(facts);
+  };
+  const shape = (fields: Record<string, FieldSchema>) => fieldType({ record: fields } as FieldSchema);
+  const contractFactsNow = contractFacts(ir).sections;
+  const sections = plan?.sections.get(JSON.stringify(contractFactsNow)) ?? contractSectionsStage0(contractFactsNow);
+  const restarts = sections.restarts;
   // 含む部品の依存も、部品の名前で修飾して並ぶ（todos.newId）。アダプターが、それを中の部品のコードに渡す
-  const allQueries = { ...model.queries };
-  const allEffects = { ...model.effects };
-  for (const [part, boundary] of Object.entries(model.parts ?? {})) {
-    for (const [name, query] of Object.entries(boundary.queries)) allQueries[`${part}.${name}`] = query;
-    for (const [name, fields] of Object.entries(boundary.effects)) allEffects[`${part}.${name}`] = fields;
-  }
+  const { queries: allQueries, effects: allEffects } = dependenciesIn(model);
   const key = (name: string) => (/^[A-Za-z_$][\w$]*$/.test(name) ? name : JSON.stringify(name));
   const queries = Object.keys(allQueries).sort().map((name) => {
-    const { input, output, promise, mayFail } = allQueries[name];
+    const { input, output } = allQueries[name];
     // 依存の約束。代役は、これを守って答える。失敗することがある依存は、ときどき例外を投げる (W8)
-    const notes = [
-      ...(promise === "fresh" ? ["Never answers with the same value twice."] : promise === "increasing" ? ["Never answers with less than it answered before."] : []),
-      ...(mayFail ? ["May fail: throws when the dependency is unavailable. Let the exception reach the production code."] : []),
-    ];
+    const noted = notesFacts(allQueries[name]);
+    const notes = (plan?.notes.get(JSON.stringify(noted)) ?? queryNotesStage0(noted)).map((id) => NOTES[id]);
     const note = notes.length === 0 ? "" : `/** ${notes.join(" ")} */ `;
     return `${note}${key(name)}(${Object.keys(input).length > 0 ? `input: ${shape(input)}` : ""}): ${fieldType(output)}`;
   });
@@ -115,7 +204,7 @@ export function generateContract(ir: Ir): string {
     return `${name}: ${fieldType(model.outputs![name])}`;
   });
   const results =
-    outputs.length === 0
+    !sections.commandOutput
       ? ""
       : `/**
  * What a command answers with. Return it from \`executeCommand\`; it is compared with the specification.
@@ -130,7 +219,7 @@ ${outputs.map((line) => `  ${line};`).join("\n")}
   // 経路: コマンドが外からどう届くか。HTTP の決まりは、契約の文で述べる（仕様は HTTP の意味を持たない）
   const routes = Object.keys(model.routes ?? {}).sort();
   const routing =
-    routes.length === 0
+    !sections.routes
       ? ""
       : `/**
  * The commands below reach the production system as HTTP requests. Start its server in \`setupIsolation\`
@@ -156,7 +245,7 @@ ${behaviors.map((b) => `  | { name: ${JSON.stringify(b.name)}; input: ${shape(mo
 ${routing}${results}/**
  * Stand-ins for everything the system depends on. The test harness owns them; connect them to
  * whatever seams your production code has.${
-   Object.keys(model.parts ?? {}).length > 0
+   sections.partsNote
      ? "\n * A name with a dot (`todos.newId`) is a dependency of a component the system contains (`todos`): connect it to that component's code."
      : ""
  }
@@ -189,7 +278,7 @@ export interface TargetSystemAdapter {
   /** Called after each trial, pass or fail. Discard everything the trial created. */
   teardownIsolation(): Promise<void>;
   /** Execute one command. A trial executes several commands in sequence on the same system. */
-  executeCommand(command: Command): Promise<${outputs.length === 0 ? "void" : "CommandOutput[keyof CommandOutput] | void"}>;
+  executeCommand(command: Command): Promise<${!sections.commandOutput ? "void" : "CommandOutput[keyof CommandOutput] | void"}>;
   /** The current state of the system. */
   getCurrentState(): Promise<StateName>;${
     restarts

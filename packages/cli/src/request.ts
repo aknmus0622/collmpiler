@@ -294,6 +294,15 @@ export function renderAssets(assets: Asset[]): string {
   return parts.join("\n");
 }
 
+// 依頼文にどの節を入れるか (N10h)。判断は Stage 0 (requestSectionsStage0) か、生成した部品 (Stage 1、self/specs/text-plan.*)
+export type RequestFacts = { phase: Phase; attempt: number; hasFeedback: boolean; others: number; partFiles: number };
+export type RequestSections = { feedback: "none" | "current-code" | "previous-attempt"; others: boolean; contained: boolean };
+export const requestSectionsStage0 = (facts: RequestFacts): RequestSections => ({
+  feedback: !facts.hasFeedback ? "none" : facts.attempt === 1 ? "current-code" : "previous-attempt",
+  others: facts.phase !== "wiring" && facts.others > 0,
+  contained: facts.phase !== "wiring" && facts.partFiles > 0,
+});
+
 export function renderRequest(
   target: Target,
   ws: Workspace,
@@ -306,8 +315,11 @@ export function renderRequest(
   // others: 同じ本番コードを共有する、ほかのコンポーネントの IR の場所
   // partFiles: 含む部品のコード（使うだけで、書き換えない）
   options: { incremental?: boolean; others?: string[]; partFiles?: string[] } = {},
+  // Stage 1 が下した、節の判断（無ければ Stage 0）
+  decided?: RequestSections,
 ): string {
   const incremental = options.incremental ?? false;
+  const sections = decided ?? requestSectionsStage0({ phase, attempt, hasFeedback: feedback !== undefined, others: (options.others ?? []).length, partFiles: (options.partFiles ?? []).length });
   const body =
     phase === "design"
       ? design(target, ws, guide, incremental)
@@ -315,21 +327,22 @@ export function renderRequest(
         ? wiring(target, ws, incremental)
         : implementation(target, ws, guide, incremental);
   // 1回目の依頼に載るのは、エージェントを呼ぶ前に、いまのコードを採点した結果
-  const previous = !feedback
+  const previous =
+    sections.feedback === "none" || !feedback
     ? ""
-    : attempt === 1
+    : sections.feedback === "current-code"
       ? `\n## Where the current code falls short\n\nThe harness checked the code as it is now, before any change:\n\n${renderFeedback(feedback, true)}\n`
       : `\n## Feedback from the previous attempt\n\n${renderFeedback(feedback)}\n`;
   // ほかのコンポーネントの仕様は、設計と実装の段階にだけ見せる
   const others = options.others ?? [];
   const system =
-    phase === "wiring" || others.length === 0
+    !sections.others
       ? ""
       : `\n## Other components of the same system\n\nThe production code is shared with other components. Their specifications are here, in the same format:\n\n${others.map((path) => `- \`${path}\``).join("\n")}\n\nYour task is the specification named at the top. The code must keep satisfying the others too: their tests are run again after yours pass. Do not change exported names or signatures that already exist unless your specification requires it. Reuse what fits; do not edit those files.\n\nYou may change code that your component uses, including code it shares with the others. Code that only other components use is not yours to change: such a change is undone and the attempt is rejected. New files are always fine.\n`;
   // 含む部品のコード: 設計と実装の段階は、それを使う。中身を変えてはならない
   const partFiles = options.partFiles ?? [];
   const contained =
-    phase === "wiring" || partFiles.length === 0
+    !sections.contained
       ? ""
       : `\n## Components this one contains\n\nThe specification lists in \`model.parts\` the components this one contains. Their production code already exists and has been verified on its own. Use it as it is, through its exported API; read it to learn that API:\n\n${partFiles.map((path) => `- \`${path}\``).join("\n")}\n\nDo not change these files: a change is undone and the attempt is rejected. Your code is what connects the outside (\`model.routes\`, if present) to them.\n`;
   return `# ${TITLES[phase]} (attempt ${attempt})\n\n${body}${system}${contained}${renderAssets(assets)}${previous}`;

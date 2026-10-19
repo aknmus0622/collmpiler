@@ -4,7 +4,7 @@
     "leaf-check.interpretation.ts"
   ],
   "specs": "sha256:54cf7f971d120b60edee7c22b20dd7753d21c8f2306b4bb9bb4708a277ede6d8",
-  "code": "sha256:e8599a864dfe325ae790b227a66fe430da20ddfe881f983a578b9bea7602665b",
+  "code": "sha256:85c5c4138f318a2187111eebcf0b6c319fb4713430cdb6c610f88c9ef84b2fde",
   "files": [
     "../src/graph-check/graph-check.ts",
     "../src/graph-check/rules.ts",
@@ -27,6 +27,9 @@
     "../src/reference-check/reference-check.ts",
     "../src/reference-check/types.ts",
     "../src/reference-check/verdict.ts",
+    "../src/text-plan/plan.ts",
+    "../src/text-plan/text-plan.ts",
+    "../src/text-plan/types.ts",
     "../src/tree-check/rules.ts",
     "../src/tree-check/tree-check.ts",
     "../src/tree-check/types.ts",
