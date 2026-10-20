@@ -4,7 +4,7 @@
     "step-choice.interpretation.ts"
   ],
   "specs": "sha256:64d6c09c7dfa690db68e77fe6c171afb7eec074562f129ca01c1ec06c2aba07f",
-  "code": "sha256:6a583bedfac0d236c42ce58b14cf28614df2c2d9ed1ea639dfc21c14696452fa",
+  "code": "sha256:49998a01bea02765cb820d39d3cdca7d29dccf88c082baad7f6948b8ad2f872e",
   "files": [
     "../src/gate-rules/gate-rules.ts",
     "../src/gate-rules/types.ts",
@@ -31,6 +31,9 @@
     "../src/pipeline/pipeline.ts",
     "../src/pipeline/plan.ts",
     "../src/pipeline/types.ts",
+    "../src/promise-keeper/promise-keeper.ts",
+    "../src/promise-keeper/rules.ts",
+    "../src/promise-keeper/types.ts",
     "../src/reference-check/reference-check.ts",
     "../src/reference-check/types.ts",
     "../src/reference-check/verdict.ts",

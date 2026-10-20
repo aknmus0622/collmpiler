@@ -4,7 +4,7 @@
     "graph-check.interpretation.ts"
   ],
   "specs": "sha256:41e93d67e41ecfcb9661b8c39dcdb7df4d8a14563b719782c1845afbe8b79765",
-  "code": "sha256:b8576350cb680ee66773982c5ff8eb0d7685a391c362e56b6e1a34bcc3dc276e",
+  "code": "sha256:f946d795528e2e771efd1f80ed60efbe8074471bf12a4fdc3c7abbe9ec5aa264",
   "files": [
     "../src/gate-rules/gate-rules.ts",
     "../src/gate-rules/types.ts",
@@ -31,6 +31,9 @@
     "../src/pipeline/pipeline.ts",
     "../src/pipeline/plan.ts",
     "../src/pipeline/types.ts",
+    "../src/promise-keeper/promise-keeper.ts",
+    "../src/promise-keeper/rules.ts",
+    "../src/promise-keeper/types.ts",
     "../src/reference-check/reference-check.ts",
     "../src/reference-check/types.ts",
     "../src/reference-check/verdict.ts",

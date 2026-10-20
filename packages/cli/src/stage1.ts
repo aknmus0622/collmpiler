@@ -5,6 +5,7 @@ import type { SlotReport } from "./slots.ts";
 import { EXTRA_SEEDS, FrameworkError } from "./runtime.ts";
 import type { CaseChoice, CommandChoice, CommandFacts } from "./choose.ts";
 import { chooseCaseStage0, chooseStage0, enabledStage0 } from "./choose.ts";
+import { freshStage0, increasingStage0, survivesRestartStage0 } from "./promise.ts";
 import type { Adapter, CellTrial, Deciders, Unobservable } from "./runtime.ts";
 import { leavesOf, observationsEqualStage0 } from "./observe.ts";
 import type { Observed } from "./observe.ts";
@@ -72,6 +73,7 @@ export const R1_COMPONENTS: Record<string, readonly string[]> = {
   "gate-rules": ["rules.ts"],
   "observation-compare": ["observe.ts"],
   "step-choice": ["choose.ts"],
+  "promise-keeper": ["promise.ts"],
 };
 export const stage0HashOf = (component: string) => hashFiles(fileURLToPath(new URL(".", import.meta.url)), R1_COMPONENTS[component] ?? []);
 // R1: 採点の部品を作り直す実行では、採点の判断をすべて Stage 0 が下す。切り替えるオプションは持たない。
@@ -585,6 +587,43 @@ const stepChoiceCase: Stage1Part<CaseQuestion, CaseChoice> = {
   },
 };
 
+// 依存の約束 (promise-keeper、採点の部品)。問い1つを、1回の隔離で尋ねる。
+// 範囲: 整数だけ（increasing）、同じ種類（整数か文字列）の値だけ（fresh）。外なら Stage 0 が決める
+type PromiseQuestion =
+  | { kind: "increasing"; drawn: number; previous: number | null; delta: number; max: number | null }
+  | { kind: "fresh"; drawn: unknown; used: unknown[] }
+  | { kind: "restart"; durable: boolean };
+const integral = (value: unknown) => typeof value === "number" && Number.isInteger(value);
+const promiseKeeper: Stage1Part<PromiseQuestion, unknown> = {
+  component: "promise-keeper",
+  inScope(question) {
+    if (question.kind === "increasing") return [question.drawn, question.previous ?? 0, question.delta, question.max ?? 0].every(integral);
+    if (question.kind === "fresh") {
+      const all = [question.drawn, ...question.used];
+      return all.every(integral) || all.every((value) => typeof value === "string");
+    }
+    return true;
+  },
+  async run(adapter, question) {
+    const events =
+      question.kind === "increasing"
+        ? [{ name: "Increasing", input: { drawn: question.drawn, previous: question.previous, delta: question.delta, max: question.max } }]
+        : question.kind === "restart"
+          ? [{ name: "Restart", input: { durable: question.durable } }]
+          : typeof question.drawn === "number"
+            ? [{ name: "BeginFreshNumber", input: { drawn: question.drawn } }, ...question.used.map((value) => ({ name: "UsedNumber", input: { value } })), { name: "Fresh", input: {} }]
+            : [{ name: "BeginFreshText", input: { drawn: question.drawn } }, ...question.used.map((value) => ({ name: "UsedText", input: { value } })), { name: "Fresh", input: {} }];
+    const answer = (await session(adapter, { queries: {}, effects: {} }, events)).at(-1);
+    return question.kind === "restart" ? answer === "keep" : answer;
+  },
+};
+const promiseStage0 = (question: PromiseQuestion): unknown =>
+  question.kind === "increasing"
+    ? increasingStage0(question.drawn, question.previous, question.delta, question.max)
+    : question.kind === "fresh"
+      ? freshStage0(question.drawn, question.used)
+      : survivesRestartStage0(question.durable);
+
 // 部品1つを、検証のあいだ使う形にする。生成した部品はモジュールに1つだけの状態を持つので、1度に1つずつ動かす。
 // 動かなくなったら（例外）、その検証のあいだは Stage 0 だけで続ける。フレームワークの誤り (R4) は、そのまま伝える
 function serving<I, R>(part: Stage1Part<I, R>, adapter: Adapter): (input: I) => Promise<R | undefined> {
@@ -624,6 +663,15 @@ export async function stage1Deciders(underTest?: Adapter): Promise<Deciders> {
     const cases = serving(stepChoiceCase, choice);
     deciders.chooseCommand = (state, facts, pick, forced, strict, holds) => command({ state, facts, pick, forced, strict, holds });
     deciders.chooseCase = (names, holds) => cases({ names, holds });
+  }
+  const promises = await usable(promiseKeeper.component);
+  if (promises) {
+    const keep = serving(promiseKeeper, promises);
+    // 範囲の外は、尋ねない（Stage 0 だけで決める）
+    const ask = (question: PromiseQuestion) => (promiseKeeper.inScope!(question) ? keep(question) : Promise.resolve(undefined));
+    deciders.increasing = async (drawn, previous, delta, max) => (await ask({ kind: "increasing", drawn, previous, delta, max })) as number | undefined;
+    deciders.fresh = (drawn, used) => ask({ kind: "fresh", drawn, used });
+    deciders.survivesRestart = async (durable) => (await ask({ kind: "restart", durable })) as boolean | undefined;
   }
   return deciders;
 }
@@ -669,6 +717,14 @@ export const R1_CASES: Record<string, { compare(adapter: Adapter, given: unknown
       } catch (error) {
         stage1 = `(${error instanceof Error ? error.message : String(error)})`;
       }
+      return JSON.stringify(stage0) === JSON.stringify(stage1) ? undefined : `${JSON.stringify(given)}: Stage 0 ${JSON.stringify(stage0)}、Stage 1 ${JSON.stringify(stage1)}`;
+    },
+  },
+  "promise-keeper": {
+    async compare(adapter, given) {
+      const question = given as PromiseQuestion;
+      const stage0 = promiseStage0(question);
+      const stage1 = await promiseKeeper.run(adapter, question);
       return JSON.stringify(stage0) === JSON.stringify(stage1) ? undefined : `${JSON.stringify(given)}: Stage 0 ${JSON.stringify(stage0)}、Stage 1 ${JSON.stringify(stage1)}`;
     },
   },

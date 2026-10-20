@@ -13,6 +13,7 @@ import { dependenciesOf, loadSpecs, restartable } from "./loader.ts";
 import { observationsEqualStage0 } from "./observe.ts";
 import { chooseCaseStage0, chooseStage0, enabledStage0 } from "./choose.ts";
 import type { CaseChoice, CommandChoice, CommandFacts } from "./choose.ts";
+import { freshStage0, increasingStage0, survivesRestartStage0 } from "./promise.ts";
 import type { Observed } from "./observe.ts";
 import { conforms, isEnum, isList, isNumberSchema, isOneOf, isOptional, isRecord, isStringSchema } from "./schema.ts";
 
@@ -127,6 +128,10 @@ export type Deciders = {
     holds: (command: string, condition: string) => boolean,
   ) => Promise<CommandChoice | undefined>;
   chooseCase?: (names: string[], holds: (condition: string) => boolean) => Promise<CaseChoice | undefined>;
+  // 依存の約束 (promise-keeper)
+  increasing?: (drawn: number, previous: number | null, delta: number, max: number | null) => Promise<number | undefined>;
+  fresh?: (drawn: unknown, used: unknown[]) => Promise<unknown>;
+  survivesRestart?: (durable: boolean) => Promise<boolean | undefined>;
 };
 
 // 値の判断で、Stage 0 と Stage 1 が一致することを求める (R4)
@@ -139,6 +144,22 @@ function agree<T>(what: string, component: string, stage0: T, stage1: T | undefi
 async function chooseCommand(deciders: Deciders, ...[state, facts, pick, forced, strict, holds]: Parameters<NonNullable<Deciders["chooseCommand"]>>): Promise<CommandChoice> {
   const stage0 = chooseStage0(enabledStage0(state, facts, holds), pick, forced, strict);
   agree("実行するコマンドの選び方", "step-choice", stage0, await deciders.chooseCommand?.(state, facts, pick, forced, strict, holds), { state, facts, pick, forced, strict });
+  return stage0;
+}
+// 依存の約束を守った答え。Stage 0 がいつも決め、Stage 1 があれば一致を求める
+async function keepIncreasing(deciders: Deciders, drawn: number, previous: number | null, delta: number, max: number | null): Promise<number> {
+  const stage0 = increasingStage0(drawn, previous, delta, max);
+  agree("increasing の答え", "promise-keeper", stage0, await deciders.increasing?.(drawn, previous, delta, max), { drawn, previous, delta, max });
+  return stage0;
+}
+async function keepFresh(deciders: Deciders, drawn: unknown, used: unknown[]): Promise<unknown> {
+  const stage0 = freshStage0(drawn, used);
+  agree("fresh の答え", "promise-keeper", stage0, await deciders.fresh?.(drawn, used), { drawn, used });
+  return stage0;
+}
+async function survivesRestart(deciders: Deciders, durable: boolean): Promise<boolean> {
+  const stage0 = survivesRestartStage0(durable);
+  agree("再起動で残るか", "promise-keeper", stage0, await deciders.survivesRestart?.(durable), { durable });
   return stage0;
 }
 // 起きる場合を選ぶ（コマンドの場合、副作用の onlyWhen）
@@ -351,18 +372,16 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
 
   // 再起動 (W7): 再起動を越えて残る部品は、状態とデータ（中の部品も）をそのまま持つ。ほかは始めに戻る。
   // 中の部品は、それぞれの決まりで。依存の約束のための記録（前の答え、返した値）は残る（依存は再起動しない）
-  const restart = (state: State): State => {
-    if (model.durable !== undefined) return state;
+  const restart = async (state: State): Promise<State> => {
+    if (await survivesRestart(deciders, model.durable !== undefined)) return state;
     const fresh = start();
-    return {
-      ...fresh,
-      env: state.env,
-      ...(state.parts ? { parts: Object.fromEntries(Object.entries(state.parts).map(([part, inner]) => [part, children[part].restart(inner)])) } : {}),
-    };
+    const parts: Record<string, State> = {};
+    for (const [part, inner] of Object.entries(state.parts ?? {})) parts[part] = await children[part].restart(inner);
+    return { ...fresh, env: state.env, ...(state.parts ? { parts } : {}) };
   };
 
   // 依存の約束を守った、問い合わせの答え。increasing は、前の答えに増え幅を足す。fresh は、すでに返した値を避ける
-  const answersOf = (state: State, raw: RawStep): { queries: Values; env: Env; failed: string[] } => {
+  const answersOf = async (state: State, raw: RawStep): Promise<{ queries: Values; env: Env; failed: string[] }> => {
     const env: Env = { last: { ...state.env?.last }, used: { ...state.env?.used } };
     const queries: Values = { ...raw.queries };
     // 失敗した問い合わせは、答えが無い（約束のための記録も、進めない）
@@ -372,15 +391,13 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
       if (failed.includes(name)) continue;
       const { promise, output } = model.queries[name];
       if (promise === "increasing") {
-        const previous = env.last[name];
         const max = isNumberSchema(output) ? output.max : undefined;
-        const value = previous === undefined ? (queries[name] as number) : Math.min(previous + (raw.deltas?.[name] ?? 0), max ?? Number.POSITIVE_INFINITY);
+        const value = await keepIncreasing(deciders, queries[name] as number, env.last[name] ?? null, raw.deltas?.[name] ?? 0, max ?? null);
         queries[name] = value;
         env.last[name] = value;
       } else {
         const used = env.used[name] ?? [];
-        let value = queries[name];
-        if (used.includes(value)) value = typeof value === "number" ? Math.max(...(used as number[])) + 1 : `${String(value)}#${used.length}`;
+        const value = await keepFresh(deciders, queries[name], used);
         queries[name] = value;
         env.used[name] = [...used, value];
       }
@@ -494,7 +511,7 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
       // 意味の関数の中の decide / calculate が、この解釈を引くようにする
       activate(binding);
       // この手の、問い合わせの答えと、コマンドごとの入力（約束と、入力の選び方を反映したもの）
-      const { queries, env, failed } = answersOf(state, raw);
+      const { queries, env, failed } = await answersOf(state, raw);
       const inputs = Object.fromEntries(commands.map((name) => [name, inputOf(state, raw, name)]));
       // そのコマンドが尋ねることを、引数を解決して、答えと一緒に並べる
       const askedBy = (name: string): Asked[] => {
@@ -1112,7 +1129,7 @@ export async function check(
             steps.push({ from: state.status, data: plain(state.data), command: "(restart)", input: {}, queries: {}, asks: [], case: "restart" });
             current = undefined;
             recorded = [];
-            state = sim.restart(state);
+            state = await sim.restart(state);
             expected = { state: state.status, effects: [] };
             if (!adapter.restartSystem) return { steps, expected, actual: { error: "adapter.restartSystem() is missing: this system keeps data across restarts, so the adapter must be able to restart it" } };
             await adapter.restartSystem();

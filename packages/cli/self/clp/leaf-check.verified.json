@@ -4,7 +4,7 @@
     "leaf-check.interpretation.ts"
   ],
   "specs": "sha256:54cf7f971d120b60edee7c22b20dd7753d21c8f2306b4bb9bb4708a277ede6d8",
-  "code": "sha256:da050774657983eee8f191dccf140fe51b24ff45d74a932406f3832f2b0b84aa",
+  "code": "sha256:62b4478e435c7ba1190321da75320486bb89f32a1efd4dc4352185ee5ec481bb",
   "files": [
     "../src/gate-rules/gate-rules.ts",
     "../src/gate-rules/types.ts",
@@ -31,6 +31,9 @@
     "../src/pipeline/pipeline.ts",
     "../src/pipeline/plan.ts",
     "../src/pipeline/types.ts",
+    "../src/promise-keeper/promise-keeper.ts",
+    "../src/promise-keeper/rules.ts",
+    "../src/promise-keeper/types.ts",
     "../src/reference-check/reference-check.ts",
     "../src/reference-check/types.ts",
     "../src/reference-check/verdict.ts",

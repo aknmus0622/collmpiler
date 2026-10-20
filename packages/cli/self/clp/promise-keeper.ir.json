@@ -1,0 +1,260 @@
+{
+  "behaviors": [
+    {
+      "from": [
+        "READY"
+      ],
+      "name": "BeginFreshNumber",
+      "onlyIf": [],
+      "when": {
+        "otherwise": {
+          "does": "The fresh answer of a query that answers numbers is decided next, for the number drawn. No value answered before has been given yet.",
+          "set": {
+            "freshDrawn": {
+              "$ref": "input:drawn"
+            },
+            "used": []
+          }
+        }
+      }
+    },
+    {
+      "from": [
+        "READY"
+      ],
+      "name": "BeginFreshText",
+      "onlyIf": [],
+      "when": {
+        "otherwise": {
+          "does": "The fresh answer of a query that answers texts is decided next, for the text drawn. No value answered before has been given yet.",
+          "set": {
+            "freshDrawn": {
+              "$ref": "input:drawn"
+            },
+            "used": []
+          }
+        }
+      }
+    },
+    {
+      "description": "The fresh answer: the value drawn, if it is not one of the values answered before (the same number, or the same text). Otherwise, if it is a number, one more than the largest number answered before; if it is a text, the text drawn followed by \"#\" and the number of values answered before (counting every value given, of either kind).",
+      "from": [
+        "READY"
+      ],
+      "name": "Fresh",
+      "onlyIf": [],
+      "when": {
+        "The value drawn for the fresh answer is a number answered before": {
+          "responds": {
+            "$ref": "calculation:oneMoreThanLargest"
+          }
+        },
+        "The value drawn for the fresh answer is not one of the values answered before": {
+          "responds": {
+            "$ref": "data:freshDrawn"
+          }
+        },
+        "otherwise": {
+          "responds": {
+            "$ref": "calculation:drawnNumbered"
+          }
+        }
+      }
+    },
+    {
+      "description": "The answer of a query that promises never to answer less than before. If it has not answered before (`previous` is null), the value drawn. Otherwise the previous answer plus the increment `delta`, but not more than `max` when a maximum is given.",
+      "from": [
+        "READY"
+      ],
+      "name": "Increasing",
+      "onlyIf": [],
+      "when": {
+        "The increasing query has not answered before (`previous` is null)": {
+          "responds": {
+            "$ref": "input:drawn"
+          }
+        },
+        "otherwise": {
+          "responds": {
+            "$ref": "calculation:increasedAnswer"
+          }
+        }
+      }
+    },
+    {
+      "description": "The system restarts. A component that is durable keeps its state and data; any other starts again.",
+      "from": [
+        "READY"
+      ],
+      "name": "Restart",
+      "onlyIf": [],
+      "when": {
+        "The component that restarts is durable": {
+          "responds": "keep"
+        },
+        "otherwise": {
+          "responds": "start-again"
+        }
+      }
+    },
+    {
+      "from": [
+        "READY"
+      ],
+      "name": "UsedNumber",
+      "onlyIf": [],
+      "when": {
+        "otherwise": {
+          "does": "A number the query answered before.",
+          "set": {
+            "used": {
+              "$ref": "calculation:usedWithValue"
+            }
+          }
+        }
+      }
+    },
+    {
+      "from": [
+        "READY"
+      ],
+      "name": "UsedText",
+      "onlyIf": [],
+      "when": {
+        "otherwise": {
+          "does": "A text the query answered before.",
+          "set": {
+            "used": {
+              "$ref": "calculation:usedWithValue"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "decisions": {},
+  "descriptions": {
+    "component": "Turns answers drawn at random into answers that keep a dependency's promises, and decides what survives a restart.",
+    "data.freshDrawn": "The value drawn for the fresh answer being decided (a number or a text).",
+    "data.used": "The values answered before by the query whose fresh answer is being decided, in the order given."
+  },
+  "irVersion": 7,
+  "model": {
+    "calculations": {
+      "drawnNumbered": {
+        "description": "The text drawn, followed by \"#\" and the number of values answered before (every value given, of either kind)",
+        "output": "string"
+      },
+      "increasedAnswer": {
+        "description": "The previous answer plus `delta`, but not more than `max` when `max` is not null",
+        "output": {
+          "max": 1100,
+          "min": -1000,
+          "type": "integer"
+        }
+      },
+      "oneMoreThanLargest": {
+        "description": "One more than the largest number among the values answered before",
+        "output": "integer"
+      },
+      "usedWithValue": {
+        "description": "The values answered before given so far, followed by the value just given",
+        "output": {
+          "list": "value"
+        }
+      }
+    },
+    "commands": {
+      "BeginFreshNumber": {
+        "drawn": {
+          "max": 4,
+          "min": 0,
+          "type": "integer"
+        }
+      },
+      "BeginFreshText": {
+        "drawn": {
+          "examples": [
+            "a",
+            "b",
+            "a#1",
+            ""
+          ],
+          "type": "string"
+        }
+      },
+      "Fresh": {},
+      "Increasing": {
+        "delta": {
+          "max": 100,
+          "min": 0,
+          "type": "integer"
+        },
+        "drawn": {
+          "max": 1000,
+          "min": -1000,
+          "type": "integer"
+        },
+        "max": {
+          "optional": {
+            "max": 1000,
+            "min": -1000,
+            "type": "integer"
+          }
+        },
+        "previous": {
+          "optional": {
+            "max": 1000,
+            "min": -1000,
+            "type": "integer"
+          }
+        }
+      },
+      "Restart": {
+        "durable": "boolean"
+      },
+      "UsedNumber": {
+        "value": {
+          "max": 4,
+          "min": 0,
+          "type": "integer"
+        }
+      },
+      "UsedText": {
+        "value": {
+          "examples": [
+            "a",
+            "b",
+            "a#1",
+            ""
+          ],
+          "type": "string"
+        }
+      }
+    },
+    "data": {
+      "freshDrawn": "value",
+      "used": {
+        "list": "value"
+      }
+    },
+    "effects": {},
+    "init": "READY",
+    "initial": {
+      "freshDrawn": null,
+      "used": []
+    },
+    "outputs": {
+      "Fresh": "value",
+      "Increasing": "integer",
+      "Restart": [
+        "keep",
+        "start-again"
+      ]
+    },
+    "queries": {},
+    "states": [
+      "READY"
+    ]
+  }
+}

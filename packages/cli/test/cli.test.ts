@@ -64,7 +64,7 @@ test("clp verify: すでにある本番コードを検証する。何も書き�
   const self = ["verify", "--specs", "packages/cli/self/specs", "--out", "packages/cli/self", "--runs", "20"];
   const all = clp(self);
   assert.equal(all.status, 0);
-  assert.equal(all.stdout.match(/CLP_RESULT \{"status":"pass"/g)?.length, 15);
+  assert.equal(all.stdout.match(/CLP_RESULT \{"status":"pass"/g)?.length, 16);
   const one = clp([...self, "--component", "pipeline"]);
   assert.equal(one.stdout.match(/CLP_RESULT/g)?.length, 1);
   assert.equal(clp([...self, "--component", "nobody"]).status, 2);

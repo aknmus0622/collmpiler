@@ -4,7 +4,7 @@
     "interpret-flow.interpretation.ts"
   ],
   "specs": "sha256:9b1e8fb7169d5855b3164da20488eec9e298f12581687050ff3974ff0ccd9937",
-  "code": "sha256:bd21033abd42e6b68f3a055bf1bf688381caf980e1a04c6f2654b3e38aefd6f7",
+  "code": "sha256:a0238923cd44fd8c440d98d424ea13bc948c21734434fff35dbe8146cd148e45",
   "files": [
     "../src/gate-rules/gate-rules.ts",
     "../src/gate-rules/types.ts",
@@ -31,6 +31,9 @@
     "../src/pipeline/pipeline.ts",
     "../src/pipeline/plan.ts",
     "../src/pipeline/types.ts",
+    "../src/promise-keeper/promise-keeper.ts",
+    "../src/promise-keeper/rules.ts",
+    "../src/promise-keeper/types.ts",
     "../src/reference-check/reference-check.ts",
     "../src/reference-check/types.ts",
     "../src/reference-check/verdict.ts",

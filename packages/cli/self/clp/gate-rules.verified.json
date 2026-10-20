@@ -4,7 +4,7 @@
     "gate-rules.interpretation.ts"
   ],
   "specs": "sha256:d3ac158244e813e9f5386380e6074fb540e4b4054d9dd7d68e4ee28352918bba",
-  "code": "sha256:30660b8fc5d18d1551b22f4e1eb8aa367490dd6c16f68692b02609b086401a5c",
+  "code": "sha256:e161829c4ada17a5a049e905b2a481ba714f2f9c449c83822aadaf9c0e4ea09a",
   "files": [
     "../src/gate-rules/gate-rules.ts",
     "../src/gate-rules/types.ts",
@@ -31,6 +31,9 @@
     "../src/pipeline/pipeline.ts",
     "../src/pipeline/plan.ts",
     "../src/pipeline/types.ts",
+    "../src/promise-keeper/promise-keeper.ts",
+    "../src/promise-keeper/rules.ts",
+    "../src/promise-keeper/types.ts",
     "../src/reference-check/reference-check.ts",
     "../src/reference-check/types.ts",
     "../src/reference-check/verdict.ts",

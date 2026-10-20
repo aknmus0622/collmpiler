@@ -310,6 +310,7 @@ test("自分自身の検証: 自分の生成物の上で動くフレームワー
     "observation-compare:implementation:0:ok",
     "payload-check:implementation:0:ok",
     "pipeline:implementation:0:ok",
+    "promise-keeper:implementation:0:ok",
     "reference-check:implementation:0:ok",
     "step-choice:implementation:0:ok",
     "text-plan:implementation:0:ok",
@@ -886,6 +887,23 @@ test("採点の部品 (N12b): 観測値の比較は、事例のすべてで Stag
   const { resolveLayout, workspaceOf } = await import("../src/layout.ts");
   const { typescriptTarget } = await import("../src/target-typescript.ts");
   assert.equal(runCases(join(self, "specs"), workspaceOf(resolveLayout({ out: self }), typescriptTarget.files, "observation-compare"), "observation-compare").problem, undefined);
+});
+
+test("採点の部品 (N12e): 依存の約束の守り方は、事例のすべてで Stage 0 と同じ答えを返し、検証で使われる", async () => {
+  const { R1_CASES, runCases, stage1Adapter, stage1Deciders } = await import("../src/stage1.ts");
+  const self = join(repoRoot, "packages/cli/self");
+  const adapter = await stage1Adapter("promise-keeper");
+  assert.ok(adapter, "Stage 0 が採点した記録があり、使えること (R2)");
+  const cases = JSON.parse(readFileSync(join(self, "cases/promise-keeper.json"), "utf8")).cases as unknown[];
+  for (const given of cases) assert.equal(await R1_CASES["promise-keeper"].compare(adapter, given), undefined, JSON.stringify(given));
+  const deciders = await stage1Deciders();
+  // 範囲の外（整数でない数、種類の混ざった値）は尋ねず、Stage 0 が決める
+  assert.equal(await deciders.increasing!(1.5, null, 0, null), undefined);
+  assert.equal(await deciders.fresh!("a", [1]), undefined);
+  assert.equal(await deciders.fresh!(2, [2]), 3);
+  const { resolveLayout, workspaceOf } = await import("../src/layout.ts");
+  const { typescriptTarget } = await import("../src/target-typescript.ts");
+  assert.equal(runCases(join(self, "specs"), workspaceOf(resolveLayout({ out: self }), typescriptTarget.files, "promise-keeper"), "promise-keeper").problem, undefined);
 });
 
 test("採点の部品 (N12c): 1手の選び方は、事例のすべてで Stage 0 と同じ選び方をし、Stage 0 が尋ねない条件は尋ねない", async () => {
