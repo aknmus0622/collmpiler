@@ -6,7 +6,9 @@ import { EXTRA_SEEDS, FrameworkError } from "./runtime.ts";
 import type { CaseChoice, CommandChoice, CommandFacts } from "./choose.ts";
 import { chooseCaseStage0, chooseStage0, enabledStage0 } from "./choose.ts";
 import { freshStage0, increasingStage0, survivesRestartStage0 } from "./promise.ts";
-import type { Adapter, CellTrial, Deciders, Unobservable } from "./runtime.ts";
+import type { Adapter, CellTrial, Deciders, OutcomeSession, Unobservable } from "./runtime.ts";
+import { OUTCOME_START, callsStage0, outcomeStage0 } from "./outcome.ts";
+import type { OutcomeEvent, OutcomeFail } from "./outcome.ts";
 import { leavesOf, observationsEqualStage0 } from "./observe.ts";
 import type { Observed } from "./observe.ts";
 import { fileURLToPath } from "node:url";
@@ -74,6 +76,7 @@ export const R1_COMPONENTS: Record<string, readonly string[]> = {
   "observation-compare": ["observe.ts"],
   "step-choice": ["choose.ts"],
   "promise-keeper": ["promise.ts"],
+  "outcome-apply": ["outcome.ts"],
 };
 export const stage0HashOf = (component: string) => hashFiles(fileURLToPath(new URL(".", import.meta.url)), R1_COMPONENTS[component] ?? []);
 // R1: 採点の部品を作り直す実行では、採点の判断をすべて Stage 0 が下す。切り替えるオプションは持たない。
@@ -624,6 +627,45 @@ const promiseStage0 = (question: PromiseQuestion): unknown =>
       ? freshStage0(question.drawn, question.used)
       : survivesRestartStage0(question.durable);
 
+// 起きることの適用 (outcome-apply、採点の部品)。1手の適用ごとに1つの隔離を開き、事実を1つずつ渡す（渡す側が値を解決しながら
+// 進むので、まとめて渡せない）。誤りの種類は副作用 Fail で受ける。含む部品の手は、親の隔離が開く前に終わる（部品を呼ぶのは場合を
+// 選ぶ前で、親は場合を選んだあとに開く）ので、同じ部品の隔離が重なることはない
+const OUTCOME = "outcome-apply";
+async function outcomeSession(adapter: Adapter): Promise<OutcomeSession & { failed(): boolean }> {
+  let fails: OutcomeFail[] = [];
+  let open = true;
+  let failed = false;
+  await adapter.setupIsolation({ queries: {}, effects: { Fail: (payload: { code: OutcomeFail }) => void fails.push(payload.code) } });
+  const close = async () => {
+    if (!open) return;
+    open = false;
+    await adapter.teardownIsolation();
+  };
+  return {
+    failed: () => failed,
+    async send(event) {
+      if (!open) return undefined;
+      fails = [];
+      try {
+        const answer = await adapter.executeCommand(event);
+        return { ...(answer === undefined ? {} : { answer }), ...(fails.length > 0 ? { fail: fails[0] } : {}) };
+      } catch (error) {
+        failed = true;
+        await close();
+        return fallback(OUTCOME, error);
+      }
+    },
+    close,
+  };
+}
+const callPart: Stage1Part<{ keyed: boolean; found: boolean }, boolean> = {
+  component: OUTCOME,
+  async run(adapter, question) {
+    const [answer] = await session(adapter, { queries: {}, effects: { Fail: () => undefined } }, [{ name: "Call", input: question }]);
+    return answer as boolean;
+  },
+};
+
 // 部品1つを、検証のあいだ使う形にする。生成した部品はモジュールに1つだけの状態を持つので、1度に1つずつ動かす。
 // 動かなくなったら（例外）、その検証のあいだは Stage 0 だけで続ける。フレームワークの誤り (R4) は、そのまま伝える
 function serving<I, R>(part: Stage1Part<I, R>, adapter: Adapter): (input: I) => Promise<R | undefined> {
@@ -672,6 +714,29 @@ export async function stage1Deciders(underTest?: Adapter): Promise<Deciders> {
     deciders.increasing = async (drawn, previous, delta, max) => (await ask({ kind: "increasing", drawn, previous, delta, max })) as number | undefined;
     deciders.fresh = (drawn, used) => ask({ kind: "fresh", drawn, used });
     deciders.survivesRestart = async (durable) => (await ask({ kind: "restart", durable })) as boolean | undefined;
+  }
+  const outcome = await usable(OUTCOME);
+  if (outcome) {
+    // 1度動かなくなったら、その検証のあいだは開かない
+    let broken = false;
+    deciders.outcome = async () => {
+      if (broken) return undefined;
+      const opened = await outcomeSession(outcome).catch((error: unknown) => fallback(OUTCOME, error));
+      if (!opened) {
+        broken = true;
+        return undefined;
+      }
+      return {
+        async send(event) {
+          const answer = await opened.send(event);
+          if (opened.failed()) broken = true;
+          return answer;
+        },
+        close: opened.close,
+      };
+    };
+    const call = serving(callPart, outcome);
+    deciders.calls = (keyed, found) => call({ keyed, found });
   }
   return deciders;
 }
@@ -726,6 +791,30 @@ export const R1_CASES: Record<string, { compare(adapter: Adapter, given: unknown
       const stage0 = promiseStage0(question);
       const stage1 = await promiseKeeper.run(adapter, question);
       return JSON.stringify(stage0) === JSON.stringify(stage1) ? undefined : `${JSON.stringify(given)}: Stage 0 ${JSON.stringify(stage0)}、Stage 1 ${JSON.stringify(stage1)}`;
+    },
+  },
+  "outcome-apply": {
+    async compare(adapter, given) {
+      const question = given as { kind: "call"; keyed: boolean; found: boolean } | { kind: "outcome"; events: OutcomeEvent[] };
+      if (question.kind === "call") {
+        const stage0 = callsStage0(question.keyed, question.found);
+        const stage1 = await callPart.run(adapter, question);
+        return stage0 === stage1 ? undefined : `${JSON.stringify(given)}: Stage 0 ${stage0}、Stage 1 ${stage1}`;
+      }
+      const opened = await outcomeSession(adapter);
+      let memory = OUTCOME_START;
+      try {
+        for (const [index, event] of question.events.entries()) {
+          const stage0 = outcomeStage0(memory, event);
+          memory = stage0.memory;
+          const stage1 = await opened.send(event);
+          const shape = (found: { answer?: unknown; fail?: OutcomeFail } | undefined) => JSON.stringify(found === undefined ? "(動かない)" : { answer: found.answer ?? null, fail: found.fail ?? null });
+          if (shape(stage0) !== shape(stage1)) return `${JSON.stringify(question.events.slice(0, index + 1))}: Stage 0 ${shape(stage0)}、Stage 1 ${shape(stage1)}`;
+        }
+      } finally {
+        await opened.close();
+      }
+      return undefined;
     },
   },
   "mutation-judge": {

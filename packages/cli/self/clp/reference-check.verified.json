@@ -4,7 +4,7 @@
     "reference-check.interpretation.ts"
   ],
   "specs": "sha256:972035f913c35ed8f6ca9e786a11512f48bcb9d5c697adeff29ee88d41c8b45b",
-  "code": "sha256:efed512cc59a9991a8f1f3a9b53f6366d232c477b0f4e8df22a9b33b700ce61c",
+  "code": "sha256:f9db394f78c7dfabc8c09ce6d9ea7605809980006d531650856aadbe1c51b0f4",
   "files": [
     "../src/gate-rules/gate-rules.ts",
     "../src/gate-rules/types.ts",
@@ -25,6 +25,9 @@
     "../src/mutation-verdict/types.ts",
     "../src/observation-compare/compare.ts",
     "../src/observation-compare/observation-compare.ts",
+    "../src/outcome-apply/outcome-apply.ts",
+    "../src/outcome-apply/rules.ts",
+    "../src/outcome-apply/types.ts",
     "../src/payload-check/fit.ts",
     "../src/payload-check/payload-check.ts",
     "../src/payload-check/types.ts",

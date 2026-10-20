@@ -4,7 +4,7 @@
     "graph-check.interpretation.ts"
   ],
   "specs": "sha256:41e93d67e41ecfcb9661b8c39dcdb7df4d8a14563b719782c1845afbe8b79765",
-  "code": "sha256:f946d795528e2e771efd1f80ed60efbe8074471bf12a4fdc3c7abbe9ec5aa264",
+  "code": "sha256:856fa4b09b97193cdb56efdff9dad6985da669d00d25120753a7d6a974759313",
   "files": [
     "../src/gate-rules/gate-rules.ts",
     "../src/gate-rules/types.ts",
@@ -25,6 +25,9 @@
     "../src/mutation-verdict/types.ts",
     "../src/observation-compare/compare.ts",
     "../src/observation-compare/observation-compare.ts",
+    "../src/outcome-apply/outcome-apply.ts",
+    "../src/outcome-apply/rules.ts",
+    "../src/outcome-apply/types.ts",
     "../src/payload-check/fit.ts",
     "../src/payload-check/payload-check.ts",
     "../src/payload-check/types.ts",

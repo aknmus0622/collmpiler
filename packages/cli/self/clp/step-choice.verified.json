@@ -4,7 +4,7 @@
     "step-choice.interpretation.ts"
   ],
   "specs": "sha256:64d6c09c7dfa690db68e77fe6c171afb7eec074562f129ca01c1ec06c2aba07f",
-  "code": "sha256:49998a01bea02765cb820d39d3cdca7d29dccf88c082baad7f6948b8ad2f872e",
+  "code": "sha256:7a99477ef47691a0adcedf49dcd8d3fa66e6f821d8b8e9a4b414ae3089573f51",
   "files": [
     "../src/gate-rules/gate-rules.ts",
     "../src/gate-rules/types.ts",
@@ -25,6 +25,9 @@
     "../src/mutation-verdict/types.ts",
     "../src/observation-compare/compare.ts",
     "../src/observation-compare/observation-compare.ts",
+    "../src/outcome-apply/outcome-apply.ts",
+    "../src/outcome-apply/rules.ts",
+    "../src/outcome-apply/types.ts",
     "../src/payload-check/fit.ts",
     "../src/payload-check/payload-check.ts",
     "../src/payload-check/types.ts",

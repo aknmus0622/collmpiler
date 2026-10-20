@@ -4,7 +4,7 @@
     "promise-keeper.interpretation.ts"
   ],
   "specs": "sha256:6303c786adb4a678af9bbdf832abbf9997ad4bf81352e8d35400948f2bd70f1b",
-  "code": "sha256:27a75246b3a09ebb9bc69d2944e31920511d0b42b7cc9509afc9fc66a65f62e7",
+  "code": "sha256:52d88b18702974c23f088f2293f9a45726c8c777637373be4fb9f1fb015e3564",
   "files": [
     "../src/gate-rules/gate-rules.ts",
     "../src/gate-rules/types.ts",
@@ -25,6 +25,9 @@
     "../src/mutation-verdict/types.ts",
     "../src/observation-compare/compare.ts",
     "../src/observation-compare/observation-compare.ts",
+    "../src/outcome-apply/outcome-apply.ts",
+    "../src/outcome-apply/rules.ts",
+    "../src/outcome-apply/types.ts",
     "../src/payload-check/fit.ts",
     "../src/payload-check/payload-check.ts",
     "../src/payload-check/types.ts",

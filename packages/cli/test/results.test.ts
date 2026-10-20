@@ -199,3 +199,42 @@ test("1手の選び方 (N12c): Stage 1 の選び方は Stage 0 と一致しな�
   assert.equal(checked.ok, false);
   assert.match((checked as { message: string }).message, /フレームワークの誤り: 実行するコマンドの選び方が/);
 });
+
+test("起きることの適用 (N12d): Stage 1 の適用は、事実ごとに Stage 0 と一致しなければならず、食い違えば止める (R4)", async () => {
+  const dir = specDir();
+  const { OUTCOME_START, outcomeStage0 } = await import("../src/outcome.ts");
+  const run = (deciders: Parameters<typeof check>[4]) => check(dir, adapterWith(), { drafts: false }, { seed: 7, numRuns: 50 }, deciders);
+  // Stage 0 と同じ判断をする隔離なら、結果は変わらない。開いた隔離は、どれも閉じられる
+  let opened = 0;
+  let closed = 0;
+  const faithful = {
+    outcome: async () => {
+      opened++;
+      let memory = OUTCOME_START;
+      return {
+        async send(event: Parameters<typeof outcomeStage0>[1]) {
+          const found = outcomeStage0(memory, event);
+          memory = found.memory;
+          return found;
+        },
+        async close() {
+          closed++;
+        },
+      };
+    },
+  };
+  assert.equal((await run(faithful)).status, "pass");
+  assert.ok(opened > 0);
+  assert.equal(closed, opened);
+  // 遷移先をいつも元の状態だと答える Stage 1 は、借りた場面で食い違う
+  const stuck = await run({
+    outcome: async () => ({
+      async send(event: Parameters<typeof outcomeStage0>[1]) {
+        return event.name === "End" ? { answer: "AVAILABLE" } : event.name === "Effect" ? { answer: true } : {};
+      },
+      async close() {},
+    }),
+  });
+  assert.equal(stuck.status, "error");
+  assert.match((stuck as { message: string }).message, /フレームワークの誤り: 起きることの適用が、Stage 0 .* と Stage 1 \(outcome-apply: /);
+});

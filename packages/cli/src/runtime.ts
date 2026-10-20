@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { isDeepStrictEqual, parseArgs } from "node:util";
 import fc from "fast-check";
-import { FAILED, RuleConflictError, UnboundNameError, activate, matchCondition } from "@clp/core";
+import { FAILED, RuleConflictError, UnboundNameError, activate } from "@clp/core";
 import type { BoundSpecification, FieldSchema } from "@clp/core";
 import { extract, isRecordOutput, isReference, respondedValues, stableStringify } from "./extract.ts";
 import { seedOf } from "./generate.ts";
@@ -14,6 +14,8 @@ import { observationsEqualStage0 } from "./observe.ts";
 import { chooseCaseStage0, chooseStage0, enabledStage0 } from "./choose.ts";
 import type { CaseChoice, CommandChoice, CommandFacts } from "./choose.ts";
 import { freshStage0, increasingStage0, survivesRestartStage0 } from "./promise.ts";
+import { OUTCOME_START, callsStage0, outcomeStage0 } from "./outcome.ts";
+import type { OutcomeEvent, OutcomeFail } from "./outcome.ts";
 import type { Observed } from "./observe.ts";
 import { conforms, isEnum, isList, isNumberSchema, isOneOf, isOptional, isRecord, isStringSchema } from "./schema.ts";
 
@@ -132,7 +134,45 @@ export type Deciders = {
   increasing?: (drawn: number, previous: number | null, delta: number, max: number | null) => Promise<number | undefined>;
   fresh?: (drawn: unknown, used: unknown[]) => Promise<unknown>;
   survivesRestart?: (durable: boolean) => Promise<boolean | undefined>;
+  // 起きることの適用 (outcome-apply)。1手の適用ごとに1つの隔離を開き、事実を順に渡す。使えなければ undefined
+  outcome?: () => Promise<OutcomeSession | undefined>;
+  calls?: (keyed: boolean, found: boolean) => Promise<boolean | undefined>;
 };
+// send が undefined を返したら、その部品は動かなくなった（Stage 0 だけで続ける）
+export type OutcomeSession = { send(event: OutcomeEvent): Promise<{ answer?: unknown; fail?: OutcomeFail } | undefined>; close(): Promise<void> };
+
+// 1手の適用。Stage 0 がいつも判断し、Stage 1 の隔離があれば、事実ごとに答えと誤りの種類の一致を求める。
+// 仕様の誤りなら、呼ぶ側が渡した言葉で止める
+class OutcomeRun {
+  private memory = OUTCOME_START;
+  private stage1: OutcomeSession | undefined;
+  private constructor(stage1: OutcomeSession | undefined) {
+    this.stage1 = stage1;
+  }
+  static async open(deciders: Deciders): Promise<OutcomeRun> {
+    return new OutcomeRun(await deciders.outcome?.());
+  }
+  async send(event: OutcomeEvent, failMessage: () => string = () => ""): Promise<unknown> {
+    const stage0 = outcomeStage0(this.memory, event);
+    this.memory = stage0.memory;
+    const stage1 = await this.stage1?.send(event);
+    if (stage1 === undefined) this.stage1 = undefined;
+    else {
+      const shape = (found: { answer?: unknown; fail?: OutcomeFail }) => ({ answer: found.answer ?? null, fail: found.fail ?? null });
+      agree("起きることの適用", "outcome-apply", shape(stage0), shape(stage1), event);
+    }
+    if (stage0.fail) throw new Error(failMessage());
+    return stage0.answer;
+  }
+  async close(): Promise<void> {
+    await this.stage1?.close();
+  }
+}
+async function callsPart(deciders: Deciders, keyed: boolean, found: boolean): Promise<boolean> {
+  const stage0 = callsStage0(keyed, found);
+  agree("部品を呼ぶか", "outcome-apply", stage0, await deciders.calls?.(keyed, found), { keyed, found });
+  return stage0;
+}
 
 // 値の判断で、Stage 0 と Stage 1 が一致することを求める (R4)
 function agree<T>(what: string, component: string, stage0: T, stage1: T | undefined, given: unknown): void {
@@ -447,6 +487,8 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
     if (resolved === FAILED_ANSWER) throw new Error(failedRead(String((value as Reference).path)));
     return resolved;
   };
+  // この1手で選んだ決定表の行（尋ねた条件の答えと一緒に）。1手の終わりに Stage 1 と突き合わせる
+  const rowChoices: { names: string[]; answers: Record<string, boolean>; choice: CaseChoice }[] = [];
   const resolveRaw = (value: SpecValue, context: Values & { status: string }, command: string): unknown => {
     if (!isReference(value)) return value;
     const ref: Reference = value;
@@ -456,7 +498,18 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
         const [decision, column] = ref.path as [string, string];
         const table = input.decisions[decision];
         if (!table) throw new Error(`決定表 "${decision}" がありません`);
-        const row = matchCondition(binding, Object.keys(table), context);
+        // 行の選び方は、場合の選び方と同じ。値の解決は同期なので、ここでは Stage 0 で選んで、尋ねた答えと一緒に記録し、
+        // 1手の終わりに Stage 1 (step-choice) に同じことを尋ねて一致を求める
+        const names = Object.keys(table);
+        const answers: Record<string, boolean> = {};
+        const choice = chooseCaseStage0(names, (name) => {
+          const condition = binding.conditions[name];
+          if (!condition) throw new UnboundNameError("条件", name);
+          return (answers[name] = Boolean(condition(context)));
+        });
+        if (choice.chosen === null) throw new RuleConflictError(choice.conflict);
+        rowChoices.push({ names, answers, choice });
+        const row = choice.chosen;
         const cell = table[row][column];
         if (cell === null) throw new Error(`決定表 "${decision}" の行 "${row}" には、列 "${column}" の値がありません (null) が、その値が使われました`);
         return cell;
@@ -507,6 +560,8 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
   // force: そのコマンドを、実行できるかどうか (from / onlyIf) を見ずに実行する（仕様のミューテーションで使う）
   // strict: force したコマンドが、いまの状態で実行できなければ、仕様の誤りにする（外側の部品が呼んだとき）
   const next = async (state: State, raw: RawStep, steps: Step[], force?: string, strict = false): Promise<{ step: Step; expected: Observation; after: State } | undefined> => {
+    // この手で選んだ決定表の行は、ここから（含む部品の手は、自分の分だけを突き合わせる）
+    const mark = rowChoices.length;
     try {
       // 意味の関数の中の decide / calculate が、この解釈を引くようにする
       activate(binding);
@@ -579,7 +634,7 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
         const list = call.part in keyed ? manyStates[call.part] : undefined;
         const index = list ? list.findIndex((entry) => isDeepStrictEqual(entry.key, key)) : -1;
         let result: Awaited<ReturnType<Simulator["next"]>>;
-        if (list && index < 0) result = undefined;
+        if (!(await callsPart(deciders, list !== undefined, index >= 0))) result = undefined;
         else {
           try {
             result = await child.next(list ? list[index].state : partStates[call.part], childRaw, [], call.command, true);
@@ -634,86 +689,97 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
       steps.push(step);
 
       const outcome = cases[matched];
-      // goTo が無ければ、状態は変わらない。決定表の列なら、当たった行の値 (W2)
-      const target = outcome.goTo === undefined ? state.status : typeof outcome.goTo === "string" ? outcome.goTo : String(resolve(outcome.goTo as SpecValue, contextOf(command), command));
-      if (!model.states.includes(target)) throw new Error(`goTo "${target}" は states にありません`);
-
-      // 副作用: when が成り立つものだけを、書かれた順に
-      // 含む部品の副作用が先（呼んだのは、場合を決める前）。名前は、部品の名前で修飾する
+      const run = await OutcomeRun.open(deciders);
+      let target: string;
       const effects: { name: string; payload: Values }[] = [...childEffects];
-      for (const effect of outcome.effects) {
-        const issued =
-          effect.when === undefined
-            ? true
-            : typeof effect.when === "string"
-              ? (await chooseCase(deciders, [effect.when], holds)).chosen === effect.when
-              : resolve(effect.when, context, command) === true;
-        if (!issued) continue;
-        const fields = model.effects[effect.name];
-        if (!fields) throw new Error(`副作用 "${effect.name}" は effects にありません`);
-        const payload = Object.fromEntries(Object.entries(effect.payload).map(([field, value]) => [field, resolve(value, context, command)]));
-        for (const [field, schema] of Object.entries(fields)) {
-          if (!conforms(schema, payload[field])) {
-            throw new Error(`${effect.name}.${field} = ${JSON.stringify(payload[field])} が宣言した型・範囲に合いません`);
-          }
-        }
-        effects.push({ name: effect.name, payload });
-      }
-
-      // 覚えるデータ
       const set: Values = {};
-      for (const [field, value] of Object.entries(outcome.set)) {
-        if (!(field in model.data)) throw new Error(`set: "${field}" は data にありません`);
-        set[field] = resolve(value, context, command);
-        if (!conforms(model.data[field], set[field])) {
-          throw new Error(`set: ${field} = ${JSON.stringify(set[field])} が宣言した型・範囲に合いません`);
-        }
-      }
-
-      // 返す値
       const declared = model.outputs?.[command];
       let output: unknown;
-      if (declared !== undefined) {
-        const responded = respondedValues(outcome.responds, declared);
-        if (outcome.responds === undefined) throw new Error(`コマンド ${command} の、この場合に返す値 (responds) がありません`);
-        const valueOf = (value: SpecValue) => ((value as unknown) === null ? null : resolve(value, context, command));
-        if (isRecordOutput(declared)) {
-          const fields = Object.fromEntries(responded.map(([field, value]) => [field, valueOf(value)]));
-          for (const [field, schema] of Object.entries(declared.record)) {
-            const fits = fields[field] === null && schema !== "value" ? declared.optional?.includes(field) === true : conforms(schema, fields[field]);
-            if (!fits) throw new Error(`responds: ${field} = ${JSON.stringify(fields[field])} が宣言した型・範囲に合いません`);
-          }
-          output = fields;
-        } else if (isOneOf(declared)) {
-          // どれか1つの形: { 形: 値 }
-          output = Object.fromEntries(responded.map(([variant, value]) => [variant, valueOf(value)]));
-          if (!conforms(declared, output)) throw new Error(`responds: ${JSON.stringify(output)} が宣言した型・範囲に合いません`);
-        } else {
-          output = valueOf(responded[0][1]);
-          if (!conforms(declared as FieldSchema, output)) throw new Error(`responds: ${JSON.stringify(output)} が宣言した型・範囲に合いません`);
+      try {
+        await run.send({ name: "Begin", input: { state: state.status } });
+        // goTo が無ければ、状態は変わらない。決定表の列なら、当たった行の値 (W2)
+        if (outcome.goTo !== undefined) {
+          const to = typeof outcome.goTo === "string" ? outcome.goTo : String(resolve(outcome.goTo as SpecValue, contextOf(command), command));
+          await run.send({ name: "GoTo", input: { target: to, declared: model.states.includes(to) } }, () => `goTo "${to}" は states にありません`);
         }
-      }
 
-      // 多数ある部品を作る、消す（場合が決まったあと、書いた順に）
-      for (const added of outcome.adds ?? []) {
-        const child = children[added.part];
-        const list = manyStates[added.part];
-        if (!child || !list) throw new Error(`部品 "${added.part}" は、多数ある部品 (many) ではありません`);
-        const key = plain(resolve(added.key, context, command));
-        if (list.some((entry) => isDeepStrictEqual(entry.key, key))) throw new Error(`${added.part}: キー ${JSON.stringify(key)} の部品は、すでにあります`);
-        const fresh = child.start();
-        const given = plain(Object.fromEntries(Object.entries(added.data).map(([field, value]) => [field, resolve(value, context, command)]))) as Values;
-        for (const [field, value] of Object.entries(given)) {
-          const schema = input.parts![added.part].model!.data[field];
-          if (!schema) throw new Error(`${added.part}: "${field}" は、その部品の data にありません`);
-          if (!conforms(schema, value)) throw new Error(`${added.part}.${field} = ${JSON.stringify(value)} が宣言した型・範囲に合いません`);
+        // 副作用: when が成り立つものだけを、書かれた順に
+        // 含む部品の副作用が先（呼んだのは、場合を決める前）。名前は、部品の名前で修飾する
+        for (const effect of outcome.effects) {
+          const guard = effect.when === undefined ? "none" : typeof effect.when === "string" ? "condition" : "value";
+          const chosen = typeof effect.when === "string" ? (await chooseCase(deciders, [effect.when], holds)).chosen === effect.when : false;
+          const guardValue = guard === "value" ? resolve(effect.when as SpecValue, context, command) : null;
+          const fields = model.effects[effect.name];
+          const issued = await run.send(
+            { name: "Effect", input: { guard, chosen, guardValue: guardValue === undefined ? null : plain(guardValue), declared: fields !== undefined } },
+            () => `副作用 "${effect.name}" は effects にありません`,
+          );
+          if (!issued) continue;
+          const payload = Object.fromEntries(Object.entries(effect.payload).map(([field, value]) => [field, resolve(value, context, command)]));
+          for (const [field, schema] of Object.entries(fields)) {
+            await run.send({ name: "Fits", input: { fits: conforms(schema, payload[field]) } }, () => `${effect.name}.${field} = ${JSON.stringify(payload[field])} が宣言した型・範囲に合いません`);
+          }
+          effects.push({ name: effect.name, payload });
         }
-        list.push({ key, state: { ...fresh, data: { ...fresh.data, ...given } } });
-      }
-      for (const removed of outcome.removes ?? []) {
-        const key = plain(resolve(removed.key, context, command));
-        if (!manyStates[removed.part]) throw new Error(`部品 "${removed.part}" は、多数ある部品 (many) ではありません`);
-        manyStates[removed.part] = manyStates[removed.part].filter((entry) => !isDeepStrictEqual(entry.key, key));
+
+        // 覚えるデータ
+        for (const [field, value] of Object.entries(outcome.set)) {
+          await run.send({ name: "Set", input: { declared: field in model.data } }, () => `set: "${field}" は data にありません`);
+          set[field] = resolve(value, context, command);
+          await run.send({ name: "Fits", input: { fits: conforms(model.data[field], set[field]) } }, () => `set: ${field} = ${JSON.stringify(set[field])} が宣言した型・範囲に合いません`);
+        }
+
+        // 返す値
+        if (declared !== undefined) {
+          await run.send({ name: "Responds", input: { given: outcome.responds !== undefined } }, () => `コマンド ${command} の、この場合に返す値 (responds) がありません`);
+          const responded = respondedValues(outcome.responds, declared);
+          const valueOf = (value: SpecValue) => ((value as unknown) === null ? null : resolve(value, context, command));
+          if (isRecordOutput(declared)) {
+            const fields = Object.fromEntries(responded.map(([field, value]) => [field, valueOf(value)]));
+            for (const [field, schema] of Object.entries(declared.record)) {
+              await run.send(
+                {
+                  name: "RespondField",
+                  input: { isNull: fields[field] === null, anyValue: schema === "value", optional: declared.optional?.includes(field) === true, fits: conforms(schema, fields[field]) },
+                },
+                () => `responds: ${field} = ${JSON.stringify(fields[field])} が宣言した型・範囲に合いません`,
+              );
+            }
+            output = fields;
+          } else if (isOneOf(declared)) {
+            // どれか1つの形: { 形: 値 }
+            output = Object.fromEntries(responded.map(([variant, value]) => [variant, valueOf(value)]));
+            await run.send({ name: "Fits", input: { fits: conforms(declared, output) } }, () => `responds: ${JSON.stringify(output)} が宣言した型・範囲に合いません`);
+          } else {
+            output = valueOf(responded[0][1]);
+            await run.send({ name: "Fits", input: { fits: conforms(declared as FieldSchema, output) } }, () => `responds: ${JSON.stringify(output)} が宣言した型・範囲に合いません`);
+          }
+        }
+
+        // 多数ある部品を作る、消す（場合が決まったあと、書いた順に）
+        for (const added of outcome.adds ?? []) {
+          const child = children[added.part];
+          const list = manyStates[added.part];
+          await run.send({ name: "Add", input: { many: child !== undefined && list !== undefined } }, () => `部品 "${added.part}" は、多数ある部品 (many) ではありません`);
+          const key = plain(resolve(added.key, context, command));
+          await run.send({ name: "Key", input: { exists: list.some((entry) => isDeepStrictEqual(entry.key, key)) } }, () => `${added.part}: キー ${JSON.stringify(key)} の部品は、すでにあります`);
+          const fresh = child.start();
+          const given = plain(Object.fromEntries(Object.entries(added.data).map(([field, value]) => [field, resolve(value, context, command)]))) as Values;
+          for (const [field, value] of Object.entries(given)) {
+            const schema = input.parts![added.part].model!.data[field];
+            await run.send({ name: "AddField", input: { declared: schema !== undefined } }, () => `${added.part}: "${field}" は、その部品の data にありません`);
+            await run.send({ name: "Fits", input: { fits: conforms(schema, value) } }, () => `${added.part}.${field} = ${JSON.stringify(value)} が宣言した型・範囲に合いません`);
+          }
+          list.push({ key, state: { ...fresh, data: { ...fresh.data, ...given } } });
+        }
+        for (const removed of outcome.removes ?? []) {
+          const key = plain(resolve(removed.key, context, command));
+          await run.send({ name: "Remove", input: { many: manyStates[removed.part] !== undefined } }, () => `部品 "${removed.part}" は、多数ある部品 (many) ではありません`);
+          manyStates[removed.part] = manyStates[removed.part].filter((entry) => !isDeepStrictEqual(entry.key, key));
+        }
+        target = String(await run.send({ name: "End", input: {} }));
+      } finally {
+        await run.close();
       }
 
       const after: State = {
@@ -724,8 +790,16 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
         ...(state.many ? { many: manyStates } : {}),
       };
       checkInvariants(after, steps);
+      for (const recorded of rowChoices.splice(mark)) {
+        const replay = (name: string) => {
+          if (!(name in recorded.answers)) throw new Error(`条件 "${name}" は、Stage 0 なら尋ねません`);
+          return recorded.answers[name];
+        };
+        agree("決定表の行の選び方", "step-choice", recorded.choice, await deciders.chooseCase?.(recorded.names, replay), { names: recorded.names, answers: recorded.answers });
+      }
       return { step, expected: plain({ state: target, effects, ...(declared === undefined ? {} : { output }) }) as Observation, after };
     } catch (error) {
+      rowChoices.length = mark;
       throw error instanceof SpecError || error instanceof FrameworkError ? error : new SpecError(messageOf(error), steps);
     }
   };
