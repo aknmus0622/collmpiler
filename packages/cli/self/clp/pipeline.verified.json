@@ -4,7 +4,7 @@
     "pipeline.interpretation.ts"
   ],
   "specs": "sha256:cd2a330ce6f8bb602beb0281b621b0dc25debef9ecbba63578f8ad77c236b594",
-  "code": "sha256:5da6f30c155067310a2b7ef35b43998dbee50a42f2cdd029fda22e580e67a01a",
+  "code": "sha256:362086ce951095c0ac666d5298618b08ee05488f53834316f10f0798402a6fcf",
   "files": [
     "../src/gate-rules/gate-rules.ts",
     "../src/gate-rules/types.ts",
@@ -23,6 +23,8 @@
     "../src/mutation-verdict/judgement.ts",
     "../src/mutation-verdict/mutation-verdict.ts",
     "../src/mutation-verdict/types.ts",
+    "../src/observation-compare/compare.ts",
+    "../src/observation-compare/observation-compare.ts",
     "../src/payload-check/fit.ts",
     "../src/payload-check/payload-check.ts",
     "../src/payload-check/types.ts",

@@ -307,6 +307,7 @@ test("自分自身の検証: 自分の生成物の上で動くフレームワー
     "leaf-check:implementation:0:ok",
     "mutation-judge:implementation:0:ok",
     "mutation-verdict:implementation:0:ok",
+    "observation-compare:implementation:0:ok",
     "payload-check:implementation:0:ok",
     "pipeline:implementation:0:ok",
     "reference-check:implementation:0:ok",
@@ -865,6 +866,25 @@ test("採点の部品 (N11): ミューテーションの合否は、事例の集
   writeFileSync(join(copy, "clp/mutation-judge.adapter.ts"), `export const adapter = { async setupIsolation() {}, async teardownIsolation() {}, async executeCommand() {}, async getCurrentState() { return "VALUES"; } };\n`);
   const checked = runCases(specs, workspace(copy), "mutation-judge");
   assert.match(checked.problem ?? "", /事例 \d+: Stage 0/);
+});
+
+test("採点の部品 (N12b): 観測値の比較は、事例のすべてで Stage 0 と同じ答えを返し、検証で使われる", async () => {
+  const { R1_CASES, runCases, stage1Adapter, stage1Deciders } = await import("../src/stage1.ts");
+  const self = join(repoRoot, "packages/cli/self");
+  const adapter = await stage1Adapter("observation-compare");
+  assert.ok(adapter, "Stage 0 が採点した記録があり、使えること (R2)");
+  const cases = JSON.parse(readFileSync(join(self, "cases/observation-compare.json"), "utf8")).cases as unknown[];
+  assert.ok(cases.length > 300);
+  for (const given of cases) assert.equal(await R1_CASES["observation-compare"].compare(adapter, given), undefined, JSON.stringify(given));
+  // 事例には、一致するものと、しないものの両方がある
+  const { observationsEqualStage0 } = await import("../src/observe.ts");
+  const verdicts = new Set(cases.map((given) => { const c = given as { expected: never; actual: never; answers: boolean }; return observationsEqualStage0(c.expected, c.actual, c.answers); }));
+  assert.deepEqual([...verdicts].sort(), [false, true]);
+  // 検証 (check) は、この部品を判断に使う
+  assert.ok((await stage1Deciders()).observationsEqual);
+  const { resolveLayout, workspaceOf } = await import("../src/layout.ts");
+  const { typescriptTarget } = await import("../src/target-typescript.ts");
+  assert.equal(runCases(join(self, "specs"), workspaceOf(resolveLayout({ out: self }), typescriptTarget.files, "observation-compare"), "observation-compare").problem, undefined);
 });
 
 test("採点の部品 (N11c / N11d): 出口の門の判定は、事実のすべての組み合わせで Stage 0 と同じ判定を返す", async () => {

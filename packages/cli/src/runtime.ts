@@ -10,6 +10,8 @@ import { seedOf } from "./generate.ts";
 import type { Ir } from "./generate.ts";
 import type { Reference, SpecInput, SpecModel, SpecValue } from "./extract.ts";
 import { dependenciesOf, loadSpecs, restartable } from "./loader.ts";
+import { observationsEqualStage0 } from "./observe.ts";
+import type { Observed } from "./observe.ts";
 import { conforms, isEnum, isList, isNumberSchema, isOneOf, isOptional, isRecord, isStringSchema } from "./schema.ts";
 
 // 生成された verify.ts から呼ばれる PBT ランタイム。
@@ -98,6 +100,35 @@ class SpecError extends Error {
     this.name = "SpecError";
     this.steps = steps;
   }
+}
+
+// フレームワーク自身の誤り: 同じ値を求めた Stage 0 と Stage 1 が食い違った (R4)。仕様の誤りと同じく、検証を止める
+class FrameworkError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "FrameworkError";
+  }
+}
+
+// 判断の差し替え口 (N12a)。採点の部品 (R1) を Stage 1 で使うときに、検証の前に1度だけ用意する（stage1.ts の stage1Deciders）。
+// 無いものは Stage 0 だけで判断する
+export type Deciders = {
+  // 観測値の比較 (observation-compare)。answers: 仕様がそのコマンドの答えの形を宣言している
+  observationsEqual?: (expected: Observed, actual: Observed, answers: boolean) => Promise<boolean | undefined>;
+};
+
+// 観測値を比べる。Stage 0 はいつも比べ（安いので）、Stage 1 があれば両方の答えが一致することを求める (R4: 期待との一致は値なので、
+// 厳しい側を取るのではなく、食い違えば止める)。Stage 1 が動かなければ (undefined)、Stage 0 で続ける
+async function observationsEqual(deciders: Deciders, expected: Observed, actual: Observed, answers: boolean): Promise<boolean> {
+  const stage0 = observationsEqualStage0(expected, actual, answers);
+  const stage1 = await deciders.observationsEqual?.(expected, actual, answers);
+  if (stage1 !== undefined && stage1 !== stage0) {
+    throw new FrameworkError(
+      `観測値の比較が、Stage 0 (${stage0 ? "一致" : "不一致"}) と Stage 1 (observation-compare: ${stage1 ? "一致" : "不一致"}) で食い違いました: ` +
+        `期待 ${JSON.stringify(expected)}、実際 ${JSON.stringify(actual)}`,
+    );
+  }
+  return stage0;
 }
 
 // 意味の関数に書かれている定数と、決定表の値。入力の生成に混ぜる。
@@ -960,6 +991,7 @@ export async function check(
   adapter: Adapter,
   select: { drafts: boolean; component?: string },
   given: { seed?: number; path?: string; numRuns?: number },
+  deciders?: Deciders,
 ): Promise<PbtResult> {
   const input = await loadSpecs(specs, select);
   const model = input.model;
@@ -975,6 +1007,10 @@ export async function check(
   const dependencies = dependenciesOf(input);
   // シードの指定が無ければ、clp apply と同じく、仕様のハッシュから決める（同じ仕様とコードなら、いつも同じ結果）
   if (params.seed === undefined) params = { ...params, seed: seedOf(JSON.parse(stableStringify(extract(input).ir)) as Ir) };
+  // 判断を Stage 1 で下す部品（渡されなければ、使えるものを用意する。stage1.ts は runtime.ts を読むので、ここで読み込む）
+  const decide = deciders ?? (await (await import("./stage1.ts")).stage1Deciders(adapter));
+  // 答えるコマンドで、本番システムが何も返さなかったときは、null と答えたとみなす（報告に見せる形）
+  const shown = (actual: Observed, answers: boolean): Observed => (answers && !("output" in actual) ? { ...actual, output: null } : actual);
 
   // 1試行を実行し、不一致があればその内容を返す。仕様側の問題は SpecError として投げる
   const trial = async (raw: RawStep[]) => {
@@ -1027,7 +1063,7 @@ export async function check(
       try {
         let state = sim.start();
         const initial = plain({ state: await adapter.getCurrentState(), effects: recorded });
-        if (!isDeepStrictEqual(expected, initial)) return { steps, expected, actual: initial };
+        if (!(await observationsEqual(decide, expected as Observed, initial, false))) return { steps, expected, actual: initial };
 
         for (const rawStep of raw) {
           // 再起動 (W7): 本番システムを同じ保存先で起動し直す。残るはずのものは残り、ほかは始めに戻る
@@ -1040,7 +1076,7 @@ export async function check(
             if (!adapter.restartSystem) return { steps, expected, actual: { error: "adapter.restartSystem() is missing: this system keeps data across restarts, so the adapter must be able to restart it" } };
             await adapter.restartSystem();
             const restarted = plain({ state: await adapter.getCurrentState(), effects: recorded });
-            if (!isDeepStrictEqual(expected, restarted)) return { steps, expected, actual: restarted };
+            if (!(await observationsEqual(decide, expected as Observed, restarted, false))) return { steps, expected, actual: restarted };
           }
           const planned = await sim.next(state, rawStep, steps);
           if (!planned) continue;
@@ -1052,9 +1088,9 @@ export async function check(
           // 本番コードが例外を握りつぶしていても、仕様に無い問い合わせは不合格にする
           if (misasked) return { steps, expected, actual: { error: misasked } };
           // 返した値を比べるのは、返すものの形を宣言したコマンドだけ
-          const answered = "output" in expected ? { output: returned === undefined ? null : returned } : {};
-          const actual = plain({ state: await adapter.getCurrentState(), effects: recorded, ...answered });
-          if (!isDeepStrictEqual(expected, actual)) return { steps, expected, actual };
+          const answers = "output" in expected;
+          const actual: Observed = plain({ state: await adapter.getCurrentState(), effects: recorded, ...(answers && returned !== undefined ? { output: returned } : {}) });
+          if (!(await observationsEqual(decide, expected as Observed, actual, answers))) return { steps, expected, actual: shown(actual, answers) };
           state = planned.after;
         }
       } finally {
@@ -1065,7 +1101,7 @@ export async function check(
         }
       }
     } catch (error) {
-      if (error instanceof SpecError) throw error;
+      if (error instanceof SpecError || error instanceof FrameworkError) throw error;
       return { steps, expected, actual: { error: misasked ?? messageOf(error) } };
     }
     return undefined;
@@ -1091,6 +1127,7 @@ export async function check(
     };
   } catch (error) {
     if (error instanceof SpecError) return { status: "error", message: `仕様の誤り: ${error.message}`, steps: error.steps };
+    if (error instanceof FrameworkError) return { status: "error", message: `フレームワークの誤り: ${error.message}` };
     throw error;
   }
 }

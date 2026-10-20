@@ -8,6 +8,7 @@ import type { Ir } from "../src/generate.ts";
 import { loadSpecs } from "../src/loader.ts";
 import { check, compareSpecs, observability } from "../src/runtime.ts";
 import type { Adapter, Ports } from "../src/runtime.ts";
+import { observationsEqualStage0 } from "../src/observe.ts";
 
 // コマンドの結果: 返すものの形 (output) を宣言し、場合ごとに返す値 (responds) を書く。検証は、返した値も比べる
 
@@ -158,4 +159,21 @@ test("結果にしか現れない決定表の値は、検証に現れる。2つ�
   assert.deepEqual(differences.map((d) => `${d.command}:${d.aspect}`), ["Borrow:output"]);
   assert.deepEqual(differences[0].first, { state: "ON_LOAN", effects: [], output: { result: "lent", dueInDays: 14 } });
   assert.deepEqual(differences[0].other, { state: "ON_LOAN", effects: [], output: { result: "lent", dueInDays: 1 } });
+});
+
+test("観測値の比較 (N12b): Stage 1 の比較は Stage 0 と一致しなければならず、食い違えばフレームワークの誤りとして止める (R4)", async () => {
+  const dir = specDir();
+  const run = (deciders: Parameters<typeof check>[4]) => check(dir, adapterWith(), { drafts: false }, { seed: 7, numRuns: 50 }, deciders);
+  // 同じ判断をする Stage 1 なら、結果は変わらない。動かなくなった Stage 1 (undefined) は、Stage 0 だけで続ける
+  assert.equal((await run({ observationsEqual: async (expected, actual, answers) => observationsEqualStage0(expected, actual, answers) })).status, "pass");
+  assert.equal((await run({ observationsEqual: async () => undefined })).status, "pass");
+  // いつも「一致」と答える甘い Stage 1 は、正しい実装の上では Stage 0 と一致し、通る
+  assert.equal((await run({ observationsEqual: async () => true })).status, "pass");
+  // いつも「不一致」と答える Stage 1 は、Stage 0 と食い違うので、止まる（実装の誤りにはしない）
+  const stopped = await run({ observationsEqual: async () => false });
+  assert.equal(stopped.status, "error");
+  assert.match((stopped as { message: string }).message, /フレームワークの誤り: 観測値の比較が、Stage 0 \(一致\) と Stage 1 \(observation-compare: 不一致\)/);
+  // 甘い Stage 1 でも、誤った実装は Stage 0 との食い違いで止まり、合格にはならない
+  const lenient = await check(dir, adapterWith({ peek: () => "yes" }), { drafts: false }, { seed: 7, numRuns: 50 }, { observationsEqual: async () => true });
+  assert.equal(lenient.status, "error");
 });

@@ -4,7 +4,7 @@
     "value-writer.interpretation.ts"
   ],
   "specs": "sha256:cc963f70a0017e698b6a0ca27dfdff02adfdcef7de8c18ed5c196bd769f58e51",
-  "code": "sha256:c440ce6005d31bbe0979f2ed7acc26523ad877cfd0db96bc3896b5fe5531710e",
+  "code": "sha256:1ee283f0ee440a2383f21b0ee550bd1386729d9cfa4b7287867824dd54d81ff5",
   "files": [
     "../src/gate-rules/gate-rules.ts",
     "../src/gate-rules/types.ts",
@@ -23,6 +23,8 @@
     "../src/mutation-verdict/judgement.ts",
     "../src/mutation-verdict/mutation-verdict.ts",
     "../src/mutation-verdict/types.ts",
+    "../src/observation-compare/compare.ts",
+    "../src/observation-compare/observation-compare.ts",
     "../src/payload-check/fit.ts",
     "../src/payload-check/payload-check.ts",
     "../src/payload-check/types.ts",

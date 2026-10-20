@@ -3,7 +3,9 @@ import type { ReferenceDiagnostic, SpecInput } from "./extract.ts";
 import { slotQueries, slotsOf } from "./slots.ts";
 import type { SlotReport } from "./slots.ts";
 import { EXTRA_SEEDS } from "./runtime.ts";
-import type { Adapter, CellTrial, Unobservable } from "./runtime.ts";
+import type { Adapter, CellTrial, Deciders, Unobservable } from "./runtime.ts";
+import { leavesOf, observationsEqualStage0 } from "./observe.ts";
+import type { Observed } from "./observe.ts";
 import { fileURLToPath } from "node:url";
 import { GRAMMAR, leafEvents, leafMessage, leafQueries, slotOf, treeDiagnostic } from "@clp/core";
 import type { FieldSchema, LeafFacts, LeafReport, Node, TreeReport } from "@clp/core";
@@ -66,17 +68,19 @@ function fallback(component: string, error: unknown): undefined {
 export const R1_COMPONENTS: Record<string, readonly string[]> = {
   "mutation-judge": ["mutation.ts"],
   "gate-rules": ["rules.ts"],
+  "observation-compare": ["observe.ts"],
 };
 export const stage0HashOf = (component: string) => hashFiles(fileURLToPath(new URL(".", import.meta.url)), R1_COMPONENTS[component] ?? []);
-// R1: 採点の部品を作り直す実行では、採点の判断をすべて Stage 0 が下す。切り替えるオプションは持たない
-let gradingByStage0 = false;
-export const setGradingByStage0 = (on: boolean) => void (gradingByStage0 = on);
-export const isGradingByStage0 = () => gradingByStage0;
+// R1: 採点の部品を作り直す実行では、採点の判断をすべて Stage 0 が下す。切り替えるオプションは持たない。
+// 検証は別のプロセス (verify.ts) でも動くので、環境変数で子のプロセスにも伝える
+const GRADING = "CLP_GRADING_BY_STAGE0";
+export const setGradingByStage0 = (on: boolean) => void (on ? (process.env[GRADING] = "1") : delete process.env[GRADING]);
+export const isGradingByStage0 = () => process.env[GRADING] === "1";
 
 // 採点の判断を下す (R4)。Stage 0 はいつも判断し、Stage 1 が使えれば両方の厳しい側を取る（strict）。食い違えば知らせる（止めない）。
 // 甘い Stage 1 が、Stage 0 なら落とすものを通すことはない
 export async function grade<I, R>(part: Stage1Part<I, R>, input: I, stage0: R, strict: (a: R, b: R) => R, same: (a: R, b: R) => boolean): Promise<R> {
-  if (gradingByStage0) return stage0;
+  if (isGradingByStage0()) return stage0;
   const stage1 = await runStage1(part, input);
   if (stage1 === undefined) return stage0;
   if (!same(stage0, stage1)) console.error(`注意: 採点の判断が、Stage 0 と Stage 1 (${part.component}) で食い違いました。厳しい側を取ります`);
@@ -513,6 +517,44 @@ export function gateVerdict<R>(name: string, facts: object, stage0: R, strict: (
   return grade(gateRulesPart as Stage1Part<{ name: string; input: object }, R>, { name, input: facts }, stage0, strict, (a, b) => JSON.stringify(a) === JSON.stringify(b));
 }
 
+// 観測値の比較 (observation-compare、採点の部品)。2つの観測値を葉の列にして渡し、一致するかを尋ねる
+type Comparison = { expected: Observed; actual: Observed; answers: boolean };
+const observationComparePart: Stage1Part<Comparison, boolean> = {
+  component: "observation-compare",
+  async run(adapter, { expected, actual, answers }) {
+    const events = [
+      { name: "Begin", input: { answers, answered: "output" in actual } },
+      ...[...leavesOf(expected)].map((leaf) => ({ name: "Expected", input: { leaf } })),
+      ...[...leavesOf(actual)].map((leaf) => ({ name: "Actual", input: { leaf } })),
+      { name: "Decide", input: {} },
+    ];
+    return (await session(adapter, { queries: {}, effects: {} }, events)).at(-1) as boolean;
+  },
+};
+
+// 検証 (runtime.ts の check) で使う判断の部品を、1度だけ用意する（試行ごとに合格の記録を確かめると遅いので、読み込みは最初の1回）。
+// 採点の部品を作り直している実行 (R1) と、使えない部品は、渡さない（Stage 0 だけで判断する）
+// underTest: 検証している本番システムのアダプター。採点の部品が自分自身を採点することはない（同じモジュールを共有するので、隔離もぶつかる）
+export async function stage1Deciders(underTest?: Adapter): Promise<Deciders> {
+  if (isGradingByStage0()) return {};
+  const compare = await stage1Adapter(observationComparePart.component);
+  if (!compare || compare === underTest) return {};
+  let broken = false;
+  return {
+    async observationsEqual(expected, actual, answers) {
+      if (broken) return undefined;
+      const run = queue.then(() => observationComparePart.run(compare, { expected, actual, answers }));
+      queue = run.catch(() => undefined);
+      try {
+        return await run;
+      } catch (error) {
+        broken = true;
+        return fallback(observationComparePart.component, error);
+      }
+    },
+  };
+}
+
 // 採点の部品の事例の集まり (R3)。事例は入力だけ（期待値は持たない: 同じ入力で Stage 0 が判断したもの）。
 // compare は、1つの事例を Stage 0 と、渡したアダプターの両方で判断し、食い違えばその説明を返す
 export const R1_CASES: Record<string, { compare(adapter: Adapter, given: unknown): Promise<string | undefined> }> = {
@@ -522,6 +564,14 @@ export const R1_CASES: Record<string, { compare(adapter: Adapter, given: unknown
       const stage0 = GATE_RULES_STAGE0[name](input);
       const stage1 = await gateRulesPart.run(adapter, { name, input });
       return JSON.stringify(stage0) === JSON.stringify(stage1) ? undefined : `${name} ${JSON.stringify(input)}: Stage 0 ${JSON.stringify(stage0)}、Stage 1 ${JSON.stringify(stage1)}`;
+    },
+  },
+  "observation-compare": {
+    async compare(adapter, given) {
+      const comparison = given as Comparison;
+      const stage0 = observationsEqualStage0(comparison.expected, comparison.actual, comparison.answers);
+      const stage1 = await observationComparePart.run(adapter, comparison);
+      return stage0 === stage1 ? undefined : `${JSON.stringify(given)}: Stage 0 ${stage0}、Stage 1 ${stage1}`;
     },
   },
   "mutation-judge": {

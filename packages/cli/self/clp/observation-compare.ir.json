@@ -1,0 +1,145 @@
+{
+  "behaviors": [
+    {
+      "from": [
+        "READY"
+      ],
+      "name": "Actual",
+      "onlyIf": [],
+      "when": {
+        "otherwise": {
+          "does": "A leaf of the actual observation.",
+          "set": {
+            "actual": {
+              "$ref": "calculation:actualWithLeaf"
+            }
+          }
+        }
+      }
+    },
+    {
+      "from": [
+        "READY"
+      ],
+      "name": "Begin",
+      "onlyIf": [],
+      "when": {
+        "otherwise": {
+          "does": "Two observations are compared next; no leaf has been given yet. Whether the command answers (declares an output), and whether the system answered something, are remembered: a command that answers but answered nothing counts as answering null.",
+          "set": {
+            "actual": [],
+            "answerAbsent": {
+              "$ref": "calculation:answerAbsentNow"
+            },
+            "expected": []
+          }
+        }
+      }
+    },
+    {
+      "from": [
+        "READY"
+      ],
+      "name": "Decide",
+      "onlyIf": [],
+      "when": {
+        "otherwise": {
+          "does": "The answer is whether the two observations are equal: whether they have the same leaves (in any order of giving; a leaf given twice counts once), where, if the command answers and the system answered nothing, the actual observation also has the leaf `\"output\"|null|null`. Nothing is forgotten until the next Begin.",
+          "responds": {
+            "$ref": "calculation:observationsEqual"
+          }
+        }
+      }
+    },
+    {
+      "from": [
+        "READY"
+      ],
+      "name": "Expected",
+      "onlyIf": [],
+      "when": {
+        "otherwise": {
+          "does": "A leaf of the expected observation.",
+          "set": {
+            "expected": {
+              "$ref": "calculation:expectedWithLeaf"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "decisions": {},
+  "descriptions": {
+    "component": "Decides whether the observation of the system after a command equals the one the specification expects.",
+    "data.actual": "The leaves of the actual observation given so far.",
+    "data.answerAbsent": "Whether the command answers (the specification declares an output) but the system answered nothing.",
+    "data.expected": "The leaves of the expected observation given so far."
+  },
+  "irVersion": 7,
+  "model": {
+    "calculations": {
+      "actualWithLeaf": {
+        "description": "The actual leaves given so far, followed by the leaf just given",
+        "output": {
+          "list": "string"
+        }
+      },
+      "answerAbsentNow": {
+        "description": "Whether the command answers (declares an output) and the system answered nothing",
+        "output": "boolean"
+      },
+      "expectedWithLeaf": {
+        "description": "The expected leaves given so far, followed by the leaf just given",
+        "output": {
+          "list": "string"
+        }
+      },
+      "observationsEqual": {
+        "description": "Whether the set of expected leaves equals the set of actual leaves, the leaf `\"output\"|null|null` added to the actual ones when the command answers and the system answered nothing (order and repetition do not matter)",
+        "output": "boolean"
+      }
+    },
+    "commands": {
+      "Actual": {
+        "leaf": {
+          "among": {
+            "data": "expected"
+          },
+          "type": "string"
+        }
+      },
+      "Begin": {
+        "answered": "boolean",
+        "answers": "boolean"
+      },
+      "Decide": {},
+      "Expected": {
+        "leaf": "string"
+      }
+    },
+    "data": {
+      "actual": {
+        "list": "string"
+      },
+      "answerAbsent": "boolean",
+      "expected": {
+        "list": "string"
+      }
+    },
+    "effects": {},
+    "init": "READY",
+    "initial": {
+      "actual": [],
+      "answerAbsent": false,
+      "expected": []
+    },
+    "outputs": {
+      "Decide": "boolean"
+    },
+    "queries": {},
+    "states": [
+      "READY"
+    ]
+  }
+}
