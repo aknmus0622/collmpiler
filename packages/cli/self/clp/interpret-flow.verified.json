@@ -4,7 +4,7 @@
     "interpret-flow.interpretation.ts"
   ],
   "specs": "sha256:9b1e8fb7169d5855b3164da20488eec9e298f12581687050ff3974ff0ccd9937",
-  "code": "sha256:259e8fb5c7820c86954df909628f71d76bac42dcb8a7bd2d0b5b10525774a5db",
+  "code": "sha256:bd21033abd42e6b68f3a055bf1bf688381caf980e1a04c6f2654b3e38aefd6f7",
   "files": [
     "../src/gate-rules/gate-rules.ts",
     "../src/gate-rules/types.ts",
@@ -34,6 +34,9 @@
     "../src/reference-check/reference-check.ts",
     "../src/reference-check/types.ts",
     "../src/reference-check/verdict.ts",
+    "../src/step-choice/choice.ts",
+    "../src/step-choice/step-choice.ts",
+    "../src/step-choice/types.ts",
     "../src/text-plan/plan.ts",
     "../src/text-plan/text-plan.ts",
     "../src/text-plan/types.ts",

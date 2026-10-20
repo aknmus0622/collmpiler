@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { isDeepStrictEqual, parseArgs } from "node:util";
 import fc from "fast-check";
-import { FAILED, RuleConflictError, activate, matchCondition } from "@clp/core";
+import { FAILED, RuleConflictError, UnboundNameError, activate, matchCondition } from "@clp/core";
 import type { BoundSpecification, FieldSchema } from "@clp/core";
 import { extract, isRecordOutput, isReference, respondedValues, stableStringify } from "./extract.ts";
 import { seedOf } from "./generate.ts";
@@ -11,6 +11,8 @@ import type { Ir } from "./generate.ts";
 import type { Reference, SpecInput, SpecModel, SpecValue } from "./extract.ts";
 import { dependenciesOf, loadSpecs, restartable } from "./loader.ts";
 import { observationsEqualStage0 } from "./observe.ts";
+import { chooseCaseStage0, chooseStage0, enabledStage0 } from "./choose.ts";
+import type { CaseChoice, CommandChoice, CommandFacts } from "./choose.ts";
 import type { Observed } from "./observe.ts";
 import { conforms, isEnum, isList, isNumberSchema, isOneOf, isOptional, isRecord, isStringSchema } from "./schema.ts";
 
@@ -103,7 +105,7 @@ class SpecError extends Error {
 }
 
 // フレームワーク自身の誤り: 同じ値を求めた Stage 0 と Stage 1 が食い違った (R4)。仕様の誤りと同じく、検証を止める
-class FrameworkError extends Error {
+export class FrameworkError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "FrameworkError";
@@ -115,7 +117,36 @@ class FrameworkError extends Error {
 export type Deciders = {
   // 観測値の比較 (observation-compare)。answers: 仕様がそのコマンドの答えの形を宣言している
   observationsEqual?: (expected: Observed, actual: Observed, answers: boolean) => Promise<boolean | undefined>;
+  // 1手の選び方 (step-choice)。holds は、条件が成り立つかを意味の関数で確かめる橋渡し（command: そのコマンドの場面で）
+  chooseCommand?: (
+    state: string,
+    facts: CommandFacts[],
+    pick: number,
+    forced: string | null,
+    strict: boolean,
+    holds: (command: string, condition: string) => boolean,
+  ) => Promise<CommandChoice | undefined>;
+  chooseCase?: (names: string[], holds: (condition: string) => boolean) => Promise<CaseChoice | undefined>;
 };
+
+// 値の判断で、Stage 0 と Stage 1 が一致することを求める (R4)
+function agree<T>(what: string, component: string, stage0: T, stage1: T | undefined, given: unknown): void {
+  if (stage1 !== undefined && !isDeepStrictEqual(stage0, stage1)) {
+    throw new FrameworkError(`${what}が、Stage 0 (${JSON.stringify(stage0)}) と Stage 1 (${component}: ${JSON.stringify(stage1)}) で食い違いました: ${JSON.stringify(given)}`);
+  }
+}
+// 実行するコマンドを選ぶ。Stage 0 がいつも選び、Stage 1 があれば一致を求める
+async function chooseCommand(deciders: Deciders, ...[state, facts, pick, forced, strict, holds]: Parameters<NonNullable<Deciders["chooseCommand"]>>): Promise<CommandChoice> {
+  const stage0 = chooseStage0(enabledStage0(state, facts, holds), pick, forced, strict);
+  agree("実行するコマンドの選び方", "step-choice", stage0, await deciders.chooseCommand?.(state, facts, pick, forced, strict, holds), { state, facts, pick, forced, strict });
+  return stage0;
+}
+// 起きる場合を選ぶ（コマンドの場合、副作用の onlyWhen）
+async function chooseCase(deciders: Deciders, names: string[], holds: (condition: string) => boolean): Promise<CaseChoice> {
+  const stage0 = chooseCaseStage0(names, holds);
+  agree("場合の選び方", "step-choice", stage0, await deciders.chooseCase?.(names, holds), { names });
+  return stage0;
+}
 
 // 観測値を比べる。Stage 0 はいつも比べ（安いので）、Stage 1 があれば両方の答えが一致することを求める (R4: 期待との一致は値なので、
 // 厳しい側を取るのではなく、食い違えば止める)。Stage 1 が動かなければ (undefined)、Stage 0 で続ける
@@ -222,11 +253,11 @@ const messageOf = (error: unknown) => (error instanceof Error ? `${error.name}: 
 
 // 仕様側のシミュレーション。実装には触れず、仕様だけで「次に何が起きるべきか」を進める
 type Simulator = ReturnType<typeof simulator>;
-function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecification, hints: Hints = literalsIn(binding, ...bindingsOf(input)), nested = false) {
+function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecification, hints: Hints = literalsIn(binding, ...bindingsOf(input)), nested = false, deciders: Deciders = {}) {
   const commands = Object.keys(input.behaviors).sort();
   // 含む部品の仕様。外側のコマンドが呼んだ所で、その部品の仕様を実行する
   const children: Record<string, Simulator> = Object.fromEntries(
-    Object.entries(input.parts ?? {}).map(([part, child]) => [part, simulator(child, child.model!, child.binding!, hints, true)]),
+    Object.entries(input.parts ?? {}).map(([part, child]) => [part, simulator(child, child.model!, child.binding!, hints, true, deciders)]),
   );
   // 多数ある部品（名前 → キーの名前）
   const keyed: Record<string, string> = Object.fromEntries(Object.entries(input.parts ?? {}).flatMap(([part, child]) => (child.by === undefined ? [] : [[part, child.by]])));
@@ -454,7 +485,6 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
   const pathFields = Object.fromEntries(
     Object.entries(model.routes ?? {}).map(([command, route]) => [command, [...route.matchAll(/:([A-Za-z_$][\w$]*)/g)].map((match) => match[1])]),
   );
-  const sendable = (name: string, given: Values) => (pathFields[name] ?? []).every((field) => given[field] !== "." && given[field] !== "..");
 
   // 1手進める。実行できるコマンドが無ければ undefined。仕様の評価に失敗したら SpecError
   // force: そのコマンドを、実行できるかどうか (from / onlyIf) を見ずに実行する（仕様のミューテーションで使う）
@@ -492,25 +522,27 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
         };
       };
       const contextOf = (name: string) => guarded(rawContextOf(name));
-      const enabled = commands.filter((name) => {
+      // 実行できるかの事実。外側の部品から呼ばれたとき (force) は、経路を通らない
+      const facts: CommandFacts[] = commands.map((name) => {
         const behavior = input.behaviors[name];
-        return (
-          (behavior.from ?? model.states).includes(state.status) &&
-          // 外側の部品から呼ばれたとき (force) は、経路を通らない
-          (force !== undefined || sendable(name, inputs[name])) &&
-          (behavior.onlyIf ?? []).every((text) => {
-            const condition = binding.conditions[text];
-            if (!condition) throw new Error(`事前条件 "${text}" の意味が、解釈にありません`);
-            return condition(contextOf(name));
-          })
-        );
+        return {
+          command: name,
+          everywhere: behavior.from === undefined,
+          from: behavior.from ?? [],
+          pathValues: force !== undefined ? [] : (pathFields[name] ?? []).map((field) => inputs[name][field]).filter((value): value is string => typeof value === "string"),
+          onlyIf: behavior.onlyIf ?? [],
+        };
       });
-      if (force === undefined && enabled.length === 0) return undefined;
-      if (force !== undefined && strict && !enabled.includes(force)) {
-        throw new Error(`コマンド ${force} は、いまの状態 (${state.status}) では実行できません（from / onlyIf に合いません）`);
-      }
-
-      const command = force ?? enabled[raw.pick % enabled.length];
+      // 橋渡し: 事前条件の意味の関数を、そのコマンドの場面で実行する
+      const onlyIfHolds = (name: string, text: string) => {
+        const condition = binding.conditions[text];
+        if (!condition) throw new Error(`事前条件 "${text}" の意味が、解釈にありません`);
+        return Boolean(condition(contextOf(name)));
+      };
+      const choice = await chooseCommand(deciders, state.status, facts, raw.pick, force ?? null, strict, onlyIfHolds);
+      if (choice.refused) throw new Error(`コマンド ${force} は、いまの状態 (${state.status}) では実行できません（from / onlyIf に合いません）`);
+      if (choice.chosen === null) return undefined;
+      const command = choice.chosen;
       // 含む部品のコマンドを、書いた順に呼ぶ（場合を決める前）。部品の状態は、ここで進む
       const partStates: Record<string, State> = { ...state.parts };
       const manyStates: Record<string, { key: unknown; state: State }[]> = Object.fromEntries(Object.entries(state.many ?? {}).map(([part, list]) => [part, [...list]]));
@@ -535,6 +567,7 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
           try {
             result = await child.next(list ? list[index].state : partStates[call.part], childRaw, [], call.command, true);
           } catch (error) {
+            if (error instanceof FrameworkError) throw error;
             throw new Error(`${command} が呼んだ ${call.part}.${call.command} で: ${error instanceof SpecError ? error.message : messageOf(error)}`);
           } finally {
             activate(binding);
@@ -557,16 +590,20 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
       const views = manyViews(manyStates);
       for (const part of Object.keys(keyed)) if (answers[part]) Object.assign(views[part] as object, answers[part]);
       const context = guarded({ ...rawContextOf(command), ...answers, ...views });
+      // 橋渡し: 条件の意味の関数を、この場面で実行する
+      const holds = (name: string) => {
+        const condition = binding.conditions[name];
+        if (!condition) throw new UnboundNameError("条件", name);
+        return Boolean(condition(context));
+      };
       const cases = input.behaviors[command].when;
-      let matched: string;
-      try {
-        matched = matchCondition(binding, Object.keys(cases), context);
-      } catch (error) {
+      const caseChoice = await chooseCase(deciders, Object.keys(cases), holds);
+      if (caseChoice.chosen === null) {
         // 衝突した場面（コマンドと入力）を、再現するコマンド列に含める。以前は、最後のコマンドが列に入らなかった
-        if (!(error instanceof RuleConflictError)) throw error;
-        steps.push({ from: state.status, data: plain(state.data), command, input: inputs[command], queries: answeredOf(queries), asks: plainAsks(askedBy(command)), case: `(${error.hits.join(" / ")})`, ...failedOf(failed) });
-        throw new SpecError(`${command} で、${error.message}（入力 ${JSON.stringify(inputs[command])}）`, steps);
+        steps.push({ from: state.status, data: plain(state.data), command, input: inputs[command], queries: answeredOf(queries), asks: plainAsks(askedBy(command)), case: `(${caseChoice.conflict.join(" / ")})`, ...failedOf(failed) });
+        throw new SpecError(`${command} で、${new RuleConflictError(caseChoice.conflict).message}（入力 ${JSON.stringify(inputs[command])}）`, steps);
       }
+      const matched = caseChoice.chosen;
       const step: Step = {
         from: state.status,
         data: plain(state.data),
@@ -592,7 +629,7 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
           effect.when === undefined
             ? true
             : typeof effect.when === "string"
-              ? matchCondition(binding, [effect.when], context) === effect.when
+              ? (await chooseCase(deciders, [effect.when], holds)).chosen === effect.when
               : resolve(effect.when, context, command) === true;
         if (!issued) continue;
         const fields = model.effects[effect.name];
@@ -672,7 +709,7 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
       checkInvariants(after, steps);
       return { step, expected: plain({ state: target, effects, ...(declared === undefined ? {} : { output }) }) as Observation, after };
     } catch (error) {
-      throw error instanceof SpecError ? error : new SpecError(messageOf(error), steps);
+      throw error instanceof SpecError || error instanceof FrameworkError ? error : new SpecError(messageOf(error), steps);
     }
   };
 
@@ -684,13 +721,16 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
 export async function selfCheck(
   input: SpecInput,
   params: { seed?: number; numRuns?: number } = {},
+  deciders?: Deciders,
 ): Promise<{ ok: true; numRuns: number } | { ok: false; message: string; steps: Step[] }> {
   const model = input.model;
   if (input.problems?.length) return { ok: false, message: `解釈が Layer 1 と合いません: ${input.problems.join(" / ")}`, steps: [] };
   if (!model && input.layer1) return { ok: false, message: "コンポーネントの解釈 (interpretation) がありません", steps: [] };
   if (!model) return { ok: false, message: "仕様にコンポーネントがありません", steps: [] };
   if (!input.binding) return { ok: false, message: "コンポーネントの解釈 (interpretation) がありません", steps: [] };
-  const sim = simulator(input, model, input.binding);
+  // 利用者の部品でも、事前検査は Stage 1 の判断と両方で走らせ、一致を求める (R4)
+  const decide = deciders ?? (await (await import("./stage1.ts")).stage1Deciders());
+  const sim = simulator(input, model, input.binding, undefined, false, decide);
 
   const walk = async (raw: RawStep[]) => {
     const steps: Step[] = [];
@@ -704,6 +744,7 @@ export async function selfCheck(
     await walk(details.counterexample![0]);
   } catch (error) {
     if (error instanceof SpecError) return { ok: false, message: error.message, steps: error.steps };
+    if (error instanceof FrameworkError) return { ok: false, message: `フレームワークの誤り: ${error.message}`, steps: [] };
     throw error;
   }
   return { ok: false, message: "仕様の検査に失敗しましたが、再現できませんでした", steps: [] };
@@ -1001,14 +1042,14 @@ export async function check(
   if (input.stale) return { status: "error", message: "解釈を導いたあとで、Layer 1 が変わっています (clp interpret を実行してください)" };
   if (!model) return { status: "error", message: "仕様にコンポーネントがありません" };
   if (!input.binding) return { status: "error", message: "コンポーネントの解釈 (interpretation) がありません" };
-  const sim = simulator(input, model, input.binding);
+  // 判断を Stage 1 で下す部品（渡されなければ、使えるものを用意する。stage1.ts は runtime.ts を読むので、ここで読み込む）
+  const decide = deciders ?? (await (await import("./stage1.ts")).stage1Deciders(adapter));
+  const sim = simulator(input, model, input.binding, undefined, false, decide);
   if (sim.commands.length === 0) return { status: "error", message: "検証するコマンドがありません" };
   // 代役が答える問い合わせと、記録する副作用。含む部品のものは、部品の名前で修飾したもの（todos.newId）
   const dependencies = dependenciesOf(input);
   // シードの指定が無ければ、clp apply と同じく、仕様のハッシュから決める（同じ仕様とコードなら、いつも同じ結果）
   if (params.seed === undefined) params = { ...params, seed: seedOf(JSON.parse(stableStringify(extract(input).ir)) as Ir) };
-  // 判断を Stage 1 で下す部品（渡されなければ、使えるものを用意する。stage1.ts は runtime.ts を読むので、ここで読み込む）
-  const decide = deciders ?? (await (await import("./stage1.ts")).stage1Deciders(adapter));
   // 答えるコマンドで、本番システムが何も返さなかったときは、null と答えたとみなす（報告に見せる形）
   const shown = (actual: Observed, answers: boolean): Observed => (answers && !("output" in actual) ? { ...actual, output: null } : actual);
 

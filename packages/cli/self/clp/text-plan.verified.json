@@ -4,7 +4,7 @@
     "text-plan.interpretation.ts"
   ],
   "specs": "sha256:477d885eb5722e085ba12bab225d8f8b0a9d4adbee43c671877db6160adaabc9",
-  "code": "sha256:82674e31013f1d37a3104bd0b21e3c7d339cd0a65a9342fca7da232ccf9761f8",
+  "code": "sha256:d84ef1deafa39b1865729ebf37337956b1a8dbde335423f4ac3c41824e2b7eb3",
   "files": [
     "../src/gate-rules/gate-rules.ts",
     "../src/gate-rules/types.ts",
@@ -34,6 +34,9 @@
     "../src/reference-check/reference-check.ts",
     "../src/reference-check/types.ts",
     "../src/reference-check/verdict.ts",
+    "../src/step-choice/choice.ts",
+    "../src/step-choice/step-choice.ts",
+    "../src/step-choice/types.ts",
     "../src/text-plan/plan.ts",
     "../src/text-plan/text-plan.ts",
     "../src/text-plan/types.ts",

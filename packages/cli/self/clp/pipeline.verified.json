@@ -4,7 +4,7 @@
     "pipeline.interpretation.ts"
   ],
   "specs": "sha256:cd2a330ce6f8bb602beb0281b621b0dc25debef9ecbba63578f8ad77c236b594",
-  "code": "sha256:362086ce951095c0ac666d5298618b08ee05488f53834316f10f0798402a6fcf",
+  "code": "sha256:9f45ceb17693c484434446e4703f30df8097494aee4a43624cb2a5efe3a2b721",
   "files": [
     "../src/gate-rules/gate-rules.ts",
     "../src/gate-rules/types.ts",
@@ -34,6 +34,9 @@
     "../src/reference-check/reference-check.ts",
     "../src/reference-check/types.ts",
     "../src/reference-check/verdict.ts",
+    "../src/step-choice/choice.ts",
+    "../src/step-choice/step-choice.ts",
+    "../src/step-choice/types.ts",
     "../src/text-plan/plan.ts",
     "../src/text-plan/text-plan.ts",
     "../src/text-plan/types.ts",

@@ -4,7 +4,7 @@
     "value-writer.interpretation.ts"
   ],
   "specs": "sha256:cc963f70a0017e698b6a0ca27dfdff02adfdcef7de8c18ed5c196bd769f58e51",
-  "code": "sha256:1ee283f0ee440a2383f21b0ee550bd1386729d9cfa4b7287867824dd54d81ff5",
+  "code": "sha256:8d207f9d5556237fff777befcebb504079e7b329be277af9052e51453c00e42b",
   "files": [
     "../src/gate-rules/gate-rules.ts",
     "../src/gate-rules/types.ts",
@@ -34,6 +34,9 @@
     "../src/reference-check/reference-check.ts",
     "../src/reference-check/types.ts",
     "../src/reference-check/verdict.ts",
+    "../src/step-choice/choice.ts",
+    "../src/step-choice/step-choice.ts",
+    "../src/step-choice/types.ts",
     "../src/text-plan/plan.ts",
     "../src/text-plan/text-plan.ts",
     "../src/text-plan/types.ts",

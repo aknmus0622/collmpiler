@@ -177,3 +177,25 @@ test("観測値の比較 (N12b): Stage 1 の比較は Stage 0 と一致しなけ
   const lenient = await check(dir, adapterWith({ peek: () => "yes" }), { drafts: false }, { seed: 7, numRuns: 50 }, { observationsEqual: async () => true });
   assert.equal(lenient.status, "error");
 });
+
+test("1手の選び方 (N12c): Stage 1 の選び方は Stage 0 と一致しなければならず、食い違えば検証と事前検査を止める (R4)", async () => {
+  const dir = specDir();
+  const { chooseCaseStage0, chooseStage0, enabledStage0 } = await import("../src/choose.ts");
+  const { selfCheck } = await import("../src/runtime.ts");
+  const run = (deciders: Parameters<typeof check>[4]) => check(dir, adapterWith(), { drafts: false }, { seed: 7, numRuns: 50 }, deciders);
+  // Stage 0 と同じ選び方なら、結果は変わらない（条件の意味は、橋渡し holds が実行する）
+  const same = {
+    chooseCommand: async (...[state, facts, pick, forced, strict, holds]: Parameters<NonNullable<NonNullable<Parameters<typeof check>[4]>["chooseCommand"]>>) =>
+      chooseStage0(enabledStage0(state, facts, holds), pick, forced, strict),
+    chooseCase: async (names: string[], holds: (condition: string) => boolean) => chooseCaseStage0(names, holds),
+  };
+  assert.equal((await run(same)).status, "pass");
+  // いつも otherwise を選ぶ Stage 1 は、上限に達した場面で食い違う
+  const stopped = await run({ chooseCase: async () => ({ chosen: "otherwise", conflict: [] }) });
+  assert.equal(stopped.status, "error");
+  assert.match((stopped as { message: string }).message, /フレームワークの誤り: 場合の選び方が、Stage 0 .* と Stage 1 \(step-choice: /);
+  // 事前検査も同じ
+  const checked = await selfCheck(await loadSpecs(dir), { seed: 7, numRuns: 50 }, { chooseCommand: async () => ({ chosen: null, refused: false }) });
+  assert.equal(checked.ok, false);
+  assert.match((checked as { message: string }).message, /フレームワークの誤り: 実行するコマンドの選び方が/);
+});

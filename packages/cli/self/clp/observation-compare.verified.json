@@ -4,7 +4,7 @@
     "observation-compare.interpretation.ts"
   ],
   "specs": "sha256:321ea57513469caf80d0ae0e3bc1081ebf9d4c4b3c07c131801b0227f6a92df1",
-  "code": "sha256:7e285f0b1a80fe9abad83dc165dc47fdbd00b41e8953873aa639794f6a141b86",
+  "code": "sha256:94f999df6315260a9854cfb980d8b961b44d1616bc2035ea223345846bdbd5d0",
   "files": [
     "../src/gate-rules/gate-rules.ts",
     "../src/gate-rules/types.ts",
@@ -34,6 +34,9 @@
     "../src/reference-check/reference-check.ts",
     "../src/reference-check/types.ts",
     "../src/reference-check/verdict.ts",
+    "../src/step-choice/choice.ts",
+    "../src/step-choice/step-choice.ts",
+    "../src/step-choice/types.ts",
     "../src/text-plan/plan.ts",
     "../src/text-plan/text-plan.ts",
     "../src/text-plan/types.ts",

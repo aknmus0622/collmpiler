@@ -2,7 +2,9 @@ import { referenceEvents, valuesToWrite, writeEvent } from "./extract.ts";
 import type { ReferenceDiagnostic, SpecInput } from "./extract.ts";
 import { slotQueries, slotsOf } from "./slots.ts";
 import type { SlotReport } from "./slots.ts";
-import { EXTRA_SEEDS } from "./runtime.ts";
+import { EXTRA_SEEDS, FrameworkError } from "./runtime.ts";
+import type { CaseChoice, CommandChoice, CommandFacts } from "./choose.ts";
+import { chooseCaseStage0, chooseStage0, enabledStage0 } from "./choose.ts";
 import type { Adapter, CellTrial, Deciders, Unobservable } from "./runtime.ts";
 import { leavesOf, observationsEqualStage0 } from "./observe.ts";
 import type { Observed } from "./observe.ts";
@@ -69,6 +71,7 @@ export const R1_COMPONENTS: Record<string, readonly string[]> = {
   "mutation-judge": ["mutation.ts"],
   "gate-rules": ["rules.ts"],
   "observation-compare": ["observe.ts"],
+  "step-choice": ["choose.ts"],
 };
 export const stage0HashOf = (component: string) => hashFiles(fileURLToPath(new URL(".", import.meta.url)), R1_COMPONENTS[component] ?? []);
 // R1: 採点の部品を作り直す実行では、採点の判断をすべて Stage 0 が下す。切り替えるオプションは持たない。
@@ -532,27 +535,97 @@ const observationComparePart: Stage1Part<Comparison, boolean> = {
   },
 };
 
+// 1手の選び方 (step-choice、採点の部品)。事実を1つずつ渡し、条件が成り立つかの問い (holds) には、橋渡しが意味の関数を実行して答える。
+// 橋渡しが例外を投げたら（Stage 0 が尋ねなかった条件を尋ねて、意味の関数が実行できなかった）、それを覚えておき、フレームワークの誤りにする
+type Holds = { asked?: unknown };
+const asking = (holds: Holds, answer: () => boolean) => {
+  try {
+    return answer();
+  } catch (error) {
+    holds.asked ??= error;
+    throw error;
+  }
+};
+type CommandQuestion = { state: string; facts: CommandFacts[]; pick: number; forced: string | null; strict: boolean; holds: (command: string, condition: string) => boolean };
+const stepChoiceCommand: Stage1Part<CommandQuestion, CommandChoice> = {
+  component: "step-choice",
+  async run(adapter, question) {
+    let considering = "";
+    const failure: Holds = {};
+    const events = function* () {
+      yield { name: "BeginStep", input: { state: question.state } };
+      for (const fact of question.facts) {
+        considering = fact.command;
+        yield { name: "Consider", input: { command: fact.command, everywhere: fact.everywhere } };
+        for (const state of fact.from) yield { name: "From", input: { state } };
+        for (const value of fact.pathValues) yield { name: "PathValue", input: { value } };
+        for (const condition of fact.onlyIf) yield { name: "OnlyIf", input: { condition } };
+        yield { name: "Considered", input: {} };
+      }
+      yield { name: "Choose", input: { pick: question.pick, forced: question.forced, strict: question.strict } };
+    };
+    const ports = { queries: { holds: ({ condition }: { condition: string }) => asking(failure, () => question.holds(considering, condition)) }, effects: {} };
+    const answers = await session(adapter, ports, events());
+    if (failure.asked !== undefined) throw new FrameworkError(`step-choice が、Stage 0 なら尋ねない条件を尋ね、その意味を実行できませんでした: ${failure.asked instanceof Error ? failure.asked.message : String(failure.asked)}`);
+    const answer = answers.at(-1) as { chosen?: string | null; refused: boolean };
+    return { chosen: answer.chosen ?? null, refused: answer.refused };
+  },
+};
+type CaseQuestion = { names: string[]; holds: (condition: string) => boolean };
+const stepChoiceCase: Stage1Part<CaseQuestion, CaseChoice> = {
+  component: "step-choice",
+  async run(adapter, question) {
+    const failure: Holds = {};
+    const events = [{ name: "BeginCases", input: {} }, ...question.names.map((name) => ({ name: "Case", input: { name } })), { name: "DecideCase", input: {} }];
+    const ports = { queries: { holds: ({ condition }: { condition: string }) => asking(failure, () => question.holds(condition)) }, effects: {} };
+    const answers = await session(adapter, ports, events);
+    if (failure.asked !== undefined) throw new FrameworkError(`step-choice が、Stage 0 なら尋ねない条件を尋ね、その意味を実行できませんでした: ${failure.asked instanceof Error ? failure.asked.message : String(failure.asked)}`);
+    const answer = answers.at(-1) as { chosen?: string | null; conflict: string[] };
+    return { chosen: answer.chosen ?? null, conflict: answer.conflict };
+  },
+};
+
+// 部品1つを、検証のあいだ使う形にする。生成した部品はモジュールに1つだけの状態を持つので、1度に1つずつ動かす。
+// 動かなくなったら（例外）、その検証のあいだは Stage 0 だけで続ける。フレームワークの誤り (R4) は、そのまま伝える
+function serving<I, R>(part: Stage1Part<I, R>, adapter: Adapter): (input: I) => Promise<R | undefined> {
+  let broken = false;
+  return async (input) => {
+    if (broken) return undefined;
+    const run = queue.then(() => part.run(adapter, input));
+    queue = run.catch(() => undefined);
+    try {
+      return await run;
+    } catch (error) {
+      if (error instanceof FrameworkError) throw error;
+      broken = true;
+      return fallback(part.component, error);
+    }
+  };
+}
+
 // 検証 (runtime.ts の check) で使う判断の部品を、1度だけ用意する（試行ごとに合格の記録を確かめると遅いので、読み込みは最初の1回）。
 // 採点の部品を作り直している実行 (R1) と、使えない部品は、渡さない（Stage 0 だけで判断する）
 // underTest: 検証している本番システムのアダプター。採点の部品が自分自身を採点することはない（同じモジュールを共有するので、隔離もぶつかる）
 export async function stage1Deciders(underTest?: Adapter): Promise<Deciders> {
   if (isGradingByStage0()) return {};
-  const compare = await stage1Adapter(observationComparePart.component);
-  if (!compare || compare === underTest) return {};
-  let broken = false;
-  return {
-    async observationsEqual(expected, actual, answers) {
-      if (broken) return undefined;
-      const run = queue.then(() => observationComparePart.run(compare, { expected, actual, answers }));
-      queue = run.catch(() => undefined);
-      try {
-        return await run;
-      } catch (error) {
-        broken = true;
-        return fallback(observationComparePart.component, error);
-      }
-    },
+  const usable = async (component: string) => {
+    const adapter = await stage1Adapter(component);
+    return adapter && adapter !== underTest ? adapter : undefined;
   };
+  const deciders: Deciders = {};
+  const compare = await usable(observationComparePart.component);
+  if (compare) {
+    const run = serving(observationComparePart, compare);
+    deciders.observationsEqual = (expected, actual, answers) => run({ expected, actual, answers });
+  }
+  const choice = await usable(stepChoiceCommand.component);
+  if (choice) {
+    const command = serving(stepChoiceCommand, choice);
+    const cases = serving(stepChoiceCase, choice);
+    deciders.chooseCommand = (state, facts, pick, forced, strict, holds) => command({ state, facts, pick, forced, strict, holds });
+    deciders.chooseCase = (names, holds) => cases({ names, holds });
+  }
+  return deciders;
 }
 
 // 採点の部品の事例の集まり (R3)。事例は入力だけ（期待値は持たない: 同じ入力で Stage 0 が判断したもの）。
@@ -572,6 +645,31 @@ export const R1_CASES: Record<string, { compare(adapter: Adapter, given: unknown
       const stage0 = observationsEqualStage0(comparison.expected, comparison.actual, comparison.answers);
       const stage1 = await observationComparePart.run(adapter, comparison);
       return stage0 === stage1 ? undefined : `${JSON.stringify(given)}: Stage 0 ${stage0}、Stage 1 ${stage1}`;
+    },
+  },
+  "step-choice": {
+    async compare(adapter, given) {
+      const question = given as { kind: "command" | "case"; holding: Record<string, boolean> } & Omit<CommandQuestion, "holds"> & Omit<CaseQuestion, "holds">;
+      // 事例に無い条件を尋ねたら、答えられない（Stage 0 なら尋ねない条件）
+      const lookup = (key: string) => {
+        if (!(key in question.holding)) throw new Error(`条件 ${key} は、Stage 0 なら尋ねません`);
+        return question.holding[key];
+      };
+      let stage0: unknown;
+      let stage1: unknown;
+      try {
+        if (question.kind === "command") {
+          const holds = (command: string, condition: string) => lookup(`${command}:${condition}`);
+          stage0 = chooseStage0(enabledStage0(question.state, question.facts, holds), question.pick, question.forced, question.strict);
+          stage1 = await stepChoiceCommand.run(adapter, { ...question, holds });
+        } else {
+          stage0 = chooseCaseStage0(question.names, lookup);
+          stage1 = await stepChoiceCase.run(adapter, { names: question.names, holds: lookup });
+        }
+      } catch (error) {
+        stage1 = `(${error instanceof Error ? error.message : String(error)})`;
+      }
+      return JSON.stringify(stage0) === JSON.stringify(stage1) ? undefined : `${JSON.stringify(given)}: Stage 0 ${JSON.stringify(stage0)}、Stage 1 ${JSON.stringify(stage1)}`;
     },
   },
   "mutation-judge": {

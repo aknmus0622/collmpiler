@@ -311,6 +311,7 @@ test("自分自身の検証: 自分の生成物の上で動くフレームワー
     "payload-check:implementation:0:ok",
     "pipeline:implementation:0:ok",
     "reference-check:implementation:0:ok",
+    "step-choice:implementation:0:ok",
     "text-plan:implementation:0:ok",
     "tree-check:implementation:0:ok",
     "type-check:implementation:0:ok",
@@ -885,6 +886,21 @@ test("採点の部品 (N12b): 観測値の比較は、事例のすべてで Stag
   const { resolveLayout, workspaceOf } = await import("../src/layout.ts");
   const { typescriptTarget } = await import("../src/target-typescript.ts");
   assert.equal(runCases(join(self, "specs"), workspaceOf(resolveLayout({ out: self }), typescriptTarget.files, "observation-compare"), "observation-compare").problem, undefined);
+});
+
+test("採点の部品 (N12c): 1手の選び方は、事例のすべてで Stage 0 と同じ選び方をし、Stage 0 が尋ねない条件は尋ねない", async () => {
+  const { R1_CASES, runCases, stage1Adapter, stage1Deciders } = await import("../src/stage1.ts");
+  const self = join(repoRoot, "packages/cli/self");
+  const adapter = await stage1Adapter("step-choice");
+  assert.ok(adapter, "Stage 0 が採点した記録があり、使えること (R2)");
+  const cases = JSON.parse(readFileSync(join(self, "cases/step-choice.json"), "utf8")).cases as unknown[];
+  assert.ok(cases.length >= 500);
+  for (const given of cases) assert.equal(await R1_CASES["step-choice"].compare(adapter, given), undefined, JSON.stringify(given));
+  const deciders = await stage1Deciders();
+  assert.ok(deciders.chooseCommand && deciders.chooseCase);
+  const { resolveLayout, workspaceOf } = await import("../src/layout.ts");
+  const { typescriptTarget } = await import("../src/target-typescript.ts");
+  assert.equal(runCases(join(self, "specs"), workspaceOf(resolveLayout({ out: self }), typescriptTarget.files, "step-choice"), "step-choice").problem, undefined);
 });
 
 test("採点の部品 (N11c / N11d): 出口の門の判定は、事実のすべての組み合わせで Stage 0 と同じ判定を返す", async () => {
