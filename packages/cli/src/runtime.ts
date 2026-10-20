@@ -428,7 +428,7 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
   // 1手進める。実行できるコマンドが無ければ undefined。仕様の評価に失敗したら SpecError
   // force: そのコマンドを、実行できるかどうか (from / onlyIf) を見ずに実行する（仕様のミューテーションで使う）
   // strict: force したコマンドが、いまの状態で実行できなければ、仕様の誤りにする（外側の部品が呼んだとき）
-  const next = (state: State, raw: RawStep, steps: Step[], force?: string, strict = false): { step: Step; expected: Observation; after: State } | undefined => {
+  const next = async (state: State, raw: RawStep, steps: Step[], force?: string, strict = false): Promise<{ step: Step; expected: Observation; after: State } | undefined> => {
     try {
       // 意味の関数の中の decide / calculate が、この解釈を引くようにする
       activate(binding);
@@ -498,11 +498,11 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
         const key = call.key === undefined ? undefined : plain(resolve(call.key, base as Values & { status: string }, command));
         const list = call.part in keyed ? manyStates[call.part] : undefined;
         const index = list ? list.findIndex((entry) => isDeepStrictEqual(entry.key, key)) : -1;
-        let result: ReturnType<Simulator["next"]>;
+        let result: Awaited<ReturnType<Simulator["next"]>>;
         if (list && index < 0) result = undefined;
         else {
           try {
-            result = child.next(list ? list[index].state : partStates[call.part], childRaw, [], call.command, true);
+            result = await child.next(list ? list[index].state : partStates[call.part], childRaw, [], call.command, true);
           } catch (error) {
             throw new Error(`${command} が呼んだ ${call.part}.${call.command} で: ${error instanceof SpecError ? error.message : messageOf(error)}`);
           } finally {
@@ -661,16 +661,16 @@ export async function selfCheck(
   if (!input.binding) return { ok: false, message: "コンポーネントの解釈 (interpretation) がありません", steps: [] };
   const sim = simulator(input, model, input.binding);
 
-  const walk = (raw: RawStep[]) => {
+  const walk = async (raw: RawStep[]) => {
     const steps: Step[] = [];
     let state = sim.start();
     sim.checkInvariants(state, steps);
-    for (const rawStep of raw) state = sim.next(state, rawStep, steps)?.after ?? state;
+    for (const rawStep of raw) state = (await sim.next(state, rawStep, steps))?.after ?? state;
   };
-  const details = await fc.check(fc.property(sim.sequences, (raw) => walk(raw)), { numRuns: 500, ...params });
+  const details = await fc.check(fc.asyncProperty(sim.sequences, (raw) => walk(raw)), { numRuns: 500, ...params });
   if (!details.failed) return { ok: true, numRuns: details.numRuns };
   try {
-    walk(details.counterexample![0]);
+    await walk(details.counterexample![0]);
   } catch (error) {
     if (error instanceof SpecError) return { ok: false, message: error.message, steps: error.steps };
     throw error;
@@ -706,9 +706,9 @@ export async function compareSpecs(first: SpecInput, second: SpecInput, params: 
   const a = simulator(first, first.model, first.binding, literalsIn(first.binding, second.binding));
   const b = simulator(second, second.model, second.binding);
   type Seen = { command?: string; result: Difference["first"]; after?: State };
-  const advance = (sim: typeof a, state: State, raw: RawStep, steps: Step[]): Seen => {
+  const advance = async (sim: typeof a, state: State, raw: RawStep, steps: Step[]): Promise<Seen> => {
     try {
-      const planned = sim.next(state, raw, steps);
+      const planned = await sim.next(state, raw, steps);
       return planned ? { command: planned.step.command, result: planned.expected, after: planned.after } : { result: { skipped: true } };
     } catch (error) {
       if (error instanceof SpecError) return { command: error.steps.at(-1)?.command, result: { error: error.message } };
@@ -731,14 +731,14 @@ export async function compareSpecs(first: SpecInput, second: SpecInput, params: 
     if (!found.some((aspect) => aspect.startsWith("effect:")) && !isDeepStrictEqual(left, right)) found.push("order");
     return found;
   };
-  const walk = (raw: RawStep[], only: string, aspect: string): Difference | undefined => {
+  const walk = async (raw: RawStep[], only: string, aspect: string): Promise<Difference | undefined> => {
     const steps: Step[] = [];
     const others: Step[] = [];
     let left = a.start();
     let right = b.start();
     for (const rawStep of raw) {
-      const x = advance(a, left, rawStep, steps);
-      const y = advance(b, right, rawStep, others);
+      const x = await advance(a, left, rawStep, steps);
+      const y = await advance(b, right, rawStep, others);
       const command = x.command ?? y.command;
       const aspects = aspectsOf(x, y);
       if (command === only && aspects.includes(aspect)) {
@@ -758,9 +758,9 @@ export async function compareSpecs(first: SpecInput, second: SpecInput, params: 
   const differences: Difference[] = [];
   for (const command of a.commands) {
     for (const aspect of aspects) {
-      const details = await fc.check(fc.property(a.sequences, (raw) => walk(raw, command, aspect) === undefined), { numRuns: 300, ...params });
+      const details = await fc.check(fc.asyncProperty(a.sequences, async (raw) => (await walk(raw, command, aspect)) === undefined), { numRuns: 300, ...params });
       if (!details.failed || !details.counterexample) continue;
-      const found = walk(details.counterexample[0], command, aspect);
+      const found = await walk(details.counterexample[0], command, aspect);
       if (found) differences.push(found);
     }
   }
@@ -800,12 +800,12 @@ export async function unreachedCases(input: SpecInput, params: { seed?: number; 
   const sim = simulator(input, model, binding);
   const seen = new Set<string>();
   const key = (command: string, name: string) => `${command}\u0000${name}`;
-  const walk = (raw: RawStep[]) => {
+  const walk = async (raw: RawStep[]) => {
     const steps: Step[] = [];
     let state = sim.start();
     try {
       for (const rawStep of raw) {
-        const planned = sim.next(state, rawStep, steps);
+        const planned = await sim.next(state, rawStep, steps);
         if (!planned) continue;
         seen.add(key(planned.step.command, planned.step.case));
         state = planned.after;
@@ -818,7 +818,7 @@ export async function unreachedCases(input: SpecInput, params: { seed?: number; 
   const all = Object.entries(input.behaviors).flatMap(([command, behavior]) => Object.keys(behavior.when).map((name) => ({ command, case: name })));
   const missing = () => all.filter((entry) => !seen.has(key(entry.command, entry.case)));
   for (let extra = 0; extra <= 2 && missing().length > 0; extra++) {
-    await fc.check(fc.property(sim.sequences, walk), { numRuns: params.numRuns ?? DEFAULT_RUNS, seed: (params.seed ?? 0) + extra });
+    await fc.check(fc.asyncProperty(sim.sequences, walk), { numRuns: params.numRuns ?? DEFAULT_RUNS, seed: (params.seed ?? 0) + extra });
   }
   return missing();
 }
@@ -847,24 +847,24 @@ export function cellTrials(input: SpecInput, params: { seed?: number; numRuns?: 
           const mutatedBinding = { ...binding, component: { ...binding.component, decisions } };
           const mutated = simulator({ ...input, decisions, binding: mutatedBinding }, model, mutatedBinding, literalsIn(binding));
           let enablementDiffers = false;
-          const outcomeDiffers = (raw: RawStep[]): boolean => {
+          const outcomeDiffers = async (raw: RawStep[]): Promise<boolean> => {
             let left = original.start();
             let right = mutated.start();
             for (const rawStep of raw) {
-              const expected = original.next(left, rawStep, []);
+              const expected = await original.next(left, rawStep, []);
               // 変えた仕様が、同じ場面で選ぶコマンド（実行できるかどうかの違いを見る）
               let chosen: string | undefined;
               try {
-                chosen = mutated.next(right, rawStep, [])?.step.command;
+                chosen = (await mutated.next(right, rawStep, []))?.step.command;
               } catch (error) {
                 if (!(error instanceof SpecError)) throw error;
               }
               if (chosen !== expected?.step.command) enablementDiffers = true;
               if (!expected) continue;
               // 元の仕様が実行するコマンドを、変えた仕様でも実行して、結果を比べる
-              let changed: ReturnType<typeof mutated.next>;
+              let changed: Awaited<ReturnType<typeof mutated.next>>;
               try {
-                changed = mutated.next(right, rawStep, [], expected.step.command);
+                changed = await mutated.next(right, rawStep, [], expected.step.command);
               } catch (error) {
                 // 変えた値が型に合わなくなるなど。値が結果に届いている
                 if (error instanceof SpecError) return true;
@@ -877,7 +877,7 @@ export function cellTrials(input: SpecInput, params: { seed?: number; numRuns?: 
             return false;
           };
           const seed = extra === 0 ? params.seed : (params.seed ?? 0) + extra;
-          const details = await fc.check(fc.property(original.sequences, (raw) => !outcomeDiffers(raw)), { numRuns: DEFAULT_RUNS, ...params, ...(seed === undefined ? {} : { seed }) });
+          const details = await fc.check(fc.asyncProperty(original.sequences, async (raw) => !(await outcomeDiffers(raw))), { numRuns: DEFAULT_RUNS, ...params, ...(seed === undefined ? {} : { seed }) });
           return { changed: details.failed, enablementDiffers };
         };
         trials.push({ table, row, column, value, run });
@@ -1042,7 +1042,7 @@ export async function check(
             const restarted = plain({ state: await adapter.getCurrentState(), effects: recorded });
             if (!isDeepStrictEqual(expected, restarted)) return { steps, expected, actual: restarted };
           }
-          const planned = sim.next(state, rawStep, steps);
+          const planned = await sim.next(state, rawStep, steps);
           if (!planned) continue;
           expected = planned.expected;
           current = planned.step;
