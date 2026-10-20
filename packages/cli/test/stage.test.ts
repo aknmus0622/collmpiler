@@ -303,6 +303,7 @@ test("自分自身の検証: 自分の生成物の上で動くフレームワー
   assert.deepEqual(result.attempts.map((a) => `${a.component}:${a.phase}:${a.attempt}:${a.feedback?.kind ?? "ok"}`), [
     "gate-rules:implementation:0:ok",
     "graph-check:implementation:0:ok",
+    "input-candidates:implementation:0:ok",
     "interpret-flow:implementation:0:ok",
     "leaf-check:implementation:0:ok",
     "mutation-judge:implementation:0:ok",
@@ -902,6 +903,19 @@ test("採点の部品 (N12d): 起きることの適用は、事例のすべて�
   const { resolveLayout, workspaceOf } = await import("../src/layout.ts");
   const { typescriptTarget } = await import("../src/target-typescript.ts");
   assert.equal(runCases(join(self, "specs"), workspaceOf(resolveLayout({ out: self }), typescriptTarget.files, "outcome-apply"), "outcome-apply").problem, undefined);
+});
+
+test("採点の部品 (N12f): 入力の候補は、事例のすべてで Stage 0 と同じ候補を返し、検証で使われる", async () => {
+  const { R1_CASES, runCases, stage1Adapter, stage1Deciders } = await import("../src/stage1.ts");
+  const self = join(repoRoot, "packages/cli/self");
+  const adapter = await stage1Adapter("input-candidates");
+  assert.ok(adapter, "Stage 0 が採点した記録があり、使えること (R2)");
+  const cases = JSON.parse(readFileSync(join(self, "cases/input-candidates.json"), "utf8")).cases as unknown[];
+  for (const given of cases) assert.equal(await R1_CASES["input-candidates"].compare(adapter, given), undefined, JSON.stringify(given));
+  assert.ok((await stage1Deciders()).candidates);
+  const { resolveLayout, workspaceOf } = await import("../src/layout.ts");
+  const { typescriptTarget } = await import("../src/target-typescript.ts");
+  assert.equal(runCases(join(self, "specs"), workspaceOf(resolveLayout({ out: self }), typescriptTarget.files, "input-candidates"), "input-candidates").problem, undefined);
 });
 
 test("採点の部品 (N12e): 依存の約束の守り方は、事例のすべてで Stage 0 と同じ答えを返し、検証で使われる", async () => {

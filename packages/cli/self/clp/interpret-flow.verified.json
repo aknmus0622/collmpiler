@@ -4,13 +4,16 @@
     "interpret-flow.interpretation.ts"
   ],
   "specs": "sha256:9b1e8fb7169d5855b3164da20488eec9e298f12581687050ff3974ff0ccd9937",
-  "code": "sha256:c3be32c890d013c78b184e3099cd83d0c04c0155993be9b534adf8300bf980ff",
+  "code": "sha256:b2beab442d97be3869640f2073fe1e6948dcb48c4ed73418d8f2ed42d4cb6efc",
   "files": [
     "../src/gate-rules/gate-rules.ts",
     "../src/gate-rules/types.ts",
     "../src/graph-check/graph-check.ts",
     "../src/graph-check/rules.ts",
     "../src/graph-check/types.ts",
+    "../src/input-candidates/candidates.ts",
+    "../src/input-candidates/input-candidates.ts",
+    "../src/input-candidates/types.ts",
     "../src/interpret-flow/interpret-flow.ts",
     "../src/interpret-flow/plan.ts",
     "../src/interpret-flow/types.ts",

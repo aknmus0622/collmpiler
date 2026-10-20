@@ -4,13 +4,16 @@
     "payload-check.interpretation.ts"
   ],
   "specs": "sha256:7c10d82826d0de89bfa16c287120445a25e056c78a5076f7492e8224b3e01a5d",
-  "code": "sha256:a37945545d1973d520674512271eecfe3f2ad360272fd9a2049ecf2130894855",
+  "code": "sha256:a5657d94a6c59a6c7dcc40d5fad0ffd4bbc2ed5f8b6b0a74f56ff2ef06b8de56",
   "files": [
     "../src/gate-rules/gate-rules.ts",
     "../src/gate-rules/types.ts",
     "../src/graph-check/graph-check.ts",
     "../src/graph-check/rules.ts",
     "../src/graph-check/types.ts",
+    "../src/input-candidates/candidates.ts",
+    "../src/input-candidates/input-candidates.ts",
+    "../src/input-candidates/types.ts",
     "../src/interpret-flow/interpret-flow.ts",
     "../src/interpret-flow/plan.ts",
     "../src/interpret-flow/types.ts",

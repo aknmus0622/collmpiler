@@ -6,7 +6,8 @@ import { EXTRA_SEEDS, FrameworkError } from "./runtime.ts";
 import type { CaseChoice, CommandChoice, CommandFacts } from "./choose.ts";
 import { chooseCaseStage0, chooseStage0, enabledStage0 } from "./choose.ts";
 import { freshStage0, increasingStage0, survivesRestartStage0 } from "./promise.ts";
-import type { Adapter, CellTrial, Deciders, OutcomeSession, Unobservable } from "./runtime.ts";
+import type { Adapter, CandidateQuestion, CellTrial, Deciders, OutcomeSession, Unobservable } from "./runtime.ts";
+import { amongStage0, numberCandidatesStage0, stringCandidatesStage0 } from "./candidates.ts";
 import { OUTCOME_START, callsStage0, outcomeStage0 } from "./outcome.ts";
 import type { OutcomeEvent, OutcomeFail } from "./outcome.ts";
 import { leavesOf, observationsEqualStage0 } from "./observe.ts";
@@ -77,6 +78,7 @@ export const R1_COMPONENTS: Record<string, readonly string[]> = {
   "step-choice": ["choose.ts"],
   "promise-keeper": ["promise.ts"],
   "outcome-apply": ["outcome.ts"],
+  "input-candidates": ["candidates.ts"],
 };
 export const stage0HashOf = (component: string) => hashFiles(fileURLToPath(new URL(".", import.meta.url)), R1_COMPONENTS[component] ?? []);
 // R1: 採点の部品を作り直す実行では、採点の判断をすべて Stage 0 が下す。切り替えるオプションは持たない。
@@ -666,6 +668,36 @@ const callPart: Stage1Part<{ keyed: boolean; found: boolean }, boolean> = {
   },
 };
 
+// 入力の候補 (input-candidates、採点の部品)。問い1つを、1回の隔離で尋ねる
+const inputCandidates: Stage1Part<CandidateQuestion, unknown> = {
+  component: "input-candidates",
+  async run(adapter, question) {
+    const events =
+      question.kind === "strings"
+        ? [
+            { name: "BeginStrings", input: {} },
+            ...question.texts.map((text) => ({ name: "Text", input: { text } })),
+            ...question.numbers.map((number) => ({ name: "LengthNumber", input: { number } })),
+            { name: "DecideStrings", input: {} },
+          ]
+        : question.kind === "numbers"
+          ? [
+              { name: "BeginNumbers", input: { integer: question.integer, min: question.min, max: question.max } },
+              ...question.around.map((around) => ({ name: "Around", input: { around } })),
+              { name: "DecideNumbers", input: {} },
+            ]
+          : [{ name: "BeginAmong", input: { pick: question.pick } }, ...question.usable.map((usable) => ({ name: "Item", input: { usable } })), { name: "DecideAmong", input: {} }];
+    const answer = (await session(adapter, { queries: {}, effects: {} }, events)).at(-1);
+    return question.kind === "among" ? (answer ?? null) : answer;
+  },
+};
+const candidatesStage0 = (question: CandidateQuestion): unknown =>
+  question.kind === "strings"
+    ? stringCandidatesStage0(question.texts, question.numbers)
+    : question.kind === "numbers"
+      ? numberCandidatesStage0(question.integer, question.min, question.max, question.around)
+      : amongStage0(question.pick, question.usable);
+
 // 部品1つを、検証のあいだ使う形にする。生成した部品はモジュールに1つだけの状態を持つので、1度に1つずつ動かす。
 // 動かなくなったら（例外）、その検証のあいだは Stage 0 だけで続ける。フレームワークの誤り (R4) は、そのまま伝える
 function serving<I, R>(part: Stage1Part<I, R>, adapter: Adapter): (input: I) => Promise<R | undefined> {
@@ -738,6 +770,8 @@ export async function stage1Deciders(underTest?: Adapter): Promise<Deciders> {
     const call = serving(callPart, outcome);
     deciders.calls = (keyed, found) => call({ keyed, found });
   }
+  const candidates = await usable(inputCandidates.component);
+  if (candidates) deciders.candidates = serving(inputCandidates, candidates);
   return deciders;
 }
 
@@ -815,6 +849,14 @@ export const R1_CASES: Record<string, { compare(adapter: Adapter, given: unknown
         await opened.close();
       }
       return undefined;
+    },
+  },
+  "input-candidates": {
+    async compare(adapter, given) {
+      const question = given as CandidateQuestion;
+      const stage0 = candidatesStage0(question);
+      const stage1 = await inputCandidates.run(adapter, question);
+      return JSON.stringify(stage0) === JSON.stringify(stage1) ? undefined : `${JSON.stringify(given)}: Stage 0 ${JSON.stringify(stage0)}、Stage 1 ${JSON.stringify(stage1)}`;
     },
   },
   "mutation-judge": {

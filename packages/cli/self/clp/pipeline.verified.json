@@ -4,13 +4,16 @@
     "pipeline.interpretation.ts"
   ],
   "specs": "sha256:cd2a330ce6f8bb602beb0281b621b0dc25debef9ecbba63578f8ad77c236b594",
-  "code": "sha256:48a69a965eb706fe2e546770cae194760622b81107f3438b859116324bcad352",
+  "code": "sha256:e2e01342552103f9c70fdaeeb49ba71467ec40d9740c550b5021756b900a1064",
   "files": [
     "../src/gate-rules/gate-rules.ts",
     "../src/gate-rules/types.ts",
     "../src/graph-check/graph-check.ts",
     "../src/graph-check/rules.ts",
     "../src/graph-check/types.ts",
+    "../src/input-candidates/candidates.ts",
+    "../src/input-candidates/input-candidates.ts",
+    "../src/input-candidates/types.ts",
     "../src/interpret-flow/interpret-flow.ts",
     "../src/interpret-flow/plan.ts",
     "../src/interpret-flow/types.ts",

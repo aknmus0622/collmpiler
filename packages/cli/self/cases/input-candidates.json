@@ -1,0 +1,4232 @@
+{
+ "about": "Cases for the input-candidates grading component (SELF_HOSTING.md §10.3, R3): random strings and numbers found in a specification, number inputs with and without limits and thresholds (fractions and clock-like numbers included), and picks among remembered values. Inputs only: the expected candidates are what Stage 0 (packages/cli/src/candidates.ts) decides.",
+ "cases": [
+  {
+   "kind": "strings",
+   "texts": [
+    "a"
+   ],
+   "numbers": [
+    -3,
+    12,
+    12,
+    9999
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "a",
+    ""
+   ],
+   "numbers": [
+    1700000000,
+    0.5
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "a",
+    "b",
+    "a"
+   ],
+   "numbers": []
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "a"
+   ],
+   "numbers": []
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "Gold",
+    "a",
+    "b"
+   ],
+   "numbers": [
+    2,
+    1
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [],
+   "numbers": [
+    -3
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "a",
+    "Gold",
+    "Gold"
+   ],
+   "numbers": []
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "a",
+    "",
+    "Gold",
+    "b"
+   ],
+   "numbers": [
+    12,
+    7
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "a",
+    "Gold",
+    "a"
+   ],
+   "numbers": [
+    1700000000,
+    10000,
+    7,
+    9999
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "a",
+    "Gold",
+    "Gold"
+   ],
+   "numbers": [
+    2.5,
+    1700000000,
+    10001
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "b",
+    ""
+   ],
+   "numbers": [
+    10,
+    -1,
+    10001,
+    100
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [],
+   "numbers": [
+    12
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "Gold",
+    "a",
+    "b"
+   ],
+   "numbers": [
+    1700000000,
+    1,
+    7
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "Gold",
+    "a",
+    "",
+    ""
+   ],
+   "numbers": [
+    10000,
+    7,
+    -1
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "Gold",
+    "a"
+   ],
+   "numbers": [
+    3,
+    3,
+    3
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "b",
+    "b"
+   ],
+   "numbers": []
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "Gold",
+    "a",
+    "",
+    "b"
+   ],
+   "numbers": [
+    2,
+    -1,
+    100
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "Gold",
+    "Gold"
+   ],
+   "numbers": [
+    -3,
+    0.5
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "b",
+    "Gold",
+    "b",
+    "a"
+   ],
+   "numbers": [
+    -1,
+    -1,
+    7,
+    10000
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "Gold"
+   ],
+   "numbers": []
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "a",
+    "b",
+    "a",
+    ""
+   ],
+   "numbers": [
+    10
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "",
+    "a"
+   ],
+   "numbers": []
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "a"
+   ],
+   "numbers": [
+    10000
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "a",
+    "b",
+    "b",
+    "b"
+   ],
+   "numbers": [
+    1700000000,
+    10000,
+    0.5,
+    2.5
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "b",
+    "",
+    "b",
+    "a"
+   ],
+   "numbers": [
+    1,
+    10,
+    9999
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "Gold",
+    "Gold",
+    "",
+    "b"
+   ],
+   "numbers": [
+    9999,
+    10,
+    1
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [],
+   "numbers": [
+    3
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "",
+    "b"
+   ],
+   "numbers": [
+    2,
+    10000,
+    0
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "a"
+   ],
+   "numbers": []
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "Gold",
+    ""
+   ],
+   "numbers": []
+  },
+  {
+   "kind": "strings",
+   "texts": [],
+   "numbers": []
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "b",
+    "b",
+    "a"
+   ],
+   "numbers": [
+    100
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "a",
+    ""
+   ],
+   "numbers": [
+    100,
+    1
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "",
+    "a"
+   ],
+   "numbers": [
+    0.5,
+    100,
+    0
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "",
+    "Gold",
+    "a",
+    ""
+   ],
+   "numbers": []
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "a",
+    "a",
+    "Gold",
+    "b"
+   ],
+   "numbers": [
+    -3
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "a",
+    "b",
+    "a",
+    "Gold"
+   ],
+   "numbers": []
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "",
+    "a",
+    "a",
+    "a"
+   ],
+   "numbers": [
+    0.5
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "a",
+    "b",
+    "Gold",
+    "b"
+   ],
+   "numbers": [
+    2.5,
+    10,
+    3,
+    10000
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "b",
+    "a",
+    "a"
+   ],
+   "numbers": [
+    1,
+    12,
+    -1
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "Gold",
+    "",
+    "Gold",
+    ""
+   ],
+   "numbers": [
+    100,
+    7
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "Gold"
+   ],
+   "numbers": [
+    10,
+    2,
+    10000,
+    3
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [],
+   "numbers": [
+    10001,
+    1
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [],
+   "numbers": [
+    3,
+    3
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "",
+    "a",
+    "a",
+    "a"
+   ],
+   "numbers": [
+    12,
+    7,
+    9999
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "b",
+    "",
+    "a",
+    "Gold"
+   ],
+   "numbers": [
+    10
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "a",
+    "",
+    "a",
+    "a"
+   ],
+   "numbers": [
+    3,
+    3,
+    0.5,
+    7
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "b",
+    "b",
+    "a"
+   ],
+   "numbers": [
+    -3,
+    12,
+    100,
+    100
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "b",
+    "a"
+   ],
+   "numbers": []
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "b",
+    ""
+   ],
+   "numbers": [
+    0.5,
+    100
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [],
+   "numbers": [
+    2
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [],
+   "numbers": [
+    10000,
+    100,
+    2.5,
+    1
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [],
+   "numbers": [
+    0.5,
+    9999,
+    9999,
+    7
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [],
+   "numbers": [
+    9999,
+    -3,
+    2,
+    3
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "",
+    "",
+    "a"
+   ],
+   "numbers": [
+    -3,
+    0
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [],
+   "numbers": []
+  },
+  {
+   "kind": "strings",
+   "texts": [],
+   "numbers": [
+    3,
+    0.5,
+    -1
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "b",
+    "b",
+    "b",
+    "Gold"
+   ],
+   "numbers": []
+  },
+  {
+   "kind": "strings",
+   "texts": [],
+   "numbers": [
+    2,
+    9999
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "Gold",
+    "a",
+    "b",
+    ""
+   ],
+   "numbers": [
+    0.5,
+    10000
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "Gold",
+    "Gold"
+   ],
+   "numbers": [
+    100
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "b"
+   ],
+   "numbers": [
+    10000
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    ""
+   ],
+   "numbers": [
+    0
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    ""
+   ],
+   "numbers": [
+    2
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "Gold",
+    "b",
+    "b"
+   ],
+   "numbers": [
+    7,
+    10,
+    100
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "a",
+    "a",
+    "a"
+   ],
+   "numbers": [
+    100,
+    0,
+    12
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "Gold"
+   ],
+   "numbers": [
+    3
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "a"
+   ],
+   "numbers": [
+    2.5,
+    10000
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "a",
+    "Gold",
+    "a",
+    "Gold"
+   ],
+   "numbers": [
+    1700000000,
+    10,
+    12,
+    10000
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "",
+    "",
+    "b",
+    "Gold"
+   ],
+   "numbers": [
+    0
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "Gold"
+   ],
+   "numbers": [
+    1700000000
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "a",
+    "Gold"
+   ],
+   "numbers": [
+    1700000000,
+    3
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "a",
+    "",
+    ""
+   ],
+   "numbers": [
+    3,
+    100
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "b",
+    "b",
+    "a",
+    "a"
+   ],
+   "numbers": [
+    2.5
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "",
+    "Gold",
+    "a"
+   ],
+   "numbers": [
+    3,
+    1700000000,
+    12,
+    12
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "a"
+   ],
+   "numbers": [
+    0,
+    7
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    ""
+   ],
+   "numbers": [
+    -3
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "a",
+    "a"
+   ],
+   "numbers": [
+    2.5,
+    12,
+    100
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "Gold",
+    "Gold",
+    "Gold",
+    ""
+   ],
+   "numbers": [
+    0.5,
+    1
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [],
+   "numbers": [
+    10001,
+    1,
+    10000,
+    1700000000
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [],
+   "numbers": [
+    100,
+    7,
+    10,
+    10
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "Gold",
+    "a",
+    "Gold",
+    "b"
+   ],
+   "numbers": [
+    100,
+    1700000000,
+    7,
+    9999
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "a",
+    "Gold",
+    "a",
+    ""
+   ],
+   "numbers": []
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "Gold",
+    "b",
+    "",
+    ""
+   ],
+   "numbers": []
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "",
+    "",
+    "a",
+    "a"
+   ],
+   "numbers": [
+    3,
+    2
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "Gold",
+    "a",
+    "Gold",
+    "Gold"
+   ],
+   "numbers": [
+    10000,
+    2,
+    10
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "a"
+   ],
+   "numbers": [
+    2,
+    -3
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "",
+    "a",
+    "a",
+    "a"
+   ],
+   "numbers": [
+    100,
+    0.5,
+    9999
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "b"
+   ],
+   "numbers": [
+    -3,
+    2.5
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "",
+    "",
+    "Gold",
+    "Gold"
+   ],
+   "numbers": [
+    0,
+    0.5
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "a",
+    "b",
+    "a",
+    "a"
+   ],
+   "numbers": [
+    2.5,
+    12,
+    0.5,
+    100
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "a",
+    "a"
+   ],
+   "numbers": []
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "a",
+    "a",
+    ""
+   ],
+   "numbers": [
+    10000,
+    1700000000
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    ""
+   ],
+   "numbers": [
+    -3,
+    2.5,
+    2,
+    10000
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "a",
+    "a",
+    "a"
+   ],
+   "numbers": [
+    2,
+    100,
+    2.5,
+    100
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    ""
+   ],
+   "numbers": [
+    12,
+    2.5,
+    7
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "b",
+    "a",
+    "b",
+    "a"
+   ],
+   "numbers": [
+    10,
+    7
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    ""
+   ],
+   "numbers": []
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "b",
+    "b",
+    "a",
+    "a"
+   ],
+   "numbers": [
+    2.5,
+    10001
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "a"
+   ],
+   "numbers": [
+    1700000000,
+    0
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "b",
+    "Gold",
+    "Gold"
+   ],
+   "numbers": [
+    1,
+    10,
+    10001,
+    10000
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "Gold",
+    "",
+    "a"
+   ],
+   "numbers": [
+    1
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "a",
+    "b",
+    "a",
+    "Gold"
+   ],
+   "numbers": [
+    12,
+    0,
+    -1,
+    9999
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [],
+   "numbers": []
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "a",
+    ""
+   ],
+   "numbers": []
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "a",
+    "Gold"
+   ],
+   "numbers": [
+    2,
+    -3,
+    10001
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "",
+    "a"
+   ],
+   "numbers": [
+    0.5,
+    10000,
+    -3,
+    12
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "",
+    "Gold",
+    "Gold"
+   ],
+   "numbers": [
+    10000,
+    -3,
+    10001,
+    -3
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "b",
+    "Gold",
+    "b",
+    ""
+   ],
+   "numbers": []
+  },
+  {
+   "kind": "strings",
+   "texts": [],
+   "numbers": [
+    2,
+    10,
+    1,
+    -3
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [],
+   "numbers": [
+    -3
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "a",
+    "a"
+   ],
+   "numbers": [
+    10001,
+    7,
+    2
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "a",
+    "Gold"
+   ],
+   "numbers": []
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "",
+    "a"
+   ],
+   "numbers": []
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "b",
+    "a",
+    "b"
+   ],
+   "numbers": [
+    3,
+    2.5,
+    -3
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "",
+    ""
+   ],
+   "numbers": [
+    7
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "b",
+    ""
+   ],
+   "numbers": [
+    0.5,
+    1,
+    10000,
+    2.5
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "a",
+    "Gold",
+    "b"
+   ],
+   "numbers": [
+    1,
+    12,
+    100,
+    10000
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [],
+   "numbers": [
+    10001,
+    10000
+   ]
+  },
+  {
+   "kind": "strings",
+   "texts": [
+    "b"
+   ],
+   "numbers": [
+    0.5
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": null,
+   "max": 3,
+   "around": [
+    12,
+    0.5
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 10,
+   "max": 10,
+   "around": [
+    2
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 0,
+   "max": null,
+   "around": [
+    7,
+    -3
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 3,
+   "max": 1,
+   "around": [
+    3,
+    10000,
+    2,
+    3
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 12,
+   "max": null,
+   "around": [
+    2.5,
+    1,
+    7,
+    12
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": null,
+   "max": 1,
+   "around": []
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": null,
+   "max": 2.5,
+   "around": [
+    3,
+    10000,
+    7,
+    100
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": -3,
+   "max": 12,
+   "around": [
+    100
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 0,
+   "max": null,
+   "around": [
+    3
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 1,
+   "max": null,
+   "around": [
+    100,
+    2
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": null,
+   "max": -3,
+   "around": [
+    1
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": -3,
+   "max": 2.5,
+   "around": [
+    -1,
+    10000,
+    3,
+    10
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": null,
+   "max": null,
+   "around": [
+    1,
+    1,
+    12,
+    100
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": null,
+   "max": 0,
+   "around": [
+    10
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": 0,
+   "max": 1,
+   "around": [
+    1,
+    1700000000,
+    2.5
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": 10,
+   "max": 2.5,
+   "around": []
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": 1,
+   "max": 10,
+   "around": [
+    1700000000,
+    10000,
+    10001
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": null,
+   "max": null,
+   "around": []
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 0,
+   "max": null,
+   "around": [
+    3,
+    -1
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": null,
+   "max": -3,
+   "around": []
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": null,
+   "max": -3,
+   "around": []
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": -3,
+   "max": null,
+   "around": [
+    -1,
+    7,
+    12
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 2.5,
+   "max": null,
+   "around": [
+    0.5,
+    2.5,
+    12
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 3,
+   "max": 3,
+   "around": [
+    12,
+    1,
+    10001,
+    2.5
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": null,
+   "max": 3,
+   "around": [
+    10000
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": null,
+   "max": 2.5,
+   "around": [
+    7
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": null,
+   "max": null,
+   "around": [
+    0,
+    10001,
+    2.5,
+    9999
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": null,
+   "max": null,
+   "around": [
+    2,
+    0.5,
+    -1
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": null,
+   "max": 2.5,
+   "around": [
+    -1
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 10,
+   "max": -3,
+   "around": [
+    7
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": 12,
+   "max": 10,
+   "around": [
+    10000,
+    2.5,
+    1700000000
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": -3,
+   "max": null,
+   "around": []
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 2.5,
+   "max": null,
+   "around": [
+    -1,
+    10001
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": -3,
+   "max": 10,
+   "around": [
+    0,
+    -1,
+    -3
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": null,
+   "max": null,
+   "around": [
+    1700000000
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": 10,
+   "max": 10,
+   "around": [
+    7,
+    10001,
+    1
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": -3,
+   "max": -3,
+   "around": [
+    0.5,
+    -1,
+    0
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": null,
+   "max": 1,
+   "around": [
+    10,
+    100,
+    7,
+    10001
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": -3,
+   "max": -3,
+   "around": [
+    -1
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": null,
+   "max": null,
+   "around": []
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": -3,
+   "max": null,
+   "around": [
+    3,
+    2.5
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 12,
+   "max": 12,
+   "around": [
+    10001,
+    7
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 0,
+   "max": null,
+   "around": [
+    10,
+    2.5,
+    10000,
+    0.5
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": null,
+   "max": -3,
+   "around": [
+    2
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": null,
+   "max": null,
+   "around": [
+    7,
+    7,
+    3
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": 0,
+   "max": null,
+   "around": [
+    12
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": 2.5,
+   "max": 2.5,
+   "around": [
+    2.5,
+    0,
+    1700000000
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": -3,
+   "max": -3,
+   "around": [
+    10,
+    10000,
+    100
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 12,
+   "max": 2.5,
+   "around": [
+    2.5,
+    1700000000,
+    -1,
+    12
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 0,
+   "max": 1,
+   "around": [
+    9999,
+    100
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": -3,
+   "max": -3,
+   "around": [
+    0,
+    12,
+    0
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 3,
+   "max": 0,
+   "around": [
+    10001
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 2.5,
+   "max": 2.5,
+   "around": [
+    0,
+    -1,
+    10001
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": 10,
+   "max": -3,
+   "around": []
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 1,
+   "max": null,
+   "around": []
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": null,
+   "max": 1,
+   "around": []
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": 1,
+   "max": null,
+   "around": [
+    0.5,
+    10001
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 1,
+   "max": 3,
+   "around": [
+    12,
+    -3,
+    0.5,
+    10001
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": null,
+   "max": 3,
+   "around": []
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": null,
+   "max": 0,
+   "around": []
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": null,
+   "max": 10,
+   "around": [
+    2,
+    1,
+    10000
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 3,
+   "max": null,
+   "around": []
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": 3,
+   "max": 12,
+   "around": [
+    9999,
+    1700000000,
+    1700000000
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 10,
+   "max": 2.5,
+   "around": []
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": -3,
+   "max": null,
+   "around": [
+    12,
+    -3
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 0,
+   "max": 1,
+   "around": [
+    0.5,
+    -1,
+    9999
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": null,
+   "max": 1,
+   "around": [
+    0,
+    -1,
+    100
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": null,
+   "max": 0,
+   "around": [
+    1700000000,
+    1700000000
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 3,
+   "max": 10,
+   "around": [
+    1,
+    2,
+    0.5
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": 3,
+   "max": null,
+   "around": [
+    -1,
+    2.5,
+    0.5
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": 12,
+   "max": null,
+   "around": [
+    10001
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 1,
+   "max": 12,
+   "around": [
+    10000,
+    -3,
+    -3
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": null,
+   "max": 0,
+   "around": [
+    7,
+    2
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": null,
+   "max": 2.5,
+   "around": [
+    0.5,
+    1700000000,
+    -3
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 2.5,
+   "max": 0,
+   "around": [
+    12,
+    100
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": null,
+   "max": 0,
+   "around": [
+    0
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": 10,
+   "max": null,
+   "around": [
+    1,
+    100,
+    9999,
+    3
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": 12,
+   "max": 0,
+   "around": [
+    100,
+    1700000000,
+    -3
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": null,
+   "max": -3,
+   "around": []
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 12,
+   "max": 2.5,
+   "around": [
+    2,
+    100
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": -3,
+   "max": -3,
+   "around": [
+    3
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": null,
+   "max": -3,
+   "around": [
+    7,
+    10000,
+    7
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": 12,
+   "max": 2.5,
+   "around": [
+    1700000000
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 10,
+   "max": 0,
+   "around": [
+    3,
+    -1
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": null,
+   "max": 2.5,
+   "around": [
+    9999,
+    0
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": -3,
+   "max": null,
+   "around": []
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 2.5,
+   "max": 2.5,
+   "around": [
+    10001,
+    10000,
+    100,
+    10000
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": -3,
+   "max": null,
+   "around": []
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": 2.5,
+   "max": 1,
+   "around": [
+    2.5,
+    12
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": null,
+   "max": 0,
+   "around": [
+    1700000000,
+    0.5,
+    7
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": 12,
+   "max": 1,
+   "around": [
+    10001,
+    -1,
+    10000,
+    2.5
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 10,
+   "max": 12,
+   "around": [
+    100,
+    0,
+    -3,
+    2
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 1,
+   "max": null,
+   "around": [
+    1,
+    1700000000,
+    10000
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 1,
+   "max": 10,
+   "around": [
+    9999,
+    -1,
+    12,
+    0
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 3,
+   "max": null,
+   "around": [
+    1700000000,
+    0.5
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 10,
+   "max": 10,
+   "around": [
+    0
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": 0,
+   "max": 1,
+   "around": [
+    2.5,
+    100,
+    12
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": 1,
+   "max": null,
+   "around": []
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": 12,
+   "max": 2.5,
+   "around": []
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": -3,
+   "max": null,
+   "around": []
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": null,
+   "max": 0,
+   "around": [
+    10000,
+    9999
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": 2.5,
+   "max": 1,
+   "around": [
+    10000,
+    -3,
+    1
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": null,
+   "max": null,
+   "around": [
+    0.5,
+    2.5,
+    10
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 2.5,
+   "max": 2.5,
+   "around": [
+    10000,
+    2,
+    10001,
+    3
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 12,
+   "max": 0,
+   "around": [
+    10000
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": null,
+   "max": 2.5,
+   "around": [
+    12,
+    7
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": 2.5,
+   "max": 2.5,
+   "around": [
+    10001,
+    10000
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 0,
+   "max": 0,
+   "around": [
+    0,
+    100
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": 10,
+   "max": null,
+   "around": [
+    100,
+    10000
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": null,
+   "max": 2.5,
+   "around": [
+    0.5,
+    10000,
+    10000,
+    2
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 0,
+   "max": 1,
+   "around": [
+    7,
+    1
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 12,
+   "max": 2.5,
+   "around": [
+    1,
+    0.5,
+    3
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": null,
+   "max": 0,
+   "around": [
+    2.5,
+    9999,
+    2.5
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": null,
+   "max": 3,
+   "around": [
+    12,
+    -3,
+    10,
+    10000
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 12,
+   "max": 10,
+   "around": [
+    1
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 10,
+   "max": 2.5,
+   "around": [
+    100,
+    2,
+    -1,
+    2.5
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": 2.5,
+   "max": null,
+   "around": [
+    2.5,
+    100
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": -3,
+   "max": 0,
+   "around": [
+    -3,
+    0.5,
+    9999,
+    10000
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 1,
+   "max": null,
+   "around": [
+    0.5,
+    -3
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 1,
+   "max": null,
+   "around": [
+    3,
+    0,
+    -3
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": null,
+   "max": 10,
+   "around": [
+    0,
+    10001
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": null,
+   "max": null,
+   "around": [
+    -1,
+    10001
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": null,
+   "max": 1,
+   "around": [
+    1700000000,
+    0,
+    1,
+    1
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": 0,
+   "max": null,
+   "around": [
+    100,
+    12,
+    1700000000
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": 3,
+   "max": -3,
+   "around": [
+    1700000000,
+    3,
+    -3,
+    2
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 2.5,
+   "max": 0,
+   "around": [
+    10001
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": null,
+   "max": 12,
+   "around": [
+    -3
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 0,
+   "max": -3,
+   "around": [
+    100,
+    -3
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": -3,
+   "max": 12,
+   "around": [
+    7
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": null,
+   "max": null,
+   "around": [
+    10001,
+    0,
+    12
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": 3,
+   "max": 1,
+   "around": []
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": 3,
+   "max": null,
+   "around": [
+    0.5,
+    -3,
+    7,
+    10000
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": null,
+   "max": -3,
+   "around": [
+    1700000000,
+    -1
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": -3,
+   "max": 10,
+   "around": [
+    0.5
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 10,
+   "max": 2.5,
+   "around": [
+    -1
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": 12,
+   "max": 1,
+   "around": [
+    12,
+    1,
+    0
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": -3,
+   "max": null,
+   "around": [
+    12,
+    2
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": null,
+   "max": 10,
+   "around": []
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 0,
+   "max": 12,
+   "around": [
+    10000,
+    3,
+    2,
+    2
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": null,
+   "max": 10,
+   "around": [
+    2.5
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 3,
+   "max": null,
+   "around": [
+    10,
+    10000,
+    100,
+    2.5
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": 1,
+   "max": null,
+   "around": [
+    100
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": -3,
+   "max": 1,
+   "around": [
+    7,
+    0.5,
+    10
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": 2.5,
+   "max": null,
+   "around": [
+    0,
+    7,
+    9999,
+    2.5
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": null,
+   "max": 10,
+   "around": []
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": -3,
+   "max": null,
+   "around": [
+    12
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": null,
+   "max": -3,
+   "around": [
+    -1,
+    12,
+    10001
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": null,
+   "max": null,
+   "around": [
+    2
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": null,
+   "max": null,
+   "around": []
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": -3,
+   "max": 3,
+   "around": [
+    3
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": 12,
+   "max": 2.5,
+   "around": [
+    -1,
+    3
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": null,
+   "max": 2.5,
+   "around": []
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": null,
+   "max": 3,
+   "around": []
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": 12,
+   "max": null,
+   "around": [
+    0.5
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": null,
+   "max": 0,
+   "around": [
+    3,
+    1,
+    1
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": null,
+   "max": null,
+   "around": [
+    9999
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": null,
+   "max": 12,
+   "around": [
+    1,
+    0.5
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": null,
+   "max": 12,
+   "around": [
+    10
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": null,
+   "max": 12,
+   "around": [
+    -3
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": 10,
+   "max": null,
+   "around": [
+    0,
+    0.5,
+    10000,
+    9999
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 3,
+   "max": null,
+   "around": []
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": -3,
+   "max": null,
+   "around": [
+    1700000000,
+    3,
+    3,
+    12
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": -3,
+   "max": 0,
+   "around": [
+    1700000000,
+    0.5,
+    7,
+    2.5
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": null,
+   "max": 0,
+   "around": []
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": null,
+   "max": 10,
+   "around": [
+    9999,
+    1700000000,
+    10001,
+    0
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": 10,
+   "max": -3,
+   "around": [
+    3,
+    1700000000,
+    9999
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": 0,
+   "max": null,
+   "around": [
+    1
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": -3,
+   "max": null,
+   "around": [
+    12,
+    10,
+    2,
+    2
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": 12,
+   "max": -3,
+   "around": []
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": null,
+   "max": 2.5,
+   "around": [
+    10001,
+    12
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 3,
+   "max": 0,
+   "around": [
+    2.5,
+    1700000000,
+    2,
+    9999
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": 0,
+   "max": null,
+   "around": [
+    7,
+    7,
+    0,
+    100
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": -3,
+   "max": 12,
+   "around": [
+    10,
+    7,
+    12,
+    1
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": null,
+   "max": null,
+   "around": [
+    10
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": 12,
+   "max": 10,
+   "around": [
+    10,
+    -1
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": null,
+   "max": null,
+   "around": [
+    1700000000,
+    100
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 1,
+   "max": 3,
+   "around": [
+    1700000000,
+    1,
+    3,
+    10001
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 10,
+   "max": 3,
+   "around": [
+    -1,
+    1700000000
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": 3,
+   "max": 0,
+   "around": []
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": null,
+   "max": 10,
+   "around": [
+    0,
+    10,
+    9999
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 12,
+   "max": null,
+   "around": [
+    0
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": null,
+   "max": 10,
+   "around": [
+    -3
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": -3,
+   "max": 10,
+   "around": []
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 12,
+   "max": 1,
+   "around": [
+    9999,
+    10000
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": 12,
+   "max": 0,
+   "around": [
+    12
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": null,
+   "max": 1,
+   "around": []
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": 1,
+   "max": 12,
+   "around": [
+    3,
+    2.5,
+    9999,
+    9999
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 10,
+   "max": null,
+   "around": [
+    12,
+    1700000000,
+    100,
+    9999
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": -3,
+   "max": 10,
+   "around": [
+    3,
+    2.5
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": -3,
+   "max": null,
+   "around": []
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": 10,
+   "max": 0,
+   "around": [
+    1700000000,
+    2.5,
+    1
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 12,
+   "max": 0,
+   "around": [
+    1,
+    2.5
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 12,
+   "max": null,
+   "around": [
+    3,
+    10001,
+    2.5,
+    12
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 2.5,
+   "max": 3,
+   "around": [
+    10000
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": 2.5,
+   "max": 1,
+   "around": []
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 0,
+   "max": null,
+   "around": [
+    0,
+    -3
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": 1,
+   "max": -3,
+   "around": []
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": null,
+   "max": null,
+   "around": []
+  },
+  {
+   "kind": "numbers",
+   "integer": true,
+   "min": null,
+   "max": null,
+   "around": [
+    1700000000,
+    9999,
+    0.5,
+    2.5
+   ]
+  },
+  {
+   "kind": "numbers",
+   "integer": false,
+   "min": 2.5,
+   "max": null,
+   "around": []
+  },
+  {
+   "kind": "among",
+   "pick": 7,
+   "usable": []
+  },
+  {
+   "kind": "among",
+   "pick": 0,
+   "usable": []
+  },
+  {
+   "kind": "among",
+   "pick": 3,
+   "usable": []
+  },
+  {
+   "kind": "among",
+   "pick": 7,
+   "usable": [
+    true,
+    false
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 3,
+   "usable": [
+    true,
+    false
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 19,
+   "usable": [
+    true,
+    false,
+    false,
+    false,
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 6,
+   "usable": [
+    false,
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 3,
+   "usable": [
+    true,
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 18,
+   "usable": [
+    false,
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": null,
+   "usable": [
+    false,
+    true,
+    false,
+    false
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 10,
+   "usable": [
+    true,
+    true,
+    false
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 17,
+   "usable": [
+    true,
+    false,
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 5,
+   "usable": [
+    true,
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 0,
+   "usable": [
+    true,
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 14,
+   "usable": [
+    true,
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 6,
+   "usable": [
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 0,
+   "usable": [
+    false,
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 10,
+   "usable": [
+    false
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 2,
+   "usable": [
+    false
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 14,
+   "usable": [
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 13,
+   "usable": [
+    false
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 8,
+   "usable": [
+    true,
+    false,
+    false
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": null,
+   "usable": [
+    true,
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 10,
+   "usable": [
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": null,
+   "usable": [
+    true,
+    false,
+    true,
+    false,
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 14,
+   "usable": [
+    false,
+    true,
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 18,
+   "usable": []
+  },
+  {
+   "kind": "among",
+   "pick": 16,
+   "usable": [
+    false,
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 4,
+   "usable": [
+    false
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 8,
+   "usable": [
+    true,
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 11,
+   "usable": [
+    true,
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 17,
+   "usable": [
+    true,
+    true,
+    false,
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 8,
+   "usable": [
+    false,
+    true,
+    false
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 13,
+   "usable": [
+    false,
+    false
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 4,
+   "usable": [
+    true,
+    false,
+    false
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 18,
+   "usable": [
+    true,
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 11,
+   "usable": [
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 19,
+   "usable": [
+    true,
+    true,
+    false,
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 9,
+   "usable": [
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 8,
+   "usable": [
+    true,
+    false,
+    true,
+    false
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 5,
+   "usable": [
+    true,
+    false
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 5,
+   "usable": [
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 18,
+   "usable": [
+    true,
+    false,
+    true,
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 16,
+   "usable": [
+    true,
+    true,
+    false
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 9,
+   "usable": [
+    false,
+    false
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": null,
+   "usable": [
+    false,
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 7,
+   "usable": [
+    true,
+    false,
+    true,
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 2,
+   "usable": [
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": null,
+   "usable": [
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 2,
+   "usable": []
+  },
+  {
+   "kind": "among",
+   "pick": 9,
+   "usable": [
+    false,
+    false
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 6,
+   "usable": [
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 9,
+   "usable": [
+    false,
+    true,
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 0,
+   "usable": [
+    true,
+    true,
+    true,
+    false,
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 16,
+   "usable": [
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 8,
+   "usable": [
+    true,
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": null,
+   "usable": []
+  },
+  {
+   "kind": "among",
+   "pick": 16,
+   "usable": [
+    true,
+    true,
+    false
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": null,
+   "usable": [
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 13,
+   "usable": [
+    false,
+    true,
+    true,
+    false,
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 10,
+   "usable": [
+    true,
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": null,
+   "usable": [
+    true,
+    false,
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 4,
+   "usable": [
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 18,
+   "usable": []
+  },
+  {
+   "kind": "among",
+   "pick": 6,
+   "usable": [
+    true,
+    false
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 11,
+   "usable": []
+  },
+  {
+   "kind": "among",
+   "pick": 9,
+   "usable": []
+  },
+  {
+   "kind": "among",
+   "pick": 11,
+   "usable": [
+    false,
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 16,
+   "usable": [
+    true,
+    true,
+    true,
+    false
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 15,
+   "usable": [
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": null,
+   "usable": []
+  },
+  {
+   "kind": "among",
+   "pick": 10,
+   "usable": []
+  },
+  {
+   "kind": "among",
+   "pick": 14,
+   "usable": []
+  },
+  {
+   "kind": "among",
+   "pick": 18,
+   "usable": [
+    false,
+    true,
+    false,
+    true,
+    false
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 14,
+   "usable": [
+    false,
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 8,
+   "usable": [
+    true,
+    true,
+    false,
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 14,
+   "usable": [
+    true,
+    false,
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 16,
+   "usable": []
+  },
+  {
+   "kind": "among",
+   "pick": 17,
+   "usable": [
+    false,
+    true,
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 17,
+   "usable": []
+  },
+  {
+   "kind": "among",
+   "pick": 1,
+   "usable": []
+  },
+  {
+   "kind": "among",
+   "pick": 11,
+   "usable": [
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": null,
+   "usable": [
+    true,
+    true,
+    true,
+    false,
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 14,
+   "usable": []
+  },
+  {
+   "kind": "among",
+   "pick": 17,
+   "usable": []
+  },
+  {
+   "kind": "among",
+   "pick": 11,
+   "usable": [
+    true,
+    true,
+    true,
+    false
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 1,
+   "usable": []
+  },
+  {
+   "kind": "among",
+   "pick": null,
+   "usable": [
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 7,
+   "usable": [
+    true,
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": null,
+   "usable": [
+    false
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 1,
+   "usable": []
+  },
+  {
+   "kind": "among",
+   "pick": null,
+   "usable": []
+  },
+  {
+   "kind": "among",
+   "pick": null,
+   "usable": []
+  },
+  {
+   "kind": "among",
+   "pick": 11,
+   "usable": [
+    false,
+    false,
+    false,
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 3,
+   "usable": [
+    true,
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 5,
+   "usable": [
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 2,
+   "usable": [
+    true,
+    true,
+    false,
+    false,
+    false
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 14,
+   "usable": [
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": null,
+   "usable": [
+    true,
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 13,
+   "usable": [
+    true,
+    false
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": null,
+   "usable": [
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": null,
+   "usable": []
+  },
+  {
+   "kind": "among",
+   "pick": null,
+   "usable": [
+    false,
+    true,
+    false
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": null,
+   "usable": [
+    true,
+    false,
+    false,
+    false
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": null,
+   "usable": []
+  },
+  {
+   "kind": "among",
+   "pick": 13,
+   "usable": [
+    true,
+    false,
+    true,
+    false
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": null,
+   "usable": []
+  },
+  {
+   "kind": "among",
+   "pick": 14,
+   "usable": [
+    false,
+    false
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": null,
+   "usable": []
+  },
+  {
+   "kind": "among",
+   "pick": 3,
+   "usable": [
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 7,
+   "usable": []
+  },
+  {
+   "kind": "among",
+   "pick": null,
+   "usable": []
+  },
+  {
+   "kind": "among",
+   "pick": null,
+   "usable": [
+    true,
+    true,
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 7,
+   "usable": [
+    true,
+    true,
+    false,
+    false
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": null,
+   "usable": [
+    false,
+    false
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 14,
+   "usable": [
+    true,
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": null,
+   "usable": [
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": 15,
+   "usable": [
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": null,
+   "usable": [
+    true,
+    true,
+    true
+   ]
+  },
+  {
+   "kind": "among",
+   "pick": null,
+   "usable": [
+    true,
+    true
+   ]
+  }
+ ]
+}

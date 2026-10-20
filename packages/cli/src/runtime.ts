@@ -16,6 +16,7 @@ import type { CaseChoice, CommandChoice, CommandFacts } from "./choose.ts";
 import { freshStage0, increasingStage0, survivesRestartStage0 } from "./promise.ts";
 import { OUTCOME_START, callsStage0, outcomeStage0 } from "./outcome.ts";
 import type { OutcomeEvent, OutcomeFail } from "./outcome.ts";
+import { amongStage0, numberCandidatesStage0, stringCandidatesStage0 } from "./candidates.ts";
 import type { Observed } from "./observe.ts";
 import { conforms, isEnum, isList, isNumberSchema, isOneOf, isOptional, isRecord, isStringSchema } from "./schema.ts";
 
@@ -137,7 +138,32 @@ export type Deciders = {
   // 起きることの適用 (outcome-apply)。1手の適用ごとに1つの隔離を開き、事実を順に渡す。使えなければ undefined
   outcome?: () => Promise<OutcomeSession | undefined>;
   calls?: (keyed: boolean, found: boolean) => Promise<boolean | undefined>;
+  // 入力の候補 (input-candidates)
+  candidates?: (question: CandidateQuestion) => Promise<unknown>;
 };
+// 入力の候補の問い。arbitraryOf は同期（fast-check の生成器を組み立てる）ので、Stage 0 で決めて記録し、試行を始める前に Stage 1 と突き合わせる
+export type CandidateQuestion =
+  | { kind: "strings"; texts: string[]; numbers: number[] }
+  | { kind: "numbers"; integer: boolean; min: number | null; max: number | null; around: number[] }
+  | { kind: "among"; pick: number | null; usable: boolean[] };
+const candidatesStage0 = (question: CandidateQuestion): unknown =>
+  question.kind === "strings"
+    ? stringCandidatesStage0(question.texts, question.numbers)
+    : question.kind === "numbers"
+      ? numberCandidatesStage0(question.integer, question.min, question.max, question.around)
+      : amongStage0(question.pick, question.usable);
+// 記録した候補の決め方を、Stage 1 と突き合わせる
+async function verifyCandidates(deciders: Deciders, questions: { question: CandidateQuestion; answer: unknown }[]): Promise<void> {
+  if (!deciders.candidates) return;
+  for (const { question, answer } of questions) agree("入力の候補", "input-candidates", answer, await deciders.candidates(question), question);
+}
+// シミュレーターを作るあいだ (同期) に決めた候補の記録。記録するのは、突き合わせる呼び手 (check、selfCheck) が求めたときだけ
+let candidateLog: { question: CandidateQuestion; answer: unknown }[] | undefined;
+function decided<T>(question: CandidateQuestion): T {
+  const answer = candidatesStage0(question);
+  candidateLog?.push({ question, answer });
+  return answer as T;
+}
 // send が undefined を返したら、その部品は動かなくなった（Stage 0 だけで続ける）
 export type OutcomeSession = { send(event: OutcomeEvent): Promise<{ answer?: unknown; fail?: OutcomeFail } | undefined>; close(): Promise<void> };
 
@@ -270,9 +296,12 @@ function arbitraryOf(schema: FieldSchema, hints: Hints): fc.Arbitrary<unknown> {
   }
   if (schema === "string" || isStringSchema(schema)) {
     // 意味の関数の中の文字列と、宣言した例を混ぜる（形式の決まった文字列は、乱数ではまず出ない）
-    const known = [...new Set([...hints.strings, ...(isStringSchema(schema) ? (schema.examples ?? []) : [])])];
     // 長さのしきい値: 仕様の中の数の前後の長さの文字列も混ぜる（「100 文字を超えるタイトルは断る」に、乱数の短い文字列は届かない）
-    const lengths = [...new Set(hints.numbers.filter((n) => Number.isInteger(n) && n > 0 && n <= 10_000).flatMap((n) => [n - 1, n, n + 1]))];
+    const { known, lengths } = decided<{ known: string[]; lengths: number[] }>({
+      kind: "strings",
+      texts: [...hints.strings, ...(isStringSchema(schema) ? (schema.examples ?? []) : [])],
+      numbers: [...hints.numbers],
+    });
     const choices: fc.WeightedArbitrary<unknown>[] = [{ weight: 2, arbitrary: fc.string() }];
     if (known.length > 0) choices.push({ weight: 2, arbitrary: fc.constantFrom(...known) });
     if (lengths.length > 0) choices.push({ weight: 1, arbitrary: fc.constantFrom(...lengths).map((length) => "x".repeat(length)) });
@@ -284,18 +313,19 @@ function arbitraryOf(schema: FieldSchema, hints: Hints): fc.Arbitrary<unknown> {
   // 以前は、宣言があると、仕様の中の数を使わなかった。そのため around が、狙う値の写しを書く場所になっていた
   const declared = isNumberSchema(schema) ? schema : { type: schema as "integer" | "number" };
   const { type, min, max } = declared;
-  const around = [...new Set([...hints.numbers, ...(declared.around ?? [])])];
+  const { limits, thresholds } = decided<{ limits: number[]; thresholds: number[] }>({
+    kind: "numbers",
+    integer: type === "integer",
+    min: min ?? null,
+    max: max ?? null,
+    around: [...hints.numbers, ...(declared.around ?? [])],
+  });
   const base =
     type === "integer"
       ? fc.integer({ min: min ?? -(2 ** 31), max: max ?? 2 ** 31 - 1 })
       : fc.double({ min, max, noNaN: true, noDefaultInfinity: true });
   // 範囲の端と、しきい値の前後を重点的に生成する（「以上」と「より大きい」の取り違えを見つけるため）。
   // しきい値にちょうど当たる入力は一様な乱数ではまず出ないので、半分はここから選ぶ
-  const valid = (values: (number | undefined)[]) => [
-    ...new Set(values.filter((value): value is number => value !== undefined && conforms(schema, value))),
-  ];
-  const limits = valid([min, max]);
-  const thresholds = valid(around.flatMap((value) => (type === "integer" ? [value - 1, value, value + 1] : [value])));
   const choices: fc.WeightedArbitrary<unknown>[] = [{ weight: 2, arbitrary: base }];
   if (limits.length > 0) choices.push({ weight: 1, arbitrary: fc.constantFrom(...limits) });
   if (thresholds.length > 0) choices.push({ weight: 3, arbitrary: fc.constantFrom(...thresholds) });
@@ -454,10 +484,15 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
       // 多数ある部品を指したときは、そのキーから
       const remembered =
         among.data in state.data ? state.data[among.data] : among.data in keyed ? (state.many?.[among.data] ?? []).map((entry) => entry.key) : rememberedInParts(state, among.data);
-      const candidates = (Array.isArray(remembered) ? remembered : [])
-        .map((item) => (among.field === undefined ? item : (item as Values | null)?.[among.field]))
-        .filter((value) => value !== undefined && value !== null && conforms(model.commands[name][field], value));
-      if (pick !== null && pick !== undefined && candidates.length > 0) given[field] = candidates[pick % candidates.length];
+      const items = (Array.isArray(remembered) ? remembered : []).map((item) => (among.field === undefined ? item : (item as Values | null)?.[among.field]));
+      const question: CandidateQuestion = {
+        kind: "among",
+        pick: pick ?? null,
+        usable: items.map((value) => value !== undefined && value !== null && conforms(model.commands[name][field], value)),
+      };
+      const position = candidatesStage0(question) as number | null;
+      amongChoices.push({ question, answer: position });
+      if (position !== null) given[field] = items[position];
     }
     return given;
   };
@@ -487,6 +522,8 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
     if (resolved === FAILED_ANSWER) throw new Error(failedRead(String((value as Reference).path)));
     return resolved;
   };
+  // この1手で選んだ、覚えているものからの入力。1手の終わりに Stage 1 と突き合わせる
+  const amongChoices: { question: CandidateQuestion; answer: unknown }[] = [];
   // この1手で選んだ決定表の行（尋ねた条件の答えと一緒に）。1手の終わりに Stage 1 と突き合わせる
   const rowChoices: { names: string[]; answers: Record<string, boolean>; choice: CaseChoice }[] = [];
   const resolveRaw = (value: SpecValue, context: Values & { status: string }, command: string): unknown => {
@@ -562,6 +599,7 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
   const next = async (state: State, raw: RawStep, steps: Step[], force?: string, strict = false): Promise<{ step: Step; expected: Observation; after: State } | undefined> => {
     // この手で選んだ決定表の行は、ここから（含む部品の手は、自分の分だけを突き合わせる）
     const mark = rowChoices.length;
+    const amongMark = amongChoices.length;
     try {
       // 意味の関数の中の decide / calculate が、この解釈を引くようにする
       activate(binding);
@@ -790,6 +828,7 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
         ...(state.many ? { many: manyStates } : {}),
       };
       checkInvariants(after, steps);
+      await verifyCandidates(deciders, amongChoices.splice(amongMark));
       for (const recorded of rowChoices.splice(mark)) {
         const replay = (name: string) => {
           if (!(name in recorded.answers)) throw new Error(`条件 "${name}" は、Stage 0 なら尋ねません`);
@@ -800,6 +839,7 @@ function simulator(input: SpecInput, model: SpecModel, binding: BoundSpecificati
       return { step, expected: plain({ state: target, effects, ...(declared === undefined ? {} : { output }) }) as Observation, after };
     } catch (error) {
       rowChoices.length = mark;
+      amongChoices.length = amongMark;
       throw error instanceof SpecError || error instanceof FrameworkError ? error : new SpecError(messageOf(error), steps);
     }
   };
@@ -821,7 +861,16 @@ export async function selfCheck(
   if (!input.binding) return { ok: false, message: "コンポーネントの解釈 (interpretation) がありません", steps: [] };
   // 利用者の部品でも、事前検査は Stage 1 の判断と両方で走らせ、一致を求める (R4)
   const decide = deciders ?? (await (await import("./stage1.ts")).stage1Deciders());
+  candidateLog = [];
   const sim = simulator(input, model, input.binding, undefined, false, decide);
+  const candidates = candidateLog;
+  candidateLog = undefined;
+  try {
+    await verifyCandidates(decide, candidates);
+  } catch (error) {
+    if (error instanceof FrameworkError) return { ok: false, message: `フレームワークの誤り: ${error.message}`, steps: [] };
+    throw error;
+  }
 
   const walk = async (raw: RawStep[]) => {
     const steps: Step[] = [];
@@ -1135,7 +1184,16 @@ export async function check(
   if (!input.binding) return { status: "error", message: "コンポーネントの解釈 (interpretation) がありません" };
   // 判断を Stage 1 で下す部品（渡されなければ、使えるものを用意する。stage1.ts は runtime.ts を読むので、ここで読み込む）
   const decide = deciders ?? (await (await import("./stage1.ts")).stage1Deciders(adapter));
+  candidateLog = [];
   const sim = simulator(input, model, input.binding, undefined, false, decide);
+  const candidates = candidateLog;
+  candidateLog = undefined;
+  try {
+    await verifyCandidates(decide, candidates);
+  } catch (error) {
+    if (error instanceof FrameworkError) return { status: "error", message: `フレームワークの誤り: ${error.message}` };
+    throw error;
+  }
   if (sim.commands.length === 0) return { status: "error", message: "検証するコマンドがありません" };
   // 代役が答える問い合わせと、記録する副作用。含む部品のものは、部品の名前で修飾したもの（todos.newId）
   const dependencies = dependenciesOf(input);

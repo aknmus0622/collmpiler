@@ -4,13 +4,16 @@
     "step-choice.interpretation.ts"
   ],
   "specs": "sha256:64d6c09c7dfa690db68e77fe6c171afb7eec074562f129ca01c1ec06c2aba07f",
-  "code": "sha256:7a99477ef47691a0adcedf49dcd8d3fa66e6f821d8b8e9a4b414ae3089573f51",
+  "code": "sha256:0384c354c65e7219bfa8cf63f7322db85dc3f29fb1bfba221832b28ca8b96076",
   "files": [
     "../src/gate-rules/gate-rules.ts",
     "../src/gate-rules/types.ts",
     "../src/graph-check/graph-check.ts",
     "../src/graph-check/rules.ts",
     "../src/graph-check/types.ts",
+    "../src/input-candidates/candidates.ts",
+    "../src/input-candidates/input-candidates.ts",
+    "../src/input-candidates/types.ts",
     "../src/interpret-flow/interpret-flow.ts",
     "../src/interpret-flow/plan.ts",
     "../src/interpret-flow/types.ts",
