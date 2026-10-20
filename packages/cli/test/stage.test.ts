@@ -310,6 +310,7 @@ test("自分自身の検証: 自分の生成物の上で動くフレームワー
     "mutation-verdict:implementation:0:ok",
     "observation-compare:implementation:0:ok",
     "outcome-apply:implementation:0:ok",
+    "overlay-check:implementation:0:ok",
     "payload-check:implementation:0:ok",
     "pipeline:implementation:0:ok",
     "promise-keeper:implementation:0:ok",
@@ -903,6 +904,30 @@ test("採点の部品 (N12d): 起きることの適用は、事例のすべて�
   const { resolveLayout, workspaceOf } = await import("../src/layout.ts");
   const { typescriptTarget } = await import("../src/target-typescript.ts");
   assert.equal(runCases(join(self, "specs"), workspaceOf(resolveLayout({ out: self }), typescriptTarget.files, "outcome-apply"), "outcome-apply").problem, undefined);
+});
+
+test("Stage 1: 重ね合わせの判定（Layer 1 との衝突、古さ）は、事実のすべての組み合わせで Stage 0 と同じ問題を返す (N12g)", async () => {
+  const { overlayCheck, runStage1, loadJudges } = await import("../src/stage1.ts");
+  const { overlayCodesStage0 } = await import("@clp/core");
+  const facts = JSON.parse(readFileSync(join(import.meta.dirname, "fixtures/overlay-facts.json"), "utf8")).cases;
+  const stage1 = await runStage1(overlayCheck, facts);
+  assert.ok(stage1, "Stage 1 が使えること");
+  assert.deepEqual(stage1, facts.map(overlayCodesStage0));
+  // 読み込みでも使われる: Layer 1 と食い違う解釈は、Stage 1 の判断でも、同じ言葉で報告される
+  const { loadSpecs } = await import("../src/loader.ts");
+  const dir = mkdtempSync(join(tmpRoot, "overlay-"));
+  writeFileSync(
+    join(dir, "lamp.component.ts"),
+    `import { commands, interpretation, service, states } from "@clp/core";
+export const State = states(["OFF", "ON"]);
+export const Command = commands({ Toggle: { from: State.OFF, goTo: State.ON } });
+export const Lamp = service({ init: State.OFF, uses: [State, Command] });
+export const Interpretation = interpretation(Lamp, [Command.Toggle.with({ goTo: State.OFF })]);
+`,
+  );
+  const both = await Promise.all([loadSpecs(dir), loadSpecs(dir, { judges: loadJudges })]);
+  assert.deepEqual(both[1].problems, both[0].problems);
+  assert.match((both[1].problems ?? []).join("\n"), /commands\.Toggle\.goTo: Layer 1 に書かれているので、解釈では書けません/);
 });
 
 test("採点の部品 (N12f): 入力の候補は、事例のすべてで Stage 0 と同じ候補を返し、検証で使われる", async () => {

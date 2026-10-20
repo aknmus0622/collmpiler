@@ -4,7 +4,7 @@
     "observation-compare.interpretation.ts"
   ],
   "specs": "sha256:321ea57513469caf80d0ae0e3bc1081ebf9d4c4b3c07c131801b0227f6a92df1",
-  "code": "sha256:a3e7ad5b74cce24cf0148877b1e6f77c75c99cb63dc307287c9ce283f373d13b",
+  "code": "sha256:b30fcac2ad86280324cd66f26851d368d002766dbe59eac36661f8c6a2fe53a2",
   "files": [
     "../src/gate-rules/gate-rules.ts",
     "../src/gate-rules/types.ts",
@@ -31,6 +31,9 @@
     "../src/outcome-apply/outcome-apply.ts",
     "../src/outcome-apply/rules.ts",
     "../src/outcome-apply/types.ts",
+    "../src/overlay-check/overlay-check.ts",
+    "../src/overlay-check/rules.ts",
+    "../src/overlay-check/types.ts",
     "../src/payload-check/fit.ts",
     "../src/payload-check/payload-check.ts",
     "../src/payload-check/types.ts",

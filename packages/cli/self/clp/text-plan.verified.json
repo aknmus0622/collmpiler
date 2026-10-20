@@ -4,7 +4,7 @@
     "text-plan.interpretation.ts"
   ],
   "specs": "sha256:477d885eb5722e085ba12bab225d8f8b0a9d4adbee43c671877db6160adaabc9",
-  "code": "sha256:06c7640667396e8bed1624538f6fabfa4a07c8f5c28594c9a2ab6ed98dd73017",
+  "code": "sha256:9a947d81297f62df8d7efe6e6e33720425edcac0f53991b53d7749720630cfb9",
   "files": [
     "../src/gate-rules/gate-rules.ts",
     "../src/gate-rules/types.ts",
@@ -31,6 +31,9 @@
     "../src/outcome-apply/outcome-apply.ts",
     "../src/outcome-apply/rules.ts",
     "../src/outcome-apply/types.ts",
+    "../src/overlay-check/overlay-check.ts",
+    "../src/overlay-check/rules.ts",
+    "../src/overlay-check/types.ts",
     "../src/payload-check/fit.ts",
     "../src/payload-check/payload-check.ts",
     "../src/payload-check/types.ts",

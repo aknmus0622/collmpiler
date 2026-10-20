@@ -14,7 +14,7 @@ import { leavesOf, observationsEqualStage0 } from "./observe.ts";
 import type { Observed } from "./observe.ts";
 import { fileURLToPath } from "node:url";
 import { GRAMMAR, leafEvents, leafMessage, leafQueries, slotOf, treeDiagnostic } from "@clp/core";
-import type { FieldSchema, LeafFacts, LeafReport, Node, TreeReport } from "@clp/core";
+import type { FieldSchema, LeafFacts, LeafReport, Node, OverlayCode, OverlayFact, TreeReport } from "@clp/core";
 import type { LoadJudges } from "./loader.ts";
 import { hashFiles, staleness } from "./verified.ts";
 import { judgeEvents, judgeStage0 } from "./mutation.ts";
@@ -433,10 +433,33 @@ async function stage1Declared(input: SpecInput): Promise<{ reports: DeclaredRepo
 }
 
 // 仕様を読み込むときの判断（木の検査と葉の検査）を、使える中でいちばん新しい Stage で下す。loadSpecs の judges に渡す
+// 重ね合わせの判定 (overlay-check)。事実を1つずつ渡し、事実ごとに報告された問題の種類を集める
+const OVERLAY_COMMANDS = { key: "Key", slot: "Slot", state: "State", entry: "Entry", branching: "Branching", asks: "Asks", call: "Call", stamp: "Stamp" } as const;
+export const overlayCheck: Stage1Part<OverlayFact[], OverlayCode[][]> = {
+  component: "overlay-check",
+  async run(adapter, facts) {
+    const codes: OverlayCode[][] = [];
+    let current: OverlayCode[] = [];
+    await adapter.setupIsolation({ queries: {}, effects: { Problem: (payload: { code: OverlayCode }) => void current.push(payload.code) } });
+    try {
+      for (const fact of facts) {
+        current = [];
+        const { kind, ...input } = fact;
+        await adapter.executeCommand({ name: OVERLAY_COMMANDS[kind], input });
+        codes.push(current);
+      }
+    } finally {
+      await adapter.teardownIsolation();
+    }
+    return codes;
+  },
+};
+
 export const loadJudges: LoadJudges = {
   tree: async (tree) => (await runStage1(treeCheck, tree))?.map(treeDiagnostic),
   leaf: async (facts) => (await runStage1(leafCheckPart, facts))?.map(leafMessage),
   claims: (events) => runStage1(typeCheck, events),
+  overlay: (facts) => runStage1(overlayCheck, facts),
 };
 
 // 文面の判断 (text-plan)。契約に現れる型を、中から順に書き、注記と節を決める。結果は、生成の前に登録する

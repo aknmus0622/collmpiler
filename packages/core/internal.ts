@@ -6,6 +6,9 @@
 //
 // 型は実行時に消えるため、すべて「値」として宣言する。値として残るので IR に出力でき、PBT の入力生成にも使える。
 
+import { overlayCodesStage0 } from "./overlay.ts";
+import type { OverlayCode, OverlayFact } from "./overlay.ts";
+
 // --- フィールドの型 ---
 // 数値の制約。around は、その前後を PBT が重点的に生成するしきい値
 export type NumberSchema = {
@@ -317,22 +320,31 @@ export type MergedView = {
   commands: Record<string, { prose: boolean; cases: Record<string, { described: boolean; filled: string[] }> }>;
 };
 
+// 重ね合わせで確かめた事実と、問題だったときの言葉 (N12g)
+export type OverlayCheck = { fact: OverlayFact; messages: Partial<Record<OverlayCode, string>> };
+
 // Layer 1 に解釈の構造を重ねる。Layer 1 が構造として書いたものは、解釈では書き換えられない。
 // 合わない点は problems に集める（読み込みの時点では投げない。報告は IR を作るときに行う）
 export function resolveComponent(
   layer1: object,
   written: object = {},
   rules: MergeRules = DEFAULT_RULES,
-): { declaration: Declaration; commands: Record<string, Record<string, Structure>>; problems: string[]; view: MergedView } {
+): { declaration: Declaration; commands: Record<string, Record<string, Structure>>; problems: string[]; overlay: OverlayCheck[]; view: MergedView } {
   const base = layer1 as Layer1;
   const view: MergedView = { prose: [], entries: { data: {}, queries: {}, effects: {}, calculations: {} }, states: "given", init: false, commands: {} };
   const structure = written as StructureValue;
   const problems: string[] = [];
+  // 確かめた事実の1つずつと、問題だったときの言葉。読み込む側は、同じ事実を Stage 1 で判断し直せる (N12g)
+  const overlay: OverlayCheck[] = [];
+  const found = (fact: OverlayFact, messages: Partial<Record<OverlayCode, string>>) => {
+    overlay.push({ fact, messages });
+    for (const code of overlayCodesStage0(fact)) problems.push(messages[code] ?? code);
+  };
   const descriptions: Record<string, string> = {};
   if (base.description !== undefined) descriptions.component = base.description;
 
   for (const key of Object.keys(structure)) {
-    if (!(STRUCTURE_KEYS as readonly string[]).includes(key)) problems.push(`解釈の structure に "${key}" というキーはありません`);
+    found({ kind: "key", known: (STRUCTURE_KEYS as readonly string[]).includes(key) }, { "unknown-key": `解釈の structure に "${key}" というキーはありません` });
   }
 
   // 状態: 配列か、{ 名前: 説明 }
@@ -343,12 +355,12 @@ export function resolveComponent(
     states = Object.keys(base.states);
     for (const [name, text] of Object.entries(base.states as Record<string, Description>)) {
       if (isDescription(text)) descriptions[`states.${name}`] = text.$description;
-      else problems.push(`states の "${name}" には、description(...) を書いてください`);
+      found({ kind: "state", described: isDescription(text) }, { undescribed: `states の "${name}" には、description(...) を書いてください` });
     }
   }
-  if (states !== undefined && structure.states !== undefined) problems.push("states: Layer 1 に構造として書かれているので、解釈では書けません");
+  found({ kind: "slot", known: true, layer1: states !== undefined, interpretation: structure.states !== undefined }, { conflict: "states: Layer 1 に構造として書かれているので、解釈では書けません" });
   states = states ?? structure.states;
-  if (base.init !== undefined && structure.init !== undefined) problems.push("init: Layer 1 に書かれているので、解釈では書けません");
+  found({ kind: "slot", known: true, layer1: base.init !== undefined, interpretation: structure.init !== undefined }, { conflict: "init: Layer 1 に書かれているので、解釈では書けません" });
   let init = base.init ?? structure.init;
   // 状態も初期状態も、どこにも書かれていない: 状態を持たない部品。内部では、1つだけの状態を持つものとして扱う
   if (states === undefined && init === undefined && !isDescription(base.states)) {
@@ -370,9 +382,9 @@ export function resolveComponent(
     const listed = given === undefined || isDescription(given) ? undefined : given;
     const added = structure[key] ?? {};
     const names = listed ? [...Object.keys(listed), ...(additive ? Object.keys(added).filter((name) => !(name in listed)) : [])] : Object.keys(added);
-    if (listed && !additive) {
+    if (listed) {
       for (const name of Object.keys(added)) {
-        if (!(name in listed)) problems.push(`${key}.${name}: Layer 1 にありません（Layer 1 が項目を並べているので、解釈では足せません）`);
+        found({ kind: "entry", listed: true, closed: !additive, inLayer1: name in listed }, { closed: `${key}.${name}: Layer 1 にありません（Layer 1 が項目を並べているので、解釈では足せません）` });
       }
     }
     const result: Record<string, CommandShape> = {};
@@ -382,11 +394,13 @@ export function resolveComponent(
       const { is, ...rest } = (added[name] ?? {}) as Record<string, unknown>;
       const right: Record<string, unknown> = key === "calculations" && is !== undefined ? { ...rest, description: is } : added[name] ?? {};
       for (const part of Object.keys(left)) {
-        if (!(parts as readonly string[]).includes(part)) problems.push(`${key}.${name}: ここには ${part === "type" ? "typed" : part} を書けません`);
+        found({ kind: "key", known: (parts as readonly string[]).includes(part) }, { "unknown-key": `${key}.${name}: ここには ${part === "type" ? "typed" : part} を書けません` });
       }
       for (const part of Object.keys(right)) {
-        if (!(parts as readonly string[]).includes(part)) problems.push(`${key}.${name}: 解釈に "${part}" というキーは書けません`);
-        else if (left[part] !== undefined) problems.push(`${key}.${name}.${part}: Layer 1 に書かれているので、解釈では書けません`);
+        found(
+          { kind: "slot", known: (parts as readonly string[]).includes(part), layer1: left[part] !== undefined, interpretation: true },
+          { "unknown-key": `${key}.${name}: 解釈に "${part}" というキーは書けません`, conflict: `${key}.${name}.${part}: Layer 1 に書かれているので、解釈では書けません` },
+        );
       }
       const merged = { ...right, ...left } as CommandShape & Record<string, unknown>;
       // 足りない部品は、葉の検査が報告する
@@ -414,7 +428,7 @@ export function resolveComponent(
   const calculations = Object.fromEntries(
     Object.entries(entries("calculations")).map(([name, entry]) => [name, { is: entry.description ?? "", type: (entry.output ?? "string") as FieldSchema }]),
   );
-  if (base.decisions !== undefined && structure.decisions !== undefined) problems.push("decisions: Layer 1 に書かれているので、解釈では書けません");
+  found({ kind: "slot", known: true, layer1: base.decisions !== undefined, interpretation: structure.decisions !== undefined }, { conflict: "decisions: Layer 1 に書かれているので、解釈では書けません" });
 
   // コマンド
   const commands: Declaration["commands"] = {};
@@ -425,30 +439,28 @@ export function resolveComponent(
   const refined = structure.commands ?? {};
   if (sketched) {
     for (const name of Object.keys(refined)) {
-      if (!(name in sketched) && rules.closed.commands) problems.push(`commands.${name}: Layer 1 にありません（Layer 1 がコマンドを並べているので、解釈では足せません）`);
+      found({ kind: "entry", listed: true, closed: rules.closed.commands, inLayer1: name in sketched }, { closed: `commands.${name}: Layer 1 にありません（Layer 1 がコマンドを並べているので、解釈では足せません）` });
     }
   }
   const names = sketched ? [...Object.keys(sketched), ...(rules.closed.commands ? [] : Object.keys(refined).filter((name) => !(name in sketched)))] : Object.keys(refined);
   for (const name of names) {
     const left = shapeOf(sketched?.[name]);
     for (const part of Object.keys(left)) {
-      if (!rules.commandParts.includes(part)) problems.push(`commands.${name}: ここには ${part === "type" ? "typed" : part} を書けません`);
+      found({ kind: "key", known: rules.commandParts.includes(part) }, { "unknown-key": `commands.${name}: ここには ${part === "type" ? "typed" : part} を書けません` });
     }
     // 解釈が触れなかったコマンドは、何も足さない（単一化）
     const right = refined[name] ?? {};
     const prose = isDescription(sketched?.[name]) || (sketched === undefined && isDescription(given));
     view.commands[name] = { prose, cases: {} };
     for (const key of Object.keys(right)) {
-      if (!(COMMAND_KEYS as readonly string[]).includes(key) && key !== "nothing") problems.push(`commands.${name}: 解釈に "${key}" というキーは書けません`);
+      found({ kind: "key", known: (COMMAND_KEYS as readonly string[]).includes(key) || key === "nothing" }, { "unknown-key": `commands.${name}: 解釈に "${key}" というキーは書けません` });
     }
     for (const key of ["input", "output", "route", "from", "onlyIf", "asks", "calls", "description"] as const) {
-      if (left[key] !== undefined && right[key] !== undefined) {
-        problems.push(`commands.${name}.${key}: Layer 1 に書かれているので、解釈では書けません`);
-      }
+      found({ kind: "slot", known: true, layer1: left[key] !== undefined, interpretation: right[key] !== undefined }, { conflict: `commands.${name}.${key}: Layer 1 に書かれているので、解釈では書けません` });
     }
     const merge = (where: string, a: OutcomeShape, b: OutcomeStructure, caseName = "otherwise"): [Outcome, Structure] => {
       for (const key of ["goTo", "does", "responds", "nothing"] as const) {
-        if (a[key] !== undefined && b[key] !== undefined) problems.push(`${where}.${key}: Layer 1 に書かれているので、解釈では書けません`);
+        found({ kind: "slot", known: true, layer1: a[key] !== undefined, interpretation: b[key] !== undefined }, { conflict: `${where}.${key}: Layer 1 に書かれているので、解釈では書けません` });
       }
       const goTo = a.goTo ?? b.goTo;
       const does = a.does ?? b.does;
@@ -456,7 +468,7 @@ export function resolveComponent(
       const nothing = a.nothing ?? b.nothing;
       // 覚えること: 同じデータを両方が覚えるなら、Layer 1 が勝つ（解釈は書き換えられない）
       for (const field of Object.keys(b.set ?? {})) {
-        if (a.set && field in a.set) problems.push(`${where}.set.${field}: Layer 1 に書かれているので、解釈では書けません`);
+        found({ kind: "slot", known: true, layer1: a.set !== undefined && field in a.set, interpretation: true }, { conflict: `${where}.set.${field}: Layer 1 に書かれているので、解釈では書けません` });
       }
       // 副作用と、部品を作る・消すことは、Layer 1 の分が先、解釈の分があと
       const joined = <T>(first: readonly T[] | undefined, second: readonly T[] | undefined) =>
@@ -492,13 +504,26 @@ export function resolveComponent(
     const cases: Record<string, Structure> = {};
     let text = left.description ?? right.description;
     const flat = OUTCOME_KEYS.filter((key) => right[key] !== undefined);
+    found(
+      {
+        kind: "branching",
+        layer1Cases: left.when !== undefined,
+        interpretationCases: right.when !== undefined,
+        flat: flat.length > 0,
+        layer1Outcome: left.goTo !== undefined || left.does !== undefined || left.responds !== undefined,
+        layer1GoTo: left.goTo !== undefined,
+      },
+      {
+        "flat-in-cases": `commands.${name}: 場合に分かれるので、${flat.join(" / ")} は場合 (cases) の中に書いてください`,
+        "layer1-outside-cases": `commands.${name}: Layer 1 の goTo / does / responds は、場合 (cases) の中に書いてください`,
+        "branch-over-goto": `commands.${name}: Layer 1 が遷移先を1つに決めているので、解釈では場合分けできません`,
+      },
+    );
     if (left.when) {
       // Layer 1 が場合分けを書いた: 解釈は、同じ場合のそれぞれに構造を書く（otherwise だけは足せる）
-      if (flat.length > 0) problems.push(`commands.${name}: 場合に分かれるので、${flat.join(" / ")} は場合 (cases) の中に書いてください`);
-      if (left.goTo !== undefined || left.does !== undefined || left.responds !== undefined) problems.push(`commands.${name}: Layer 1 の goTo / does / responds は、場合 (cases) の中に書いてください`);
       const keys = [...Object.keys(left.when), ...(left.when.otherwise === undefined && right.when?.otherwise !== undefined ? ["otherwise"] : [])];
       for (const condition of Object.keys(right.when ?? {})) {
-        if (!keys.includes(condition)) problems.push(`commands.${name}.cases.${condition}: Layer 1 にありません（Layer 1 が場合分けを書いているので、解釈では足せません）`);
+        found({ kind: "entry", listed: true, closed: true, inLayer1: keys.includes(condition) }, { closed: `commands.${name}.cases.${condition}: Layer 1 にありません（Layer 1 が場合分けを書いているので、解釈では足せません）` });
       }
       // 解釈が触れなかった場合は、何も足さない（単一化）
       for (const condition of keys) {
@@ -506,8 +531,6 @@ export function resolveComponent(
       }
     } else if (right.when) {
       // 解釈が場合分けを決めた
-      if (flat.length > 0) problems.push(`commands.${name}: 場合に分かれるので、${flat.join(" / ")} は場合 (cases) の中に書いてください`);
-      if (left.goTo !== undefined) problems.push(`commands.${name}: Layer 1 が遷移先を1つに決めているので、解釈では場合分けできません`);
       text = text ?? left.does;
       for (const [condition, branch] of Object.entries(right.when)) {
         [outcomes[condition], cases[condition]] = merge(`commands.${name}.cases.${condition}`, {}, branch, condition);
@@ -521,17 +544,21 @@ export function resolveComponent(
     const asked: Record<string, Asked> = {};
     for (const [alias, entry] of Object.entries(left.asks ?? right.asks ?? {})) {
       const queried = Object.keys(entry ?? {});
-      if (queried.length !== 1) problems.push(`commands.${name}.asks.${alias}: 問い合わせを1つだけ書いてください (${queried.join(", ") || "なし"})`);
-      else asked[alias] = { query: queried[0], input: entry[queried[0]] ?? {} };
+      found({ kind: "asks", count: queried.length }, { "one-query": `commands.${name}.asks.${alias}: 問い合わせを1つだけ書いてください (${queried.join(", ") || "なし"})` });
+      if (queried.length === 1) asked[alias] = { query: queried[0], input: entry[queried[0]] ?? {} };
     }
     // 含む部品を呼ぶこと
     const called = left.calls ?? right.calls ?? {};
     for (const [alias, call] of Object.entries(called)) {
       const part = base.parts?.[call.part];
-      if (!part) problems.push(`commands.${name}.calls.${alias}: 部品 "${call.part}" は parts にありません`);
-      else if ((part.by === undefined) !== (call.key === undefined)) {
-        problems.push(`commands.${name}.calls.${alias}: 部品 "${call.part}" は${part.by === undefined ? "1つだけなので、at(...) は要りません" : "多数あるので、at(キー) でどれかを選んでください"}`);
-      }
+      found(
+        { kind: "call", exists: part !== undefined, keyedPart: part?.by !== undefined, keyGiven: call.key !== undefined },
+        {
+          "no-part": `commands.${name}.calls.${alias}: 部品 "${call.part}" は parts にありません`,
+          "key-extra": `commands.${name}.calls.${alias}: 部品 "${call.part}" は1つだけなので、at(...) は要りません`,
+          "key-missing": `commands.${name}.calls.${alias}: 部品 "${call.part}" は多数あるので、at(キー) でどれかを選んでください`,
+        },
+      );
     }
     const routed = left.route ?? right.route;
     const accepted = left.input ?? right.input;
@@ -570,7 +597,7 @@ export function resolveComponent(
     ...(base.parts ? { parts: base.parts } : {}),
     ...(base.durable !== undefined ? { durable: base.durable } : {}),
   };
-  return { declaration, commands: structures, problems, view };
+  return { declaration, commands: structures, problems, overlay, view };
 }
 
 // コンポーネント → その解釈。decide / calculate が、意味の関数の中から引けるようにする

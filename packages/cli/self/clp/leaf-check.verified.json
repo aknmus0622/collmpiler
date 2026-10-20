@@ -4,7 +4,7 @@
     "leaf-check.interpretation.ts"
   ],
   "specs": "sha256:54cf7f971d120b60edee7c22b20dd7753d21c8f2306b4bb9bb4708a277ede6d8",
-  "code": "sha256:e99206f4755dc372bef6e4327b11f8540fbce753df2b44f0a46ab04ff4201473",
+  "code": "sha256:3c4ef0a7b57196bab37505f907fc5e80b91cdfb2efc6bd3dc1055452aa130b33",
   "files": [
     "../src/gate-rules/gate-rules.ts",
     "../src/gate-rules/types.ts",
@@ -31,6 +31,9 @@
     "../src/outcome-apply/outcome-apply.ts",
     "../src/outcome-apply/rules.ts",
     "../src/outcome-apply/types.ts",
+    "../src/overlay-check/overlay-check.ts",
+    "../src/overlay-check/rules.ts",
+    "../src/overlay-check/types.ts",
     "../src/payload-check/fit.ts",
     "../src/payload-check/payload-check.ts",
     "../src/payload-check/types.ts",

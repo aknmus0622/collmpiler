@@ -4,7 +4,7 @@
     "graph-check.interpretation.ts"
   ],
   "specs": "sha256:41e93d67e41ecfcb9661b8c39dcdb7df4d8a14563b719782c1845afbe8b79765",
-  "code": "sha256:139ddf7ed0ee4e88aceae4224f3709de507664a234f9e61f8804a4ce84d7a656",
+  "code": "sha256:3fcc760e2014895d1aa011f2cd9da3b4ce2b5299d595f1ded396eeebe9221886",
   "files": [
     "../src/gate-rules/gate-rules.ts",
     "../src/gate-rules/types.ts",
@@ -31,6 +31,9 @@
     "../src/outcome-apply/outcome-apply.ts",
     "../src/outcome-apply/rules.ts",
     "../src/outcome-apply/types.ts",
+    "../src/overlay-check/overlay-check.ts",
+    "../src/overlay-check/rules.ts",
+    "../src/overlay-check/types.ts",
     "../src/payload-check/fit.ts",
     "../src/payload-check/payload-check.ts",
     "../src/payload-check/types.ts",

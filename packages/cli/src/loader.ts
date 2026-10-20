@@ -2,8 +2,8 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { BINDING, COMPONENT, activate, check, isComponent, layer1Of, leafFactsOf, treeOf } from "@clp/core";
-import type { AssetDeclaration, BoundSpecification, Diagnostic as TreeDiagnostic, LeafFacts, Node, Structure } from "@clp/core";
+import { BINDING, COMPONENT, activate, check, isComponent, layer1Of, leafFactsOf, overlayCodesStage0, overlayOf, treeOf } from "@clp/core";
+import type { AssetDeclaration, BoundSpecification, Diagnostic as TreeDiagnostic, LeafFacts, Node, OverlayCode, OverlayFact, Structure } from "@clp/core";
 import { resolveAssets } from "./assets.ts";
 import { stableStringify } from "./extract.ts";
 import type { SpecAsk, SpecEffect, SpecInput, SpecModel, SpecOutcome, SpecValue } from "./extract.ts";
@@ -145,7 +145,17 @@ export type LoadJudges = {
   leaf?: (facts: LeafFacts) => Promise<string[] | undefined>;
   // 名前の衝突（宣言の検査の、名前を主張する事実の列）
   claims?: (events: DeclaredEvent[]) => Promise<DeclaredReport[] | undefined>;
+  // 重ね合わせで確かめた事実（Layer 1 との衝突、古さ）。事実ごとの問題の種類 (N12g)
+  overlay?: (facts: OverlayFact[]) => Promise<OverlayCode[][] | undefined>;
 };
+
+// 解釈を重ねたときの問題。事実を Stage 1 で判断し直せれば、それを言葉にする。できなければ、Stage 0 の判断 (binding.problems)
+async function overlayProblems(binding: BoundSpecification, judges: LoadJudges): Promise<string[]> {
+  const checks = overlayOf(binding);
+  const codes = checks && (await judges.overlay?.(checks.map((check) => check.fact)));
+  if (!checks || !codes) return binding.problems;
+  return checks.flatMap((check, index) => codes[index].map((code) => check.messages[code] ?? code));
+}
 
 // 仕様の読み込みはここ1箇所に閉じ込める。パスは process.cwd() 基準。
 // component: 読み込むコンポーネントの名前。省略できるのは、コンポーネントが1つのときだけ。
@@ -194,7 +204,8 @@ export async function loadSpecs(
   input.assets = resolveAssets((declaration as { assets?: readonly AssetDeclaration[] }).assets ?? [], dirname(join(root, file)));
   if (bound && options.bindings !== false) {
     const stamp = stampIn(readFileSync(join(root, bound.file), "utf8"));
-    if (stamp !== undefined && stamp !== layer1Hash(declaration)) input.stale = true;
+    const fact: OverlayFact = { kind: "stamp", recorded: stamp ?? null, current: layer1Hash(declaration) };
+    if (((await judges.overlay?.([fact]))?.[0] ?? overlayCodesStage0(fact)).includes("stale")) input.stale = true;
     // 確定版に、確かめていない印が残っている（手で書き換えた、など）。下書きは、そもそも確かめていないものなので見ない
     if (!bound.file.endsWith(DRAFT_SUFFIX)) {
       const open = openReviews(readFileSync(join(root, bound.file), "utf8"));
@@ -283,8 +294,9 @@ function effectsOf(component: string, where: string, structure: Structure): Spec
 async function normalize(name: string, layer1: object, binding: BoundSpecification | undefined, incomplete: string[] | undefined, judges: LoadJudges = {}): Promise<SpecInput> {
   if (!binding) return { behaviors: {}, decisions: {}, layer1 };
   // 重ね合わせの誤りか、書き残し（葉の検査）があれば、語彙は作らない（報告は extract が行う）
-  if (binding.problems.length > 0 || (incomplete?.length ?? 0) > 0) {
-    return { behaviors: {}, decisions: {}, layer1, binding, problems: binding.problems, ...(incomplete?.length ? { incomplete } : {}) };
+  const problems = await overlayProblems(binding, judges);
+  if (problems.length > 0 || (incomplete?.length ?? 0) > 0) {
+    return { behaviors: {}, decisions: {}, layer1, binding, problems, ...(incomplete?.length ? { incomplete } : {}) };
   }
   const component = binding.component;
   const model: SpecModel = {

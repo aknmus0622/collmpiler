@@ -4,7 +4,7 @@
     "step-choice.interpretation.ts"
   ],
   "specs": "sha256:64d6c09c7dfa690db68e77fe6c171afb7eec074562f129ca01c1ec06c2aba07f",
-  "code": "sha256:0384c354c65e7219bfa8cf63f7322db85dc3f29fb1bfba221832b28ca8b96076",
+  "code": "sha256:83ba807ee1d94809fd14ef4dead42f60d3ec7f3e6375c326f0db7f877f0acf05",
   "files": [
     "../src/gate-rules/gate-rules.ts",
     "../src/gate-rules/types.ts",
@@ -31,6 +31,9 @@
     "../src/outcome-apply/outcome-apply.ts",
     "../src/outcome-apply/rules.ts",
     "../src/outcome-apply/types.ts",
+    "../src/overlay-check/overlay-check.ts",
+    "../src/overlay-check/rules.ts",
+    "../src/overlay-check/types.ts",
     "../src/payload-check/fit.ts",
     "../src/payload-check/payload-check.ts",
     "../src/payload-check/types.ts",

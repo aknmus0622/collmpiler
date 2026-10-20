@@ -8,7 +8,10 @@
 // - 節は、作られた場所（ファイルと行）を覚える。診断に出すため。
 
 import { BINDING, COMPONENT, UnboundNameError, activate, active, matchCondition, resolveComponent } from "./internal.ts";
-import type { BoundSpecification, Declaration, MergeRules, MergedView, Structure, Table } from "./internal.ts";
+import type { BoundSpecification, Declaration, MergeRules, MergedView, OverlayCheck, Structure, Table } from "./internal.ts";
+export type { OverlayCheck } from "./internal.ts";
+export { overlayCodesStage0 } from "./overlay.ts";
+export type { OverlayCode, OverlayFact } from "./overlay.ts";
 
 export { BINDING, COMPONENT, RuleConflictError, UnboundNameError, activate, dir, file, isDescription, isFragment, matchCondition, text } from "./internal.ts";
 export type {
@@ -1185,7 +1188,7 @@ export function interpretation(target: Node, given: readonly unknown[]): BoundSp
   if (finals.length > 0) structure.finals = finals;
 
   const layer1 = layer1Of(target);
-  const { declaration, commands, problems, view } = resolveComponent(layer1, structure, mergeRules());
+  const { declaration, commands, problems, overlay, view } = resolveComponent(layer1, structure, mergeRules());
   const value: BoundSpecification = {
     source: target,
     component: declaration,
@@ -1198,6 +1201,7 @@ export function interpretation(target: Node, given: readonly unknown[]): BoundSp
     incomplete: leafCheck(leafFacts(view, declaration, commands, meanings)),
   };
   Object.defineProperty(value, FACTS, { value: leafFacts(view, declaration, commands, meanings) });
+  Object.defineProperty(value, OVERLAY, { value: overlay });
   Object.defineProperty(value, BINDING, { value: true });
   activate(value);
   TREES.set(value, { tree, problems: into.problems });
@@ -1415,6 +1419,9 @@ export function treeOf(value: object): { tree: Node; problems: Diagnostic[] } | 
 }
 // 解釈が持つ、葉の検査の事実
 const FACTS = Symbol.for("clp.leafFacts");
+// 解釈が持つ、重ね合わせで確かめた事実 (N12g)。problems は、その Stage 0 の判断
+const OVERLAY = Symbol.for("clp.overlay");
+export const overlayOf = (binding: BoundSpecification): OverlayCheck[] | undefined => (binding as unknown as Record<symbol, OverlayCheck[] | undefined>)[OVERLAY];
 export const leafFactsOf = (binding: BoundSpecification): LeafFacts | undefined => (binding as unknown as Record<symbol, LeafFacts | undefined>)[FACTS];
 
 

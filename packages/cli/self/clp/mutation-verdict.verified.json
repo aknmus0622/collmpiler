@@ -4,7 +4,7 @@
     "mutation-verdict.interpretation.ts"
   ],
   "specs": "sha256:8d17d595afebe7ed06d0bd62a9a4a03b87852a7e468351d5335c17b74774be86",
-  "code": "sha256:2af673f03fa5f99c06ea43eb355003b589bafbe38505f6748259a8f9599813eb",
+  "code": "sha256:eab7365443a09c4d7405e4a6070784dcf2de5a69829a3de5124f1b986a0c103f",
   "files": [
     "../src/gate-rules/gate-rules.ts",
     "../src/gate-rules/types.ts",
@@ -31,6 +31,9 @@
     "../src/outcome-apply/outcome-apply.ts",
     "../src/outcome-apply/rules.ts",
     "../src/outcome-apply/types.ts",
+    "../src/overlay-check/overlay-check.ts",
+    "../src/overlay-check/rules.ts",
+    "../src/overlay-check/types.ts",
     "../src/payload-check/fit.ts",
     "../src/payload-check/payload-check.ts",
     "../src/payload-check/types.ts",

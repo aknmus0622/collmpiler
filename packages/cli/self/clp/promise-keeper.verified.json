@@ -4,7 +4,7 @@
     "promise-keeper.interpretation.ts"
   ],
   "specs": "sha256:6303c786adb4a678af9bbdf832abbf9997ad4bf81352e8d35400948f2bd70f1b",
-  "code": "sha256:61a53211699bdfd089372a4c0984ee3eb11ccd7959da365cba5d68917619cc38",
+  "code": "sha256:7531695ce535f440c2767a461dc17b72d5ce035b101979b005aa0fd0ec33edc4",
   "files": [
     "../src/gate-rules/gate-rules.ts",
     "../src/gate-rules/types.ts",
@@ -31,6 +31,9 @@
     "../src/outcome-apply/outcome-apply.ts",
     "../src/outcome-apply/rules.ts",
     "../src/outcome-apply/types.ts",
+    "../src/overlay-check/overlay-check.ts",
+    "../src/overlay-check/rules.ts",
+    "../src/overlay-check/types.ts",
     "../src/payload-check/fit.ts",
     "../src/payload-check/payload-check.ts",
     "../src/payload-check/types.ts",

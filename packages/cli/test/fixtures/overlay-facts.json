@@ -1,0 +1,467 @@
+{
+ "about": "Cases for overlay-check (N12g): every combination of the facts of each kind. Inputs only: the expected problems are what Stage 0 (overlayCodesStage0 in packages/core/overlay.ts) decides. Used by stage.test.ts.",
+ "cases": [
+  {
+   "kind": "key",
+   "known": false
+  },
+  {
+   "kind": "key",
+   "known": true
+  },
+  {
+   "kind": "slot",
+   "known": false,
+   "layer1": false,
+   "interpretation": false
+  },
+  {
+   "kind": "slot",
+   "known": false,
+   "layer1": false,
+   "interpretation": true
+  },
+  {
+   "kind": "slot",
+   "known": false,
+   "layer1": true,
+   "interpretation": false
+  },
+  {
+   "kind": "slot",
+   "known": false,
+   "layer1": true,
+   "interpretation": true
+  },
+  {
+   "kind": "slot",
+   "known": true,
+   "layer1": false,
+   "interpretation": false
+  },
+  {
+   "kind": "slot",
+   "known": true,
+   "layer1": false,
+   "interpretation": true
+  },
+  {
+   "kind": "slot",
+   "known": true,
+   "layer1": true,
+   "interpretation": false
+  },
+  {
+   "kind": "slot",
+   "known": true,
+   "layer1": true,
+   "interpretation": true
+  },
+  {
+   "kind": "state",
+   "described": false
+  },
+  {
+   "kind": "state",
+   "described": true
+  },
+  {
+   "kind": "entry",
+   "listed": false,
+   "closed": false,
+   "inLayer1": false
+  },
+  {
+   "kind": "entry",
+   "listed": false,
+   "closed": false,
+   "inLayer1": true
+  },
+  {
+   "kind": "entry",
+   "listed": false,
+   "closed": true,
+   "inLayer1": false
+  },
+  {
+   "kind": "entry",
+   "listed": false,
+   "closed": true,
+   "inLayer1": true
+  },
+  {
+   "kind": "entry",
+   "listed": true,
+   "closed": false,
+   "inLayer1": false
+  },
+  {
+   "kind": "entry",
+   "listed": true,
+   "closed": false,
+   "inLayer1": true
+  },
+  {
+   "kind": "entry",
+   "listed": true,
+   "closed": true,
+   "inLayer1": false
+  },
+  {
+   "kind": "entry",
+   "listed": true,
+   "closed": true,
+   "inLayer1": true
+  },
+  {
+   "kind": "branching",
+   "layer1Cases": false,
+   "interpretationCases": false,
+   "flat": false,
+   "layer1Outcome": false,
+   "layer1GoTo": false
+  },
+  {
+   "kind": "branching",
+   "layer1Cases": false,
+   "interpretationCases": false,
+   "flat": false,
+   "layer1Outcome": false,
+   "layer1GoTo": true
+  },
+  {
+   "kind": "branching",
+   "layer1Cases": false,
+   "interpretationCases": false,
+   "flat": false,
+   "layer1Outcome": true,
+   "layer1GoTo": false
+  },
+  {
+   "kind": "branching",
+   "layer1Cases": false,
+   "interpretationCases": false,
+   "flat": false,
+   "layer1Outcome": true,
+   "layer1GoTo": true
+  },
+  {
+   "kind": "branching",
+   "layer1Cases": false,
+   "interpretationCases": false,
+   "flat": true,
+   "layer1Outcome": false,
+   "layer1GoTo": false
+  },
+  {
+   "kind": "branching",
+   "layer1Cases": false,
+   "interpretationCases": false,
+   "flat": true,
+   "layer1Outcome": false,
+   "layer1GoTo": true
+  },
+  {
+   "kind": "branching",
+   "layer1Cases": false,
+   "interpretationCases": false,
+   "flat": true,
+   "layer1Outcome": true,
+   "layer1GoTo": false
+  },
+  {
+   "kind": "branching",
+   "layer1Cases": false,
+   "interpretationCases": false,
+   "flat": true,
+   "layer1Outcome": true,
+   "layer1GoTo": true
+  },
+  {
+   "kind": "branching",
+   "layer1Cases": false,
+   "interpretationCases": true,
+   "flat": false,
+   "layer1Outcome": false,
+   "layer1GoTo": false
+  },
+  {
+   "kind": "branching",
+   "layer1Cases": false,
+   "interpretationCases": true,
+   "flat": false,
+   "layer1Outcome": false,
+   "layer1GoTo": true
+  },
+  {
+   "kind": "branching",
+   "layer1Cases": false,
+   "interpretationCases": true,
+   "flat": false,
+   "layer1Outcome": true,
+   "layer1GoTo": false
+  },
+  {
+   "kind": "branching",
+   "layer1Cases": false,
+   "interpretationCases": true,
+   "flat": false,
+   "layer1Outcome": true,
+   "layer1GoTo": true
+  },
+  {
+   "kind": "branching",
+   "layer1Cases": false,
+   "interpretationCases": true,
+   "flat": true,
+   "layer1Outcome": false,
+   "layer1GoTo": false
+  },
+  {
+   "kind": "branching",
+   "layer1Cases": false,
+   "interpretationCases": true,
+   "flat": true,
+   "layer1Outcome": false,
+   "layer1GoTo": true
+  },
+  {
+   "kind": "branching",
+   "layer1Cases": false,
+   "interpretationCases": true,
+   "flat": true,
+   "layer1Outcome": true,
+   "layer1GoTo": false
+  },
+  {
+   "kind": "branching",
+   "layer1Cases": false,
+   "interpretationCases": true,
+   "flat": true,
+   "layer1Outcome": true,
+   "layer1GoTo": true
+  },
+  {
+   "kind": "branching",
+   "layer1Cases": true,
+   "interpretationCases": false,
+   "flat": false,
+   "layer1Outcome": false,
+   "layer1GoTo": false
+  },
+  {
+   "kind": "branching",
+   "layer1Cases": true,
+   "interpretationCases": false,
+   "flat": false,
+   "layer1Outcome": false,
+   "layer1GoTo": true
+  },
+  {
+   "kind": "branching",
+   "layer1Cases": true,
+   "interpretationCases": false,
+   "flat": false,
+   "layer1Outcome": true,
+   "layer1GoTo": false
+  },
+  {
+   "kind": "branching",
+   "layer1Cases": true,
+   "interpretationCases": false,
+   "flat": false,
+   "layer1Outcome": true,
+   "layer1GoTo": true
+  },
+  {
+   "kind": "branching",
+   "layer1Cases": true,
+   "interpretationCases": false,
+   "flat": true,
+   "layer1Outcome": false,
+   "layer1GoTo": false
+  },
+  {
+   "kind": "branching",
+   "layer1Cases": true,
+   "interpretationCases": false,
+   "flat": true,
+   "layer1Outcome": false,
+   "layer1GoTo": true
+  },
+  {
+   "kind": "branching",
+   "layer1Cases": true,
+   "interpretationCases": false,
+   "flat": true,
+   "layer1Outcome": true,
+   "layer1GoTo": false
+  },
+  {
+   "kind": "branching",
+   "layer1Cases": true,
+   "interpretationCases": false,
+   "flat": true,
+   "layer1Outcome": true,
+   "layer1GoTo": true
+  },
+  {
+   "kind": "branching",
+   "layer1Cases": true,
+   "interpretationCases": true,
+   "flat": false,
+   "layer1Outcome": false,
+   "layer1GoTo": false
+  },
+  {
+   "kind": "branching",
+   "layer1Cases": true,
+   "interpretationCases": true,
+   "flat": false,
+   "layer1Outcome": false,
+   "layer1GoTo": true
+  },
+  {
+   "kind": "branching",
+   "layer1Cases": true,
+   "interpretationCases": true,
+   "flat": false,
+   "layer1Outcome": true,
+   "layer1GoTo": false
+  },
+  {
+   "kind": "branching",
+   "layer1Cases": true,
+   "interpretationCases": true,
+   "flat": false,
+   "layer1Outcome": true,
+   "layer1GoTo": true
+  },
+  {
+   "kind": "branching",
+   "layer1Cases": true,
+   "interpretationCases": true,
+   "flat": true,
+   "layer1Outcome": false,
+   "layer1GoTo": false
+  },
+  {
+   "kind": "branching",
+   "layer1Cases": true,
+   "interpretationCases": true,
+   "flat": true,
+   "layer1Outcome": false,
+   "layer1GoTo": true
+  },
+  {
+   "kind": "branching",
+   "layer1Cases": true,
+   "interpretationCases": true,
+   "flat": true,
+   "layer1Outcome": true,
+   "layer1GoTo": false
+  },
+  {
+   "kind": "branching",
+   "layer1Cases": true,
+   "interpretationCases": true,
+   "flat": true,
+   "layer1Outcome": true,
+   "layer1GoTo": true
+  },
+  {
+   "kind": "asks",
+   "count": 0
+  },
+  {
+   "kind": "asks",
+   "count": 1
+  },
+  {
+   "kind": "asks",
+   "count": 2
+  },
+  {
+   "kind": "asks",
+   "count": 3
+  },
+  {
+   "kind": "call",
+   "exists": false,
+   "keyedPart": false,
+   "keyGiven": false
+  },
+  {
+   "kind": "call",
+   "exists": false,
+   "keyedPart": false,
+   "keyGiven": true
+  },
+  {
+   "kind": "call",
+   "exists": false,
+   "keyedPart": true,
+   "keyGiven": false
+  },
+  {
+   "kind": "call",
+   "exists": false,
+   "keyedPart": true,
+   "keyGiven": true
+  },
+  {
+   "kind": "call",
+   "exists": true,
+   "keyedPart": false,
+   "keyGiven": false
+  },
+  {
+   "kind": "call",
+   "exists": true,
+   "keyedPart": false,
+   "keyGiven": true
+  },
+  {
+   "kind": "call",
+   "exists": true,
+   "keyedPart": true,
+   "keyGiven": false
+  },
+  {
+   "kind": "call",
+   "exists": true,
+   "keyedPart": true,
+   "keyGiven": true
+  },
+  {
+   "kind": "stamp",
+   "recorded": null,
+   "current": "sha256:a"
+  },
+  {
+   "kind": "stamp",
+   "recorded": null,
+   "current": "sha256:b"
+  },
+  {
+   "kind": "stamp",
+   "recorded": "sha256:a",
+   "current": "sha256:a"
+  },
+  {
+   "kind": "stamp",
+   "recorded": "sha256:a",
+   "current": "sha256:b"
+  },
+  {
+   "kind": "stamp",
+   "recorded": "sha256:b",
+   "current": "sha256:a"
+  },
+  {
+   "kind": "stamp",
+   "recorded": "sha256:b",
+   "current": "sha256:b"
+  }
+ ]
+}

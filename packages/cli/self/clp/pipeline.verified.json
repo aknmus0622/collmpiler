@@ -4,7 +4,7 @@
     "pipeline.interpretation.ts"
   ],
   "specs": "sha256:cd2a330ce6f8bb602beb0281b621b0dc25debef9ecbba63578f8ad77c236b594",
-  "code": "sha256:e2e01342552103f9c70fdaeeb49ba71467ec40d9740c550b5021756b900a1064",
+  "code": "sha256:d7096ee130ec580470e9505226cd8a24a709ecf0fa47ab8415c61599975ef65c",
   "files": [
     "../src/gate-rules/gate-rules.ts",
     "../src/gate-rules/types.ts",
@@ -31,6 +31,9 @@
     "../src/outcome-apply/outcome-apply.ts",
     "../src/outcome-apply/rules.ts",
     "../src/outcome-apply/types.ts",
+    "../src/overlay-check/overlay-check.ts",
+    "../src/overlay-check/rules.ts",
+    "../src/overlay-check/types.ts",
     "../src/payload-check/fit.ts",
     "../src/payload-check/payload-check.ts",
     "../src/payload-check/types.ts",

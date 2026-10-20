@@ -4,7 +4,7 @@
     "gate-rules.interpretation.ts"
   ],
   "specs": "sha256:d3ac158244e813e9f5386380e6074fb540e4b4054d9dd7d68e4ee28352918bba",
-  "code": "sha256:292fb27e5636218e6bf075949e2a5b300634cf6c739aa48fdc7d223afff6cbb0",
+  "code": "sha256:ba600b751ecf0f3be529a578b6990066e68fa9df2c7857230998002d611c098b",
   "files": [
     "../src/gate-rules/gate-rules.ts",
     "../src/gate-rules/types.ts",
@@ -31,6 +31,9 @@
     "../src/outcome-apply/outcome-apply.ts",
     "../src/outcome-apply/rules.ts",
     "../src/outcome-apply/types.ts",
+    "../src/overlay-check/overlay-check.ts",
+    "../src/overlay-check/rules.ts",
+    "../src/overlay-check/types.ts",
     "../src/payload-check/fit.ts",
     "../src/payload-check/payload-check.ts",
     "../src/payload-check/types.ts",

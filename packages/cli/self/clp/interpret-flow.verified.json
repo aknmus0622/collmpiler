@@ -4,7 +4,7 @@
     "interpret-flow.interpretation.ts"
   ],
   "specs": "sha256:9b1e8fb7169d5855b3164da20488eec9e298f12581687050ff3974ff0ccd9937",
-  "code": "sha256:b2beab442d97be3869640f2073fe1e6948dcb48c4ed73418d8f2ed42d4cb6efc",
+  "code": "sha256:92ff3ba4b6decb6a71751d5eac007ea53c1818424680a9d9c96e93abbcd38a72",
   "files": [
     "../src/gate-rules/gate-rules.ts",
     "../src/gate-rules/types.ts",
@@ -31,6 +31,9 @@
     "../src/outcome-apply/outcome-apply.ts",
     "../src/outcome-apply/rules.ts",
     "../src/outcome-apply/types.ts",
+    "../src/overlay-check/overlay-check.ts",
+    "../src/overlay-check/rules.ts",
+    "../src/overlay-check/types.ts",
     "../src/payload-check/fit.ts",
     "../src/payload-check/payload-check.ts",
     "../src/payload-check/types.ts",

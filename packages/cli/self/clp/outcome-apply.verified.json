@@ -4,7 +4,7 @@
     "outcome-apply.interpretation.ts"
   ],
   "specs": "sha256:aee49ac97009b313357992d0cd5f735862c158286a86d201a6997511ff488a80",
-  "code": "sha256:26254c6c8cd78200d68ce19cb54be8a9ea68780e5e82b8194be1a2a18ca01c28",
+  "code": "sha256:775f45803841e338c4f9503b18668c1fbd89df6f0c56355762d18d4db816934d",
   "files": [
     "../src/gate-rules/gate-rules.ts",
     "../src/gate-rules/types.ts",
@@ -31,6 +31,9 @@
     "../src/outcome-apply/outcome-apply.ts",
     "../src/outcome-apply/rules.ts",
     "../src/outcome-apply/types.ts",
+    "../src/overlay-check/overlay-check.ts",
+    "../src/overlay-check/rules.ts",
+    "../src/overlay-check/types.ts",
     "../src/payload-check/fit.ts",
     "../src/payload-check/payload-check.ts",
     "../src/payload-check/types.ts",
