@@ -192,7 +192,7 @@ A cell a row does not use is written as `null`, never filled with a placeholder 
 
 From `DISTRIBUTION.md`; these are settled decisions, not suggestions:
 
-- **Node is the only allowed runtime dependency.** No Bun, Deno, single binaries, or Docker. No npm publishing for now — the git repo is the distribution channel.
+- **Node is the only allowed runtime dependency** — with one decided exception from 1.0: Java, for the formal checker (Alloy by default, or Z), called as an external command (`ROADMAP.md` §4, `DISTRIBUTION.md` decision 3'). No Bun, Deno, single binaries, or Docker. No npm publishing for now — the git repo is the distribution channel.
 - **No build step.** `.ts` files run directly via Node type stripping; `packages/cli/package.json` `bin` will point straight at `./bin/clp.ts`, shared through a pnpm workspace (`"@clp/cli": "workspace:*"`).
 - **Node >= 22.18** (`.node-version` is to be `24`), enforced via `engines`, `engine-strict=true` in `.npmrc`, and a version guard at the top of `bin/clp.ts`.
 - Because of type stripping: no `enum`, no `namespace`, and relative imports must include the `.ts` extension. Use `as const` + unions instead of `enum`.

@@ -1355,3 +1355,62 @@ const Queries = kind("queries", { entries: Query, nonEmpty: true });
 * 解釈が足した副作用・データ・問い合わせが使われていなければ、`clp compile --strict-added`（`clp interpret` の検査が使う）で誤り。
   それ以外では、これまでどおり注意。
 
+
+## 17. 部品は、どこに書いても部品（1.0。紙の上の設計）
+
+`ROADMAP.md` §4 の1つ目の完了条件。「節」や「境界」という言葉は持ち込まず、§14 の「部品の中の部品」を、書く場所を問わない形に
+広げる。決まりは1つ: **部品は、どこに書いても部品**。
+
+### 17.1. 書き方
+
+Layer 1（人）。子は、その場で書いた `service(...)`。文だけでよい。詰めたい子だけ、ほかの部品と同じく構造を書く。
+
+```ts
+export const Part = parts({
+  fines: service({ description: "延滞料は、返す日が期限を過ぎた日数 × 10 円。会員ごとに未払いの合計を覚え、払えば 0 になる。" }),
+  lending: service({ description: "1人5冊まで貸す。返せば、その本はまた貸せる。" }),
+});
+export const Library = service({
+  description: "図書館。本を貸し、返してもらい、延滞料を取る。未払いのある会員には貸さない。",
+  uses: [Part],
+});
+```
+
+解釈（LLM）。1つのファイルに、親の解釈と、子の解釈を入れ子で書く。子の解釈は `Part.fines.with([...])` で、中身は
+ファイルの部品の `interpretation(Fines, [...])` と同じ並び。子が文だけなら、子の語彙（状態、コマンド、データ…）は、その中で
+宣言するまとまりから生まれる。親は、いまと同じく `Part.fines.HasUnpaid({ member })` で子のコマンドを呼ぶ（取っ手は名前を問わない
+Proxy なので、子のコマンドが解釈の中で生まれても呼べる。無いコマンドは、重ね合わせの検査が報告する）。
+
+```ts
+export const FinesCommand = commands({ Charge: { input: ..., does: "..." }, Pay: {...}, HasUnpaid: { output: "boolean", ... } });
+export const Interpretation = interpretation(Library, [
+  Part.fines.with([FinesData, FinesCommand, FinesCommand.Charge.with({ ... }), ...]),
+  Part.lending.with([...]),
+  Command.Borrow.with({
+    calls: [Part.fines.HasUnpaid({ member: BorrowInput.member })],
+    cases: [IfAdded.hasUnpaid.then({ responds: "refused" }), otherwise({ calls: [...], ... })],
+  }),
+]);
+```
+
+### 17.2. 決まり
+
+- **名前は道筋。** 中に書いた子は `library.fines`（親の名前 + `parts` のキー）。`listComponents` は子も並べ、パイプラインは
+  いまと同じく子を先に一致させる。本番コードのまとまり、テスト側（`clp/library.fines.adapter.ts` …）、合格の記録も、
+  ファイルの部品と同じ。
+- **解釈は木。** 子の解釈は親の解釈ファイルの中にあり、`layer1` のハッシュは、子の Layer 1 も含めた木全体のもの
+  （子の文を変えれば、親の解釈ファイルが古くなる）。子だけを導き直すときも、書き出すのは同じファイル。
+- **検査は葉まで。** 木の検査、葉の検査、重ね合わせ、名前、グラフ、仕様の自己検査は、子ごとに、いまと同じものを行う。
+  診断の道筋は `parts.fines.commands.Pay.cases.otherwise`。
+- **見えるもの。** 子は親を知らない（親のデータも問い合わせも見えない）。親は子のコマンドを呼び、答えを読む（§14 のまま）。
+  子どうしは、親を通してだけ関わる。
+- **切り出し。** `clp extract library.fines --as fines` は、子の `service(...)` を `fines.component.ts` に、`Part.fines.with([...])`
+  の中身を `fines.interpretation.ts` の `interpretation(Fines, [...])` に移し、親は `parts({ fines: Fines })` になる。IR の中身は
+  変わらない（名前だけが `library.fines` から `fines` に変わり、テスト側のファイル名も合わせて移す）。逆向き（取り込み）は作らない。
+- **分け方の提案。** 解釈する LLM は、文だけの部品に、独立に詰められるまとまりがあれば、子に分けることを提案してよい（疑問点と
+  同じ扱い）。`clp run` では、人が受け入れれば、Layer 1 に `parts({ ...: service({ description }) })` を書き足して導き直す。
+
+### 17.3. まだ決めていないこと
+
+- 多数ある部品を、その場で書く形（`many(service({...}), by("id"))`）。書き方は自然に決まるが、キーの型を文から導けるか。
+- 子の文を親の文から切り分ける手伝い（提案の文面）。`clp run` の設計と一緒に決める。
