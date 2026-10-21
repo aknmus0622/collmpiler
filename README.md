@@ -6,7 +6,7 @@
 
 ## Current Scope
 
-Version 0.1. TypeScript targets only. What 0.1 set out to complete, and what comes next, is in
+Version 0.3. TypeScript targets only. What 0.1 and 0.3 set out to complete, and what comes next, is in
 [`ROADMAP.md`](ROADMAP.md) (in Japanese).
 
 - **Write a spec as TypeScript data. (Spec Driven Development)** Decision tables, plus a component described as
@@ -19,11 +19,19 @@ Version 0.1. TypeScript targets only. What 0.1 set out to complete, and what com
 - **Run it again when the spec changes.** The same command brings the code back into agreement with the spec:
   only the steps the change calls for are run, existing code is kept, and the agent is first shown where the
   current code falls short. If nothing changed, it only verifies.
-- **Behind a web API.** A command answers whoever executed it, and values can be records and lists, so the part
-  of a web application that decides things is specified and verified; the HTTP server around it is written by
-  a person (`examples/todo-ts`).
-- **The framework is built with itself.** Four of its own parts are specs, implemented by an agent and used by
-  the framework; deleted, they are rebuilt by `clp apply` alone (`SELF_HOSTING.md`).
+- **A web application, persistence and failing dependencies included.** A command answers whoever executed it,
+  values can be records and lists, components contain components, and an HTTP route is part of the spec. Agents
+  write everything down to the `node:http` server; a person writes only the composition root (a port, a database
+  file). Data that must survive a restart (`durable`, on `node:sqlite`) is verified by restarting the system
+  between steps, and a dependency that can fail (`mayFail`) fails during verification (`examples/todo-db-ts`).
+- **A person stays in the loop.** Questions the interpreting LLM could not settle, and places where two
+  independent interpretations behave differently, block until a person resolves them — by making the spec more
+  precise or by marking the reading as reviewed.
+- **The framework is built with itself.** Nineteen of its own parts — the checks, the pipeline, the grading
+  verdicts, and the execution of a spec's meaning during verification — are specs, implemented by agents and
+  used by the framework. A small hand-written version of each stays as the trusted base: parts that grade are
+  always graded by it, and its answers must agree with theirs. Deleted, all nineteen are rebuilt by `clp apply`
+  alone (`SELF_HOSTING.md`).
 
 ## Requirements and Setup
 
@@ -88,9 +96,10 @@ The walkthrough below uses `examples/checkout-ts/`: the spec of an order that is
 cancelled (`specs/`), the implementation an LLM agent wrote from it (`src/`), and the test side (`clp/`).
 Paths and commands are relative to that directory.
 
-Three more examples: `examples/library-ts/` starts from a deliberately rough spec and shows how it was made
-precise (see its `README.md`); `examples/todo-ts/` is a to-do list behind an HTTP API, with the server written by
-hand (see its `README.md`); `packages/cli/self/` describes parts of the framework itself in the same way, and the
+More examples: `examples/library-ts/` starts from a deliberately rough spec and shows how it was made
+precise (see its `README.md`); `examples/todo-ts/` is a to-do list behind an HTTP API, server included, where a
+person wrote only the composition root; `examples/todo-db-ts/` makes it persistent and lets a dependency fail
+(each has a `README.md`); `packages/cli/self/` describes parts of the framework itself in the same way, and the
 framework runs on them (`examples/co-llm-piler` is a link to it).
 
 ### 1. Write the spec
@@ -482,5 +491,5 @@ actual:   state CANCELLED, effects []
 
 ## Future Scope
 
-See [`ROADMAP.md`](ROADMAP.md) (in Japanese): what version 0.1 is to complete, the steps towards it, and the
-direction after that.
+See [`ROADMAP.md`](ROADMAP.md) (in Japanese): what versions 0.1 and 0.3 completed, the steps towards them, and
+the direction towards 1.0.

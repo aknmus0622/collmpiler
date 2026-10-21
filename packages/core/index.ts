@@ -1433,7 +1433,7 @@ export const overlayOf = (binding: BoundSpecification): OverlayCheck[] | undefin
 export const leafFactsOf = (binding: BoundSpecification): LeafFacts | undefined => (binding as unknown as Record<symbol, LeafFacts | undefined>)[FACTS];
 
 
-// --- 1.0 の書き方 (DSL.md §16.0): 種類と、席・項目・並び、略記 ---
+// --- 0.3 の書き方 (DSL.md §16.0): 種類と、席・項目・並び、略記 ---
 //
 // ノードは「種類 + 名前つきの子」。種類は、決まった名前の子（席）か、自由な名前の子（項目）の、どちらか一方を持つ。
 // 名前が生まれるのは、項目を持つ種類（まとまり）の宣言のキーだけ。ほかの `{}` のキーは、すべて席。

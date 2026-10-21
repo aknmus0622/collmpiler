@@ -5,7 +5,7 @@ import {
   service, states, types,
 } from "../index.ts";
 
-// 1.0 の書き方 (DSL.md §16.0): 種類（席か項目）、[] と略記、service、まとまりの宣言、解釈は名前を持つノードの並び
+// 0.3 の書き方 (DSL.md §16.0): 種類（席か項目）、[] と略記、service、まとまりの宣言、解釈は名前を持つノードの並び
 
 const State = states({ OPEN: "Not done yet.", DONE: "Done." });
 const If = conditions({ alreadyDone: "The item is already done" });
