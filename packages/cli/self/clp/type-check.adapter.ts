@@ -1,26 +1,26 @@
-import type { Command, Ports, StateName, TargetSystemAdapter } from "./type-check.adapter.contract.ts";
-import { TypeCheck } from "../src/type-check/type-check.ts";
+import type { Ports, StateName, TargetSystemAdapter } from "./type-check.adapter.contract.ts";
+import { TypeCheck } from "../src/type-check.ts";
 
 // Import the production code from ../src/ and forward each call to it. No business logic here.
 let system: TypeCheck | undefined;
 
 function current(): TypeCheck {
-  if (system === undefined) throw new Error("the system is not set up");
+  if (!system) throw new Error("adapter: setupIsolation has not been called");
   return system;
 }
 
 export const adapter: TargetSystemAdapter = {
   async setupIsolation(ports: Ports) {
     system = new TypeCheck({
-      report(finding) {
-        ports.effects.Report({ code: finding.code, owner: finding.owner });
+      report(code, owner) {
+        ports.effects.Report({ code, owner });
       },
     });
   },
   async teardownIsolation() {
     system = undefined;
   },
-  async executeCommand(command: Command) {
+  async executeCommand(command) {
     const check = current();
     switch (command.name) {
       case "Type":
@@ -48,16 +48,16 @@ export const adapter: TargetSystemAdapter = {
         check.beginClaims();
         return;
       case "Claim":
-        check.claim(command.input);
+        check.claim(command.input.name, command.input.owner, command.input.shared);
         return;
       default: {
         const unknown: never = command;
-        throw new Error(`unknown command: ${JSON.stringify(unknown)}`);
+        throw new Error(`adapter: unknown command ${JSON.stringify(unknown)}`);
       }
     }
   },
   async getCurrentState(): Promise<StateName> {
-    // The type check has a single state (the specification's READY) and exposes none.
+    // TypeCheck has no states of its own: it is always in the specification's single state READY.
     current();
     return "READY";
   },

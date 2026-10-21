@@ -1,69 +1,49 @@
-import type { Command, CommandOutput, StateName, TargetSystemAdapter } from "./value-writer.adapter.contract.ts";
-import type { ConstantValue, SpecValue, ValueWriterState, WrittenValue } from "../src/value-writer/types.ts";
-import { ValueWriter } from "../src/value-writer/value-writer.ts";
+import type { CommandOutput, Ports, StateName, TargetSystemAdapter } from "./value-writer.adapter.contract.ts";
+import { ValueWriter } from "../src/value-writer.ts";
+import type { JsonValue, SpecValue, WrittenValue } from "../src/value-writer.ts";
 
-const STATE_NAMES: Record<ValueWriterState, StateName> = {
-  ready: "READY",
-};
+type WriteInput = Extract<Parameters<TargetSystemAdapter["executeCommand"]>[0], { name: "Write" }>["input"];
 
 let writer: ValueWriter | undefined;
 
-function current(): ValueWriter {
-  if (writer === undefined) throw new Error("adapter: setupIsolation has not been called");
-  return writer;
+// Contract input `value` (keyed by variant) -> production `SpecValue` (discriminated by `kind`).
+function toSpecValue(value: WriteInput["value"]): SpecValue {
+  if ("constant" in value) return { kind: "constant", constant: value.constant as JsonValue };
+  if ("reference" in value) return { kind: "reference", target: value.reference.target, name: value.reference.name };
+  if ("column" in value) return { kind: "column", table: value.column.table, column: value.column.column };
+  return { kind: "was", was: value.was };
 }
 
-function toSpecValue(value: Extract<Command, { name: "Write" }>["input"]["value"]): SpecValue {
-  if ("constant" in value) return { kind: "constant", constant: value.constant as ConstantValue };
-  if ("reference" in value) {
-    const { target, name } = value.reference;
-    return { kind: "reference", reference: { target, name } };
-  }
-  if ("column" in value) {
-    const { table, column } = value.column;
-    return { kind: "reference", reference: { target: "decision", table, column } };
-  }
-  if ("was" in value) return { kind: "was", states: value.was };
-  const unknown: never = value;
-  throw new Error(`adapter: unknown value ${JSON.stringify(unknown)}`);
-}
-
-function toWriteOutput(written: WrittenValue): CommandOutput["Write"] {
+// Production `WrittenValue` (discriminated by `kind`) -> contract output (keyed by variant).
+function toOutput(written: WrittenValue): CommandOutput["Write"] {
   switch (written.kind) {
     case "constant":
-      return { constant: written.constant as Extract<CommandOutput["Write"], { constant: unknown }>["constant"] };
+      return { constant: written.value };
     case "reference":
-      return { reference: written.text };
+      return { reference: written.value };
     case "was":
-      return { was: [...written.states] };
-    default: {
-      const unknown: never = written;
-      throw new Error(`adapter: unknown written value ${JSON.stringify(unknown)}`);
-    }
+      return { was: written.value };
   }
 }
 
 // Import the production code from ../src/ and forward each call to it. No business logic here.
 export const adapter: TargetSystemAdapter = {
-  async setupIsolation(_ports) {
-    // The value writer has no dependencies, so there is nothing in `ports` to connect.
+  async setupIsolation(_ports: Ports) {
+    // The value writer asks nothing of its environment and tells it nothing: no ports to connect.
     writer = new ValueWriter();
   },
   async teardownIsolation() {
     writer = undefined;
   },
   async executeCommand(command) {
-    const system = current();
+    if (!writer) throw new Error("setupIsolation was not called");
     switch (command.name) {
       case "Write":
-        return toWriteOutput(system.write(toSpecValue(command.input.value)));
-      default: {
-        const unknown: never = command.name;
-        throw new Error(`adapter: unknown command ${JSON.stringify(unknown)}`);
-      }
+        return toOutput(writer.write(toSpecValue(command.input.value)));
     }
   },
-  async getCurrentState() {
-    return STATE_NAMES[current().state];
+  async getCurrentState(): Promise<StateName> {
+    // The production code has no states of its own; the specification's only state is READY.
+    return "READY";
   },
 };

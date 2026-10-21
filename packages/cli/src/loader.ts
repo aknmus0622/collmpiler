@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { BINDING, COMPONENT, activate, check, isComponent, layer1Of, leafFactsOf, overlayCodesStage0, overlayOf, treeOf } from "@clp/core";
+import { BINDING, COMPONENT, activate, check, isComponent, layer1Declaration, layer1Of, leafFactsOf, overlayCodesStage0, overlayOf, treeOf } from "@clp/core";
 import type { AssetDeclaration, BoundSpecification, Diagnostic as TreeDiagnostic, LeafFacts, Node, OverlayCode, OverlayFact, Structure } from "@clp/core";
 import { resolveAssets } from "./assets.ts";
 import { stableStringify } from "./extract.ts";
@@ -292,7 +292,20 @@ function effectsOf(component: string, where: string, structure: Structure): Spec
 // 解釈が無い、または Layer 1 と合わないときは、語彙を作らずに、その旨だけを持たせる（報告は extract が行う）
 // incomplete: 葉の検査の結果（判断したのは Stage 1 か Stage 0）
 async function normalize(name: string, layer1: object, binding: BoundSpecification | undefined, incomplete: string[] | undefined, judges: LoadJudges = {}): Promise<SpecInput> {
-  if (!binding) return { behaviors: {}, decisions: {}, layer1 };
+  if (!binding) {
+    // 解釈の前でも、Layer 1 だけで分かる名前の衝突（データとコマンドの入力など）は報告する。解釈を導いてから見つかると、
+    // 解釈する側は Layer 1 の名前を変えられないので、その実行が無駄になる
+    const declared = layer1Declaration(layer1);
+    const vocabulary = {
+      data: declared.data,
+      queries: declared.queries,
+      commands: Object.fromEntries(Object.entries(declared.commands).map(([command, decl]) => [command, decl.input ?? {}])),
+    } as SpecModel;
+    const asked = Object.values(declared.commands).flatMap((decl) => Object.keys(decl.asks ?? {}));
+    const claims = [...claimEvents(vocabulary, asked, Object.keys(declared.parts ?? {}))];
+    const collisions = (await judges.claims?.(claims)) ?? declaredReportsStage0(claims);
+    return { behaviors: {}, decisions: {}, layer1, ...(collisions.length > 0 ? { grammar: collisions.map((found) => declaredMessage(found)) } : {}) };
+  }
   // 重ね合わせの誤りか、書き残し（葉の検査）があれば、語彙は作らない（報告は extract が行う）
   const problems = await overlayProblems(binding, judges);
   if (problems.length > 0 || (incomplete?.length ?? 0) > 0) {

@@ -1,54 +1,54 @@
-import type { Ports, StateName, TargetSystemAdapter } from "./leaf-check.adapter.contract.ts";
-import { LeafCheck } from "../src/leaf-check/leaf-check.ts";
-import type { LeafFindingSink, LeafGrammar } from "../src/leaf-check/types.ts";
+import type { StateName, TargetSystemAdapter } from "./leaf-check.adapter.contract.ts";
+import { LeafCheck } from "../src/leaf-check.ts";
 
 // Import the production code from ../src/ and forward each call to it. No business logic here.
-let system: LeafCheck | undefined;
+let system: LeafCheck | null = null;
 
 function current(): LeafCheck {
-  if (system === undefined) throw new Error("the system is not set up");
+  if (system === null) throw new Error("adapter: setupIsolation has not been called");
   return system;
 }
 
 export const adapter: TargetSystemAdapter = {
-  async setupIsolation(ports: Ports) {
-    const grammar: LeafGrammar = {
-      isRequired: (kind, field) => ports.queries.required({ field, kind }),
-      isOutcome: (kind, field) => ports.queries.outcome({ field, kind }),
-      requiresCase: (name) => ports.queries.requiredCase({ name }),
-      mustHaveEntries: (group) => ports.queries.nonEmpty({ group }),
-    };
-    const findings: LeafFindingSink = {
-      report: (finding) => ports.effects.Report({ code: finding.code }),
-    };
-    system = new LeafCheck(grammar, findings);
+  async setupIsolation(ports) {
+    system = new LeafCheck(
+      {
+        isRequired: (kind, field) => ports.queries.required({ field, kind }),
+        isOutcome: (kind, field) => ports.queries.outcome({ field, kind }),
+        mustHaveEntries: (group) => ports.queries.nonEmpty({ group }),
+        isRequiredCase: (name) => ports.queries.requiredCase({ name }),
+      },
+      {
+        report: (code) => ports.effects.Report({ code }),
+      },
+    );
   },
   async teardownIsolation() {
-    system = undefined;
+    system = null;
   },
   async executeCommand(command) {
     const check = current();
     switch (command.name) {
       case "Begin":
-        check.begin(command.input);
+        check.begin({ states: command.input.states, init: command.input.init, commands: command.input.commands });
+        return;
+      case "ProseGroup":
+        check.proseGroup(command.input.group, command.input.entries);
+        return;
+      case "EntryField":
+        check.entryField(command.input.field, command.input.kind, command.input.present);
         return;
       case "BeginCommand":
-        check.beginCommand(command.input);
+        check.beginCommand(command.input.cases, command.input.hasOtherwise);
         return;
       case "BeginCase":
-        check.beginCase(command.input.described);
+        check.beginCase(command.input.described, command.input.nothing);
         return;
       case "Written":
         check.written(command.input.field);
         return;
       case "EndCase":
         check.endCase();
-        return;
-      case "EntryField":
-        check.entryField(command.input);
-        return;
-      case "ProseGroup":
-        check.proseGroup(command.input);
         return;
       case "Calculation":
         check.calculation(command.input.hasMeaning);
@@ -57,16 +57,16 @@ export const adapter: TargetSystemAdapter = {
         check.invariant(command.input.hasMeaning);
         return;
       case "Sentence":
-        check.sentence(command.input);
+        check.sentence(command.input.composite, command.input.hasMeaning);
         return;
       default: {
         const unknown: never = command;
-        throw new Error(`unknown command: ${(unknown as { name: string }).name}`);
+        throw new Error(`adapter: unknown command ${JSON.stringify(unknown)}`);
       }
     }
   },
   async getCurrentState(): Promise<StateName> {
-    // The leaf check has a single state (the specification's `READY`) and exposes none.
+    // LeafCheck has no states of its own: it is always in the specification's single state READY.
     current();
     return "READY";
   },

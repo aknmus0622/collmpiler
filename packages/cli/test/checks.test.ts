@@ -75,3 +75,19 @@ test("条件の衝突: 衝突したコマンドと入力を、再現するコマ
   assert.equal(last.command, "Place");
   assert.ok((last.input.amount as number) > 5 && (last.input.amount as number) % 2 === 1);
 });
+
+test("名前の衝突は、解釈を導く前に Layer 1 だけで報告する（解釈する側は Layer 1 の名前を変えられない）", async () => {
+  const dir = mkdtempSync(join(tmpRoot, "l1-"));
+  writeFileSync(
+    join(dir, "c.component.ts"),
+    `import { commands, data, input, service } from "@clp/core";
+export const Data = data({ state: { type: "string", description: "The state." } });
+export const Command = commands({ Begin: { input: input({ state: "string" }), does: "Remembers the state." } });
+export const C = service({ uses: [Data, Command] });
+`,
+  );
+  const codes = extract(await loadSpecs(dir)).diagnostics.map((found) => `${found.code}: ${found.message}`);
+  assert.equal(codes.length, 2);
+  assert.match(codes[0], /^unbound-specification/);
+  assert.match(codes[1], /^name-collision: "state" が重複しています \(data と input\)/);
+});

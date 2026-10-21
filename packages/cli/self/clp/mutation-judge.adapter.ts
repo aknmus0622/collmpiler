@@ -1,62 +1,51 @@
-import type { Command, Ports, StateName, TargetSystemAdapter } from "./mutation-judge.adapter.contract.ts";
-import { MutationJudge } from "../src/mutation-judge/mutation-judge.ts";
-import type { MutationGateFindings, MutationJudgeState } from "../src/mutation-judge/types.ts";
-
-const STATE_NAMES: Record<MutationJudgeState, StateName> = {
-  values: "VALUES",
-  inValue: "IN_VALUE",
-  mutants: "MUTANTS",
-  done: "DONE",
-};
-
-let system: MutationJudge | undefined;
-
-function current(): MutationJudge {
-  if (!system) throw new Error("setupIsolation has not been called");
-  return system;
-}
+import type { Ports, StateName, TargetSystemAdapter } from "./mutation-judge.adapter.contract.ts";
+import { MutationJudge, type MutationJudgeListener } from "../src/mutation-judge.ts";
 
 // Import the production code from ../src/ and forward each call to it. No business logic here.
+let judge: MutationJudge | undefined;
+
+function listenerFor(ports: Ports): MutationJudgeListener {
+  return {
+    survived: () => ports.effects.Survived({}),
+    inAdapter: () => ports.effects.InAdapter({}),
+    ineffective: () => ports.effects.Ineffective({}),
+  };
+}
+
+function current(): MutationJudge {
+  if (!judge) throw new Error("setupIsolation has not been called");
+  return judge;
+}
+
 export const adapter: TargetSystemAdapter = {
-  async setupIsolation(ports: Ports) {
-    const findings: MutationGateFindings = {
-      survived: () => ports.effects.Survived({}),
-      inAdapter: () => ports.effects.InAdapter({}),
-      ineffective: () => ports.effects.Ineffective({}),
-    };
-    system = new MutationJudge(findings);
+  async setupIsolation(ports) {
+    judge = new MutationJudge(listenerFor(ports));
   },
   async teardownIsolation() {
-    system = undefined;
+    judge = undefined;
   },
-  async executeCommand(command: Command) {
-    const judge = current();
+  async executeCommand(command) {
+    const j = current();
     switch (command.name) {
       case "BeginValue":
-        judge.beginValue(command.input.numeric, command.input.inAdapter);
+        j.beginValue({ numeric: command.input.numeric, inAdapter: command.input.inAdapter });
         return;
       case "Site":
-        judge.site(command.input.killed);
+        j.site(command.input.killed);
         return;
       case "EndValue":
-        judge.endValue();
+        j.endValue();
         return;
       case "Mutant":
-        judge.mutant(command.input.killed);
+        j.mutant(command.input.killed);
         return;
       case "Finish":
-        judge.finish(command.input.shared);
+        j.finish(command.input.shared);
         return;
-      default: {
-        const unknown: never = command;
-        throw new Error(`unknown command: ${JSON.stringify(unknown)}`);
-      }
     }
   },
-  async getCurrentState() {
-    const state = current().state;
-    const name = STATE_NAMES[state];
-    if (!name) throw new Error(`unknown state: ${String(state)}`);
-    return name;
+  async getCurrentState(): Promise<StateName> {
+    // Production state names are identical to the spec's.
+    return current().state;
   },
 };

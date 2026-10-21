@@ -1,93 +1,73 @@
-import type { Command, StateName, TargetSystemAdapter } from "./payload-check.adapter.contract.ts";
-import { PayloadCheck } from "../src/payload-check/payload-check.ts";
-import type { ConstantValue, PayloadCheckState } from "../src/payload-check/types.ts";
+import type { Command, Ports, StateName, TargetSystemAdapter } from "./payload-check.adapter.contract.ts";
+import { PayloadCheck } from "../src/payload-check.ts";
+import type { PayloadCheckListener, SlotDeclaration } from "../src/payload-check.ts";
 
-const STATE_NAMES: Record<PayloadCheckState, StateName> = {
-  "outside": "OUTSIDE",
-  "inactive": "INACTIVE",
-  "active": "ACTIVE",
-  "checking": "CHECKING",
-  "settled": "SETTLED",
-};
-
-type ConstantInput = Extract<Command, { name: "Constant" }>["input"];
-
-function toConstantValue(input: ConstantInput): ConstantValue {
-  switch (input.kind) {
-    case "boolean":
-      return { kind: "boolean" };
-    case "integer":
-      return { kind: "integer", value: input.number };
-    case "number":
-      return { kind: "number", value: input.number };
-    case "string":
-      return { kind: "string", text: input.text };
-  }
-}
-
-let system: PayloadCheck | undefined;
+// Import the production code from ../src/ and forward each call to it. No business logic here.
+let system: PayloadCheck | null = null;
 
 function current(): PayloadCheck {
-  if (system === undefined) {
-    throw new Error("adapter: setupIsolation has not been called");
-  }
+  if (system === null) throw new Error("adapter: setupIsolation has not been called");
   return system;
 }
 
-// Import the production code from ../src/ and forward each call to it. No business logic here.
+function declarationFor(ports: Ports): SlotDeclaration {
+  return {
+    declaresField: (field) => ports.queries.fieldDeclared({ field }),
+    givesField: (field) => ports.queries.fieldGiven({ field }),
+    fieldKind: (field) => ports.queries.fieldKind({ field }),
+    isOptional: (field) => ports.queries.fieldOptional({ field }),
+    hasMinimum: (field) => ports.queries.hasMinimum({ field }),
+    minimum: (field) => ports.queries.minimum({ field }),
+    hasMaximum: (field) => ports.queries.hasMaximum({ field }),
+    maximum: (field) => ports.queries.maximum({ field }),
+    isMember: (field, value) => ports.queries.memberOf({ field, value }),
+  };
+}
+
+function listenerFor(ports: Ports): PayloadCheckListener {
+  return {
+    report: (finding) => ports.effects.Report({ code: finding.code, field: finding.field }),
+  };
+}
+
 export const adapter: TargetSystemAdapter = {
   async setupIsolation(ports) {
-    const { queries, effects } = ports;
-    system = new PayloadCheck(
-      {
-        declaresField: (field) => queries.fieldDeclared({ field }),
-        fieldType: (field) => queries.fieldKind({ field }),
-        isOptional: (field) => queries.fieldOptional({ field }),
-        minimum: (field) => (queries.hasMinimum({ field }) ? queries.minimum({ field }) : undefined),
-        maximum: (field) => (queries.hasMaximum({ field }) ? queries.maximum({ field }) : undefined),
-        isMember: (field, value) => queries.memberOf({ field, value }),
-      },
-      {
-        givesField: (field) => queries.fieldGiven({ field }),
-      },
-      {
-        report: (diagnostic) =>
-          effects.Report({
-            code: diagnostic.code,
-            field: diagnostic.field,
-          }),
-      },
-    );
+    system = new PayloadCheck(declarationFor(ports), listenerFor(ports));
   },
   async teardownIsolation() {
-    system = undefined;
+    system = null;
   },
-  async executeCommand(command) {
+  async executeCommand(command: Command) {
     const check = current();
     switch (command.name) {
-      case "Constant":
-        return check.constant(toConstantValue(command.input));
-      case "DeclaredField":
-        return check.declaredField(command.input.name);
       case "EnterSlot":
         return check.enterSlot(command.input);
+      case "DeclaredField":
+        return check.declaredField(command.input.name);
       case "GivenField":
         return check.givenField(command.input.name);
-      case "Judged":
-        return check.judged(command.input.fits);
-      case "LeaveSlot":
-        return check.leaveSlot();
-      case "Null":
-        return check.nullValue();
       case "Source":
         return check.source(command.input.kind);
+      case "Constant":
+        return check.constant(command.input);
       case "Typed":
         return check.typed(command.input.type);
+      case "Judged":
+        return check.judged(command.input.fits);
+      case "Null":
+        return check.nullValue();
       case "Unresolved":
         return check.unresolved();
+      case "LeaveSlot":
+        return check.leaveSlot();
+      default: {
+        const unknown: never = command;
+        throw new Error(`adapter: unknown command ${JSON.stringify(unknown)}`);
+      }
     }
   },
-  async getCurrentState() {
-    return STATE_NAMES[current().state];
+  async getCurrentState(): Promise<StateName> {
+    // Production state names are identical to the specification's.
+    return current().state;
   },
 };

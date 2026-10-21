@@ -1,64 +1,57 @@
-import type { StateName, TargetSystemAdapter } from "./input-candidates.adapter.contract.ts";
-import { InputCandidates } from "../src/input-candidates/input-candidates.ts";
+import type { Command, Ports, StateName, TargetSystemAdapter } from "./input-candidates.adapter.contract.ts";
+import { InputCandidates } from "../src/input-candidates.ts";
 
 // Import the production code from ../src/ and forward each call to it. No business logic here.
-// The component has no dependencies, so `ports` (empty queries and effects) has nothing to connect to.
 let system: InputCandidates | null = null;
 
 function current(): InputCandidates {
-  if (system === null) throw new Error("the system is not set up");
+  if (system === null) throw new Error("adapter: setupIsolation has not been called");
   return system;
 }
 
 export const adapter: TargetSystemAdapter = {
-  async setupIsolation(_ports) {
+  async setupIsolation(_ports: Ports) {
+    // The component has no dependencies, queries or effects.
     system = new InputCandidates();
   },
   async teardownIsolation() {
     system = null;
   },
-  async executeCommand(command) {
-    const target = current();
+  async executeCommand(command: Command) {
+    const s = current();
     switch (command.name) {
       case "Around":
-        target.around(command.input.around);
-        return;
+        return s.around(command.input.around);
       case "BeginAmong":
-        target.beginAmong(command.input.pick);
-        return;
+        return s.beginAmong(command.input.pick);
       case "BeginNumbers":
-        target.beginNumbers(command.input.integer, command.input.min, command.input.max);
-        return;
+        return s.beginNumbers({
+          integer: command.input.integer,
+          min: command.input.min,
+          max: command.input.max,
+        });
       case "BeginStrings":
-        target.beginStrings();
-        return;
+        return s.beginStrings();
       case "DecideAmong":
-        return target.decideAmong();
-      case "DecideNumbers": {
-        const answer = target.decideNumbers();
-        return { limits: [...answer.limits], thresholds: [...answer.thresholds] };
-      }
-      case "DecideStrings": {
-        const answer = target.decideStrings();
-        return { known: [...answer.known], lengths: [...answer.lengths] };
-      }
+        return s.decideAmong();
+      case "DecideNumbers":
+        return s.decideNumbers();
+      case "DecideStrings":
+        return s.decideStrings();
       case "Item":
-        target.item(command.input.usable);
-        return;
+        return s.item(command.input.usable);
       case "LengthNumber":
-        target.lengthNumber(command.input.number);
-        return;
+        return s.lengthNumber(command.input.number);
       case "Text":
-        target.text(command.input.text);
-        return;
+        return s.text(command.input.text);
       default: {
         const unknown: never = command;
-        throw new Error(`unknown command: ${JSON.stringify(unknown)}`);
+        throw new Error(`adapter: unknown command ${JSON.stringify(unknown)}`);
       }
     }
   },
   async getCurrentState(): Promise<StateName> {
-    // The component has no states of its own; the specification's only state is READY.
+    // The component has no states of its own; it is always in the specification state READY.
     current();
     return "READY";
   },

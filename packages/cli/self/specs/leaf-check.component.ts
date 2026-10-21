@@ -4,13 +4,17 @@ import { commands, data, effects, input, integer, queries, service } from "@clp/
 // path of the specification must end in a leaf (a type, a meaning, an outcome, or `nothing: true`). This component is given
 // the facts of the merged specification one at a time, asks the kinds (`KINDS`) what is required, and reports what is left
 // unwritten. The walk, and the wording of the reports, belong to the framework.
+//
+// The facts may come in any order, and each is judged with what is remembered at that moment. Before any BeginCommand, the
+// command being judged has not branched (outcomes count as a command's); before any BeginCase, the case being judged is one
+// prose says nothing about, in which nothing has been written.
 export const Data = data({
-  branched: { type: "boolean", description: "Whether the command being judged has cases other than otherwise." },
-  outcomeKind: { type: ["case", "command"], description: "Whose outcomes count in the command being judged: a case's when it has branched, a command's otherwise." },
-  caseDescribed: { type: "boolean", description: "Whether prose says something happens in the case being judged." },
-  outcomeWritten: { type: "boolean", description: "Whether an outcome field has been written in the case being judged." },
-  nothingWritten: { type: "boolean", description: "Whether `nothing` has been written in the case being judged." },
-  otherWritten: { type: "boolean", description: "Whether a field other than `nothing` has been written in the case being judged." },
+  branched: { type: "boolean", initially: false, description: "Whether the command being judged has cases other than otherwise." },
+  outcomeKind: { type: ["case", "command"], initially: "command", description: "Whose outcomes count in the command being judged: a case's when it has branched, a command's otherwise." },
+  caseDescribed: { type: "boolean", initially: false, description: "Whether prose says something happens in the case being judged." },
+  outcomeWritten: { type: "boolean", initially: false, description: "Whether an outcome field has been written in the case being judged." },
+  nothingWritten: { type: "boolean", initially: false, description: "Whether `nothing` has been written in the case being judged." },
+  otherWritten: { type: "boolean", initially: false, description: "Whether a field other than `nothing` has been written in the case being judged." },
 });
 
 export const Query = queries({
@@ -41,7 +45,7 @@ export const BeginInput = input({ states: ["given", "missing", "stateless"], ini
 export const ProseInput = input({ group: ["states", "data", "queries", "effects", "calculations", "commands"], entries: integer({ min: 0, max: 1000 }) });
 export const FieldInput = input({ kind: "string", field: "string", present: "boolean" });
 export const CommandInput = input({ cases: integer({ min: 0, max: 1000 }), hasOtherwise: "boolean" });
-export const CaseInput = input({ described: "boolean" });
+export const CaseInput = input({ described: "boolean", nothing: "boolean" });
 export const WrittenInput = input({ field: "string" });
 export const SentenceInput = input({ composite: "boolean", hasMeaning: "boolean" });
 export const MeaningInput = input({ hasMeaning: "boolean" });
@@ -74,7 +78,8 @@ export const Command = commands({
     input: CaseInput,
     does:
       "One case of the command (the whole command when it has not branched) is judged next: whether prose says something happens " +
-      "in it. No field has been written in it yet. A case always follows the BeginCommand of its command.",
+      "in it, and whether `nothing` is written in it. No other field has been written in it yet. If `nothing` is written, whether " +
+      "it is an outcome is asked, of the kind whose outcomes count (outcomeKind), as for Written.",
   },
   Written: {
     input: WrittenInput,

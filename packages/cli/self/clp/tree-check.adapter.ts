@@ -1,58 +1,67 @@
-import type { StateName, TargetSystemAdapter } from "./tree-check.adapter.contract.ts";
-import { TreeCheck } from "../src/tree-check/tree-check.ts";
+import type { Command, Ports, StateName, TargetSystemAdapter } from "./tree-check.adapter.contract.ts";
+import { TreeCheck } from "../src/tree-check.ts";
+import type { ParentStates, TreeCheckListener, TreeGrammar } from "../src/tree-check.ts";
 
 // Import the production code from ../src/ and forward each call to it. No business logic here.
-let system: TreeCheck | undefined;
+let system: TreeCheck | null = null;
 
 function current(): TreeCheck {
-  if (!system) throw new Error("adapter: setupIsolation has not been called");
+  if (system === null) throw new Error("setupIsolation has not been called");
   return system;
 }
 
 export const adapter: TargetSystemAdapter = {
-  async setupIsolation(ports) {
-    system = new TreeCheck(
-      {
-        allowsSlot: (parent, slot) => ports.queries.allowed({ parent, slot }),
-        slotLimit: (parent, slot) => ports.queries.limit({ parent, slot }),
-      },
-      {
-        hasStateNamed: (name) => ports.queries.stateNamed({ name }),
-      },
-      {
-        report: (finding) => ports.effects.Report({ code: finding.code, index: finding.index }),
-      },
-      {
-        descend: (index) => ports.effects.Descend({ index }),
-      },
-    );
+  async setupIsolation(ports: Ports) {
+    const grammar: TreeGrammar = {
+      mayContain: (parentKind, slot) => ports.queries.allowed({ parent: parentKind, slot }),
+      limitOf: (parentKind, slot) => ports.queries.limit({ parent: parentKind, slot }),
+    };
+    const states: ParentStates = {
+      hasStateNamed: (name) => ports.queries.stateNamed({ name }),
+    };
+    const listener: TreeCheckListener = {
+      report: (index, code) => ports.effects.Report({ code, index }),
+      descend: (index) => ports.effects.Descend({ index }),
+    };
+    system = new TreeCheck(grammar, states, listener);
   },
   async teardownIsolation() {
-    system = undefined;
+    system = null;
   },
-  async executeCommand(command) {
+  async executeCommand(command: Command) {
     const check = current();
     switch (command.name) {
       case "BeginParent":
         check.beginParent(command.input.kind);
         return;
       case "Child":
-        check.child({ ...command.input });
+        check.child({
+          index: command.input.index,
+          slot: command.input.slot,
+          named: command.input.named,
+          identity: command.input.identity,
+        });
         return;
       case "EndParent":
-        check.endParent({ ...command.input });
+        check.endParent({
+          isComponent: command.input.isComponent,
+          hasInit: command.input.hasInit,
+          init: command.input.init,
+          initIndex: command.input.initIndex,
+          stateCount: command.input.stateCount,
+        });
         return;
       case "Stray":
-        check.stray({ ...command.input });
+        check.stray(command.input.index, command.input.form);
         return;
       default: {
         const unknown: never = command;
-        throw new Error(`adapter: unknown command ${JSON.stringify(unknown)}`);
+        throw new Error(`unknown command: ${JSON.stringify(unknown)}`);
       }
     }
   },
   async getCurrentState(): Promise<StateName> {
-    // The tree check has a single state, the specification's READY; it exposes none.
+    // TreeCheck has no states of its own; it is always in the specification's single state READY.
     current();
     return "READY";
   },

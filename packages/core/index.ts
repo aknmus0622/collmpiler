@@ -1258,7 +1258,7 @@ export type LeafEvent =
   | { name: "ProseGroup"; input: { group: string; entries: number }; where: {} }
   | { name: "EntryField"; input: { kind: string; field: string; present: boolean }; where: { group: string; entry: string } }
   | { name: "BeginCommand"; input: { cases: number; hasOtherwise: boolean }; where: { command: string } }
-  | { name: "BeginCase"; input: { described: boolean }; where: { path: string } }
+  | { name: "BeginCase"; input: { described: boolean; nothing: boolean }; where: { path: string } }
   | { name: "Written"; input: { field: string }; where: { path: string } }
   | { name: "EndCase"; input: {}; where: { path: string; filled: string[] } }
   | { name: "Sentence"; input: { composite: boolean; hasMeaning: boolean }; where: { sentence: string } }
@@ -1284,8 +1284,9 @@ export function* leafEvents({ view, declaration, structures, meanings }: LeafFac
     const branched = names.some((key) => key !== "otherwise");
     for (const [caseName, { described, filled }] of Object.entries(cases)) {
       const path = branched ? `commands.${command}.cases.${caseName}` : `commands.${command}`;
-      yield { name: "BeginCase", input: { described }, where: { path } };
-      for (const field of filled) yield { name: "Written", input: { field }, where: { path } };
+      // nothing を書いたかは、場合の始まりで渡す（検証で、まれな「nothing とほかの欄」に、短い手順で届くように）
+      yield { name: "BeginCase", input: { described, nothing: filled.includes("nothing") }, where: { path } };
+      for (const field of filled) if (field !== "nothing") yield { name: "Written", input: { field }, where: { path } };
       yield { name: "EndCase", input: {}, where: { path, filled: [...filled] } };
     }
   }
@@ -1351,7 +1352,8 @@ export function leafReportsStage0(events: Iterable<LeafEvent>): LeafReport[] {
         if (branched && leafQueries.requiredCase({ name: "otherwise" }) && !event.input.hasOtherwise) report("otherwise-missing", event);
         break;
       case "BeginCase":
-        [described, outcome, nothing, others] = [event.input.described, false, false, false];
+        [described, outcome, nothing, others] = [event.input.described, false, event.input.nothing, false];
+        if (nothing && leafQueries.outcome({ kind: branched ? "case" : "command", field: "nothing" })) outcome = true;
         break;
       case "Written":
         if (leafQueries.outcome({ kind: branched ? "case" : "command", field: event.input.field })) outcome = true;
@@ -1417,6 +1419,8 @@ export function treeOf(value: object): { tree: Node; problems: Diagnostic[] } | 
   if (isNode(value)) return { tree: value, problems: LAYER1.get(value)?.problems ?? (layer1Of(value), LAYER1.get(value)!.problems) };
   return TREES.get(value);
 }
+// Layer 1 だけを重ねた宣言（解釈の前に、Layer 1 だけで分かること、たとえば名前の衝突を確かめるため）
+export const layer1Declaration = (layer1: object): Declaration => resolveComponent(layer1, {}, mergeRules()).declaration;
 // 解釈が持つ、葉の検査の事実
 const FACTS = Symbol.for("clp.leafFacts");
 // 解釈が持つ、重ね合わせで確かめた事実 (N12g)。problems は、その Stage 0 の判断

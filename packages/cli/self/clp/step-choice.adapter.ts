@@ -1,68 +1,63 @@
-import type { TargetSystemAdapter } from "./step-choice.adapter.contract.ts";
-import { StepChoice } from "../src/step-choice/step-choice.ts";
+import type { Ports, StateName, TargetSystemAdapter } from "./step-choice.adapter.contract.ts";
+import { StepChoice } from "../src/step-choice.ts";
 
 // Import the production code from ../src/ and forward each call to it. No business logic here.
-let system: StepChoice | undefined;
+let system: StepChoice | null = null;
 
 function current(): StepChoice {
-  if (system === undefined) throw new Error("setupIsolation has not been called");
+  if (system === null) throw new Error("adapter: setupIsolation was not called");
   return system;
 }
 
 export const adapter: TargetSystemAdapter = {
-  async setupIsolation(ports) {
+  async setupIsolation(ports: Ports) {
     system = new StepChoice({
       holds: (condition) => ports.queries.holds({ condition }),
     });
   },
   async teardownIsolation() {
-    system = undefined;
+    system = null;
   },
   async executeCommand(command) {
     const s = current();
     switch (command.name) {
       case "BeginCases":
-        s.beginCases();
-        return;
+        return s.beginCases();
       case "BeginStep":
-        s.beginStep(command.input.state);
-        return;
+        return s.beginStep(command.input.state);
       case "Case":
-        s.addCase(command.input.name);
-        return;
+        return s.caseNamed(command.input.name);
       case "Choose": {
-        const { forced, pick, strict } = command.input;
-        const answer = s.choose(forced, pick, strict);
-        return { chosen: answer.chosen, refused: answer.refused };
+        const { chosen, refused } = s.choose({
+          forced: command.input.forced,
+          pick: command.input.pick,
+          strict: command.input.strict,
+        });
+        return { chosen, refused };
       }
       case "Consider":
-        s.consider(command.input.command, command.input.everywhere);
-        return;
+        return s.consider(command.input.command, command.input.everywhere);
       case "Considered":
-        s.considered();
-        return;
+        return s.considered();
       case "DecideCase": {
-        const answer = s.decideCase();
-        return { chosen: answer.chosen, conflict: [...answer.conflict] };
+        const { chosen, conflict } = s.decideCase();
+        return { chosen, conflict };
       }
       case "From":
-        s.from(command.input.state);
-        return;
+        return s.from(command.input.state);
       case "OnlyIf":
-        s.onlyIf(command.input.condition);
-        return;
+        return s.onlyIf(command.input.condition);
       case "PathValue":
-        s.pathValue(command.input.value);
-        return;
+        return s.pathValue(command.input.value);
       default: {
         const unknown: never = command;
-        throw new Error(`unknown command: ${JSON.stringify(unknown)}`);
+        throw new Error(`adapter: unknown command ${JSON.stringify(unknown)}`);
       }
     }
   },
-  async getCurrentState() {
-    // The component has no states of its own; the specification's only state is READY.
+  async getCurrentState(): Promise<StateName> {
     current();
+    // The component has no states of its own; it is always in the specification state READY.
     return "READY";
   },
 };

@@ -402,6 +402,16 @@ pnpm typecheck && pnpm test
 
 作り直している間、フレームワークは Stage 0 で動きます（生成コードも、合格の記録も無いため）。
 
+1.0 の作り直し（N13、2026-10-21）: 19 の部品すべてを、89 分、61 セッションで作り直した。実装の段階は、どの部品も1回目で合格し、
+採点の部品 7 つは事例の集まりで Stage 0 と一致して記録が書かれた（R3）。そこに至るまでに2回止まり、どちらも仕様の側を直した:
+
+- 1回目: `leaf-check` のまれな報告 `nothing-and-others` が、試行 5000 回でもほとんど起きず、ミューテーションが同じ文字列を残し続けた
+  （6 回）。実装エージェントは「本番コードでは直せない。入力の生成か仕様の側の問題」と正しく報告し、ごまかしを書かなかった。
+- 2回目: `nothing` を別のコマンドにしても、報告に届くには5つのコマンドを決まった順に並べる必要があり、まだまれだった。加えて、
+  解釈が「場合はいつも BeginCommand のあと」を `onlyIf` と読んだため、場合を始める前の初めの値（`false`）が観測できず、生き残った。
+- 直し方: `nothing` を書いたかを場合の始まり (`BeginCase { nothing }`) で渡し（両方の Stage が受け取る事実の列を変えた）、
+  事実の順番を約束せず、初めの値を Layer 1 に書いた。報告まで3手で届き、初めの値も観測できる。
+
 ## 8. 今後の課題
 
 * **IR の並べ直しの残りは、判断を持たない。** 値の直列化のほかに `extract` がしているのは、語彙や決定表を写す、
@@ -607,3 +617,25 @@ Finish { shared }               // 全体の判断（mutation-ineffective）
 Stage 0 と1手ごとに一致を求めている。意味の関数を実行するのは橋渡し（`runtime.ts` の `holds` の答え）だけになった。残る手書きは、
 たどる糊（IR の組み立て、木の変換、値の解決）と信頼の基盤（Stage 0、切り替え、橋渡し、入出力、fast-check、tsc）。
 
+
+## 13. 1.0 の信頼の基盤（N13、2026-10-21 時点）
+
+§10.2 で決めた信頼の基盤の、1.0 での中身と大きさ（行数。コメントを含む）。
+
+| 層 | 中身 | 行数 |
+| --- | --- | --- |
+| Stage 0（判断） | 19 の部品と対になる手書きの判断: `observe.ts`、`choose.ts`、`promise.ts`、`outcome.ts`、`candidates.ts`、`rules.ts`、`packages/core/overlay.ts` と、ほかのファイルの中の `*Stage0`（`judgeStage0`、`slotReportsStage0`、`declaredReportsStage0`、`graphReportsStage0`、`checkReports`、`leafReportsStage0`、`reconcileStage0`、`interpretStage0` / `acceptStage0`、`verdictStage0`、`typeTextStage0` ほか） | 約 770 |
+| 切り替え | どちらの Stage を使うか: 合格の記録の検査 (`verified.ts`)、登録の表と読み込み、R1 の強制、R4 の `grade`、R3 の事例 (`stage1.ts` の該当部分)、期待値の一致を求める所 (`runtime.ts` の `agree`、`OutcomeRun`、`Deciders` の包み) | 約 540（92 + 305 + 143） |
+| 橋渡し | 意味の関数を呼ぶ所: シミュレーター (`runtime.ts` の `simulator`) の中の `holds` / `onlyIfHolds`、値の解決 (`resolve`) と計算、読んではいけない名前の見張り (`guarded`) | シミュレーター全体で約 500（ほとんどは事実を集めて渡す糊） |
+| 入出力 | 仕様の読み込み (`loader.ts`)、置き場所 (`layout.ts`)、エージェントの起動 (`strategy.ts`)、`tsc` (`typecheck.ts`、`static-check.ts`)、添付 (`assets.ts`)、書いたものの機械的な検査 (`scan.ts`、`check.ts`)、コマンド (`commands/`、`bin/clp.ts`)、門の入出力 (`gates.ts`) | 約 1,530（`gates.ts` を除く） |
+| 語彙 | `packages/core`（仕様を書く語、木の変換、重ね合わせ。判断は Stage 0 として上に数えた） | 約 2,500 |
+| 第三者 | Node 22.18 以上（`node:sqlite` を含む）、fast-check 4.10.2（乱数と縮小）、TypeScript 7.0.2 (`tsc`) | — |
+
+生成したもの（信頼の基盤の外）: self の仕様 19（4,033 行、人と LLM が書いた Layer 1 と、人が確かめた解釈）から、エージェントが
+書いた本番コード 4,860 行と、生成したテスト側。採点の部品 7 つ（`mutation-judge`、`gate-rules`、`observation-compare`、
+`step-choice`、`promise-keeper`、`outcome-apply`、`input-candidates`）は、つねに Stage 0 が採点し (R1)、事例の集まりで Stage 0 と
+一致したときだけ使われる (R3)。普段は両方を走らせ、判定は厳しい側を取り、期待値と比較は一致を求める (R4)。
+
+残っている手書きの「判断」は、Stage 0 だけ。それ以外の手書きは、事実を集めて渡す糊と入出力で、判断を持たない（§4.2 の線引き）。
+次に小さくできるのは、Stage 0 そのものを小さくすること（Bootstrappable builds の起点を小さくする方向）だが、Stage 0 は Stage 1 を
+確かめる別系統の実装（Diverse Double-Compiling）でもあるので、1.0 では減らさない。

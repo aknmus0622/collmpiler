@@ -1,17 +1,17 @@
 import type { TargetSystemAdapter } from "./observation-compare.adapter.contract.ts";
-import { ObservationCompare } from "../src/observation-compare/observation-compare.ts";
+import { ObservationCompare } from "../src/observation-compare.ts";
 
 // Import the production code from ../src/ and forward each call to it. No business logic here.
 let system: ObservationCompare | undefined;
 
 function current(): ObservationCompare {
-  if (!system) throw new Error("setupIsolation has not been called");
+  if (!system) throw new Error("adapter: setupIsolation has not been called");
   return system;
 }
 
 export const adapter: TargetSystemAdapter = {
   async setupIsolation(_ports) {
-    // The production code has no dependencies, so there is nothing in `ports` to connect.
+    // ObservationCompare asks nothing of its environment and tells it nothing; no ports to connect.
     system = new ObservationCompare();
   },
   async teardownIsolation() {
@@ -21,22 +21,21 @@ export const adapter: TargetSystemAdapter = {
     const s = current();
     switch (command.name) {
       case "Begin":
-        return s.begin(command.input.answers, command.input.answered);
+        s.begin({ answered: command.input.answered, answers: command.input.answers });
+        return;
       case "Expected":
-        return s.expected(command.input.leaf);
+        s.expected(command.input.leaf);
+        return;
       case "Actual":
-        return s.actual(command.input.leaf);
+        s.actual(command.input.leaf);
+        return;
       case "Decide":
         return s.decide();
-      default: {
-        const unknown: never = command;
-        throw new Error(`unknown command: ${JSON.stringify(unknown)}`);
-      }
     }
   },
   async getCurrentState() {
     current();
-    // The specification's only state is READY; the production code has no state to read.
+    // The production code has no states of its own; the specification's only state is READY.
     return "READY";
   },
 };

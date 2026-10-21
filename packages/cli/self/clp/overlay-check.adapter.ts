@@ -1,42 +1,56 @@
 import type { Command, StateName, TargetSystemAdapter } from "./overlay-check.adapter.contract.ts";
-import { OverlayCheck } from "../src/overlay-check/overlay-check.ts";
+import { OverlayCheck } from "../src/overlay-check.ts";
 
 // Import the production code from ../src/ and forward each call to it. No business logic here.
-let system: OverlayCheck | undefined;
+let system: OverlayCheck | null = null;
 
 function current(): OverlayCheck {
-  if (!system) throw new Error("adapter: setupIsolation was not called");
+  if (system === null) throw new Error("adapter: setupIsolation has not been called");
   return system;
 }
 
 export const adapter: TargetSystemAdapter = {
   async setupIsolation(ports) {
     system = new OverlayCheck({
-      problem: (problem) => ports.effects.Problem({ code: problem.code }),
+      problem: (code) => ports.effects.Problem({ code }),
     });
   },
   async teardownIsolation() {
-    system = undefined;
+    system = null;
   },
   async executeCommand(command: Command) {
     const check = current();
     switch (command.name) {
       case "Asks":
-        return check.asks(command.input.count);
+        check.asks(command.input.count);
+        return;
       case "Branching":
-        return check.branching(command.input);
+        check.branching({
+          layer1Cases: command.input.layer1Cases,
+          interpretationCases: command.input.interpretationCases,
+          flat: command.input.flat,
+          layer1Outcome: command.input.layer1Outcome,
+          layer1GoTo: command.input.layer1GoTo,
+        });
+        return;
       case "Call":
-        return check.call(command.input);
+        check.call(command.input.exists, command.input.keyedPart, command.input.keyGiven);
+        return;
       case "Entry":
-        return check.entry(command.input);
+        check.entry(command.input.listed, command.input.closed, command.input.inLayer1);
+        return;
       case "Key":
-        return check.key(command.input.known);
+        check.key(command.input.known);
+        return;
       case "Slot":
-        return check.slot(command.input);
+        check.slot(command.input.known, command.input.layer1, command.input.interpretation);
+        return;
       case "Stamp":
-        return check.stamp(command.input);
+        check.stamp(command.input.recorded, command.input.current);
+        return;
       case "State":
-        return check.state(command.input.described);
+        check.state(command.input.described);
+        return;
       default: {
         const unknown: never = command;
         throw new Error(`adapter: unknown command ${JSON.stringify(unknown)}`);
@@ -44,7 +58,7 @@ export const adapter: TargetSystemAdapter = {
     }
   },
   async getCurrentState(): Promise<StateName> {
-    // The production check has a single state and does not expose it; it is always the specification's READY.
+    // OverlayCheck has no states of its own; it is always in the specification's single state.
     current();
     return "READY";
   },

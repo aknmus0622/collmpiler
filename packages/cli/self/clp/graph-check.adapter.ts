@@ -1,64 +1,58 @@
-import type { Command, Ports, StateName, TargetSystemAdapter } from "./graph-check.adapter.contract.ts";
-import { GraphCheck } from "../src/graph-check/graph-check.ts";
-import type { GraphCheckState } from "../src/graph-check/types.ts";
+import type { TargetSystemAdapter } from "./graph-check.adapter.contract.ts";
+import { GraphCheck } from "../src/graph-check.ts";
 
 // Import the production code from ../src/ and forward each call to it. No business logic here.
-
-const STATE_NAMES: Record<GraphCheckState, StateName> = {
-  idle: "IDLE",
-  reaching: "REACHING",
-  judging: "JUDGING",
-};
-
 let system: GraphCheck | undefined;
 
 function current(): GraphCheck {
-  if (system === undefined) throw new Error("adapter: setupIsolation has not been called");
+  if (!system) throw new Error("adapter: setupIsolation has not been called");
   return system;
 }
 
 export const adapter: TargetSystemAdapter = {
-  async setupIsolation(ports: Ports) {
+  async setupIsolation(ports) {
     system = new GraphCheck(
-      { declaresState: (state) => ports.queries.stateDeclared({ name: state }) },
-      {
-        report: (finding) =>
-          ports.effects.Report({ code: finding.code, severity: finding.severity, subject: finding.subject }),
-      },
+      { isDeclared: (name) => ports.queries.stateDeclared({ name }) },
       {
         runRound: () => ports.effects.RunRound({}),
         reachingDone: () => ports.effects.ReachingDone({}),
+        report: (finding) =>
+          ports.effects.Report({ code: finding.code, severity: finding.severity, subject: finding.subject }),
       },
     );
   },
   async teardownIsolation() {
     system = undefined;
   },
-  async executeCommand(command: Command) {
-    const check = current();
+  async executeCommand(command) {
+    const s = current();
     switch (command.name) {
       case "Begin":
-        return check.begin(command.input.init, command.input.strict, command.input.finalsDeclared);
+        return s.begin({
+          init: command.input.init,
+          strict: command.input.strict,
+          finalsDeclared: command.input.finalsDeclared,
+        });
       case "Edge":
-        return check.edge(command.input.from, command.input.to);
+        return s.edge(command.input.from, command.input.to);
       case "RoundEnd":
-        return check.roundEnd();
+        return s.roundEnd();
       case "CheckState":
-        return check.checkState(command.input.name);
+        return s.checkState(command.input.name);
       case "BeginCommand":
-        return check.beginCommand(command.input.name);
+        return s.beginCommand(command.input.name);
       case "From":
-        return check.from(command.input.state);
+        return s.from(command.input.state);
       case "EndCommand":
-        return check.endCommand();
+        return s.endCommand();
       case "BeginExits":
-        return check.beginExits(command.input.state, command.input.final);
+        return s.beginExits(command.input.state, command.input.final);
       case "Exit":
-        return check.exit(command.input.from, command.input.to);
+        return s.exit(command.input.from, command.input.to);
       case "EndExits":
-        return check.endExits();
+        return s.endExits();
       case "Vocabulary":
-        return check.vocabulary({
+        return s.vocabulary({
           group: command.input.group,
           name: command.input.name,
           used: command.input.used,
@@ -72,9 +66,6 @@ export const adapter: TargetSystemAdapter = {
     }
   },
   async getCurrentState() {
-    const state = current().state;
-    const name = STATE_NAMES[state];
-    if (name === undefined) throw new Error(`adapter: unknown production state ${JSON.stringify(state)}`);
-    return name;
+    return current().state;
   },
 };

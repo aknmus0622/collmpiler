@@ -1,20 +1,28 @@
-import type { StateName, TargetSystemAdapter } from "./gate-rules.adapter.contract.ts";
+import type { Command, CommandOutput, Ports, StateName, TargetSystemAdapter } from "./gate-rules.adapter.contract.ts";
 import {
   changedFileVerdict,
   partFileVerdict,
   removedVerdict,
   sandboxFileVerdict,
-  siteBroken,
+  siteIsBroken,
   testsVerdict,
   wiringVerdict,
-} from "../src/gate-rules/gate-rules.ts";
+} from "../src/gate-rules.ts";
+
+// The production component is a set of pure functions with no dependencies and no
+// state of its own (always in the specification state `READY`), so there is nothing
+// to build, connect to `ports`, or discard beyond the reference to the ports.
+let currentPorts: Ports | undefined;
 
 // Import the production code from ../src/ and forward each call to it. No business logic here.
-// The gate rules are pure functions with no state and no dependencies, so there is no system to build or discard.
 export const adapter: TargetSystemAdapter = {
-  async setupIsolation(_ports) {},
-  async teardownIsolation() {},
-  async executeCommand(command) {
+  async setupIsolation(ports) {
+    currentPorts = ports;
+  },
+  async teardownIsolation() {
+    currentPorts = undefined;
+  },
+  async executeCommand(command: Command): Promise<CommandOutput[keyof CommandOutput] | void> {
     switch (command.name) {
       case "ChangedFile":
         return changedFileVerdict(command.input);
@@ -25,7 +33,7 @@ export const adapter: TargetSystemAdapter = {
       case "SandboxFile":
         return sandboxFileVerdict(command.input);
       case "Site":
-        return siteBroken(command.input);
+        return siteIsBroken(command.input);
       case "Tests":
         return testsVerdict(command.input);
       case "Wiring":
@@ -33,7 +41,6 @@ export const adapter: TargetSystemAdapter = {
     }
   },
   async getCurrentState(): Promise<StateName> {
-    // The production code has no state of its own; it is always in the specification's single state.
     return "READY";
   },
 };

@@ -52,23 +52,36 @@
       }
     },
     {
+      "asks": {
+        "isOutcome": {
+          "input": {
+            "field": "nothing",
+            "kind": {
+              "$ref": "data:outcomeKind"
+            }
+          },
+          "query": "outcome"
+        }
+      },
       "from": [
         "READY"
       ],
       "name": "BeginCase",
-      "onlyIf": [
-        "A command has been begun (a BeginCommand was executed before)"
-      ],
+      "onlyIf": [],
       "when": {
         "otherwise": {
-          "does": "One case of the command (the whole command when it has not branched) is judged next: whether prose says something happens in it. No field has been written in it yet. A case always follows the BeginCommand of its command.",
+          "does": "One case of the command (the whole command when it has not branched) is judged next: whether prose says something happens in it, and whether `nothing` is written in it. No other field has been written in it yet. If `nothing` is written, whether it is an outcome is asked, of the kind whose outcomes count (outcomeKind), as for Written.",
           "set": {
             "caseDescribed": {
               "$ref": "input:described"
             },
-            "nothingWritten": false,
+            "nothingWritten": {
+              "$ref": "input:nothing"
+            },
             "otherWritten": false,
-            "outcomeWritten": false
+            "outcomeWritten": {
+              "$ref": "calculation:nothingIsOutcomeAtBegin"
+            }
           }
         }
       }
@@ -145,9 +158,7 @@
         "READY"
       ],
       "name": "EndCase",
-      "onlyIf": [
-        "A case has been begun (a BeginCase was executed before)"
-      ],
+      "onlyIf": [],
       "when": {
         "otherwise": {
           "does": "All the fields of the case have been given. If prose says something happens and no written field is an outcome, it is reported as no-outcome. Then, independently, if `nothing` is written together with any other field, it is reported as nothing-and-others.",
@@ -295,9 +306,7 @@
         "READY"
       ],
       "name": "Written",
-      "onlyIf": [
-        "A case has been begun (a BeginCase was executed before)"
-      ],
+      "onlyIf": [],
       "when": {
         "otherwise": {
           "does": "One field written in the case. Whether it is an outcome is asked, of the kind whose outcomes count (outcomeKind). Whether it is `nothing` or another field (any other name, the empty one included) is taken into account.",
@@ -338,6 +347,10 @@
         "description": "Whether the command has a case other than otherwise",
         "output": "boolean"
       },
+      "nothingIsOutcomeAtBegin": {
+        "description": "Whether `nothing` is written in the case being begun and is an outcome",
+        "output": "boolean"
+      },
       "nothingWrittenNow": {
         "description": "Whether `nothing` was written in the case, the field just given included",
         "output": "boolean"
@@ -373,7 +386,8 @@
         ]
       },
       "BeginCase": {
-        "described": "boolean"
+        "described": "boolean",
+        "nothing": "boolean"
       },
       "BeginCommand": {
         "cases": {
@@ -445,6 +459,14 @@
       }
     },
     "init": "READY",
+    "initial": {
+      "branched": false,
+      "caseDescribed": false,
+      "nothingWritten": false,
+      "otherWritten": false,
+      "outcomeKind": "command",
+      "outcomeWritten": false
+    },
     "queries": {
       "nonEmpty": {
         "input": {
