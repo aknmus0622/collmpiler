@@ -145,6 +145,8 @@ export type Removes = { part: string; key: unknown };
 export type CommandShape = {
   description?: string;
   input?: Fields;
+  // 入力の生成の指示（フィールド → among / examples / around を持つ型）。入力の型に重ねて、残さない
+  hints?: Fields;
   // 問い合わせと計算では値1つの型。コマンドでは、フィールドの組も書ける
   output?: OutputSchema;
   type?: FieldSchema;
@@ -264,6 +266,7 @@ type OutcomeStructure = Outcome & Structure;
 type CommandStructure = OutcomeStructure & {
   description?: string;
   input?: Fields;
+  hints?: Fields;
   output?: OutputSchema;
   from?: readonly string[];
   onlyIf?: readonly string[];
@@ -287,7 +290,9 @@ type StructureValue = {
 };
 
 const OUTCOME_KEYS = ["goTo", "does", "responds", "effects", "set", "adds", "removes"] as const;
-const COMMAND_KEYS = ["description", "input", "output", "route", "from", "onlyIf", "asks", "calls", "when", ...OUTCOME_KEYS] as const;
+const COMMAND_KEYS = ["description", "input", "hints", "output", "route", "from", "onlyIf", "asks", "calls", "when", ...OUTCOME_KEYS] as const;
+// 入力の生成の指示に書ける設定（合否に関わらない助言だけ）
+const HINT_SETTINGS = ["among", "examples", "around"] as const;
 const STRUCTURE_KEYS = ["states", "finals", "init", "data", "queries", "effects", "decisions", "calculations", "invariants", "commands"] as const;
 // 重ね合わせの規則。種類の定義 (packages/core/index.ts の KINDS) から作って渡す。
 // parts: まとまりごとの、項目に書ける部品。closed: Layer 1 が項目を並べたら、解釈は項目を足せない
@@ -561,7 +566,22 @@ export function resolveComponent(
       );
     }
     const routed = left.route ?? right.route;
-    const accepted = left.input ?? right.input;
+    // 入力に、生成の指示を重ねる。指示は助言なので、Layer 1 も解釈も書ける。同じ設定を両方が書けば、Layer 1 が勝つ
+    const declaredInput = left.input ?? right.input;
+    const hinted: Record<string, unknown> = { ...(declaredInput ?? {}) };
+    for (const [field, hint] of [...Object.entries(right.hints ?? {}), ...Object.entries(left.hints ?? {})]) {
+      const base = hinted[field];
+      const asType = (schema: unknown) => (typeof schema === "string" ? { type: schema } : schema !== null && typeof schema === "object" && "type" in schema ? (schema as Record<string, unknown>) : undefined);
+      const [from, to] = [asType(hint), asType(base)];
+      found({ kind: "key", known: base !== undefined }, { "unknown-key": `commands.${name}.hints.${field}: 入力に ${field} がありません` });
+      const fits = from !== undefined && to !== undefined && from.type === to.type && Object.keys(from).every((key) => key === "type" || (HINT_SETTINGS as readonly string[]).includes(key));
+      if (base !== undefined) found({ kind: "key", known: fits }, { "unknown-key": `commands.${name}.hints.${field}: 生成の指示には、入力と同じ型に among / examples / around だけを書けます` });
+      if (!fits || !from || !to) continue;
+      const settings = Object.fromEntries(Object.entries(from).filter(([key]) => key !== "type" && !(key in to)));
+      for (const key of Object.keys(from)) if (key !== "type") found({ kind: "slot", known: true, layer1: key in to, interpretation: true }, { conflict: `commands.${name}.hints.${field}.${key}: 入力に書かれているので、生成の指示では書けません` });
+      hinted[field] = { ...to, ...settings };
+    }
+    const accepted = declaredInput === undefined && Object.keys(hinted).length === 0 ? undefined : (hinted as Fields);
     const returned = (left.output ?? right.output) as OutputSchema | undefined;
     const allowed = left.from ?? right.from;
     const required = left.onlyIf ?? right.onlyIf;

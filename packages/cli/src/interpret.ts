@@ -504,6 +504,10 @@ missing.
   \`increasing: true\` (never less than before: a clock): \`newId: { output: "string", fresh: true }\`.
   An input field whose value should usually be one the component already remembers is
   \`among(Data.items, "id")\` (one of the \`id\`s of the remembered list \`items\`) instead of \`"string"\`.
+  When Layer 1 already wrote the input, add the same advice with \`hints\` on the command:
+  \`Command.Leave.with({ hints: { name: among(Data.visited) } })\` (only \`among\`, \`examples\` and \`around\`, on a
+  field Layer 1 declared, with the same type). Hints only steer which inputs the test tries; they never change
+  what is accepted.
 - A component with no states at all has no states and no \`init\`. Use whole numbers for money. The names of
   \`data\` fields, queries without input, command inputs, and the names given to asked answers share one namespace
   and must not collide (inputs, and answer names, of different commands may).

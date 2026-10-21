@@ -698,7 +698,7 @@ export const KINDS: Record<string, KindDefinition> = {
   command: {
     fields: {
       description: "text", input: "input", output: "type", route: "text", from: "list of states", onlyIf: "list of conditions",
-      asks: "list of asks", calls: "list of calls", cases: "list of cases", ...OUTCOME_FIELDS,
+      asks: "list of asks", calls: "list of calls", cases: "list of cases", hints: "input", ...OUTCOME_FIELDS,
     },
     // 文で起きることが言われたら、どれか1つ（場合に分かれていなければ、コマンドが1つの場合）
     oneOfRequired: OUTCOMES,
@@ -735,7 +735,7 @@ KINDS.forwards = { fields: { part: "text", command: "text", child: "service", by
 const MANY = Number.POSITIVE_INFINITY;
 // 席 → 変換したあとの節の種類と、いくつまで書けるか（文 (description / does) は、つながって1つになる）
 const FIELD_NODES: Record<string, Record<string, number>> = {
-  description: { description: MANY }, does: { does: MANY }, input: { input: 1 }, output: { output: 1 }, route: { route: 1 },
+  description: { description: MANY }, does: { does: MANY }, input: { input: 1 }, hints: { hints: 1 }, output: { output: 1 }, route: { route: 1 },
   from: { from: 1 }, onlyIf: { onlyIf: MANY }, asks: { asks: MANY }, calls: { calls: MANY }, cases: { when: MANY, otherwise: 1 },
   goTo: { goTo: 1 }, set: { set: MANY }, emits: { emits: MANY }, responds: { responds: 1 }, adds: { adds: MANY }, removes: { removes: MANY }, nothing: { nothing: 1 },
   type: { "#type": 1 }, initially: { initially: 1 }, fresh: { fresh: 1 }, increasing: { increasing: 1 }, mayFail: { mayFail: 1 }, init: { init: 1 }, assets: { assets: 1 }, durable: { durable: 1 },
@@ -768,6 +768,7 @@ export const GRAMMAR: Record<string, Record<string, number>> = {
   condition: { description: 1, meaning: 1 },
   invariant: { description: 1, meaning: 1 },
   input: { "#type": 1 },
+  hints: { "#type": 1 },
   output: { "#type": 1 },
   record: { field: MANY },
   oneOf: { field: MANY },
@@ -993,6 +994,9 @@ function shapeOfEntry(node: Node, into: Collected): Shape {
         break;
       case "input":
         shape.input = { ...(shape.input as Shape | undefined), ...fieldsOf(item, into) };
+        break;
+      case "hints":
+        shape.hints = { ...(shape.hints as Shape | undefined), ...fieldsOf(item, into) };
         break;
       case "output":
         shape.output = schemaOf(item.children[0], into);
@@ -1547,6 +1551,10 @@ function commandBody(given: unknown): Node {
         break;
       case "input":
         children.push(nodeOf(item) ?? inputNode(item as Record<string, TypeLike>));
+        break;
+      // 入力の生成の指示 (among / examples / around)。合否に関わらない助言なので、解釈も書ける。入力の型に重ねる
+      case "hints":
+        children.push(make("hints", { children: [isDict(item) ? record(item as Record<string, TypeLike>) : (item as Node)] }));
         break;
       case "output":
         children.push(output(item as TypeLike));

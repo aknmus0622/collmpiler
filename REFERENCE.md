@@ -137,6 +137,7 @@ What happens: fields of a command, or of a case (`If.x.then({...})`, `otherwise(
 | `integer({ min, max, around })`, `number({ ... })` | a number in a range. `around` adds thresholds to try |
 | `string({ examples: [...] })` | a string, with examples to try (an e-mail address, ...) |
 | `among(Data.items, "id")` | a string usually picked from the `id`s of the remembered list `items` (`among(Data.items, "id", "integer")` for numbers) |
+| `hints: { field: among(...) }` | on a command: generation advice (`among`, `examples`, `around`) for an input field written elsewhere, with the same type. The interpretation may add it, so Layer 1 need not declare the remembered data just to name it |
 | `record({ field: type })` | a value with fields |
 | `list(type)` | a sequence, compared in order |
 | `optional(type)` | a value or `null`. In a `record`, a field that is sometimes absent |

@@ -91,3 +91,45 @@ export const C = service({ uses: [Data, Command] });
   assert.match(codes[0], /^unbound-specification/);
   assert.match(codes[1], /^name-collision: "state" が重複しています \(data と input\)/);
 });
+
+test("生成の指示 (hints): 解釈は、Layer 1 の入力に among / examples / around を足せる。データのまとまりは閉じず、IR の形は変わらない", async () => {
+  const write = (interpretation: string) => {
+    const dir = mkdtempSync(join(tmpRoot, "hints-"));
+    writeFileSync(
+      join(dir, "h.component.ts"),
+      `import { calculations, commands, data, input, interpretation, list, service, among, string, integer } from "@clp/core";
+export const Command = commands({
+  Visit: { input: input({ name: "string" }), does: "The name is remembered as visited." },
+  Leave: { input: input({ name: "string", hour: integer({ min: 0, max: 23 }) }), output: "boolean", does: "Answers whether the name was visited. The name is usually one that was visited." },
+});
+export const Guestbook = service({ uses: [Command, data("The names visited so far.")] });
+export const Data = data({ visited: { type: list("string"), initially: [], description: "The names visited so far." } });
+export const Calc = calculations({ withName: { description: "The names with the name added", output: list("string") }, wasVisited: { description: "Whether the name was visited", output: "boolean" } });
+export const Interpretation = interpretation(Guestbook, [
+  Data,
+  Calc,
+  Command.Visit.with({ set: [Data.visited.set(Calc.withName)] }),
+  Command.Leave.with({ responds: Calc.wasVisited, ${interpretation} }),
+  Calc.withName.means((state) => [...state.visited, state.name]),
+  Calc.wasVisited.means((state) => state.visited.includes(state.name)),
+]);
+`,
+    );
+    return dir;
+  };
+  const good = extract(await loadSpecs(write(`hints: { name: among(Data.visited), hour: integer({ around: [12] }) }`)));
+  assert.deepEqual(good.diagnostics.filter((found) => found.severity === "error"), []);
+  const commands = (good.ir as { model: { commands: Record<string, Record<string, unknown>> } }).model.commands;
+  assert.deepEqual(commands.Leave, { name: { type: "string", among: { data: "visited" } }, hour: { type: "integer", min: 0, max: 23, around: [12] } });
+  assert.deepEqual(commands.Visit, { name: "string" });
+  // 入力に無いフィールド、型を変える指示、範囲を変える指示は、重ね合わせの誤り
+  for (const [hint, message] of [
+    [`hints: { nickname: string({ examples: ["a"] }) }`, /hints\.nickname: 入力に nickname がありません/],
+    [`hints: { name: integer({ around: [1] }) }`, /hints\.name: 生成の指示には、入力と同じ型に among \/ examples \/ around だけを書けます/],
+    [`hints: { hour: integer({ min: 5 }) }`, /hints\.hour: 生成の指示には/],
+    [`hints: { hour: integer({ max: 3, around: [1] }) }`, /hints\.hour: 生成の指示には/],
+  ] as const) {
+    const bad = extract(await loadSpecs(write(hint)));
+    assert.match(bad.diagnostics.map((found) => found.message).join("\n"), message, hint);
+  }
+});
