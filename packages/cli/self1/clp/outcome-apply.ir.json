@@ -1,0 +1,129 @@
+{
+  "components": {
+    "outcome-apply": {
+      "calcs": {
+        "call": {
+          "is": [
+            "ite",
+            [
+              "=",
+              [
+                "var",
+                "guard"
+              ],
+              [
+                "lit",
+                "not"
+              ]
+            ],
+            [
+              "lit",
+              "skip"
+            ],
+            [
+              "ite",
+              [
+                "var",
+                "external"
+              ],
+              [
+                "lit",
+                "effect"
+              ],
+              [
+                "ite",
+                [
+                  "var",
+                  "touched"
+                ],
+                [
+                  "lit",
+                  "twice"
+                ],
+                [
+                  "lit",
+                  "call"
+                ]
+              ]
+            ]
+          ],
+          "params": {
+            "external": "bool",
+            "guard": {
+              "enum": [
+                "none",
+                "holds",
+                "not"
+              ]
+            },
+            "touched": "bool"
+          },
+          "result": {
+            "enum": [
+              "effect",
+              "call",
+              "skip",
+              "twice"
+            ]
+          }
+        }
+      },
+      "init": {},
+      "queries": {
+        "Call": {
+          "is": [
+            "calc",
+            "call",
+            {
+              "external": [
+                "var",
+                "external"
+              ],
+              "guard": [
+                "var",
+                "guard"
+              ],
+              "touched": [
+                "var",
+                "touched"
+              ]
+            }
+          ],
+          "params": {
+            "external": "bool",
+            "guard": {
+              "enum": [
+                "none",
+                "holds",
+                "not"
+              ]
+            },
+            "touched": "bool"
+          },
+          "result": {
+            "enum": [
+              "effect",
+              "call",
+              "skip",
+              "twice"
+            ]
+          }
+        }
+      },
+      "state": {}
+    }
+  },
+  "entries": {
+    "commands": [],
+    "queries": [
+      "outcome-apply.Call"
+    ]
+  },
+  "irVersion": 8,
+  "notes": {
+    "outcome-apply": "Decides what happens with each call an event makes.",
+    "outcome-apply.calcs.call": "A call of the event, in order. A call with a condition that does not hold is skipped. Otherwise a call of the outside world is an effect, and a call of a component inside the system is made, unless that component was already changed in this step: then it is called twice in one step, which the specification must not do."
+  },
+  "root": "outcome-apply",
+  "sorts": []
+}

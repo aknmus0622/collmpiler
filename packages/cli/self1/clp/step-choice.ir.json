@@ -1,0 +1,245 @@
+{
+  "components": {
+    "oracle": {
+      "external": {
+        "commands": {},
+        "queries": {
+          "Holds": {
+            "params": {
+              "name": {
+                "atom": "CaseName"
+              }
+            },
+            "result": "bool"
+          }
+        }
+      }
+    },
+    "step-choice": {
+      "calcs": {
+        "decision": {
+          "is": [
+            "ite",
+            [
+              "=",
+              [
+                "len",
+                [
+                  "state",
+                  "hits"
+                ]
+              ],
+              0
+            ],
+            [
+              "record",
+              {
+                "chosen": null,
+                "conflict": [
+                  "list"
+                ],
+                "otherwise": true
+              }
+            ],
+            [
+              "ite",
+              [
+                "=",
+                [
+                  "len",
+                  [
+                    "state",
+                    "hits"
+                  ]
+                ],
+                1
+              ],
+              [
+                "record",
+                {
+                  "chosen": [
+                    "at",
+                    [
+                      "state",
+                      "hits"
+                    ],
+                    0
+                  ],
+                  "conflict": [
+                    "list"
+                  ],
+                  "otherwise": false
+                }
+              ],
+              [
+                "record",
+                {
+                  "chosen": null,
+                  "conflict": [
+                    "state",
+                    "hits"
+                  ],
+                  "otherwise": false
+                }
+              ]
+            ]
+          ],
+          "params": {},
+          "result": {
+            "record": {
+              "chosen": {
+                "optional": {
+                  "atom": "CaseName"
+                }
+              },
+              "conflict": {
+                "list": {
+                  "atom": "CaseName"
+                }
+              },
+              "otherwise": "bool"
+            }
+          }
+        }
+      },
+      "commands": {
+        "BeginCases": {
+          "events": [
+            "BeginCases.otherwise"
+          ],
+          "params": {}
+        },
+        "Case": {
+          "events": [
+            "Case.otherwise"
+          ],
+          "params": {
+            "name": {
+              "atom": "CaseName"
+            }
+          }
+        }
+      },
+      "events": {
+        "BeginCases.otherwise": {
+          "assign": {
+            "hits": [
+              "list"
+            ]
+          },
+          "calls": [],
+          "command": "BeginCases",
+          "guard": true
+        },
+        "Case.otherwise": {
+          "assign": {
+            "hits": [
+              "ite",
+              [
+                "ask",
+                "oracle",
+                "Holds",
+                {
+                  "name": [
+                    "var",
+                    "name"
+                  ]
+                }
+              ],
+              [
+                "concat",
+                [
+                  "state",
+                  "hits"
+                ],
+                [
+                  "list",
+                  [
+                    "var",
+                    "name"
+                  ]
+                ]
+              ],
+              [
+                "state",
+                "hits"
+              ]
+            ]
+          },
+          "calls": [],
+          "command": "Case",
+          "guard": true
+        }
+      },
+      "init": {
+        "hits": [
+          "list"
+        ]
+      },
+      "queries": {
+        "Decision": {
+          "is": [
+            "calc",
+            "decision",
+            {}
+          ],
+          "params": {},
+          "result": {
+            "record": {
+              "chosen": {
+                "optional": {
+                  "atom": "CaseName"
+                }
+              },
+              "conflict": {
+                "list": {
+                  "atom": "CaseName"
+                }
+              },
+              "otherwise": "bool"
+            }
+          }
+        }
+      },
+      "relies": [
+        "oracle"
+      ],
+      "state": {
+        "hits": {
+          "list": {
+            "atom": "CaseName"
+          }
+        }
+      }
+    }
+  },
+  "entries": {
+    "commands": [
+      "step-choice.BeginCases",
+      "step-choice.Case"
+    ],
+    "queries": [
+      "step-choice.Decision"
+    ]
+  },
+  "irVersion": 8,
+  "notes": {
+    "oracle": "The oracle, which evaluates a case's condition in the situation being considered.",
+    "step-choice": "Chooses which case of a command happens.",
+    "step-choice.calcs.decision": "Which case happens. If exactly one case's condition holds, that case. If none holds, the otherwise case (chosen is null and otherwise is true). If more than one holds, none is chosen and the conflict lists those cases in the order given; otherwise the conflict is empty.",
+    "step-choice.does.begin": "A case is chosen next. No case has been given yet.",
+    "step-choice.does.case": "A case, named by its condition. It is asked about (whether its condition holds), even when another one already holds."
+  },
+  "root": "step-choice",
+  "sorts": [
+    "CaseName"
+  ],
+  "trace": {
+    "step-choice.does.begin": [
+      "StepChoice.commands.BeginCases"
+    ],
+    "step-choice.does.case": [
+      "StepChoice.commands.Case"
+    ]
+  }
+}

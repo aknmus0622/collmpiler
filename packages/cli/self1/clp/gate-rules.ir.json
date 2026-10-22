@@ -1,0 +1,748 @@
+{
+  "components": {
+    "gate-rules": {
+      "calcs": {
+        "changedFile": {
+          "is": [
+            "ite",
+            [
+              "not",
+              [
+                "var",
+                "changed"
+              ]
+            ],
+            [
+              "lit",
+              "keep"
+            ],
+            [
+              "ite",
+              [
+                "and",
+                [
+                  "and",
+                  [
+                    "not",
+                    [
+                      "var",
+                      "usedByThis"
+                    ]
+                  ],
+                  [
+                    "not",
+                    [
+                      "var",
+                      "inert"
+                    ]
+                  ]
+                ],
+                [
+                  "var",
+                  "usedByOthers"
+                ]
+              ],
+              [
+                "lit",
+                "out-of-scope"
+              ],
+              [
+                "lit",
+                "keep"
+              ]
+            ]
+          ],
+          "params": {
+            "changed": "bool",
+            "inert": "bool",
+            "usedByOthers": "bool",
+            "usedByThis": "bool"
+          },
+          "result": {
+            "enum": [
+              "keep",
+              "out-of-scope"
+            ]
+          }
+        },
+        "partFile": {
+          "is": [
+            "ite",
+            [
+              "and",
+              [
+                "var",
+                "existedBefore"
+              ],
+              [
+                "var",
+                "changed"
+              ]
+            ],
+            [
+              "lit",
+              "restore"
+            ],
+            [
+              "lit",
+              "keep"
+            ]
+          ],
+          "params": {
+            "changed": "bool",
+            "existedBefore": "bool"
+          },
+          "result": {
+            "enum": [
+              "keep",
+              "restore"
+            ]
+          }
+        },
+        "removed": {
+          "is": [
+            "ite",
+            [
+              "ite",
+              [
+                "=",
+                [
+                  "var",
+                  "phase"
+                ],
+                [
+                  "lit",
+                  "wiring"
+                ]
+              ],
+              [
+                "var",
+                "isAdapter"
+              ],
+              [
+                "var",
+                "isSource"
+              ]
+            ],
+            [
+              "lit",
+              "ok"
+            ],
+            [
+              "lit",
+              "removed"
+            ]
+          ],
+          "params": {
+            "isAdapter": "bool",
+            "isSource": "bool",
+            "phase": {
+              "enum": [
+                "design",
+                "wiring",
+                "implementation"
+              ]
+            }
+          },
+          "result": {
+            "enum": [
+              "ok",
+              "removed"
+            ]
+          }
+        },
+        "sandboxFile": {
+          "is": [
+            "ite",
+            [
+              "var",
+              "hidden"
+            ],
+            [
+              "lit",
+              "skip"
+            ],
+            [
+              "ite",
+              [
+                "var",
+                "toolchain"
+              ],
+              [
+                "ite",
+                [
+                  "var",
+                  "toolchainIntact"
+                ],
+                [
+                  "lit",
+                  "keep"
+                ],
+                [
+                  "lit",
+                  "toolchain-modified"
+                ]
+              ],
+              [
+                "ite",
+                [
+                  "not",
+                  [
+                    "var",
+                    "regular"
+                  ]
+                ],
+                [
+                  "lit",
+                  "not-regular"
+                ],
+                [
+                  "ite",
+                  [
+                    "ite",
+                    [
+                      "=",
+                      [
+                        "var",
+                        "phase"
+                      ],
+                      [
+                        "lit",
+                        "wiring"
+                      ]
+                    ],
+                    [
+                      "var",
+                      "isAdapter"
+                    ],
+                    [
+                      "var",
+                      "isSource"
+                    ]
+                  ],
+                  [
+                    "lit",
+                    "take"
+                  ],
+                  [
+                    "ite",
+                    [
+                      "not",
+                      [
+                        "var",
+                        "input"
+                      ]
+                    ],
+                    [
+                      "lit",
+                      "unexpected"
+                    ],
+                    [
+                      "ite",
+                      [
+                        "var",
+                        "inputIntact"
+                      ],
+                      [
+                        "lit",
+                        "keep"
+                      ],
+                      [
+                        "lit",
+                        "input-modified"
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ],
+          "params": {
+            "hidden": "bool",
+            "input": "bool",
+            "inputIntact": "bool",
+            "isAdapter": "bool",
+            "isSource": "bool",
+            "phase": {
+              "enum": [
+                "design",
+                "wiring",
+                "implementation"
+              ]
+            },
+            "regular": "bool",
+            "toolchain": "bool",
+            "toolchainIntact": "bool"
+          },
+          "result": {
+            "enum": [
+              "skip",
+              "take",
+              "keep",
+              "toolchain-modified",
+              "not-regular",
+              "unexpected",
+              "input-modified"
+            ]
+          }
+        },
+        "site": {
+          "is": [
+            "or",
+            [
+              "var",
+              "executedByThis"
+            ],
+            [
+              "and",
+              [
+                "not",
+                [
+                  "var",
+                  "executedByOthers"
+                ]
+              ],
+              [
+                "or",
+                [
+                  "var",
+                  "fileUsedByThis"
+                ],
+                [
+                  "not",
+                  [
+                    "var",
+                    "fileUsedByOthers"
+                  ]
+                ]
+              ]
+            ]
+          ],
+          "params": {
+            "executedByOthers": "bool",
+            "executedByThis": "bool",
+            "fileUsedByOthers": "bool",
+            "fileUsedByThis": "bool"
+          },
+          "result": "bool"
+        },
+        "tests": {
+          "is": [
+            "ite",
+            [
+              "var",
+              "passed"
+            ],
+            [
+              "lit",
+              "ok"
+            ],
+            [
+              "ite",
+              [
+                "=",
+                [
+                  "var",
+                  "purpose"
+                ],
+                [
+                  "lit",
+                  "regression"
+                ]
+              ],
+              [
+                "lit",
+                "regression"
+              ],
+              [
+                "lit",
+                "failed"
+              ]
+            ]
+          ],
+          "params": {
+            "passed": "bool",
+            "purpose": {
+              "enum": [
+                "implementation",
+                "regression"
+              ]
+            }
+          },
+          "result": {
+            "enum": [
+              "ok",
+              "failed",
+              "regression"
+            ]
+          }
+        },
+        "wiring": {
+          "is": [
+            "ite",
+            [
+              "var",
+              "passed"
+            ],
+            [
+              "ite",
+              [
+                "var",
+                "unimplemented"
+              ],
+              [
+                "lit",
+                "passes-unimplemented"
+              ],
+              [
+                "lit",
+                "ok"
+              ]
+            ],
+            [
+              "ite",
+              [
+                "=",
+                [
+                  "var",
+                  "error"
+                ],
+                [
+                  "lit",
+                  "other"
+                ]
+              ],
+              [
+                "lit",
+                "adapter-error"
+              ],
+              [
+                "lit",
+                "ok"
+              ]
+            ]
+          ],
+          "params": {
+            "error": {
+              "enum": [
+                "none",
+                "not-implemented",
+                "other"
+              ]
+            },
+            "passed": "bool",
+            "unimplemented": "bool"
+          },
+          "result": {
+            "enum": [
+              "ok",
+              "passes-unimplemented",
+              "adapter-error"
+            ]
+          }
+        }
+      },
+      "init": {},
+      "queries": {
+        "ChangedFile": {
+          "is": [
+            "calc",
+            "changedFile",
+            {
+              "changed": [
+                "var",
+                "changed"
+              ],
+              "inert": [
+                "var",
+                "inert"
+              ],
+              "usedByOthers": [
+                "var",
+                "usedByOthers"
+              ],
+              "usedByThis": [
+                "var",
+                "usedByThis"
+              ]
+            }
+          ],
+          "params": {
+            "changed": "bool",
+            "inert": "bool",
+            "usedByOthers": "bool",
+            "usedByThis": "bool"
+          },
+          "result": {
+            "enum": [
+              "keep",
+              "out-of-scope"
+            ]
+          }
+        },
+        "PartFile": {
+          "is": [
+            "calc",
+            "partFile",
+            {
+              "changed": [
+                "var",
+                "changed"
+              ],
+              "existedBefore": [
+                "var",
+                "existedBefore"
+              ]
+            }
+          ],
+          "params": {
+            "changed": "bool",
+            "existedBefore": "bool"
+          },
+          "result": {
+            "enum": [
+              "keep",
+              "restore"
+            ]
+          }
+        },
+        "Removed": {
+          "is": [
+            "calc",
+            "removed",
+            {
+              "isAdapter": [
+                "var",
+                "isAdapter"
+              ],
+              "isSource": [
+                "var",
+                "isSource"
+              ],
+              "phase": [
+                "var",
+                "phase"
+              ]
+            }
+          ],
+          "params": {
+            "isAdapter": "bool",
+            "isSource": "bool",
+            "phase": {
+              "enum": [
+                "design",
+                "wiring",
+                "implementation"
+              ]
+            }
+          },
+          "result": {
+            "enum": [
+              "ok",
+              "removed"
+            ]
+          }
+        },
+        "SandboxFile": {
+          "is": [
+            "calc",
+            "sandboxFile",
+            {
+              "hidden": [
+                "var",
+                "hidden"
+              ],
+              "input": [
+                "var",
+                "input"
+              ],
+              "inputIntact": [
+                "var",
+                "inputIntact"
+              ],
+              "isAdapter": [
+                "var",
+                "isAdapter"
+              ],
+              "isSource": [
+                "var",
+                "isSource"
+              ],
+              "phase": [
+                "var",
+                "phase"
+              ],
+              "regular": [
+                "var",
+                "regular"
+              ],
+              "toolchain": [
+                "var",
+                "toolchain"
+              ],
+              "toolchainIntact": [
+                "var",
+                "toolchainIntact"
+              ]
+            }
+          ],
+          "params": {
+            "hidden": "bool",
+            "input": "bool",
+            "inputIntact": "bool",
+            "isAdapter": "bool",
+            "isSource": "bool",
+            "phase": {
+              "enum": [
+                "design",
+                "wiring",
+                "implementation"
+              ]
+            },
+            "regular": "bool",
+            "toolchain": "bool",
+            "toolchainIntact": "bool"
+          },
+          "result": {
+            "enum": [
+              "skip",
+              "take",
+              "keep",
+              "toolchain-modified",
+              "not-regular",
+              "unexpected",
+              "input-modified"
+            ]
+          }
+        },
+        "Site": {
+          "is": [
+            "calc",
+            "site",
+            {
+              "executedByOthers": [
+                "var",
+                "executedByOthers"
+              ],
+              "executedByThis": [
+                "var",
+                "executedByThis"
+              ],
+              "fileUsedByOthers": [
+                "var",
+                "fileUsedByOthers"
+              ],
+              "fileUsedByThis": [
+                "var",
+                "fileUsedByThis"
+              ]
+            }
+          ],
+          "params": {
+            "executedByOthers": "bool",
+            "executedByThis": "bool",
+            "fileUsedByOthers": "bool",
+            "fileUsedByThis": "bool"
+          },
+          "result": "bool"
+        },
+        "Tests": {
+          "is": [
+            "calc",
+            "tests",
+            {
+              "passed": [
+                "var",
+                "passed"
+              ],
+              "purpose": [
+                "var",
+                "purpose"
+              ]
+            }
+          ],
+          "params": {
+            "passed": "bool",
+            "purpose": {
+              "enum": [
+                "implementation",
+                "regression"
+              ]
+            }
+          },
+          "result": {
+            "enum": [
+              "ok",
+              "failed",
+              "regression"
+            ]
+          }
+        },
+        "Wiring": {
+          "is": [
+            "calc",
+            "wiring",
+            {
+              "error": [
+                "var",
+                "error"
+              ],
+              "passed": [
+                "var",
+                "passed"
+              ],
+              "unimplemented": [
+                "var",
+                "unimplemented"
+              ]
+            }
+          ],
+          "params": {
+            "error": {
+              "enum": [
+                "none",
+                "not-implemented",
+                "other"
+              ]
+            },
+            "passed": "bool",
+            "unimplemented": "bool"
+          },
+          "result": {
+            "enum": [
+              "ok",
+              "passes-unimplemented",
+              "adapter-error"
+            ]
+          }
+        }
+      },
+      "state": {}
+    }
+  },
+  "entries": {
+    "commands": [],
+    "queries": [
+      "gate-rules.ChangedFile",
+      "gate-rules.PartFile",
+      "gate-rules.Removed",
+      "gate-rules.SandboxFile",
+      "gate-rules.Site",
+      "gate-rules.Tests",
+      "gate-rules.Wiring"
+    ]
+  },
+  "irVersion": 8,
+  "notes": {
+    "gate-rules": "Decides the exit gate's verdicts on files, test runs and places in production code.",
+    "gate-rules.calcs.changedFile": "A production file that existed before the session, and whether the session changed it. A file that was not changed is always kept. A changed file is out of scope when this component's tests never use it, it has behaviour (not inert), and another component uses it; otherwise it is kept.",
+    "gate-rules.calcs.partFile": "A file of a component this one contains. If it existed before and was changed, it is restored (and the change is a violation); otherwise it is kept.",
+    "gate-rules.calcs.removed": "A file put in the sandbox at the start is missing at the end. That is fine for a file the phase may write (see SandboxFile); otherwise it was removed.",
+    "gate-rules.calcs.sandboxFile": "A file found in the sandbox after the session, judged in this order. A hidden file (or the request) is skipped. A tool's file (type definitions) is kept if it is intact, and otherwise it was modified (toolchain-modified). A file that is not a regular file is not-regular. A file the phase may write is taken: in the wiring phase only the adapter, in the other phases only production code. Any other file that was not put there at the start is unexpected; one that was is kept if intact, and otherwise it was modified (input-modified).",
+    "gate-rules.calcs.site": "A place in production code the mutation gate could break. It is broken (true) if this component's tests executed it. If they did not: it is broken if no other component executed it either, and its file is used by this component or by no other.",
+    "gate-rules.calcs.tests": "Tests that must pass have run: ok if they passed. Otherwise failed, or regression when they are another component's tests run again.",
+    "gate-rules.calcs.wiring": "The tests of the wiring phase have run. If they passed while unimplemented production code remains, they passes-unimplemented (the adapter does the work); if they passed and nothing is unimplemented, ok. If they failed because of an error other than the unimplemented marker, adapter-error; otherwise (failed for the right reason, or without an error), ok."
+  },
+  "root": "gate-rules",
+  "sorts": []
+}

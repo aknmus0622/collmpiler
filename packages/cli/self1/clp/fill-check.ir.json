@@ -1,0 +1,240 @@
+{
+  "components": {
+    "fill-check": {
+      "calcs": {
+        "fragment": {
+          "is": [
+            "ite",
+            [
+              "=",
+              [
+                "var",
+                "entry"
+              ],
+              [
+                "lit",
+                "elsewhere"
+              ]
+            ],
+            [
+              "lit",
+              "clash"
+            ],
+            [
+              "ite",
+              [
+                "var",
+                "inline"
+              ],
+              [
+                "ite",
+                [
+                  "and",
+                  [
+                    "var",
+                    "byInterpretation"
+                  ],
+                  [
+                    "not",
+                    [
+                      "=",
+                      [
+                        "var",
+                        "entry"
+                      ],
+                      [
+                        "lit",
+                        "none"
+                      ]
+                    ]
+                  ]
+                ],
+                [
+                  "lit",
+                  "overwrite"
+                ],
+                [
+                  "lit",
+                  "inline"
+                ]
+              ],
+              [
+                "ite",
+                [
+                  "or",
+                  [
+                    "=",
+                    [
+                      "var",
+                      "entry"
+                    ],
+                    [
+                      "lit",
+                      "none"
+                    ]
+                  ],
+                  [
+                    "=",
+                    [
+                      "var",
+                      "entry"
+                    ],
+                    [
+                      "lit",
+                      "prose"
+                    ]
+                  ]
+                ],
+                [
+                  "lit",
+                  "prose-left"
+                ],
+                [
+                  "ite",
+                  [
+                    "=",
+                    [
+                      "var",
+                      "entry"
+                    ],
+                    [
+                      "lit",
+                      "method"
+                    ]
+                  ],
+                  [
+                    "lit",
+                    "fill"
+                  ],
+                  [
+                    "ite",
+                    [
+                      "=",
+                      [
+                        "var",
+                        "kind"
+                      ],
+                      [
+                        "lit",
+                        "is"
+                      ]
+                    ],
+                    [
+                      "lit",
+                      "fill"
+                    ],
+                    [
+                      "lit",
+                      "not-a-method"
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ],
+          "params": {
+            "byInterpretation": "bool",
+            "entry": {
+              "enum": [
+                "none",
+                "elsewhere",
+                "prose",
+                "method",
+                "expression"
+              ]
+            },
+            "inline": "bool",
+            "kind": {
+              "enum": [
+                "is",
+                "does",
+                "value"
+              ]
+            }
+          },
+          "result": {
+            "enum": [
+              "inline",
+              "fill",
+              "prose-left",
+              "overwrite",
+              "clash",
+              "not-a-method"
+            ]
+          }
+        }
+      },
+      "init": {},
+      "queries": {
+        "Fragment": {
+          "is": [
+            "calc",
+            "fragment",
+            {
+              "byInterpretation": [
+                "var",
+                "byInterpretation"
+              ],
+              "entry": [
+                "var",
+                "entry"
+              ],
+              "inline": [
+                "var",
+                "inline"
+              ],
+              "kind": [
+                "var",
+                "kind"
+              ]
+            }
+          ],
+          "params": {
+            "byInterpretation": "bool",
+            "entry": {
+              "enum": [
+                "none",
+                "elsewhere",
+                "prose",
+                "method",
+                "expression"
+              ]
+            },
+            "inline": "bool",
+            "kind": {
+              "enum": [
+                "is",
+                "does",
+                "value"
+              ]
+            }
+          },
+          "result": {
+            "enum": [
+              "inline",
+              "fill",
+              "prose-left",
+              "overwrite",
+              "clash",
+              "not-a-method"
+            ]
+          }
+        }
+      },
+      "state": {}
+    }
+  },
+  "entries": {
+    "commands": [],
+    "queries": [
+      "fill-check.Fragment"
+    ]
+  },
+  "irVersion": 8,
+  "notes": {
+    "fill-check": "Decides what a prose fragment inside a body becomes.",
+    "fill-check.calcs.fragment": "A fragment, given its kind; whether its expression is written with it (inline); what is under its name: nothing, something under another heading Layer 1 wrote (elsewhere), prose, a method, or an expression; and whether that entry was written by the interpretation. A name used elsewhere is a clash: one component has one namespace. An inline expression is used (inline), but the interpretation writing an entry for it too is an overwrite. Without an inline expression: nothing or prose under the name leaves the fragment as prose (prose-left); a method is its content (fill); an expression is the content of a condition (fill), but not of something that happens or a value, which must be methods (not-a-method)."
+  },
+  "root": "fill-check",
+  "sorts": []
+}

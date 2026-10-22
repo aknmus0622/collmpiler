@@ -1,0 +1,32 @@
+{
+  "roots": [
+    "promise-keeper.component.ts",
+    "promise-keeper.interpretation.ts"
+  ],
+  "specs": "sha256:1b2016de64756e42e2f93a25ff9874cd0889efbf0a32c7d8a2d76789472b5536",
+  "code": "sha256:88921c4439d72705d1ce77b5ee03dbc99beed92beb77db5690c30fa50ca58952",
+  "files": [
+    "../src/checker-verdict.ts",
+    "../src/fill-check.ts",
+    "../src/fit-check.ts",
+    "../src/gate-rules.ts",
+    "../src/input-candidates.ts",
+    "../src/interpret-flow.ts",
+    "../src/mutation-judge.ts",
+    "../src/mutation-verdict.ts",
+    "../src/observation-compare.ts",
+    "../src/outcome-apply.ts",
+    "../src/overlay-check.ts",
+    "../src/pipeline.ts",
+    "../src/promise-keeper.ts",
+    "../src/sentence-trace.ts",
+    "../src/step-choice.ts",
+    "../src/syntax-check.ts",
+    "../src/text-plan.ts",
+    "../src/type-check.ts",
+    "../src/usage-check.ts",
+    "promise-keeper.adapter.ts"
+  ],
+  "gradedBy": "stage0",
+  "stage0": "sha256:4e8e6c7faf990a51b512b4836894f11bbd4e68efd7a311a54937fb63a1dd4ab9"
+}

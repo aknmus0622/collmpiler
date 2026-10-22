@@ -1,0 +1,359 @@
+{
+  "components": {
+    "checker-verdict": {
+      "calcs": {
+        "verdict": {
+          "is": [
+            "ite",
+            [
+              "or",
+              [
+                "or",
+                [
+                  "=",
+                  [
+                    "var",
+                    "kind"
+                  ],
+                  [
+                    "lit",
+                    "skipped"
+                  ]
+                ],
+                [
+                  "=",
+                  [
+                    "var",
+                    "status"
+                  ],
+                  [
+                    "lit",
+                    "skipped"
+                  ]
+                ]
+              ],
+              [
+                "=",
+                [
+                  "var",
+                  "status"
+                ],
+                [
+                  "lit",
+                  "out-of-range"
+                ]
+              ]
+            ],
+            [
+              "record",
+              {
+                "code": [
+                  "lit",
+                  "out-of-range"
+                ],
+                "severity": [
+                  "lit",
+                  "warning"
+                ]
+              }
+            ],
+            [
+              "ite",
+              [
+                "and",
+                [
+                  "=",
+                  [
+                    "var",
+                    "kind"
+                  ],
+                  [
+                    "lit",
+                    "reach"
+                  ]
+                ],
+                [
+                  "=",
+                  [
+                    "var",
+                    "status"
+                  ],
+                  [
+                    "lit",
+                    "unreachable"
+                  ]
+                ]
+              ],
+              [
+                "record",
+                {
+                  "code": [
+                    "lit",
+                    "unreached-case"
+                  ],
+                  "severity": [
+                    "lit",
+                    "warning"
+                  ]
+                }
+              ],
+              [
+                "ite",
+                [
+                  "and",
+                  [
+                    "=",
+                    [
+                      "var",
+                      "kind"
+                    ],
+                    [
+                      "lit",
+                      "property"
+                    ]
+                  ],
+                  [
+                    "=",
+                    [
+                      "var",
+                      "status"
+                    ],
+                    [
+                      "lit",
+                      "broken"
+                    ]
+                  ]
+                ],
+                [
+                  "record",
+                  {
+                    "code": [
+                      "lit",
+                      "property"
+                    ],
+                    "severity": [
+                      "lit",
+                      "error"
+                    ]
+                  }
+                ],
+                [
+                  "ite",
+                  [
+                    "and",
+                    [
+                      "=",
+                      [
+                        "var",
+                        "kind"
+                      ],
+                      [
+                        "lit",
+                        "defined"
+                      ]
+                    ],
+                    [
+                      "=",
+                      [
+                        "var",
+                        "status"
+                      ],
+                      [
+                        "lit",
+                        "broken"
+                      ]
+                    ]
+                  ],
+                  [
+                    "record",
+                    {
+                      "code": [
+                        "lit",
+                        "undefined-value"
+                      ],
+                      "severity": [
+                        "lit",
+                        "error"
+                      ]
+                    }
+                  ],
+                  [
+                    "ite",
+                    [
+                      "and",
+                      [
+                        "=",
+                        [
+                          "var",
+                          "kind"
+                        ],
+                        [
+                          "lit",
+                          "requires"
+                        ]
+                      ],
+                      [
+                        "=",
+                        [
+                          "var",
+                          "status"
+                        ],
+                        [
+                          "lit",
+                          "broken"
+                        ]
+                      ]
+                    ],
+                    [
+                      "record",
+                      {
+                        "code": [
+                          "lit",
+                          "requires-broken"
+                        ],
+                        "severity": [
+                          "lit",
+                          "error"
+                        ]
+                      }
+                    ],
+                    [
+                      "record",
+                      {
+                        "code": [
+                          "lit",
+                          "none"
+                        ],
+                        "severity": [
+                          "lit",
+                          "none"
+                        ]
+                      }
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ],
+          "params": {
+            "kind": {
+              "enum": [
+                "property",
+                "defined",
+                "requires",
+                "reach",
+                "skipped"
+              ]
+            },
+            "status": {
+              "enum": [
+                "holds",
+                "broken",
+                "reached",
+                "unreachable",
+                "out-of-range",
+                "skipped"
+              ]
+            }
+          },
+          "result": {
+            "record": {
+              "code": {
+                "enum": [
+                  "property",
+                  "undefined-value",
+                  "requires-broken",
+                  "unreached-case",
+                  "out-of-range",
+                  "none"
+                ]
+              },
+              "severity": {
+                "enum": [
+                  "error",
+                  "warning",
+                  "none"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "init": {},
+      "queries": {
+        "Verdict": {
+          "is": [
+            "calc",
+            "verdict",
+            {
+              "kind": [
+                "var",
+                "kind"
+              ],
+              "status": [
+                "var",
+                "status"
+              ]
+            }
+          ],
+          "params": {
+            "kind": {
+              "enum": [
+                "property",
+                "defined",
+                "requires",
+                "reach",
+                "skipped"
+              ]
+            },
+            "status": {
+              "enum": [
+                "holds",
+                "broken",
+                "reached",
+                "unreachable",
+                "out-of-range",
+                "skipped"
+              ]
+            }
+          },
+          "result": {
+            "record": {
+              "code": {
+                "enum": [
+                  "property",
+                  "undefined-value",
+                  "requires-broken",
+                  "unreached-case",
+                  "out-of-range",
+                  "none"
+                ]
+              },
+              "severity": {
+                "enum": [
+                  "error",
+                  "warning",
+                  "none"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "state": {}
+    }
+  },
+  "entries": {
+    "commands": [],
+    "queries": [
+      "checker-verdict.Verdict"
+    ]
+  },
+  "irVersion": 8,
+  "notes": {
+    "checker-verdict": "Decides how serious each verdict of the formal checker is.",
+    "checker-verdict.calcs.verdict": "A verdict: what was checked (a property, that a value read is defined, that a component is called within its requires, that an event can happen, or something the checker could not express at all) and how it came out. Something skipped, or out of range, is a warning (out-of-range). An event no trace reaches is a warning (unreached-case); one that is reached says nothing. A broken property, a value read where it is not defined, and a call outside the callee's requires are errors (property, undefined-value, requires-broken); anything that holds says nothing."
+  },
+  "root": "checker-verdict",
+  "sorts": []
+}

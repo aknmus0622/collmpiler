@@ -1,0 +1,590 @@
+{
+  "components": {
+    "mutation-verdict": {
+      "commands": {
+        "Begin": {
+          "events": [
+            "Begin.otherwise"
+          ],
+          "params": {
+            "kind": {
+              "enum": [
+                "number",
+                "string",
+                "boolean",
+                "null"
+              ]
+            }
+          },
+          "requires": [
+            "=",
+            [
+              "state",
+              "status"
+            ],
+            [
+              "lit",
+              "IDLE"
+            ]
+          ]
+        },
+        "Tried": {
+          "events": [
+            "Tried.otherwise"
+          ],
+          "params": {
+            "changed": "bool",
+            "enablementDiffers": "bool"
+          },
+          "requires": [
+            "=",
+            [
+              "state",
+              "status"
+            ],
+            [
+              "lit",
+              "TRYING"
+            ]
+          ]
+        }
+      },
+      "decisions": {
+        "seeds": {
+          "params": {},
+          "result": {
+            "record": {
+              "extraSeeds": "int"
+            }
+          },
+          "rows": [
+            {
+              "then": {
+                "extraSeeds": 2
+              },
+              "when": true
+            }
+          ]
+        }
+      },
+      "events": {
+        "Begin.otherwise": {
+          "assign": {
+            "booleanValue": [
+              "ite",
+              [
+                "not",
+                [
+                  "=",
+                  [
+                    "var",
+                    "kind"
+                  ],
+                  [
+                    "lit",
+                    "null"
+                  ]
+                ]
+              ],
+              [
+                "=",
+                [
+                  "var",
+                  "kind"
+                ],
+                [
+                  "lit",
+                  "boolean"
+                ]
+              ],
+              [
+                "state",
+                "booleanValue"
+              ]
+            ],
+            "enablementChanged": [
+              "ite",
+              [
+                "not",
+                [
+                  "=",
+                  [
+                    "var",
+                    "kind"
+                  ],
+                  [
+                    "lit",
+                    "null"
+                  ]
+                ]
+              ],
+              false,
+              [
+                "state",
+                "enablementChanged"
+              ]
+            ],
+            "extra": [
+              "ite",
+              [
+                "not",
+                [
+                  "=",
+                  [
+                    "var",
+                    "kind"
+                  ],
+                  [
+                    "lit",
+                    "null"
+                  ]
+                ]
+              ],
+              0,
+              [
+                "state",
+                "extra"
+              ]
+            ],
+            "status": [
+              "ite",
+              [
+                "not",
+                [
+                  "=",
+                  [
+                    "var",
+                    "kind"
+                  ],
+                  [
+                    "lit",
+                    "null"
+                  ]
+                ]
+              ],
+              [
+                "lit",
+                "TRYING"
+              ],
+              [
+                "state",
+                "status"
+              ]
+            ]
+          },
+          "calls": [
+            {
+              "args": {
+                "extra": 0
+              },
+              "command": "RunTrials",
+              "component": "runs",
+              "when": [
+                "not",
+                [
+                  "=",
+                  [
+                    "var",
+                    "kind"
+                  ],
+                  [
+                    "lit",
+                    "null"
+                  ]
+                ]
+              ]
+            }
+          ],
+          "command": "Begin",
+          "guard": true
+        },
+        "Tried.otherwise": {
+          "assign": {
+            "enablementChanged": [
+              "ite",
+              [
+                "var",
+                "changed"
+              ],
+              [
+                "state",
+                "enablementChanged"
+              ],
+              [
+                "ite",
+                [
+                  "<",
+                  [
+                    "state",
+                    "extra"
+                  ],
+                  [
+                    "field",
+                    [
+                      "decide",
+                      "seeds",
+                      {}
+                    ],
+                    "extraSeeds"
+                  ]
+                ],
+                [
+                  "or",
+                  [
+                    "state",
+                    "enablementChanged"
+                  ],
+                  [
+                    "var",
+                    "enablementDiffers"
+                  ]
+                ],
+                [
+                  "state",
+                  "enablementChanged"
+                ]
+              ]
+            ],
+            "extra": [
+              "ite",
+              [
+                "var",
+                "changed"
+              ],
+              [
+                "state",
+                "extra"
+              ],
+              [
+                "ite",
+                [
+                  "<",
+                  [
+                    "state",
+                    "extra"
+                  ],
+                  [
+                    "field",
+                    [
+                      "decide",
+                      "seeds",
+                      {}
+                    ],
+                    "extraSeeds"
+                  ]
+                ],
+                [
+                  "+",
+                  [
+                    "state",
+                    "extra"
+                  ],
+                  1
+                ],
+                [
+                  "state",
+                  "extra"
+                ]
+              ]
+            ],
+            "status": [
+              "ite",
+              [
+                "var",
+                "changed"
+              ],
+              [
+                "lit",
+                "IDLE"
+              ],
+              [
+                "ite",
+                [
+                  "<",
+                  [
+                    "state",
+                    "extra"
+                  ],
+                  [
+                    "field",
+                    [
+                      "decide",
+                      "seeds",
+                      {}
+                    ],
+                    "extraSeeds"
+                  ]
+                ],
+                [
+                  "state",
+                  "status"
+                ],
+                [
+                  "lit",
+                  "IDLE"
+                ]
+              ]
+            ]
+          },
+          "calls": [
+            {
+              "args": {
+                "severity": [
+                  "lit",
+                  "warning"
+                ],
+                "verdict": [
+                  "lit",
+                  "rare"
+                ]
+              },
+              "command": "Report",
+              "component": "runs",
+              "when": [
+                "and",
+                [
+                  "var",
+                  "changed"
+                ],
+                [
+                  ">",
+                  [
+                    "state",
+                    "extra"
+                  ],
+                  0
+                ]
+              ]
+            },
+            {
+              "args": {
+                "extra": [
+                  "+",
+                  [
+                    "state",
+                    "extra"
+                  ],
+                  1
+                ]
+              },
+              "command": "RunTrials",
+              "component": "runs",
+              "when": [
+                "and",
+                [
+                  "not",
+                  [
+                    "var",
+                    "changed"
+                  ]
+                ],
+                [
+                  "<",
+                  [
+                    "state",
+                    "extra"
+                  ],
+                  [
+                    "field",
+                    [
+                      "decide",
+                      "seeds",
+                      {}
+                    ],
+                    "extraSeeds"
+                  ]
+                ]
+              ]
+            },
+            {
+              "args": {
+                "severity": [
+                  "ite",
+                  [
+                    "state",
+                    "booleanValue"
+                  ],
+                  [
+                    "lit",
+                    "warning"
+                  ],
+                  [
+                    "lit",
+                    "error"
+                  ]
+                ],
+                "verdict": [
+                  "ite",
+                  [
+                    "or",
+                    [
+                      "state",
+                      "enablementChanged"
+                    ],
+                    [
+                      "var",
+                      "enablementDiffers"
+                    ]
+                  ],
+                  [
+                    "lit",
+                    "precondition"
+                  ],
+                  [
+                    "lit",
+                    "unobserved"
+                  ]
+                ]
+              },
+              "command": "Report",
+              "component": "runs",
+              "when": [
+                "and",
+                [
+                  "not",
+                  [
+                    "var",
+                    "changed"
+                  ]
+                ],
+                [
+                  "not",
+                  [
+                    "<",
+                    [
+                      "state",
+                      "extra"
+                    ],
+                    [
+                      "field",
+                      [
+                        "decide",
+                        "seeds",
+                        {}
+                      ],
+                      "extraSeeds"
+                    ]
+                  ]
+                ]
+              ]
+            }
+          ],
+          "command": "Tried",
+          "guard": true
+        }
+      },
+      "init": {
+        "booleanValue": false,
+        "enablementChanged": false,
+        "extra": 0,
+        "status": [
+          "lit",
+          "IDLE"
+        ]
+      },
+      "properties": {
+        "extraWithinSeeds": {
+          "is": [
+            "always",
+            [
+              "and",
+              [
+                ">=",
+                [
+                  "state",
+                  "extra"
+                ],
+                0
+              ],
+              [
+                "<=",
+                [
+                  "state",
+                  "extra"
+                ],
+                [
+                  "field",
+                  [
+                    "decide",
+                    "seeds",
+                    {}
+                  ],
+                  "extraSeeds"
+                ]
+              ]
+            ]
+          ],
+          "kind": "invariant"
+        }
+      },
+      "relies": [
+        "runs"
+      ],
+      "state": {
+        "booleanValue": "bool",
+        "enablementChanged": "bool",
+        "extra": "int",
+        "status": {
+          "enum": [
+            "IDLE",
+            "TRYING"
+          ]
+        }
+      }
+    },
+    "runs": {
+      "external": {
+        "commands": {
+          "Report": {
+            "params": {
+              "severity": {
+                "enum": [
+                  "error",
+                  "warning"
+                ]
+              },
+              "verdict": {
+                "enum": [
+                  "precondition",
+                  "unobserved",
+                  "rare"
+                ]
+              }
+            }
+          },
+          "RunTrials": {
+            "params": {
+              "extra": "int"
+            }
+          }
+        },
+        "queries": {}
+      }
+    }
+  },
+  "entries": {
+    "commands": [
+      "mutation-verdict.Begin",
+      "mutation-verdict.Tried"
+    ],
+    "queries": []
+  },
+  "irVersion": 8,
+  "notes": {
+    "mutation-verdict": "Judges, value by value, whether a changed decision-table value shows in what the specification expects. It asks for runs and reports the values that do not show.",
+    "mutation-verdict.decisions.seeds": "seeds",
+    "mutation-verdict.does.begin": "A value of a decision table is judged next. A null value (a cell a row does not use) is skipped: nothing happens. Any other value is run under the verification seed first.",
+    "mutation-verdict.does.tried": "A run has finished: whether some expected outcome changed, and whether, in some step, the changed specification would have executed a different command (whether a command can be executed changed). If an outcome changed under the verification seed, the value shows and nothing is reported. If an outcome changed under an extra seed, the value is reported as rare. If nothing changed and extra seeds remain (the extra of the run that finished is below extraSeeds), the run with the next extra is asked for; the seeds tried are the verification seed, then extra 1 up to extraSeeds. If nothing changed under any seed, the value is reported as precondition if in any of the runs of this value, the one that has just finished included, whether a command can be executed changed, and as unobserved otherwise. A rare value is a warning, and so is any verdict on a boolean value (the mutation gate does not fail on booleans); every other verdict is an error. After a value is reported, or shows, the next value can be judged.",
+    "runs": "What the verdict asks for (a run of the changed specification) and reports."
+  },
+  "root": "mutation-verdict",
+  "sorts": [],
+  "trace": {
+    "mutation-verdict.does.begin": [
+      "MutationVerdict.commands.Begin"
+    ],
+    "mutation-verdict.does.tried": [
+      "MutationVerdict.commands.Tried"
+    ]
+  }
+}

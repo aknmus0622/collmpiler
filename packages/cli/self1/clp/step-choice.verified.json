@@ -1,0 +1,32 @@
+{
+  "roots": [
+    "step-choice.component.ts",
+    "step-choice.interpretation.ts"
+  ],
+  "specs": "sha256:5fdfc5dd110e719a32922102c957e8e91dc1e76a64c0edd5fed38885d3c709ce",
+  "code": "sha256:1f7b45d8c8dbf7fded56be042c388eed64e0a43a24d9aa07f0186816e1d8c20b",
+  "files": [
+    "../src/checker-verdict.ts",
+    "../src/fill-check.ts",
+    "../src/fit-check.ts",
+    "../src/gate-rules.ts",
+    "../src/input-candidates.ts",
+    "../src/interpret-flow.ts",
+    "../src/mutation-judge.ts",
+    "../src/mutation-verdict.ts",
+    "../src/observation-compare.ts",
+    "../src/outcome-apply.ts",
+    "../src/overlay-check.ts",
+    "../src/pipeline.ts",
+    "../src/promise-keeper.ts",
+    "../src/sentence-trace.ts",
+    "../src/step-choice.ts",
+    "../src/syntax-check.ts",
+    "../src/text-plan.ts",
+    "../src/type-check.ts",
+    "../src/usage-check.ts",
+    "step-choice.adapter.ts"
+  ],
+  "gradedBy": "stage0",
+  "stage0": "sha256:af58059f3a785592215e91bb684b01a252db0f91bd1db1a4644794ee770b2d21"
+}

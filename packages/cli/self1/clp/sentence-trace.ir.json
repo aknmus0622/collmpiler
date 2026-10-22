@@ -1,0 +1,266 @@
+{
+  "components": {
+    "sentence-trace": {
+      "calcs": {
+        "embedded": {
+          "is": [
+            "ite",
+            [
+              "not",
+              [
+                "var",
+                "isComponent"
+              ]
+            ],
+            [
+              "lit",
+              "unknown-name"
+            ],
+            [
+              "ite",
+              [
+                "not",
+                [
+                  "var",
+                  "used"
+                ]
+              ],
+              [
+                "lit",
+                "embedded-unused"
+              ],
+              [
+                "lit",
+                "none"
+              ]
+            ]
+          ],
+          "params": {
+            "isComponent": "bool",
+            "used": "bool"
+          },
+          "result": {
+            "enum": [
+              "none",
+              "unknown-name",
+              "embedded-unused"
+            ]
+          }
+        },
+        "key": {
+          "is": [
+            "ite",
+            [
+              "not",
+              [
+                "var",
+                "inDescription"
+              ]
+            ],
+            [
+              "lit",
+              "unknown-sentence"
+            ],
+            [
+              "lit",
+              "none"
+            ]
+          ],
+          "params": {
+            "inDescription": "bool"
+          },
+          "result": {
+            "enum": [
+              "none",
+              "unknown-sentence"
+            ]
+          }
+        },
+        "sentence": {
+          "is": [
+            "ite",
+            [
+              "and",
+              [
+                "var",
+                "added"
+              ],
+              [
+                "not",
+                [
+                  "var",
+                  "covered"
+                ]
+              ]
+            ],
+            [
+              "lit",
+              "sentence-unused"
+            ],
+            [
+              "lit",
+              "none"
+            ]
+          ],
+          "params": {
+            "added": "bool",
+            "covered": "bool"
+          },
+          "result": {
+            "enum": [
+              "none",
+              "sentence-unused"
+            ]
+          }
+        },
+        "target": {
+          "is": [
+            "ite",
+            [
+              "not",
+              [
+                "var",
+                "exists"
+              ]
+            ],
+            [
+              "lit",
+              "unknown-name"
+            ],
+            [
+              "lit",
+              "none"
+            ]
+          ],
+          "params": {
+            "exists": "bool"
+          },
+          "result": {
+            "enum": [
+              "none",
+              "unknown-name"
+            ]
+          }
+        }
+      },
+      "init": {},
+      "queries": {
+        "Embedded": {
+          "is": [
+            "calc",
+            "embedded",
+            {
+              "isComponent": [
+                "var",
+                "isComponent"
+              ],
+              "used": [
+                "var",
+                "used"
+              ]
+            }
+          ],
+          "params": {
+            "isComponent": "bool",
+            "used": "bool"
+          },
+          "result": {
+            "enum": [
+              "none",
+              "unknown-name",
+              "embedded-unused"
+            ]
+          }
+        },
+        "Key": {
+          "is": [
+            "calc",
+            "key",
+            {
+              "inDescription": [
+                "var",
+                "inDescription"
+              ]
+            }
+          ],
+          "params": {
+            "inDescription": "bool"
+          },
+          "result": {
+            "enum": [
+              "none",
+              "unknown-sentence"
+            ]
+          }
+        },
+        "Sentence": {
+          "is": [
+            "calc",
+            "sentence",
+            {
+              "added": [
+                "var",
+                "added"
+              ],
+              "covered": [
+                "var",
+                "covered"
+              ]
+            }
+          ],
+          "params": {
+            "added": "bool",
+            "covered": "bool"
+          },
+          "result": {
+            "enum": [
+              "none",
+              "sentence-unused"
+            ]
+          }
+        },
+        "Target": {
+          "is": [
+            "calc",
+            "target",
+            {
+              "exists": [
+                "var",
+                "exists"
+              ]
+            }
+          ],
+          "params": {
+            "exists": "bool"
+          },
+          "result": {
+            "enum": [
+              "none",
+              "unknown-name"
+            ]
+          }
+        }
+      },
+      "state": {}
+    }
+  },
+  "entries": {
+    "commands": [],
+    "queries": [
+      "sentence-trace.Embedded",
+      "sentence-trace.Key",
+      "sentence-trace.Sentence",
+      "sentence-trace.Target"
+    ]
+  },
+  "irVersion": 8,
+  "notes": {
+    "sentence-trace": "Decides whether every sentence Layer 1 wrote became something, and whether what the interpretation traces exists.",
+    "sentence-trace.calcs.embedded": "Something embedded in a description as ${X}: it must be a component (otherwise an unknown name), and some body of the component must use it (otherwise it is unused).",
+    "sentence-trace.calcs.key": "A key of the interpretation's trace: it must be part of a sentence of the description, or it is an unknown sentence.",
+    "sentence-trace.calcs.sentence": "A sentence of a component's description: whether a key of the interpretation's trace is part of it, and whether the interpretation added commands or queries Layer 1 did not name. It is unused when they were added and it is not covered.",
+    "sentence-trace.calcs.target": "A name a key of the trace points to: it must exist, or it is an unknown name."
+  },
+  "root": "sentence-trace",
+  "sorts": []
+}

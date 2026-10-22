@@ -1,0 +1,31 @@
+{
+  "roots": [
+    "mutation-verdict.component.ts",
+    "mutation-verdict.interpretation.ts"
+  ],
+  "specs": "sha256:3250f52e604b2fec9fb2b2687e3ad200045bf4cc912807d6d9c73ff44d66a6fc",
+  "code": "sha256:1a0712ce64432a71c557f2d48e69d2797080fe795529fd9656f773389cd5eb80",
+  "files": [
+    "../src/checker-verdict.ts",
+    "../src/fill-check.ts",
+    "../src/fit-check.ts",
+    "../src/gate-rules.ts",
+    "../src/input-candidates.ts",
+    "../src/interpret-flow.ts",
+    "../src/mutation-judge.ts",
+    "../src/mutation-verdict.ts",
+    "../src/observation-compare.ts",
+    "../src/outcome-apply.ts",
+    "../src/overlay-check.ts",
+    "../src/pipeline.ts",
+    "../src/promise-keeper.ts",
+    "../src/sentence-trace.ts",
+    "../src/step-choice.ts",
+    "../src/syntax-check.ts",
+    "../src/text-plan.ts",
+    "../src/type-check.ts",
+    "../src/usage-check.ts",
+    "mutation-verdict.adapter.ts"
+  ],
+  "gradedBy": "stage0"
+}
