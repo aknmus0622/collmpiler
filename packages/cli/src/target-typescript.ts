@@ -112,13 +112,13 @@ export const typescriptTarget: Target = {
   },
 
   // 生成した verify.ts を別プロセスで実行し、最後に出力される結果の行を読む
-  runTests({ ws, seed, runs, drafts, usage }) {
+  runTests({ ws, seed, runs, drafts, usage, stopAt }) {
     const coverage = usage ? mkdtempSync(join(realpathSync(tmpdir()), "clp-coverage-")) : undefined;
     try {
       const run = spawnSync(
         process.execPath,
         [ws.paths.verify, "--seed", String(seed), "--runs", String(runs), ...(drafts ? ["--drafts"] : [])],
-        { cwd: ws.root, encoding: "utf8", timeout: 120_000, env: coverage ? { ...process.env, NODE_V8_COVERAGE: coverage } : process.env },
+        { cwd: ws.root, encoding: "utf8", timeout: 120_000, env: { ...process.env, ...(coverage ? { NODE_V8_COVERAGE: coverage } : {}), ...(stopAt ? { CLP_STOP_AT: stopAt } : {}) } },
       );
       const line = run.stdout?.split("\n").find((text) => text.startsWith(RESULT_PREFIX));
       if (!line) return { crash: outputOf(run) };

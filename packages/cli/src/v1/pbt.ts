@@ -414,7 +414,8 @@ export class Simulation {
   }
 }
 
-export type TrialOptions = { adapter?: Adapter8; coverage?: Record<string, number> };
+/** stopAt: a trial that ends in an exception carrying this text (production code not written yet) ends there and passes. */
+export type TrialOptions = { adapter?: Adapter8; coverage?: Record<string, number>; stopAt?: string };
 
 /**
  * Runs one trial. With an adapter, compares the production system with the spec step by step and returns the first
@@ -491,6 +492,7 @@ export async function trial(ir: Ir8, raw: RawStep[], options: TrialOptions = {})
     }
   } catch (error) {
     if (error instanceof SpecError) throw error;
+    if (options.stopAt !== undefined && messageOf(error).includes(options.stopAt)) return undefined;
     return { steps: sim.steps, expected, actual: { error: messageOf(error) } };
   }
   return undefined;
@@ -502,7 +504,7 @@ export const DEFAULT_RUNS = 5000;
 export async function check8(
   ir: Ir8,
   adapter: Adapter8,
-  params: { seed: number; path?: string; numRuns?: number; traces?: { event: string; steps: TraceStep[] }[] },
+  params: { seed: number; path?: string; numRuns?: number; traces?: { event: string; steps: TraceStep[] }[]; stopAt?: string },
   deciders?: Deciders8,
 ): Promise<PbtResult8> {
   if (entriesOf(ir).length === 0) return { status: "error", message: "検証するコマンドも問い合わせもありません" };
@@ -511,7 +513,7 @@ export async function check8(
   // every decision of a trial is put to Stage 1 before the trial counts (R4); the answers are cached across trials
   const cache = new Map<string, unknown>();
   const checked = async (raw: RawStep[], counting = true) => {
-    const { result, asked } = await recordingAsync(() => trial(ir, raw, { adapter, ...(counting ? { coverage } : {}) }));
+    const { result, asked } = await recordingAsync(() => trial(ir, raw, { adapter, ...(counting ? { coverage } : {}), ...(params.stopAt ? { stopAt: params.stopAt } : {}) }));
     await agree(asked, deciders, cache);
     return result;
   };

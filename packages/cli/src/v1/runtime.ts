@@ -38,6 +38,7 @@ export async function runPbt(options: { specs: string; adapter: Adapter8; compon
       ...(values.path ? { path: values.path } : {}),
       numRuns: values.runs === undefined ? defaultRuns8(ir) : Number(values.runs),
       traces: tracesFor(ir),
+      ...(process.env.CLP_STOP_AT ? { stopAt: process.env.CLP_STOP_AT } : {}),
     }, await deciders8());
   }
   console.log(RESULT_PREFIX + JSON.stringify(result));

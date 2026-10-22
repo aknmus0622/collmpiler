@@ -235,8 +235,8 @@ function settledOthers(ctx: GateContext) {
 
 // PBT を実行する。どう実行するかは対象言語が決める
 // usage: true なら、実行した範囲も調べる（対象言語が調べられるとき）
-function runVerify(ctx: GateContext, unit: { ws: Workspace; seed: number; runs?: number } = ctx, usage = false): { result?: PbtResult; crash?: string; usage?: Usage } {
-  const run = ctx.target.runTests({ ws: unit.ws, seed: unit.seed, runs: unit.runs ?? ctx.runs, drafts: ctx.drafts, usage });
+function runVerify(ctx: GateContext, unit: { ws: Workspace; seed: number; runs?: number } = ctx, usage = false, stopAt?: string): { result?: PbtResult; crash?: string; usage?: Usage } {
+  const run = ctx.target.runTests({ ws: unit.ws, seed: unit.seed, runs: unit.runs ?? ctx.runs, drafts: ctx.drafts, usage, ...(stopAt ? { stopAt } : {}) });
   // 出力に含まれるリポジトリのパスを、差し戻しに載せない
   return run.result ? { result: run.result, ...(run.usage ? { usage: run.usage } : {}) } : { crash: scrub(ctx, run.crash ?? "") };
 }
@@ -420,7 +420,18 @@ async function judgeOutput(
     // （アダプターが振る舞いを肩代わりしているか、未実装の部分を呼んでいない）。
     // 未実装の部分が無いとき（仕様の変更が、すでにあるコードで満たされている）は、合格してよい
     const unimplemented = sourceFiles(ws).some((rel) => readFileSync(join(ws.root, rel), "utf8").includes(target.notImplemented));
-    const error = result.status === "pass" ? undefined : "error" in result.actual ? result.actual.error : undefined;
+    let error = result.status === "pass" ? undefined : "error" in result.actual ? result.actual.error : undefined;
+    // 反例は1つだけなので、未実装の部分に当たった反例の陰に、アダプターの誤りが隠れていることがある。
+    // 未実装の部分に当たった試行はそこで打ち切って、ほかの失敗が無いかを、もう一度探す
+    if (error?.includes(target.notImplemented) && isIr8(ctx.ir)) {
+      const again = runVerify(ctx, ctx, false, target.notImplemented);
+      if (again.result?.status === "error") throw new Error(`PBT を実行できませんでした: ${again.result.message}`);
+      if (!again.result) error = again.crash ?? "";
+      else if (again.result.status === "fail") {
+        const { steps, expected, actual } = again.result as unknown as { steps: { name: string }[]; expected: unknown; actual: unknown };
+        error = "error" in (actual as object) ? (actual as { error: string }).error : `after ${steps.map((step) => step.name).join(" → ")}, the system showed ${JSON.stringify(actual)} where ${JSON.stringify(expected)} was expected`;
+      }
+    }
     const facts = { passed: result.status === "pass", unimplemented, error: error === undefined ? ("none" as const) : error.includes(target.notImplemented) ? ("not-implemented" as const) : ("other" as const) };
     const verdict = await gateVerdict("Wiring", facts, wiringStage0(facts), (a, b) => (a !== "ok" ? a : b));
     if (verdict === "passes-unimplemented") {

@@ -62,7 +62,9 @@ export interface Target {
   // PBT を実行する。期待値の計算と本番システムの操作をどうつなぐかは、実装が決める
   // usage: true なら、実行した範囲も調べる（調べられない言語では、TestRun.usage は無い。
   // そのときゲートは、範囲を本番コードの全体として扱う）
-  runTests(input: { ws: Workspace; seed: number; runs: number; drafts: boolean; usage?: boolean }): TestRun;
+  // stopAt: 本番コードの未実装の印。これを含む例外で終わった試行は、そこで打ち切って合格とする（配線の段階で、
+  // 未実装の部分に当たる前の、アダプターの誤りを探すため）
+  runTests(input: { ws: Workspace; seed: number; runs: number; drafts: boolean; usage?: boolean; stopAt?: string }): TestRun;
   // 振る舞いを持たないファイル（型だけ、など）か。実行されないので、だれが使っているかを調べられない
   inert?(ws: Workspace, rel: string): boolean;
   // ミューテーションの壊し方。言語によっては無い
