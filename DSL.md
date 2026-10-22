@@ -1371,8 +1371,9 @@ const Queries = kind("queries", { entries: Query, nonEmpty: true });
 | 説明 | 注釈として IR の外（`notes`）に持つ。人とエージェントの資料にだけ使い、意味には使わない |
 | 意味 | **式だけ**。TypeScript の関数による逃げ道は認めない |
 | 書き方 | **プログラマ向けの TypeScript の部分集合**（PlusCal の考え方）。データの欄と、関数の本体。読み取りが式に変換する |
-| 中と外 | 言葉ではなく欄で決まる。`inside`（中に持つ。状態はこちら）、`outside`（頼る。状態は相手か外の世界） |
-| CQRS | `commands`（状態を変える）と `queries`（状態を変えない）を分ける。0.3 の「外の世界への問い合わせ」は `outside` に移す |
+| 中と外 | **部品は、使う所でそのまま呼ぶ**（`Fines.Owed({ member })`）。中か外かは言葉でも欄でもなく、**部品の木の位置**で決まる: 自分の子孫は自分のもの（状態は自分）、それ以外は外のもの（状態は相手。検証では相手の仕様が代役）。どこにも置かれていない部品を呼べば、呼んだ部品の子になる。仕様の無い外の世界は `external(…)` の部品 |
+| CQRS | `commands`（状態を変える）と `queries`（状態を変えない）を分ける。0.3 の「外の世界への問い合わせ」は、`external(…)` の部品を呼ぶ形になる |
+| 性質 | **不変条件も時相の性質も `properties` 1つ**。`always(状態の述語)` の形は、読み取りが不変条件として見分け、イベントごとの証明責務を作る |
 | 場合 | **上から順に、最初に成り立ったもの**。0.3 の「同時に1つだけ、優先順位なし」をやめる。IR では、前の場合を打ち消した独立のガードにそろえる |
 | 決定表 | 場合分けと同じ「選ぶ部品」（結果が定数）。関数のように呼ぶ（`Policy({ member }).maxBooks`） |
 | データ | **関係と集合が基本**（`Map` / `Set`）。並び（`List`）は順番が意味を持つときだけ |
@@ -1406,11 +1407,12 @@ IR（文の無い、言語に寄らない核）
 | --- | --- | --- |
 | 値（原子、値オブジェクト） | 値の形 | `id("会員番号")`、`Map(BookId, MemberId)`、`Set(BookId)`、`Integer.min(0)` |
 | 条件 | `(入力, 文脈) => boolean` | `condition("未払いがある", ({ member }, { fines }) => fines.Owed({ member }) > 0)`、本体の中の `is.unpaid("…", 式)` |
-| 計算 | `(入力, 文脈) => 値` | `calc("返す期限", (_, { today }) => today + 14)` |
+| 計算 | `(入力, 文脈) => 値` | `calc("返す期限", () => Clock.Today() + 14)` |
 | 選ぶ（場合分け、決定表） | 上から順の「条件 → 結果」の並び | 本体の `if … return …`、`decisions("…", [[条件, {…}], [otherwise, {…}]])` |
 | コマンド | `(入力, 文脈) => 答え`。書き込みが次の状態 | `command({ … }, (input, ctx) => { … })` |
 | 問い合わせ | `(入力, 文脈) => 値`。書き込みは誤り | `query({ … }, (input, ctx) => 式)` |
-| 性質 | 時相の式 | `property("…", ({ data }) => always(…))` |
+| 性質 | 時相の式（`always(状態の述語)` は不変条件） | `property("…", ({ data }) => always(…))` |
+| 外の世界 | 約束だけ（中身なし） | `external("今日の日付", { Today: Integer.increasing() })` |
 | サービス | 状態・コマンド・問い合わせを持つ | `service({ … })` |
 
 どの部品も、次の3通りで書ける。読み取ったあとの木は同じ:
@@ -1419,28 +1421,51 @@ IR（文の無い、言語に寄らない核）
 2. **その場で書く**: `is.unpaid("未払いがある", fines.Owed({ member }) > 0)`。
 3. **よそで定義した部品を置く（呼ぶ）**: `if (Unpaid({ member })) …`。
 
-切り出しは、その場の部品を export した定数にして、呼ぶ形に置き換えるだけ（木は変わらない）。よそで定義した状態を持つ部品は、
-`inside` に置けば中に1つ持ち、`outside` に置けば相手が動かしているものに頼る（検証では、相手の仕様そのものが代役になる）。
-状態を持つ部品を、1つの部品の中で2か所に置いたときは1つを共有し、別名を付けたときだけ別のものにする。
+切り出しは、その場の部品を export した定数にして、呼ぶ形に置き換えるだけ（木は変わらない）。
+
+**中と外は、部品の木の位置で決まる。** 自分の子孫は自分のもの、それ以外は外のもの。
+
+- 部品は、使う所でそのまま呼ぶ（`Members.IsMember({ member })`、`Fines.Owed({ member })`、`Clock.Today()`）。
+- 呼んだ部品が、木のどこにも置かれていなければ、呼んだ部品の子になる（中に持つ。状態は自分。検証では、相手の仕様も一緒に
+  動かして期待値を作る）。
+- 別々に動くもの（デプロイの単位）があるときは、それを並べた部品を1つ書く。これも、ただの部品。そこで兄弟になった部品は、
+  互いに外のもの（状態は相手。検証では、相手の仕様が代役）。同じ部品が、あるシステムでは中、別のシステムでは独立したサービス、
+  ということを、仕様を変えずに木の置き方だけで書ける。
+- 仕様の無い外の世界は、中身が無く約束だけを持つ部品 `external(文, { 口: 型 })`（代役は、約束を守る乱数）。
+- 1つの部品の中で、同じ部品を何か所から呼んでも1つを共有する。2つ持ちたいまれな場合だけ、別名を付ける（`Fines.as("deposit")`）。
+
+```ts
+export const Clock = external("今日の日付（1970-01-01 からの日数）", { Today: Integer.increasing() });
+
+// 別々に動くものを並べた部品（無ければ、呼んだ部品はすべて呼んだ側の子）
+export const Town = service({
+  description: "町の図書館と、町の会員管理。",
+  library: Library,      // Library と Members は兄弟。Library から見て Members は外
+  members: Members,      // Fines はどこにも置かれていないので、呼んでいる Library の子
+});
+```
+
+`service` の決まった欄（`description`、`data`、`commands`、`queries`、`properties`、`examples`）以外のキーは、名前を付けた子の
+部品。キーの値が部品でなければ誤り（書き間違いを捕まえる）。
 
 ### 17.4. Layer 1 の書き方
 
 | 欄 | 書けるもの | 意味 |
 | --- | --- | --- |
 | `description` | 文 | 部品全体の文 |
-| `inside` | 部品、文 | 中に持つ部品 |
-| `outside` | 部品、型、文 | 頼る相手（部品なら、その仕様が代役）。仕様の無い外の世界は型（約束つき） |
 | `data` | 型、文 | 覚えるもの |
 | `commands` | `command(入力, 本体)`、文 | 状態を変える口 |
 | `queries` | `query(入力, 本体)`、文 | 状態を変えない口 |
-| `invariants` | `invariant(文, 本体?)` | いつも成り立つこと |
-| `properties` | `property(文, 本体?)` | 時相の性質 |
+| `properties` | `property(文, 本体?)` | いつも成り立つこと（不変条件）と、時相の性質 |
 | `examples` | `example(文, 手順)` | 書き手の期待。値だけで書く |
+| ほかのキー | 部品 | 名前を付けた子の部品（別々に動くものを並べるとき） |
+
+使う部品は欄に並べず、本体の中でそのまま呼ぶ（§17.3）。
 
 一番粗い形は `service({ description: "…" })`。詰めたい所だけ広げる。
 
 ```ts
-import { command, decisions, does, example, id, invariant, is, Map, otherwise, property, service } from "@clp/core";
+import { command, decisions, does, example, external, id, Integer, is, Map, otherwise, property, service } from "@clp/core";
 
 export const MemberId = id("会員番号");
 export const BookId = id("本の番号");
@@ -1452,16 +1477,15 @@ export const Policy = decisions("貸出の方針", [
 
 export const Fines = service({ description: "延滞料。期限を過ぎて返した日数 × 10 円を、会員ごとに足していく。払えば 0 になる。" });
 export const Members = service({ description: "会員を登録し、会員か、延長会員かを答える。" });
+export const Clock = external("今日の日付（1970-01-01 からの日数）", { Today: Integer.increasing() });
 
 export const Library = service({
   description: "図書館。本を貸し、返してもらい、延滞料を取る。",
-  inside:  { fines: Fines },
-  outside: { members: Members, today: "今日の日付（1970-01-01 からの日数）" },
   data: { lentTo: Map(BookId, MemberId), dueOf: "貸している本ごとの、返す期限" },
   commands: {
-    Borrow: command({ member: MemberId, book: BookId }, ({ member, book }, { data, members, fines }) => {
-      if (is.notMember("会員でない", !members.IsMember({ member }))) return "not-member";
-      if (is.unpaid("未払いの延滞料がある", fines.Owed({ member }) > 0)) return "unpaid";
+    Borrow: command({ member: MemberId, book: BookId }, ({ member, book }, { data }) => {
+      if (is.notMember("会員でない", !Members.IsMember({ member }))) return "not-member";
+      if (is.unpaid("未払いの延滞料がある", Fines.Owed({ member }) > 0)) return "unpaid";
       if (is.onLoan("その本は貸出中")) return "on-loan";
       if (is.atLimit("上限まで借りている", data.lentTo.count((_, m) => m === member) >= Policy({ member }).maxBooks)) return "limit";
       data.lentTo.set(book, member);
@@ -1471,16 +1495,21 @@ export const Library = service({
     Return: "本を返してもらう。期限を過ぎていれば、過ぎた日数を延滞料に付ける。",
   },
   queries: { LoansOf: "その会員が借りている本" },
-  invariants: [invariant("貸出中の本には、必ず期限がある")],
-  properties: [property("返された本は、次の時点で貸出中でない")],
+  properties: [
+    property("貸出中の本には、必ず期限がある"),            // 解釈が always(状態の述語) にすれば、不変条件として扱う
+    property("返された本は、次の時点で貸出中でない"),
+  ],
   examples: [
     example("未払いのある会員は借りられない", (run) => {
-      run.members.Register({ member: "M001" });
-      run.fines.Charge({ member: "M001", days: 3 });
-      run.expect.Borrow({ member: "M001", book: "B1" }).toBe("unpaid");
+      run(Members.Register({ member: "M001" }));
+      run(Fines.Charge({ member: "M001", days: 3 }));
+      run.expect(Library.Borrow({ member: "M001", book: "B1" })).toBe("unpaid");
     }),
   ],
 });
+
+// Library は、呼んでいる Fines と Members を中に持つ（どこにも置かれていないため）。Clock は外の世界。
+// 会員管理を別に動かすなら、§17.3 の Town のように兄弟に並べる（Library の仕様は変わらない）
 ```
 
 ### 17.5. 本体に書ける範囲
@@ -1492,7 +1521,7 @@ export const Library = service({
   - 比べる、四則、`&&` / `||` / `!`、`??`
   - `Map` / `Set` / `List` の読み取り（`has`、`get`、`keys`、`values`、`size`、`count`、`some`、`every`、`filter`、`map`、`sum`）
   - 書き込み（`data.x.set` / `delete` / `add`、`data.x = …`）
-  - 部品と外の世界のコマンド・問い合わせの呼び出し、`is.名前(文, 式?)`、`does(文)`
+  - 部品（import したもの、同じファイルのもの、`external`）のコマンド・問い合わせの呼び出し、`is.名前(文, 式?)`、`does(文)`
   - 時相（性質の中だけ）: `always`、`eventually`、`after`、`until`、`once`、`historically`、`always.on.コマンド(…)`
 - 書けない:
   - ループ（`for` / `while`。代わりに `some` / `every` / `count`）、再帰
@@ -1505,20 +1534,21 @@ export const Library = service({
 Layer 1 と同じ書き方で、Layer 1 が文のまま残した所だけを埋める（Layer 1 が書いた構造は書き換えられない）。埋める先は、
 欄の名前（`commands.Return`、`data.dueOf`）か、名前（`conditions.onLoan`）か、文そのもの（`does: { "返す期限を覚える": … }`）で指す。
 同じ部品の中で同じ文を2回書くことは誤り（指す先が曖昧になる）。同じファイルに定義した部品の解釈は、同じ解釈ファイルに並べる。
+文だけの部品が別の部品を使うとき（Library の文が「延滞料を取る」としか言わないとき）は、解釈が仕様のディレクトリにある部品を
+見つけて呼ぶ。どの部品を使うことになったか（「Library は Fines を中に持つ」）は、確認のときに人に見せる。
 
 ```ts
 export const LibraryInterpretation = interpretation(Library, {
-  outside: { today: Integer.increasing() },
   data: { dueOf: Map(BookId, Integer) },
   conditions: { onLoan: ({ book }, { data }) => data.lentTo.has(book) },
   does: {
-    "返す期限を覚える": ({ member, book }, { data, today }) => { data.dueOf.set(book, today + Policy({ member }).loanDays); },
+    "返す期限を覚える": ({ member, book }, { data }) => { data.dueOf.set(book, Clock.Today() + Policy({ member }).loanDays); },
   },
   commands: {
-    Return: command({ book: BookId }, ({ book }, { data, fines, today }) => {
+    Return: command({ book: BookId }, ({ book }, { data }) => {
       if (is.notLent("その本は貸していない", !data.lentTo.has(book))) return "not-lent";
-      if (is.late("期限を過ぎている", today > data.dueOf.get(book))) {
-        fines.Charge({ member: data.lentTo.get(book), days: today - data.dueOf.get(book) });
+      if (is.late("期限を過ぎている", Clock.Today() > data.dueOf.get(book))) {
+        Fines.Charge({ member: data.lentTo.get(book), days: Clock.Today() - data.dueOf.get(book) });
       }
       data.lentTo.delete(book);
       data.dueOf.delete(book);
@@ -1526,8 +1556,10 @@ export const LibraryInterpretation = interpretation(Library, {
     }),
   },
   queries: { LoansOf: query({ member: MemberId }, ({ member }, { data }) => data.lentTo.keys().filter((b) => data.lentTo.get(b) === member)) },
-  invariants: { "貸出中の本には、必ず期限がある": ({ data }) => data.lentTo.keys().every((b) => data.dueOf.has(b)) },
-  properties: { "返された本は、次の時点で貸出中でない": ({ data }) => always.on.Return(({ book }) => after(() => !data.lentTo.has(book))) },
+  properties: {
+    "貸出中の本には、必ず期限がある": ({ data }) => always(() => data.lentTo.keys().every((b) => data.dueOf.has(b))),
+    "返された本は、次の時点で貸出中でない": ({ data }) => always.on.Return(({ book }) => after(() => !data.lentTo.has(book))),
+  },
 });
 
 export const FinesInterpretation = interpretation(Fines, {
@@ -1555,20 +1587,21 @@ export const FinesInterpretation = interpretation(Fines, {
 ```
 data.dueOf   「貸している本ごとの、返す期限」   → 本 → 整数（本ごとに高々1つ）
 Borrow onLoan「その本は貸出中」                 → lentTo のキーに、入力の book がある
-Borrow       「返す期限を覚える」               → dueOf の book を、today + 貸出の方針(member).loanDays にする
-Return late  「期限を過ぎている」               → today が dueOf の book より大きい
-             （その場合）                       → fines の Charge を、member = lentTo の book、days = today − dueOf の book で呼ぶ
+Borrow       「返す期限を覚える」               → dueOf の book を、Clock の Today + 貸出の方針(member).loanDays にする
+Return late  「期限を過ぎている」               → Clock の Today が dueOf の book より大きい
+             （その場合）                       → Fines の Charge を、member = lentTo の book、days = Today − dueOf の book で呼ぶ
 LoansOf      「その会員が借りている本」         → lentTo のうち、値が入力の member であるキーの集合
-invariant    「貸出中の本には、必ず期限がある」 → lentTo のキーは、すべて dueOf のキー
+property     「貸出中の本には、必ず期限がある」 → いつでも、lentTo のキーは、すべて dueOf のキー（不変条件）
 property     「返された本は、次の時点で貸出中でない」→ いつでも、Return(book) が起きたら、次の時点で book は lentTo のキーにない
-文の追跡     description[1]「本を貸し」→ Borrow  [2]「返してもらい」→ Return  [3]「延滞料を取る」→ inside.fines, Return.late
+使う部品     Library は Fines と Members を中に持つ（どこにも置かれていないため）。Clock は外の世界
+文の追跡     description[1]「本を貸し」→ Borrow  [2]「返してもらい」→ Return  [3]「延滞料を取る」→ Fines, Return.late
 具体例       「未払いのある会員は借りられない」: 合う
 ```
 
 ### 17.8. 検査（文字列が無くなることを、機械的に確かめる）
 
 1. **読み取りの検査**: 文字列のリテラルを、置かれた場所で分ける。値の欄（型が文字列か列挙）は定数、注釈の欄（`is.名前` の
-   第1引数、`condition` / `does` / `invariant` / `property` の文）は `notes` へ、それ以外は誤り。どこが値の欄かは型が決める。
+   第1引数、`condition` / `does` / `property` / `external` の文）は `notes` へ、それ以外は誤り。どこが値の欄かは型が決める。
 2. **葉の検査**: 重ねた木の葉まで、中身が文のままの部品が無いことを確かめる（0.3 の N8f の規則を「文は葉ではない」に変える）。
    `error[prose-left] commands.Borrow.choose[2].condition: 「その本は貸出中」の中身（式）がありません`。
 3. **IR の形の検査**: IR の意味の部分に自然言語の欄が無く、残る文字列がすべて「型が文字列の定数」か名前であること。
@@ -1580,7 +1613,9 @@ property     「返された本は、次の時点で貸出中でない」→ い
 
 ### 17.9. IR（版 8）
 
-文は無い。説明は `notes`、文の追跡は `trace`（どちらも意味の部分の外。検査は意味の部分だけにかける）。式は s 式
+文は無い。説明は `notes`、文の追跡は `trace`（どちらも意味の部分の外。検査は意味の部分だけにかける）。中と外は、読み取りが
+木の位置から決めて、`contains`（子孫）と `relies`（外のもの）に書き出す。性質は、読み取りが `kind`（`invariant` / `temporal`）
+を付ける。式は s 式
 （`["演算", 引数…]`）。場合は、前の場合を打ち消した独立のガードを持つイベントにそろえる（元の順番は `trace`）。
 
 ```json
@@ -1589,8 +1624,8 @@ property     「返された本は、次の時点で貸出中でない」→ い
   "sorts": { "MemberId": ["atom"], "BookId": ["atom"] },
   "components": {
     "library": {
-      "inside":  { "fines": "fines" },
-      "outside": { "members": "members", "today": ["int", { "promise": "increasing" }] },
+      "contains": { "fines": "fines", "members": "members" },
+      "relies":   { "clock": "clock" },
       "state": { "lentTo": ["pfun", "BookId", "MemberId"], "dueOf": ["pfun", "BookId", "int"] },
       "init": ["and", ["=", "lentTo", ["empty"]], ["=", "dueOf", ["empty"]]],
       "decisions": {
@@ -1612,27 +1647,28 @@ property     「返された本は、次の時点で貸出中でない」→ い
           "guard": ["and", ["not", ["cond", "notMember"]], ["not", ["cond", "unpaid"]], ["not", ["cond", "onLoan"]], ["not", ["cond", "atLimit"]]],
           "assign": {
             "lentTo": ["override", "lentTo", ["maplet", "book", "member"]],
-            "dueOf":  ["override", "dueOf", ["maplet", "book", ["+", "today", ["field", ["decide", "policy", { "member": "member" }], "loanDays"]]]]
+            "dueOf":  ["override", "dueOf", ["maplet", "book", ["+", ["ask", "clock", "Today", {}], ["field", ["decide", "policy", { "member": "member" }], "loanDays"]]]]
           },
           "output": "lent"
         },
         "Return.late": {
           "params": { "book": "BookId" },
-          "guard": ["and", ["in", "book", ["dom", "lentTo"]], [">", "today", ["apply", "dueOf", "book"]]],
+          "guard": ["and", ["in", "book", ["dom", "lentTo"]], [">", ["ask", "clock", "Today", {}], ["apply", "dueOf", "book"]]],
           "assign": { "lentTo": ["dsub", ["set", "book"], "lentTo"], "dueOf": ["dsub", ["set", "book"], "dueOf"] },
-          "sync": [["call", "fines", "Charge", { "member": ["apply", "lentTo", "book"], "days": ["-", "today", ["apply", "dueOf", "book"]] }]],
+          "sync": [["call", "fines", "Charge", { "member": ["apply", "lentTo", "book"], "days": ["-", ["ask", "clock", "Today", {}], ["apply", "dueOf", "book"]] }]],
           "output": "returned"
         }
       },
       "queries": {
         "LoansOf": { "params": { "member": "MemberId" }, "result": ["setof", "BookId"], "is": ["image", ["inverse", "lentTo"], ["set", "member"]] }
       },
-      "invariants": { "dueForEveryLoan": ["subset", ["dom", "lentTo"], ["dom", "dueOf"]] },
       "properties": {
-        "returnedNotLent": ["always", ["forall", [["book", "BookId"]],
-          ["implies", ["occurs", "Return.*", { "book": "book" }], ["after", ["not", ["in", "book", ["dom", "lentTo"]]]]]]]
+        "dueForEveryLoan": { "kind": "invariant", "is": ["always", ["subset", ["dom", "lentTo"], ["dom", "dueOf"]]] },
+        "returnedNotLent": { "kind": "temporal", "is": ["always", ["forall", [["book", "BookId"]],
+          ["implies", ["occurs", "Return.*", { "book": "book" }], ["after", ["not", ["in", "book", ["dom", "lentTo"]]]]]]] }
       }
-    }
+    },
+    "clock": { "external": { "Today": ["int", { "promise": "increasing" }] } }
   },
   "examples": {
     "unpaidMemberRefused": { "steps": [
@@ -1641,7 +1677,7 @@ property     「返された本は、次の時点で貸出中でない」→ い
       { "event": "library.Borrow", "params": { "member": "M0", "book": "B0" }, "output": "unpaid" } ] }
   },
   "notes": { "library.conditions.notMember": "会員でない", "library": "図書館。本を貸し、返してもらい、延滞料を取る。" },
-  "trace": { "library.description[3]": ["library.inside.fines", "library.events.Return.late"] }
+  "trace": { "library.description[3]": ["library.contains.fines", "library.events.Return.late"] }
 }
 ```
 
@@ -1681,7 +1717,8 @@ IR の外に置く、1つの表。名前・型・意味と、TypeScript の書�
 | イベント | 決まった形の述語と、何もしないステップ（stutter）、書かなかった状態は変わらないこと（枠の条件）を機械的に足す |
 | 不変条件、時相の性質（未来と過去） | そのまま（`always`、`once` …） |
 | 部品の同期（`sync`） | 同じステップの中で、相手の状態の次の値を決める |
-| 外の世界の約束 | `increasing` は `always (x' >= x)`、`fresh` は「以前に答えた値ではない」 |
+| 外の世界（`external`）の約束 | `increasing` は `always (x' >= x)`、`fresh` は「以前に答えた値ではない」 |
+| 性質の `kind` | `invariant` はイベントごとの保存の検査（証明責務）も作る。`temporal` は `check` だけ |
 | 範囲を区切らない検査 | 1.0 では扱わない（Electrod と NuSMV / nuXmv。整数の扱いを確かめてから） |
 
 ### 17.12. 検査器の入れ替え口と、共通のトレース
@@ -1728,7 +1765,7 @@ sig MemberId, BookId {}
 
 one sig Fines   { var owed: MemberId -> lone Int }
 one sig Library { var lentTo: BookId -> lone MemberId, var dueOf: BookId -> lone Int }
-one sig Env     { var today: Int }
+one sig Clock   { var today: Int }                                 -- 外の世界（約束: 減らない）
 
 pred notMember[m: MemberId] { not Members_IsMember[m] }
 pred unpaid[m: MemberId]    { Fines_Owed[m] > 0 }
@@ -1738,13 +1775,13 @@ pred atLimit[m: MemberId]   { #Library.lentTo.m >= policy_maxBooks[m] }
 pred Borrow_lent[m: MemberId, b: BookId] {
   not notMember[m] and not unpaid[m] and not onLoan[b] and not atLimit[m]
   Library.lentTo' = Library.lentTo ++ b -> m
-  Library.dueOf'  = Library.dueOf  ++ b -> plus[Env.today, policy_loanDays[m]]
+  Library.dueOf'  = Library.dueOf  ++ b -> plus[Clock.today, policy_loanDays[m]]
   Fines.owed' = Fines.owed
 }
 
 fact traces {
   no Library.lentTo and no Library.dueOf and no Fines.owed
-  always (Env.today' >= Env.today)
+  always (Clock.today' >= Clock.today)
   always (stutter or (some m: MemberId, b: BookId | Borrow_lent[m, b] or Borrow_unpaid[m, b] or …) or …)
 }
 
@@ -1759,8 +1796,11 @@ run reachAtLimit { eventually some m: MemberId | atLimit[m] } for 3 but 5 Int, 1
 - 意味は TypeScript の関数ではなく式。正解は IR の式を評価して作るので、正解は TypeScript に縛られない。
 - 実装するエージェントは正解（式）を見る（0.3 では見せなかった）。読み違いは、解釈の段階（2 つの解釈、読み下し、具体例）で見つける。
 - 場合は上から順（0.3 では同時に1つだけ）。
-- `uses`、`parts`、まとまりの宣言（`commands({…})` など）、取っ手の変数は無くなる。名前は欄のキーと `is.名前`。
-- `queries` の意味が変わる（0.3: 外の世界への問い合わせ → 1.0: 自分の Query 側）。外の世界は `outside`。
+- `uses`、`parts`、まとまりの宣言（`commands({…})` など）、取っ手の変数は無くなる。名前は欄のキーと `is.名前`。部品は使う所で
+  そのまま呼び、中か外かは木の位置で決まる（0.3 の `parts` の宣言と `durable: Store` の「名前で渡す」も、これに置き換える）。
+- `invariants` は無くなり、`properties` の `always(状態の述語)` になる。
+- `queries` の意味が変わる（0.3: 外の世界への問い合わせ → 1.0: 自分の Query 側）。外の世界は `external(…)` の部品。
+- `service` の決まった欄以外のキーは、子の部品（0.3 の「種類は、席か項目のどちらか」の例外）。
 - 決定表は `Decision.x.of(state)` ではなく、関数のように呼ぶ。
 - 形式言語の検査器のために Java が要る（`DISTRIBUTION.md` 決定 3'）。
 
@@ -1771,4 +1811,5 @@ run reachAtLimit { eventually some m: MemberId | atLimit[m] } for 3 but 5 Int, 1
 - 具体例の書き方の細部（手順の形でよいか。前提の状態を値で書く短い形が要るか）。
 - TypeScript の型で名前を確かめる重さ（入れ子の深い仕様での型検査の速さ）。試作で測る。
 - 0.3 の書き方からの移し方（例と self の 19 部品。自動で移せる所と、解釈を導き直す所）。
+- 文だけの部品が使う部品を、書き手が文の中で指す書き方（`"未払いがある（${Fines}）"` のような形が要るか）。
 - `clp run`（1回の実行と stdio の応答）と、解釈が子への分け方を提案すること（§17 の外。`ROADMAP.md` §4）。
