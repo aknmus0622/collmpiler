@@ -13,8 +13,9 @@ import type { AnyIr as Ir } from "./generate.ts";
 import { isIr8 } from "./generate.ts";
 import { specView } from "./v1/generate.ts";
 import { decisionValues8 } from "./v1/values.ts";
-import { decisionValues, judge, judgeEvents } from "./mutation.ts";
+import { decisionValues, judge, judgeEvents, judgeStage0 } from "./mutation.ts";
 import { gateVerdict, judgeDecided } from "./stage1.ts";
+import { gateVerdict8, judgeDecided8 } from "./v1/stage1.ts";
 import { changedFileStage0, mutationSiteStage0, partFileStage0, removedInputStage0, sandboxFileStage0, testsStage0, wiringStage0 } from "./rules.ts";
 import type { SandboxFileVerdict } from "./rules.ts";
 // 作業場所のファイルの判定のうち、厳しいほう: 違反は、取り出す・残すより厳しい
@@ -228,6 +229,11 @@ const scrub = (ctx: GateContext, text: string) =>
 // ほかのコンポーネントのうち、いまの仕様で配線まで済んでいるもの。
 // 出力先の IR がいまの仕様と同じで、アダプターがあるもの。仕様が変わってまだ一致させていないものは、
 // そのコンポーネントの番で直すので、ここでは見ない
+// 出口の門の判定 (gate-rules): 1.0 の仕様は、1.0 で書いたフレームワーク自身の部品 (self1) にも尋ねる
+function gateVerdictFor<R>(ctx: GateContext, name: string, facts: object, stage0: R, strict: (a: R, b: R) => R): Promise<R> {
+  return isIr8(ctx.ir) ? gateVerdict8(name, facts, stage0, strict) : gateVerdict(name, facts, stage0, strict);
+}
+
 function settledOthers(ctx: GateContext) {
   const read = (ws: Workspace, rel: string) => (existsSync(join(ws.root, rel)) ? readFileSync(join(ws.root, rel), "utf8") : undefined);
   return ctx.others.filter((other) => read(other.ws, other.ws.paths.ir) === stableStringify(other.ir) && read(other.ws, other.ws.paths.adapter) !== undefined);
@@ -308,7 +314,7 @@ export async function exitGate(ctx: GateContext, sandbox: Sandbox): Promise<Gate
       input: rel in sandbox.inputs,
       inputIntact: rel in sandbox.inputs && entry.isFile() && content() === sandbox.inputs[rel],
     };
-    const verdict = await gateVerdict("SandboxFile", facts, sandboxFileStage0(facts), strictSandbox);
+    const verdict = await gateVerdictFor(ctx, "SandboxFile", facts, sandboxFileStage0(facts), strictSandbox);
     if (verdict === "take") outputs.push(rel);
     else if (verdict === "toolchain-modified") violations.push({ file: rel, rule: "read-only-file-modified", message: "This file is a tool's file (type definitions); it may not be edited." });
     else if (verdict === "not-regular") violations.push({ file: rel, rule: "unexpected-file", message: "Only regular files are allowed (no symlinks)." });
@@ -317,7 +323,7 @@ export async function exitGate(ctx: GateContext, sandbox: Sandbox): Promise<Gate
   }
   for (const rel of Object.keys(sandbox.inputs)) {
     if (rel === REQUEST || found.has(rel)) continue;
-    if ((await gateVerdict("Removed", where(rel), removedInputStage0(where(rel)), (a, b) => (a === "removed" ? a : b))) === "removed") {
+    if ((await gateVerdictFor(ctx, "Removed", where(rel), removedInputStage0(where(rel)), (a, b) => (a === "removed" ? a : b))) === "removed") {
       violations.push({ file: rel, rule: "read-only-file-modified", message: "This step may not remove this file." });
     }
   }
@@ -334,7 +340,7 @@ export async function exitGate(ctx: GateContext, sandbox: Sandbox): Promise<Gate
     for (const rel of ctx.partFiles ?? []) {
       const now = existsSync(join(ws.root, rel)) ? readFileSync(join(ws.root, rel), "utf8") : undefined;
       const facts = { changed: now !== ctx.before[rel], existedBefore: ctx.before[rel] !== undefined };
-      if ((await gateVerdict("PartFile", facts, partFileStage0(facts), (a, b) => (a === "restore" ? a : b))) !== "restore") continue;
+      if ((await gateVerdictFor(ctx, "PartFile", facts, partFileStage0(facts), (a, b) => (a === "restore" ? a : b))) !== "restore") continue;
       mkdirSync(dirname(join(ws.root, rel)), { recursive: true });
       writeFileSync(join(ws.root, rel), ctx.before[rel]);
       violations.push({
@@ -433,7 +439,7 @@ async function judgeOutput(
       }
     }
     const facts = { passed: result.status === "pass", unimplemented, error: error === undefined ? ("none" as const) : error.includes(target.notImplemented) ? ("not-implemented" as const) : ("other" as const) };
-    const verdict = await gateVerdict("Wiring", facts, wiringStage0(facts), (a, b) => (a !== "ok" ? a : b));
+    const verdict = await gateVerdictFor(ctx, "Wiring", facts, wiringStage0(facts), (a, b) => (a !== "ok" ? a : b));
     if (verdict === "passes-unimplemented") {
       return {
         feedback: {
@@ -456,7 +462,7 @@ async function judgeOutput(
 
   // 緑: 合格しなければならない
   const green = { passed: result.status === "pass", purpose: "implementation" as const };
-  if ((await gateVerdict("Tests", green, testsStage0(green), (a, b) => (a !== "ok" ? a : b))) !== "ok") return { ...ran, feedback: { kind: "pbt", result } };
+  if ((await gateVerdictFor(ctx, "Tests", green, testsStage0(green), (a, b) => (a !== "ok" ? a : b))) !== "ok") return { ...ran, feedback: { kind: "pbt", result } };
 
   // 回帰: 同じ本番コードを使う、ほかのコンポーネントの検証が通り続けていること
   const usedByOthers: Usage[] = [];
@@ -467,7 +473,7 @@ async function judgeOutput(
     const { usage: used, ...regression } = runVerify(ctx, other, true);
     if (regression.result?.status === "error") throw new Error(`PBT を実行できませんでした (${other.name}): ${regression.result.message}`);
     const passed = { passed: regression.result?.status === "pass", purpose: "regression" as const };
-    if ((await gateVerdict("Tests", passed, testsStage0(passed), (a, b) => (a !== "ok" ? a : b))) !== "ok") {
+    if ((await gateVerdictFor(ctx, "Tests", passed, testsStage0(passed), (a, b) => (a !== "ok" ? a : b))) !== "ok") {
       return { ...ran, feedback: { kind: "regression", component: other.name, ...regression } };
     }
     if (used) usedByOthers.push(used);
@@ -483,7 +489,7 @@ async function judgeOutput(
     const foreign: string[] = [];
     for (const rel of Object.keys(ctx.before)) {
       const facts = { changed: read(rel) !== ctx.before[rel], usedByThis: usage.uses(rel), inert: target.inert?.(ws, rel) ?? false, usedByOthers: usedByOthers.some((other) => other.uses(rel)) };
-      if ((await gateVerdict("ChangedFile", facts, changedFileStage0(facts), (a, b) => (a === "out-of-scope" ? a : b))) === "out-of-scope") foreign.push(rel);
+      if ((await gateVerdictFor(ctx, "ChangedFile", facts, changedFileStage0(facts), (a, b) => (a === "out-of-scope" ? a : b))) === "out-of-scope") foreign.push(rel);
     }
     if (foreign.length > 0) {
       for (const rel of foreign) writeFileSync(join(ws.root, rel), ctx.before[rel]);
@@ -509,7 +515,7 @@ async function judgeOutput(
   const breaks = new Map<string, boolean>();
   for (const bits of [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]) {
     const facts = { executedByThis: (bits & 1) > 0, executedByOthers: (bits & 2) > 0, fileUsedByThis: (bits & 4) > 0, fileUsedByOthers: (bits & 8) > 0 };
-    breaks.set(JSON.stringify(facts), await gateVerdict("Site", facts, mutationSiteStage0(facts), (a, b) => a || b));
+    breaks.set(JSON.stringify(facts), await gateVerdictFor(ctx, "Site", facts, mutationSiteStage0(facts), (a, b) => a || b));
   }
   const report = await ctx.mutation.run({
     root: ws.root,
@@ -547,7 +553,8 @@ async function judgeOutput(
   // 合否の決まり: 判断は Stage 0 と、使えれば Stage 1 の厳しい側 (R4)。採点の部品を作り直す実行では Stage 0 だけ (R1)
   const adapterSource = readFileSync(join(ws.root, ADAPTER), "utf8");
   const shared = ctx.others.length > 0 && !usage;
-  const decided = await judgeDecided([...judgeEvents(report, values, adapterSource, shared)]);
+  const events = [...judgeEvents(report, values, adapterSource, shared)];
+  const decided = isIr8(ctx.ir) ? await judgeDecided8(events, judgeStage0(events)) : await judgeDecided(events);
   const survived = judge(report, values, adapterSource, ADAPTER, label(ws.src), shared, decided);
   return survived.length > 0
     ? { ...ran, feedback: { kind: "mutation", violations: survived }, mutation }

@@ -14,7 +14,8 @@ import { isIr8 } from "./generate.ts";
 import { loadProgram } from "./v1/load.ts";
 import { checkSpec, isV1Specs, prepare } from "./v1/prepare.ts";
 import { boundary8, defaultRuns8 } from "./v1/runtime.ts";
-import { R1_COMPONENTS8, planContract8, stage0HashOf8 } from "./v1/stage1.ts";
+import { R1_COMPONENTS8, adapterOf as adapterOf8, planContract8, stage0HashOf8 } from "./v1/stage1.ts";
+import type { Adapter8 } from "./v1/pbt.ts";
 import type { Ir8 } from "./v1/ir.ts";
 import { DEFAULT_GUIDE } from "./guide.ts";
 import { DRAFT_SUFFIX, listComponents, loadSpecs } from "./loader.ts";
@@ -375,7 +376,9 @@ async function reconcileStage1(ctx: GateContext, options: ImplementOptions, atte
   // 仕様に無い指定: 始める段階の明示 (--from)、途中で止めること (--stop-after)、仕様が扱う範囲 (1〜3) の外の回数
   const inRange = (limit: number) => Number.isInteger(limit) && limit >= 1 && limit <= 3;
   if (options.from !== undefined || options.stopAfter !== undefined || !inRange(maxAttempts) || !inRange(maxRounds)) return undefined;
-  const adapter = await stage1Adapter("pipeline");
+  // 1.0 の仕様は、1.0 で書いたフレームワーク自身の部品 (self1) の状態機械で進める
+  const v1 = isIr8(ctx.ir);
+  const adapter = v1 ? await adapterOf8("pipeline") : await stage1Adapter("pipeline");
   if (!adapter) return undefined;
 
   const { ws } = ctx;
@@ -388,14 +391,16 @@ async function reconcileStage1(ctx: GateContext, options: ImplementOptions, atte
   };
   const requested: Requested[] = [];
   try {
-    await adapter.setupIsolation({
-      queries: { hasProductionCode: () => facts.hasProductionCode, boundaryChanged: () => facts.boundaryChanged, hasAdapter: () => facts.hasAdapter },
-      effects: {
-        StartSession: (payload: { phase: Phase; round: number; attempt: number }) => void requested.push({ kind: "session", ...payload }),
-        GradeCurrentCode: (payload: { round: number }) => void requested.push({ kind: "grade", ...payload }),
-        DiscardCode: () => void requested.push({ kind: "discard" }),
-      },
-    });
+    const driver = {
+      StartSession: (payload: { phase: Phase; round: number; attempt: number }) => void requested.push({ kind: "session", ...payload }),
+      GradeCurrentCode: (payload: { round: number }) => void requested.push({ kind: "grade", ...payload }),
+      DiscardCode: () => void requested.push({ kind: "discard" }),
+    };
+    await adapter.setupIsolation(
+      v1
+        ? { output: { HasProductionCode: () => facts.hasProductionCode, BoundaryChanged: () => facts.boundaryChanged, HasAdapter: () => facts.hasAdapter }, "pipeline-driver": driver }
+        : { queries: { hasProductionCode: () => facts.hasProductionCode, boundaryChanged: () => facts.boundaryChanged, hasAdapter: () => facts.hasAdapter }, effects: driver },
+    );
     await adapter.executeCommand({ name: "Start", input: { attemptsPerPhase: maxAttempts, rounds: maxRounds } });
   } catch (error) {
     stage1Unavailable("pipeline", error);
@@ -428,7 +433,7 @@ async function reconcileStage1(ctx: GateContext, options: ImplementOptions, atte
         await adapter.executeCommand({ name: CHECKED[phase], input: { passed: feedback === undefined } });
       }
     }
-    const state = await adapter.getCurrentState();
+    const state = v1 ? await (adapter as Adapter8).executeQuery!({ name: "Status", input: {} }) : await (adapter as { getCurrentState(): Promise<unknown> }).getCurrentState();
     if (state !== "DONE" && state !== "FAILED") throw new Error(`Stage 1 のパイプラインが、途中の状態 (${String(state)}) で止まりました`);
     return state === "DONE";
   } finally {

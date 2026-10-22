@@ -528,25 +528,8 @@ export function readingOf(target: Target, irs: Map<string, Ir8>): string {
   return lines.join("\n");
 }
 
-export async function interpret8(options: InterpretOptions8): Promise<InterpretResult8> {
-  const specsDir = resolve(process.cwd(), options.specs);
-  const program = readProgram(specsDir);
-  const targets = targetsOf(program).filter((target) => options.component === undefined || target.units.some((u) => u.id === options.component || u.exportName === options.component));
-  if (targets.length === 0 && options.component !== undefined) throw new Error(`"${options.component}" には、解釈が要る文がありません`);
-  let chosen: { target: Target; problems?: string } | undefined;
-  for (const target of targets) {
-    if (!target.current) {
-      chosen = { target };
-      break;
-    }
-    const checked = check(specsDir, componentsIn(target), target.current.endsWith(DRAFT_SUFFIX));
-    if (checked.problems !== undefined) {
-      chosen = { target, problems: checked.problems };
-      break;
-    }
-  }
-  if (!chosen) return { status: "up-to-date" };
-  const { target } = chosen;
+/** Working on one target: its sessions (the first in the specs, the others in copies), comparisons and result. */
+function workOn(specsDir: string, options: InterpretOptions8, target: Target, problems: string | undefined) {
   const update = target.current !== undefined;
   const assets = assetsFor(mergeAssets(target.units.flatMap(() => []), options.assets ?? []), "design");
   const components = componentsIn(target);
@@ -560,37 +543,37 @@ export async function interpret8(options: InterpretOptions8): Promise<InterpretR
     assets,
     options,
     label: "interpretation",
-    ...(chosen.problems ? { firstProblems: chosen.problems } : {}),
+    ...(problems ? { firstProblems: problems } : {}),
     components,
   };
-  const first = await session(firstSession);
-  const questions = existsSync(target.draft) ? questionsIn(readFileSync(target.draft, "utf8")) : [];
+  const copies = new Map<number, string>();
+  const sessions = new Map<number, Session>([[1, firstSession]]);
+  const component = components[0] ?? target.units[0].id;
   const updates = update && target.current === target.final ? { updates: target.final } : {};
-  if (!first.ok) return { status: "failed", component: components[0] ?? target.units[0].id, draft: target.draft, attempts: first.attempts, problems: first.problems, questions, ...updates };
-  const reading = first.irs ? readingOf(target, first.irs) : undefined;
-  const result = { status: "interpreted" as const, component: components[0] ?? target.units[0].id, draft: target.draft, attempts: first.attempts, questions, ...updates, ...(reading ? { reading } : {}) };
-  const sessions = Math.max(1, Math.floor(options.sessions ?? 1));
-  if (sessions < 2 || !first.irs || first.irs.size === 0) return result;
-
-  const comparisons: Comparison8[] = [];
-  for (let index = 2; index <= sessions; index++) {
-    const copy = mkdtempSync(join(dirname(specsDir), ".tmp-clp-interpret-"));
-    try {
+  return {
+    firstSession,
+    /** A later session: in a copy of the specs (without this target's drafts), its boundary fixed to the first one's. */
+    later(index: number, firstIrs: Map<string, Ir8>): Session {
+      const known = sessions.get(index);
+      if (known) return known;
+      const copy = mkdtempSync(join(dirname(specsDir), ".tmp-clp-interpret-"));
+      copies.set(index, copy);
       for (const file of readdirSync(specsDir, { recursive: true }) as string[]) {
         // the other components' drafts stay (the first session was checked with them); this one's do not
         if (!file.endsWith(".ts") || file === rel(specsDir, target.draft) || file === rel(specsDir, target.final)) continue;
         mkdirSync(dirname(join(copy, file)), { recursive: true });
         cpSync(join(specsDir, file), join(copy, file));
       }
-      const other = await session({ ...firstSession, dir: copy, start: skeleton(target, specsDir, first.irs), update: false, pinned: first.irs, index, label: `interpretation ${index}`, firstProblems: undefined });
-      if (!other.ok) {
-        comparisons.push({ session: index, status: "failed", differences: [] });
-        continue;
-      }
+      const session: Session = { ...firstSession, dir: copy, start: skeleton(target, specsDir, firstIrs), update: false, pinned: firstIrs, index, label: `interpretation ${index}`, firstProblems: undefined };
+      sessions.set(index, session);
+      return session;
+    },
+    /** Where a later session behaves differently from the first (run in a separate process). */
+    compare(index: number): Comparison8 {
       const differences: Difference8[] = [];
       let failed = false;
-      for (const component of components) {
-        const compared = spawnSync(process.execPath, [CLP, "__compare", specsDir, copy, "--component", component], { encoding: "utf8", timeout: 600_000 });
+      for (const c of components) {
+        const compared = spawnSync(process.execPath, [CLP, "__compare", specsDir, copies.get(index)!, "--component", c], { encoding: "utf8", timeout: 600_000 });
         if (compared.status !== 0) {
           (options.log ?? (() => {}))(`[compare ${index}] failed: ${(compared.stderr ?? "").trim().slice(-500)}`);
           failed = true;
@@ -598,46 +581,299 @@ export async function interpret8(options: InterpretOptions8): Promise<InterpretR
         }
         differences.push(...(JSON.parse(compared.stdout) as Difference8[]));
       }
-      comparisons.push({ session: index, status: failed ? "failed" : "compared", differences });
-    } finally {
-      rmSync(copy, { recursive: true, force: true });
+      return { session: index, status: failed ? "failed" : "compared", differences };
+    },
+    result(status: "interpreted" | "failed", first: { attempts: number; problems?: string; irs?: Map<string, Ir8> }, comparisons: Comparison8[] | undefined): InterpretResult8 {
+      const questions = existsSync(target.draft) ? questionsIn(readFileSync(target.draft, "utf8")) : [];
+      if (status === "failed") return { status, component, draft: target.draft, attempts: first.attempts, problems: first.problems, questions, ...updates };
+      if (comparisons) markComparisons(target.draft, comparisons);
+      // the questions after the comparisons are marked (their lines move)
+      const marked = existsSync(target.draft) ? questionsIn(readFileSync(target.draft, "utf8")) : [];
+      const reading = first.irs ? readingOf(target, first.irs) : undefined;
+      return { status, component, draft: target.draft, attempts: first.attempts, questions: marked, ...updates, ...(reading ? { reading } : {}), ...(comparisons ? { comparisons } : {}) };
+    },
+    cleanup() {
+      for (const copy of copies.values()) rmSync(copy, { recursive: true, force: true });
+    },
+  };
+}
+
+/** The targets of an interpretation run, in order (one component, or every one). */
+function targetsFor(specsDir: string, component: string | undefined): Target[] {
+  const targets = targetsOf(readProgram(specsDir)).filter((target) => component === undefined || target.units.some((u) => u.id === component || u.exportName === component));
+  if (targets.length === 0 && component !== undefined) throw new Error(`"${component}" には、解釈が要る文がありません`);
+  return targets;
+}
+
+/**
+ * `clp interpret`: which component to interpret and from what, how sessions and attempts follow each other, and when
+ * sessions are compared, is decided by interpret-flow (Stage 1, generated from the framework's own spec) when it can be
+ * used, otherwise by the hand-written procedure (Stage 0).
+ */
+export async function interpret8(options: InterpretOptions8): Promise<InterpretResult8> {
+  return (await interpret8Stage1(options)) ?? interpret8Stage0(options);
+}
+
+export async function interpret8Stage0(options: InterpretOptions8): Promise<InterpretResult8> {
+  const specsDir = resolve(process.cwd(), options.specs);
+  let chosen: { target: Target; problems?: string } | undefined;
+  for (const target of targetsFor(specsDir, options.component)) {
+    if (!target.current) {
+      chosen = { target };
+      break;
+    }
+    const checked = check(specsDir, componentsIn(target), target.current.endsWith(DRAFT_SUFFIX));
+    if (checked.problems !== undefined) {
+      chosen = { target, problems: checked.problems };
+      break;
     }
   }
-  markComparisons(target.draft, comparisons);
-  return { ...result, comparisons };
+  if (!chosen) return { status: "up-to-date" };
+  const work = workOn(specsDir, options, chosen.target, chosen.problems);
+  try {
+    const first = await session(work.firstSession);
+    if (!first.ok) return work.result("failed", first, undefined);
+    const sessions = Math.max(1, Math.floor(options.sessions ?? 1));
+    if (sessions < 2 || !first.irs || first.irs.size === 0) return work.result("interpreted", first, undefined);
+    const comparisons: Comparison8[] = [];
+    for (let index = 2; index <= sessions; index++) {
+      const other = await session(work.later(index, first.irs));
+      comparisons.push(other.ok ? work.compare(index) : { session: index, status: "failed", differences: [] });
+    }
+    return work.result("interpreted", first, comparisons);
+  } finally {
+    work.cleanup();
+  }
+}
+
+async function interpret8Stage1(options: InterpretOptions8): Promise<InterpretResult8 | undefined> {
+  const sessions = Math.max(1, Math.floor(options.sessions ?? 1));
+  const maxAttempts = options.maxAttempts ?? 3;
+  // outside the spec's domain: decided by Stage 0
+  const inRange = (count: number) => Number.isInteger(count) && count >= 1 && count <= 3;
+  if (!inRange(sessions) || !inRange(maxAttempts)) return undefined;
+  const { adapterOf, fallback } = await import("./stage1.ts");
+  const adapter = await adapterOf("interpret-flow");
+  if (!adapter) return undefined;
+  const specsDir = resolve(process.cwd(), options.specs);
+  const targets = targetsFor(specsDir, options.component);
+
+  const requested: { name: string; input: Record<string, unknown> }[] = [];
+  const driver = Object.fromEntries(
+    ["ConsiderNext", "CheckCurrent", "StartSession", "Compare", "RecordUncompared", "Finish"].map((name) => [name, (input: Record<string, unknown> = {}) => void requested.push({ name, input })]),
+  );
+  try {
+    await adapter.setupIsolation({ "interpret-driver": driver });
+    await adapter.executeCommand({ name: "Start", input: { sessions, maxAttempts } });
+  } catch (error) {
+    return fallback("interpret-flow", error);
+  }
+  const send = (name: string, input: Record<string, unknown> = {}) => adapter.executeCommand({ name, input });
+
+  let next = 0;
+  let found: Target | undefined;
+  let problems: string | undefined;
+  let work: ReturnType<typeof workOn> | undefined;
+  let first: { attempts: number; problems?: string; irs?: Map<string, Ir8> } | undefined;
+  const carried = new Map<number, string | undefined>();
+  const comparisons: Comparison8[] = [];
+  let finished: InterpretResult8 | undefined;
+  try {
+    while (requested.length > 0 && !finished) {
+      const request = requested.shift()!;
+      switch (request.name) {
+        case "ConsiderNext": {
+          found = next < targets.length ? targets[next++] : undefined;
+          problems = undefined;
+          if (found) await send("Consider", { hasCurrent: found.current !== undefined });
+          else await send("NoMoreComponents");
+          break;
+        }
+        case "CheckCurrent": {
+          const checked = check(specsDir, componentsIn(found!), found!.current!.endsWith(DRAFT_SUFFIX));
+          problems = checked.problems;
+          await send("CurrentChecked", { passed: checked.problems === undefined });
+          break;
+        }
+        case "StartSession": {
+          const { session: index, attempt } = request.input as { session: number; attempt: number };
+          work ??= workOn(specsDir, options, found!, problems);
+          if (index === 1 && !carried.has(1)) carried.set(1, problems);
+          const s = index === 1 ? work.firstSession : work.later(index, first!.irs!);
+          const tried = await attemptOnce(s, attempt, carried.get(index));
+          carried.set(index, tried.problems);
+          if (index === 1) first = { attempts: attempt, ...(tried.problems ? { problems: tried.problems } : {}), ...(tried.irs ? { irs: tried.irs } : {}) };
+          await send("SessionChecked", { outcome: tried.outcome, hasModel: (tried.irs?.size ?? 0) > 0 });
+          break;
+        }
+        case "Compare": {
+          const index = (request.input as { session: number }).session;
+          comparisons.push(work!.compare(index));
+          await send("Compared", { ok: comparisons.at(-1)!.status === "compared" });
+          break;
+        }
+        case "RecordUncompared": {
+          comparisons.push({ session: (request.input as { session: number }).session, status: "failed", differences: [] });
+          break;
+        }
+        case "Finish": {
+          const status = (request.input as { status: "up-to-date" | "interpreted" | "failed" }).status;
+          finished = status === "up-to-date" ? { status } : work!.result(status, first!, status === "interpreted" && sessions > 1 && comparisons.length > 0 ? comparisons : undefined);
+          break;
+        }
+      }
+    }
+  } finally {
+    work?.cleanup();
+    await adapter.teardownIsolation();
+  }
+  if (!finished) throw new Error("interpret-flow が、終わりを告げずに止まりました");
+  return finished;
 }
 
 /** `clp interpret --accept`: drafts without open review marks, that check under the current Layer 1, become the interpretation. */
 export async function accept8(options: { specs: string; component?: string }): Promise<{ accepted: string[]; problems: string[] }> {
+  return (await accept8Stage1(options)) ?? accept8Stage0(options);
+}
+
+type Acceptance = { name: string; target: Target; text?: string; open: string[]; stampCurrent: boolean; isDraft: boolean };
+function acceptanceOf(specsDir: string, target: Target, program: Program): Acceptance {
+  const name = rel(specsDir, target.file);
+  if (!target.current) return { name, target, open: [], stampCurrent: false, isDraft: false };
+  const text = readFileSync(target.current, "utf8");
+  const open = text.split("\n").flatMap((line, i) => (/\/\/\s*REVIEW(\(clp\))?:/.test(line) ? [`  ${rel(process.cwd(), target.current!)}:${i + 1}: ${line.trim()}`] : []));
+  const isDraft = target.current.endsWith(DRAFT_SUFFIX);
+  return { name, target, text, open, isDraft, stampCurrent: !isDraft && header(target, program) + stripHeader(text) === text };
+}
+const refusals = {
+  "no-interpretation": (a: Acceptance) => `${a.name}: 解釈がありません（先に clp interpret で導いてください）`,
+  "open-reviews": (a: Acceptance) =>
+    `${a.name}: 確かめていない疑問点・食い違いが ${a.open.length} 件あります。Layer 1 を詳しくして clp interpret で導き直すか、その読み方でよければ、その行の REVIEW を REVIEWED に書き換えてから確定してください\n${a.open.join("\n")}`,
+  "does-not-fit": (a: Acceptance, problems?: string) => `${a.name}: 解釈が、いまの Layer 1 に合いません。clp interpret で導き直してください\n${problems ?? ""}`,
+};
+/** Writes the restamped text and checks it; restores the file when it does not fit. The problems, or undefined. */
+function checkRestamped(specsDir: string, a: Acceptance, program: Program): string | undefined {
+  writeFileSync(a.target.current!, header(a.target, program) + stripHeader(a.text!));
+  const checked = check(specsDir, componentsIn(a.target), a.isDraft);
+  if (checked.problems !== undefined) writeFileSync(a.target.current!, a.text!);
+  return checked.problems;
+}
+const acceptNow = (a: Acceptance) => {
+  if (a.isDraft) renameSync(a.target.current!, a.target.final);
+};
+const targetsToAccept = (specsDir: string, component: string | undefined) => {
+  const program = readProgram(specsDir, { drafts: true });
+  return { program, targets: targetsOf(program).filter((target) => component === undefined || target.units.some((u) => u.id === component || u.exportName === component)) };
+};
+
+export async function accept8Stage0(options: { specs: string; component?: string }): Promise<{ accepted: string[]; problems: string[] }> {
   const specsDir = resolve(process.cwd(), options.specs);
   const accepted: string[] = [];
-  const problems: string[] = [];
-  const program = readProgram(specsDir, { drafts: true });
-  for (const target of targetsOf(program)) {
-    if (options.component !== undefined && !target.units.some((u) => u.id === options.component || u.exportName === options.component)) continue;
-    const name = rel(specsDir, target.file);
-    if (!target.current) {
-      problems.push(`${name}: 解釈がありません（先に clp interpret で導いてください）`);
-      continue;
+  let problems: string[] = [];
+  // rounds: a component that uses another may fit only once the other is accepted
+  let remaining = targetsToAccept(specsDir, options.component).targets.map((t) => t.file);
+  for (;;) {
+    const { program, targets } = targetsToAccept(specsDir, options.component);
+    const refused: string[] = [];
+    let acceptedInRound = false;
+    problems = [];
+    for (const target of targets.filter((t) => remaining.includes(t.file))) {
+      const a = acceptanceOf(specsDir, target, program);
+      const refuse = (reason: keyof typeof refusals, found?: string) => {
+        problems.push(refusals[reason](a, found));
+        refused.push(target.file);
+      };
+      if (!target.current) refuse("no-interpretation");
+      else if (a.open.length > 0) refuse("open-reviews");
+      else if (a.stampCurrent) continue;
+      else {
+        const found = checkRestamped(specsDir, a, program);
+        if (found !== undefined) refuse("does-not-fit", found);
+        else {
+          acceptNow(a);
+          accepted.push(target.final);
+          acceptedInRound = true;
+        }
+      }
     }
-    const text = readFileSync(target.current, "utf8");
-    const open = text.split("\n").flatMap((line, i) => (/\/\/\s*REVIEW(\(clp\))?:/.test(line) ? [`  ${rel(process.cwd(), target.current!)}:${i + 1}: ${line.trim()}`] : []));
-    if (open.length > 0) {
-      problems.push(`${name}: 確かめていない疑問点・食い違いが ${open.length} 件あります。Layer 1 を詳しくして clp interpret で導き直すか、その読み方でよければ、その行の REVIEW を REVIEWED に書き換えてから確定してください\n${open.join("\n")}`);
-      continue;
-    }
-    const restamped = header(target, program) + stripHeader(text);
-    const isDraft = target.current.endsWith(DRAFT_SUFFIX);
-    if (!isDraft && restamped === text) continue;
-    writeFileSync(target.current, restamped);
-    const checked = check(specsDir, componentsIn(target), isDraft);
-    if (checked.problems !== undefined) {
-      writeFileSync(target.current, text);
-      problems.push(`${name}: 解釈が、いまの Layer 1 に合いません。clp interpret で導き直してください\n${checked.problems}`);
-      continue;
-    }
-    if (isDraft) renameSync(target.current, target.final);
-    accepted.push(target.final);
+    if (refused.length === 0 || !acceptedInRound) break;
+    remaining = refused;
   }
+  return { accepted, problems };
+}
+
+async function accept8Stage1(options: { specs: string; component?: string }): Promise<{ accepted: string[]; problems: string[] } | undefined> {
+  const { adapterOf, fallback } = await import("./stage1.ts");
+  const adapter = await adapterOf("interpret-flow");
+  if (!adapter) return undefined;
+  const specsDir = resolve(process.cwd(), options.specs);
+  const requested: { name: string; input: Record<string, unknown> }[] = [];
+  const driver = Object.fromEntries(
+    ["CheckDraft", "Accept", "RefuseAccepting", "NextToAccept", "RetryRefused", "AcceptingDone"].map((name) => [name, (input: Record<string, unknown> = {}) => void requested.push({ name, input })]),
+  );
+  try {
+    await adapter.setupIsolation({ "interpret-driver": driver });
+    await adapter.executeCommand({ name: "StartAccepting", input: {} });
+  } catch (error) {
+    return fallback("interpret-flow", error);
+  }
+  const send = (name: string, input: Record<string, unknown> = {}) => adapter.executeCommand({ name, input });
+
+  const accepted: string[] = [];
+  let problems: string[] = [];
+  let round = targetsToAccept(specsDir, options.component);
+  let queue = round.targets.map((t) => t.file);
+  let refused: string[] = [];
+  let current: Acceptance | undefined;
+  let found: string | undefined;
+  let done = false;
+  try {
+    while (requested.length > 0 && !done) {
+      const request = requested.shift()!;
+      switch (request.name) {
+        case "NextToAccept": {
+          const file = queue.shift();
+          const target = file === undefined ? undefined : round.targets.find((t) => t.file === file);
+          if (!target) {
+            await send("EndRound");
+            break;
+          }
+          current = acceptanceOf(specsDir, target, round.program);
+          found = undefined;
+          await send("ConsiderAccepting", { hasDraft: current.isDraft, hasInterpretation: existsSync(target.final), openReviews: Math.min(current.open.length, 10), stampCurrent: current.stampCurrent });
+          break;
+        }
+        case "CheckDraft": {
+          found = checkRestamped(specsDir, current!, round.program);
+          await send("DraftChecked", { passed: found === undefined });
+          break;
+        }
+        case "Accept": {
+          acceptNow(current!);
+          accepted.push(current!.target.final);
+          break;
+        }
+        case "RefuseAccepting": {
+          problems.push(refusals[(request.input as { reason: keyof typeof refusals }).reason](current!, found));
+          refused.push(current!.target.file);
+          break;
+        }
+        case "RetryRefused": {
+          round = targetsToAccept(specsDir, options.component);
+          queue = refused;
+          refused = [];
+          problems = [];
+          break;
+        }
+        case "AcceptingDone": {
+          done = true;
+          break;
+        }
+      }
+    }
+  } finally {
+    await adapter.teardownIsolation();
+  }
+  if (!done) throw new Error("interpret-flow が、確定の終わりを告げずに止まりました");
   return { accepted, problems };
 }
