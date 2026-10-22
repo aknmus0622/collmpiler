@@ -10,7 +10,7 @@ import { isDeepStrictEqual } from "node:util";
 import fc from "fast-check";
 import { FAILED, OutOfSpec, SpecError, answer, brokenProperties, execute, fromPlain, initialWorld, keyOf, plain } from "./eval.ts";
 import type { Answers, Effect, World } from "./eval.ts";
-import type { Ir8, Port, TraceStep, Type } from "./ir.ts";
+import type { Expr, Ir8, Port, TraceStep, Type } from "./ir.ts";
 import { freshStage0, increasingStage0, survivesRestartStage0 } from "../promise.ts";
 import { amongStage0, numberCandidatesStage0, stringCandidatesStage0 } from "../candidates.ts";
 import { observationsEqualStage0 } from "../observe.ts";
@@ -59,13 +59,35 @@ export function literalsOf(ir: Ir8): Hints {
 type RawAtom = { $atom: number };
 const isRawAtom = (x: unknown): x is RawAtom => typeof x === "object" && x !== null && "$atom" in x;
 
-function arbitraryOf(type: Type, hints: Hints): fc.Arbitrary<unknown> {
+/** The bounds `requires` puts on an integer parameter, from its top-level conjunction (`amount >= 1 && amount <= 100`). */
+export function boundsOf(requires: Expr | undefined, param: string): { min: number | null; max: number | null } {
+  const bounds: { min: number | null; max: number | null } = { min: null, max: null };
+  const visit = (e: Expr | undefined) => {
+    if (!Array.isArray(e)) return;
+    if (e[0] === "and") return e.slice(1).forEach((x) => visit(x as Expr));
+    if (!["<", "<=", ">", ">="].includes(e[0] as string)) return;
+    const isParam = (x: unknown) => Array.isArray(x) && x[0] === "var" && x[1] === param;
+    const constant = (x: unknown) => (typeof x === "number" ? x : Array.isArray(x) && x[0] === "neg" && typeof x[1] === "number" ? -x[1] : undefined);
+    // written as param op c, or c op param (turned around)
+    const [op, c] = isParam(e[1]) ? [e[0] as string, constant(e[2])] : isParam(e[2]) ? [{ "<": ">", "<=": ">=", ">": "<", ">=": "<=" }[e[0] as string]!, constant(e[1])] : [undefined, undefined];
+    if (op === undefined || c === undefined) return;
+    if (op === ">=" || op === ">") bounds.min = Math.max(bounds.min ?? -Infinity, op === ">" ? c + 1 : c);
+    else bounds.max = Math.min(bounds.max ?? Infinity, op === "<" ? c - 1 : c);
+  };
+  visit(requires);
+  return bounds;
+}
+
+function arbitraryOf(type: Type, hints: Hints, bounds: { min: number | null; max: number | null } = { min: null, max: null }): fc.Arbitrary<unknown> {
   if (type === "bool") return fc.boolean();
   if (type === "json") return fc.jsonValue({ maxDepth: 2 }).map((v) => JSON.parse(JSON.stringify(v)) as unknown);
   if (type === "int") {
-    const { thresholds } = decided("input-candidates", { kind: "numbers", integer: true, min: null, max: null, around: hints.numbers }, numberCandidatesStage0(true, null, null, hints.numbers));
-    const base = fc.integer({ min: -1000, max: 1000 });
-    return thresholds.length ? fc.oneof({ weight: 2, arbitrary: base }, { weight: 3, arbitrary: fc.constantFrom(...thresholds) }) : base;
+    // within what `requires` allows: a value outside it is outside the spec, and the step would only be skipped
+    const { min, max } = bounds.min !== null && bounds.max !== null && bounds.min > bounds.max ? { min: null, max: null } : bounds;
+    const { limits, thresholds } = decided("input-candidates", { kind: "numbers", integer: true, min, max, around: hints.numbers }, numberCandidatesStage0(true, min, max, hints.numbers));
+    const base = fc.integer({ min: min ?? Math.min(-1000, max ?? -1000), max: max ?? Math.max(1000, min ?? 1000) });
+    const known = [...new Set([...limits, ...thresholds])];
+    return known.length ? fc.oneof({ weight: 2, arbitrary: base }, { weight: 3, arbitrary: fc.constantFrom(...known) }) : base;
   }
   if (type === "string") {
     const { known, lengths } = decided("input-candidates", { kind: "strings", texts: hints.strings, numbers: hints.numbers }, stringCandidatesStage0(hints.strings, hints.numbers));
@@ -203,7 +225,15 @@ export function fixedSteps(ir: Ir8, trace: TraceStep[]): RawStep[] | undefined {
 export function stepArbitrary(ir: Ir8, hints: Hints = literalsOf(ir)): fc.Arbitrary<RawStep> {
   const entries = entriesOf(ir);
   const outside = outsideQueries(ir);
-  const paramsOf = (entry: Entry) => fc.record(Object.fromEntries(Object.entries(entry.params).map(([k, t]) => [k, arbitraryOf(t, hints)])));
+  // a path segment of a route (`/things/:id`) cannot be "." or "..": URLs normalize them away, so HTTP cannot carry them (outside the spec)
+  const inPath = (entry: Entry) => new Set([...(ir.components[entry.component].routes?.[entry.name] ?? "").matchAll(/:(\w+)/g)].map((m) => m[1]));
+  const paramsOf = (entry: Entry) => {
+    const path = inPath(entry);
+    const c = ir.components[entry.component];
+    const requires = entry.kind === "command" ? c.commands?.[entry.name]?.requires : c.queries?.[entry.name]?.requires;
+    const of = (k: string, t: Type) => arbitraryOf(t, hints, boundsOf(requires, k));
+    return fc.record(Object.fromEntries(Object.entries(entry.params).map(([k, t]) => [k, path.has(k) ? of(k, t).filter((v) => v !== "." && v !== "..") : of(k, t)])));
+  };
   const choose = fc.oneof(
     ...entries.map((entry, index) => ({
       weight: entry.kind === "command" ? 3 : 1,

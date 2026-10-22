@@ -21,6 +21,18 @@ import type { T } from "./types.ts";
 type TE = { e: Expr; t: T };
 const BAD: TE = { e: null, t: "any" };
 const lit = (value: string): Expr => ["lit", value];
+/** The type, narrowed where the expression is a number constant (also inside records and both branches of an `ite`). */
+function constantsIn(e: Expr, t: T): T {
+  if (typeof e === "number") return { enum: [e] };
+  if (!Array.isArray(e)) return t;
+  if (e[0] === "record" && isRecord(t)) {
+    const fields = e[1] as Record<string, Expr>;
+    return { record: Object.fromEntries(Object.entries(t.record).map(([k, v]) => [k, (k in fields ? constantsIn(fields[k], v) : v) as Type])) };
+  }
+  if (e[0] === "ite") return join(constantsIn(e[2] as Expr, t), constantsIn(e[3] as Expr, t)) ?? t;
+  return t;
+}
+
 /** The state fields a conjunction fixes to a constant: `this.status === "DESIGN"`. */
 function knownState(conjuncts: Expr[]): Map<string, unknown> {
   const known = new Map<string, unknown>();
@@ -425,7 +437,8 @@ export class Builder {
   /** The value of `got`, checked against `want`. A literal gets the expected type. */
   private expect(got: TE, want: T, cx: Cx, what: string, at?: Pos): TE {
     if (got === BAD || got.t === "any") return { e: got.e, t: want };
-    if (!fits(got.t, want)) {
+    // a number written as a constant fits an enumeration of numbers that has it (`status: 422` where `201 | 422` is expected)
+    if (!fits(got.t, want) && !fits(constantsIn(got.e, got.t), want)) {
       if (Array.isArray(got.e) && got.e[0] === "lit" && typeof got.e[1] === "string" && want === "bool") {
         this.fail("prose-in-expression", cx.where, `文「${got.e[1]}」は、式の場所には書けません。is.名前("文") にして、解釈に中身を書かせます`, at);
         return { e: got.e, t: want };
@@ -1328,6 +1341,13 @@ export class Builder {
       case "failed": {
         const value = this.tx(expr.args[0], cx);
         if (!(Array.isArray(value.e) && value.e[0] === "ask")) this.fail("syntax", cx.where, "failed(…) は、外の世界への問い合わせ（の答え）に使います", expr.at);
+        else {
+          const [, id, query] = value.e as [string, string, string];
+          const unit = this.program.units.find((u) => u.id === id);
+          const promise = unit?.kind === "external" ? unit.ports?.queries.get(query)?.promise : undefined;
+          const mayFail = promise?.k === "call" && promise.args[0]?.k === "obj" && promise.args[0].props.some((p) => p.k === "prop" && p.key === "mayFail" && p.value.k === "bool" && p.value.value);
+          if (unit?.kind === "external" && !mayFail) this.fail("bad-failure", cx.where, `${unit.exportName}.${query} は失敗しません (answer({ mayFail: true }) ではありません)。failed(…) は、失敗することのある問い合わせの答えに使います`, expr.at);
+        }
         return { e: ["failed", value.e], t: "bool" };
       }
       case "always":
