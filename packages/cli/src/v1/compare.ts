@@ -10,20 +10,19 @@ import type { Ir8 } from "./ir.ts";
 import { Simulation, entryName, literalsOf, stepArbitrary, MAX_STEPS } from "./pbt.ts";
 import type { Observed8, RawStep, Step8 } from "./pbt.ts";
 
-export type Seen = Observed8 | { error: string } | { skipped: true; instead?: string; seen?: Observed8 };
+export type Seen = Observed8 | { error: string } | { skipped: true };
 export type Difference8 = { command: string; aspect: string; steps: Step8[]; first: Seen; other: Seen };
 
 const isObserved = (seen: Seen): seen is Observed8 => "effects" in seen;
 
-function advance(sim: Simulation, raw: RawStep): { name: string; seen: Seen; alive: boolean } {
+/** One step: the entry drawn, the entry that ran (another one when the drawn one was outside the spec), what was seen. */
+function advance(sim: Simulation, raw: RawStep): { name: string; ran?: string; seen: Seen; alive: boolean } {
   const name = entryName(sim.ir, sim.entries[raw.entry].qualified);
   try {
     if (raw.restart) sim.restart();
     const planned = sim.step(raw);
     if (!planned) return { name, seen: { skipped: true }, alive: true };
-    // outside the spec, so another entry ran in its place: which one, and what it did
-    if (planned.entry !== sim.entries[raw.entry]) return { name, seen: { skipped: true, instead: planned.step.name, seen: planned.expected }, alive: true };
-    return { name, seen: planned.expected, alive: true };
+    return { name, ran: planned.step.name, seen: planned.expected, alive: true };
   } catch (error) {
     if (error instanceof SpecError) return { name, seen: { error: error.message }, alive: false };
     throw error;
@@ -53,8 +52,12 @@ export async function compare8(first: Ir8, second: Ir8, params: { seed?: number;
     for (const step of raw) {
       const x = advance(a, step);
       const y = advance(b, step);
-      const aspects = aspectsOf(x.seen, y.seen);
-      if (x.name === only && aspects.includes(aspect)) return { command: only, aspect, steps: structuredClone(a.steps.length >= b.steps.length ? a.steps : b.steps), first: x.seen, other: y.seen };
+      // the same entry ran in both: what it did is compared under its name. Different ones (one reading has the drawn
+      // entry in the spec, the other not): whether the drawn entry runs
+      const same = x.ran === y.ran;
+      const aspects = same ? aspectsOf(x.seen, y.seen) : ["runs"];
+      const name = same && x.ran !== undefined ? x.ran : x.name;
+      if (name === only && aspects.includes(aspect)) return { command: only, aspect, steps: structuredClone(a.steps.length >= b.steps.length ? a.steps : b.steps), first: x.seen, other: y.seen };
       if (!x.alive || !y.alive || aspects.includes("runs")) return undefined;
     }
     return undefined;

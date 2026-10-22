@@ -1,8 +1,8 @@
 // The stamp of an interpretation: the hash of the Layer 1 it was derived from. When Layer 1 changes, the
 // interpretation is stale and stops everything until it is derived again (`clp interpret`).
 //
-// The hash covers the unit's own declaration and every Layer 1 declaration it reaches by name (types, constants,
-// other components), without positions or comments. The constants in the rows of a decision table are left out:
+// The hash covers the unit's own declaration, every other declaration of its file, and every Layer 1 declaration they
+// reach by name (types, constants, other components), without positions or comments. The constants in the rows of a decision table are left out:
 // they reach the IR without passing through the interpretation, so changing one needs no new interpretation.
 
 import { createHash } from "node:crypto";
@@ -47,6 +47,9 @@ export function layer1Hash(unit: Unit, program: Program): string {
   };
   const decl = unit.module.decls.find((d) => d.name === unit.exportName);
   if (decl) visitDecl(decl, unit.module);
+  // and everything else in the same file: an interpretation also uses what Layer 1 declares next to the unit (the outside
+  // world, types) without the unit naming it
+  for (const other of unit.module.decls) visitDecl(other, unit.module);
   return `sha256:${createHash("sha256").update(JSON.stringify(parts)).digest("hex")}`;
 }
 
