@@ -4,7 +4,7 @@
     "syntax-check.interpretation.ts"
   ],
   "specs": "sha256:07d2c90248349f813922d91e0a8f76619d1e795de93edaff1b2f56d860aa3735",
-  "code": "sha256:0d996992153277b985abd096f2e557119113fc3c6d3c2a044c65358c1c97e9dd",
+  "code": "sha256:aa2a7deac7a01e52282b0755a8c9879cde2b62df9276c5dddcd5ca7519e8e25a",
   "files": [
     "../src/checker-verdict.ts",
     "../src/fill-check.ts",

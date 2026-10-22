@@ -4,7 +4,7 @@
     "type-check.interpretation.ts"
   ],
   "specs": "sha256:157ab2ab28a9f620a1fbb8703f320d1c915d70324e6dec586615c7946a7902c9",
-  "code": "sha256:05513ef6c863d35fb5e32f0c5358fe41495bf9b299858f5f99694ed74d06354b",
+  "code": "sha256:bc95a5bb2b4eb80afe42e05e202c35b7daf87d50aef8a522e160caea9d4eff07",
   "files": [
     "../src/checker-verdict.ts",
     "../src/fill-check.ts",

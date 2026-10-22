@@ -4,7 +4,7 @@
     "sentence-trace.interpretation.ts"
   ],
   "specs": "sha256:c3ca413597cff630d1aaeb5206d40b7a318648603e8e64a4f8f417b527786a6d",
-  "code": "sha256:2528468335b7b75145914845ceac0bd536fcc39fb4cd587cb9aa02fe0a05c944",
+  "code": "sha256:a2e091bc7d8dce11b931f0b5e4daf293171fc1f534cc7cff23a032b5721ecf4b",
   "files": [
     "../src/checker-verdict.ts",
     "../src/fill-check.ts",

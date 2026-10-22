@@ -4,7 +4,7 @@
     "overlay-check.interpretation.ts"
   ],
   "specs": "sha256:5f9c10a0297437471439612c1d4bc6f23b5bbb3040f17e2191ba494a5b0878c7",
-  "code": "sha256:a3c4e690fd30b59e31823c35d2a1085d41c4107de427708f6d625a01c89a77a2",
+  "code": "sha256:ee71af755ffb04b11f8a2afc3bc17ce9cb5a4ce72286b993672e8ace74b20d8f",
   "files": [
     "../src/checker-verdict.ts",
     "../src/fill-check.ts",

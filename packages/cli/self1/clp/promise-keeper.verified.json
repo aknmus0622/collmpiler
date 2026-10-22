@@ -4,7 +4,7 @@
     "promise-keeper.interpretation.ts"
   ],
   "specs": "sha256:1b2016de64756e42e2f93a25ff9874cd0889efbf0a32c7d8a2d76789472b5536",
-  "code": "sha256:88921c4439d72705d1ce77b5ee03dbc99beed92beb77db5690c30fa50ca58952",
+  "code": "sha256:2b1bcd9628db018016a49708c01b268636e3a850b3183a319120bd47d802053b",
   "files": [
     "../src/checker-verdict.ts",
     "../src/fill-check.ts",

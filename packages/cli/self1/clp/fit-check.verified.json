@@ -4,7 +4,7 @@
     "fit-check.interpretation.ts"
   ],
   "specs": "sha256:8ec25bd33a7d0a06371f82b7d607f53cd04d59c0a36655d3532c92968339b0fd",
-  "code": "sha256:d639476834c8f36f3b33275220855868fe59b2fd454179e16386b66a31a14c49",
+  "code": "sha256:cc18f451ee11d165378b140fc4664e7bdb53f86287761848675cf7d8bebdf759",
   "files": [
     "../src/checker-verdict.ts",
     "../src/fill-check.ts",
