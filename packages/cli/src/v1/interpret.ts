@@ -96,7 +96,9 @@ function targetsOf(program: Program): Target[] {
   });
 }
 
-const header = (target: Target, program: Program) => [HEADER, ...target.units.map((unit) => stampLine(unit.exportName, layer1Hash(unit, program))).sort()].join("\n") + "\n";
+// the units as read in `program` (a copy of the specs has its own modules; the target's units resolve their imports in the original)
+const header = (target: Target, program: Program) =>
+  [HEADER, ...target.units.map((unit) => stampLine(unit.exportName, layer1Hash(program.units.find((u) => u.exportName === unit.exportName && basename(u.file) === basename(unit.file)) ?? unit, program))).sort()].join("\n") + "\n";
 const rel = (from: string, file: string) => relative(from, file).split(sep).join("/");
 
 // --- The starting point ---
