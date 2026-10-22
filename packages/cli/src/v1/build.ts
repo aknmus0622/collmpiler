@@ -791,24 +791,26 @@ export class Builder {
   // plain: inside a conditional `if` (one path, no return); statement: may split and return; answer: `return does.x(…)`, every path answers
   private doesPaths(expr: Extract<Syn, { k: "call" }>, ps: PathState, cx: Cx, at: Pos, mode: "plain" | "statement" | "answer"): PathState[] {
     const answers = mode === "answer";
+    // a fragment without content (reported) still answers where it is returned: its type is not known yet
+    const unfinished = (): PathState[] => (answers ? [{ ...ps, output: { e: null, t: "any" } }] : [ps]);
     const name = (expr.callee as { name: string }).name;
     const text = proseOf(expr.args[0]);
     if (text === undefined) {
       this.fail("syntax", cx.where, `does.${name}(…) には、文を1つ書きます`, at);
-      return [ps];
+      return unfinished();
     }
     const owner = cx.owner;
-    if (this.fragmentClash(owner, name, "does", cx, at)) return [ps];
+    if (this.fragmentClash(owner, name, "does", cx, at)) return unfinished();
     this.usedFragments.add(`${owner.id}#${name}`);
     this.note(cx.b, `${cx.b.unit.id}.does.${name}`, text);
     const { decision, fill } = this.fillOf(owner, name, "does", false);
     if (decision === "prose-left" || !fill) {
       this.fail("prose-left", cx.where, `「${text}」(does.${name}) の中身がありません`, at);
-      return [ps];
+      return unfinished();
     }
     if (decision !== "fill" || !fill.method) {
       this.fail("syntax", `${owner.exportName}.does.${name}`, "does の中身は 名前(引数) { … } のメソッドで書きます", fill.at);
-      return [ps];
+      return unfinished();
     }
     const module = this.moduleOf(owner, fill);
     const vars = this.bindFillParams(fill, cx, module);
