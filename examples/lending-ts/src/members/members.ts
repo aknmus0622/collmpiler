@@ -1,6 +1,6 @@
 import type { MemberId } from "../ids.ts";
-import { extendOutcome, registerOutcome } from "./outcomes.ts";
-import type { ExtendResult, RegisterResult } from "./outcomes.ts";
+import { extendOutcome } from "./outcomes.ts";
+import type { ExtendResult } from "./outcomes.ts";
 
 /**
  * Registry of library members (specification component `members`).
@@ -14,8 +14,8 @@ import type { ExtendResult, RegisterResult } from "./outcomes.ts";
  * - {@link Members.extend} performs command `members.Extend`.
  * - {@link Members.isMember} answers query `members.IsMember`.
  * - {@link Members.isExtended} answers query `members.IsExtended`.
- * The commands answer a string result; the queries answer a boolean and
- * never change the state.
+ * `register` answers nothing; `extend` answers a string result; the queries
+ * answer a boolean and never change the state.
  */
 export class Members {
   /** Specification state `members`: the set of registered members. */
@@ -31,18 +31,15 @@ export class Members {
   }
 
   /**
-   * Command `Register(member)`: asks to register a member.
+   * Command `Register(member)`: registers a member (updates state `members`).
+   * The command gives no answer; observe its effect through
+   * {@link Members.isMember}.
    *
    * @param member the member to register (specification `member`); any
-   *   identifier may be passed.
-   * @returns `"registered"` or `"already"`, see {@link RegisterResult}.
+   *   identifier may be passed, including one already registered.
    */
-  register(member: MemberId): RegisterResult {
-    const result = registerOutcome(this.isMember(member));
-    if (result === "registered") {
-      this.#registered.add(member);
-    }
-    return result;
+  register(member: MemberId): void {
+    this.#registered.add(member);
   }
 
   /**

@@ -16,10 +16,10 @@ export type BorrowResult = "not-member" | "unpaid" | "on-loan" | "limit" | "lent
 
 /**
  * What command `Return` answers (specification output of `library.Return`).
- * - `"not-lent"`: the book was not on loan; nothing changed.
+ * - `"not-on-loan"`: the book was not on loan; nothing changed.
  * - `"returned"`: the loan is closed; a fine may have been charged.
  */
-export type ReturnResult = "not-lent" | "returned";
+export type ReturnResult = "not-on-loan" | "returned";
 
 /**
  * The lending terms that apply to one member (specification decision table
@@ -48,11 +48,14 @@ export interface BorrowFacts {
   readonly policy: LoanPolicy;
 }
 
-/** Terms for extended members (first row of decision table `policy`). */
-const EXTENDED_POLICY: LoanPolicy = { loanDays: 28, maxBooks: 3 };
+/** Days in a week; loan periods are whole weeks. */
+const DAYS_PER_WEEK = 7;
 
-/** Terms for every other member (last row of decision table `policy`). */
-const STANDARD_POLICY: LoanPolicy = { loanDays: 14, maxBooks: 2 };
+/** Terms for extended members (first row of decision table `policy`): four weeks, three books. */
+const EXTENDED_POLICY: LoanPolicy = { loanDays: 4 * DAYS_PER_WEEK, maxBooks: 3 };
+
+/** Terms for every other member (last row of decision table `policy`): two weeks, two books. */
+const STANDARD_POLICY: LoanPolicy = { loanDays: 2 * DAYS_PER_WEEK, maxBooks: 2 };
 
 /**
  * Decision table `policy`: the lending terms for a member.
@@ -73,7 +76,8 @@ export function loanPolicy(isExtended: boolean): LoanPolicy {
  */
 export function borrowOutcome(facts: BorrowFacts): BorrowResult {
   if (!facts.isMember) return "not-member";
-  if (facts.owed > 0) return "unpaid";
+  // Fines are never negative, so anything but zero is an unpaid balance.
+  if (facts.owed !== 0) return "unpaid";
   if (facts.bookOnLoan) return "on-loan";
   if (facts.booksHeld >= facts.policy.maxBooks) return "limit";
   return "lent";
@@ -98,12 +102,13 @@ export function dueDate(today: number, policy: LoanPolicy): number {
  *   the loan and settle any fine (see {@link daysToCharge}).
  */
 export function returnOutcome(isLent: boolean): ReturnResult {
-  return isLent ? "returned" : "not-lent";
+  return isLent ? "returned" : "not-on-loan";
 }
 
 /**
  * Whether a returned book incurs a fine, and for how many days
- * (specification condition `late` and the `days` argument of `fines.Charge`).
+ * (specification: the `when` of the `fines.Charge` call made by event
+ * `Return.case1`, and that call's `days` argument).
  *
  * @param today today's date (days since 1970-01-01), as `Clock.today` answers.
  * @param due the due date recorded for the loan being closed.

@@ -13,12 +13,12 @@
             }
           },
           "requires": [
-            ">=",
+            ">",
             [
               "var",
               "days"
             ],
-            1
+            0
           ]
         },
         "Pay": {
@@ -64,14 +64,17 @@
                     ]
                   ],
                   [
-                    "apply",
+                    "nonNull",
                     [
-                      "state",
-                      "owed"
-                    ],
-                    [
-                      "var",
-                      "member"
+                      "apply",
+                      [
+                        "state",
+                        "owed"
+                      ],
+                      [
+                        "var",
+                        "member"
+                      ]
                     ]
                   ],
                   0
@@ -134,14 +137,17 @@
               ]
             ],
             [
-              "apply",
+              "nonNull",
               [
-                "state",
-                "owed"
-              ],
-              [
-                "var",
-                "member"
+                "apply",
+                [
+                  "state",
+                  "owed"
+                ],
+                [
+                  "var",
+                  "member"
+                ]
               ]
             ],
             0
@@ -185,13 +191,15 @@
   ],
   "trace": {
     "fines:延滞料": [
-      "Fines"
+      "owed",
+      "Owed"
     ],
     "fines:払えば 0 になる": [
       "Pay"
     ],
     "fines:期限を過ぎて返した日数 × 10 円を、会員ごとに足していく": [
-      "Charge"
+      "Charge",
+      "owed"
     ]
   }
 }

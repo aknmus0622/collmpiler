@@ -4,8 +4,8 @@
       "commands": {
         "Extend": {
           "events": [
-            "Extend.notRegistered",
-            "Extend.otherwise"
+            "Extend.otherwise",
+            "Extend.case1"
           ],
           "output": {
             "enum": [
@@ -21,55 +21,7 @@
         },
         "Register": {
           "events": [
-            "Register.registered",
             "Register.otherwise"
-          ],
-          "output": {
-            "enum": [
-              "already",
-              "registered"
-            ]
-          },
-          "params": {
-            "member": {
-              "atom": "MemberId"
-            }
-          }
-        }
-      },
-      "conditions": {
-        "notRegistered": {
-          "is": [
-            "not",
-            [
-              "in",
-              [
-                "var",
-                "member"
-              ],
-              [
-                "state",
-                "members"
-              ]
-            ]
-          ],
-          "params": {
-            "member": {
-              "atom": "MemberId"
-            }
-          }
-        },
-        "registered": {
-          "is": [
-            "in",
-            [
-              "var",
-              "member"
-            ],
-            [
-              "state",
-              "members"
-            ]
           ],
           "params": {
             "member": {
@@ -79,26 +31,7 @@
         }
       },
       "events": {
-        "Extend.notRegistered": {
-          "assign": {},
-          "calls": [],
-          "command": "Extend",
-          "guard": [
-            "cond",
-            "notRegistered",
-            {
-              "member": [
-                "var",
-                "member"
-              ]
-            }
-          ],
-          "output": [
-            "lit",
-            "not-member"
-          ]
-        },
-        "Extend.otherwise": {
+        "Extend.case1": {
           "assign": {
             "extended": [
               "add",
@@ -115,21 +48,42 @@
           "calls": [],
           "command": "Extend",
           "guard": [
-            "not",
+            "in",
             [
-              "cond",
-              "notRegistered",
-              {
-                "member": [
-                  "var",
-                  "member"
-                ]
-              }
+              "var",
+              "member"
+            ],
+            [
+              "state",
+              "members"
             ]
           ],
           "output": [
             "lit",
             "extended"
+          ]
+        },
+        "Extend.otherwise": {
+          "assign": {},
+          "calls": [],
+          "command": "Extend",
+          "guard": [
+            "not",
+            [
+              "in",
+              [
+                "var",
+                "member"
+              ],
+              [
+                "state",
+                "members"
+              ]
+            ]
+          ],
+          "output": [
+            "lit",
+            "not-member"
           ]
         },
         "Register.otherwise": {
@@ -148,42 +102,7 @@
           },
           "calls": [],
           "command": "Register",
-          "guard": [
-            "not",
-            [
-              "cond",
-              "registered",
-              {
-                "member": [
-                  "var",
-                  "member"
-                ]
-              }
-            ]
-          ],
-          "output": [
-            "lit",
-            "registered"
-          ]
-        },
-        "Register.registered": {
-          "assign": {},
-          "calls": [],
-          "command": "Register",
-          "guard": [
-            "cond",
-            "registered",
-            {
-              "member": [
-                "var",
-                "member"
-              ]
-            }
-          ],
-          "output": [
-            "lit",
-            "already"
-          ]
+          "guard": true
         }
       },
       "init": {
@@ -260,22 +179,24 @@
   },
   "irVersion": 8,
   "notes": {
-    "members": "会員を登録し、会員か、延長会員かを答える。",
-    "members.conditions.notRegistered": "会員でない",
-    "members.conditions.registered": "すでに会員"
+    "members": "会員を登録し、会員か、延長会員かを答える。"
   },
   "root": "members",
   "sorts": [
     "MemberId"
   ],
   "trace": {
-    "members:会員か、延長会員かを答える": [
-      "IsMember",
-      "IsExtended",
-      "Extend"
+    "members:会員か": [
+      "IsMember"
     ],
     "members:会員を登録し": [
-      "Register"
+      "Register",
+      "members"
+    ],
+    "members:延長会員かを答える": [
+      "IsExtended",
+      "Extend",
+      "extended"
     ]
   }
 }

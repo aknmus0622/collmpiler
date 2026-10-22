@@ -1,5 +1,5 @@
-import { answer, decisions, does, example, expect, external, is, Map, otherwise, service } from "@clp/core/v1";
-import type { Id, Int } from "@clp/core/v1";
+import { answer, decisions, does, example, expect, external, is, Map, otherwise, service } from "@clp/core";
+import type { Id, Int } from "@clp/core";
 
 export type MemberId = Id<"会員番号">;
 export type BookId = Id<"本の番号">;

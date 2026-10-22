@@ -25,12 +25,12 @@
             }
           },
           "requires": [
-            ">=",
+            ">",
             [
               "var",
               "days"
             ],
-            1
+            0
           ]
         },
         "Pay": {
@@ -76,14 +76,17 @@
                     ]
                   ],
                   [
-                    "apply",
+                    "nonNull",
                     [
-                      "state",
-                      "owed"
-                    ],
-                    [
-                      "var",
-                      "member"
+                      "apply",
+                      [
+                        "state",
+                        "owed"
+                      ],
+                      [
+                        "var",
+                        "member"
+                      ]
                     ]
                   ],
                   0
@@ -146,14 +149,17 @@
               ]
             ],
             [
-              "apply",
+              "nonNull",
               [
-                "state",
-                "owed"
-              ],
-              [
-                "var",
-                "member"
+                "apply",
+                [
+                  "state",
+                  "owed"
+                ],
+                [
+                  "var",
+                  "member"
+                ]
               ]
             ],
             0
@@ -207,12 +213,12 @@
         },
         "Return": {
           "events": [
-            "Return.notLent",
-            "Return.otherwise"
+            "Return.otherwise",
+            "Return.case1"
           ],
           "output": {
             "enum": [
-              "not-lent",
+              "not-on-loan",
               "returned"
             ]
           },
@@ -267,57 +273,6 @@
           "params": {
             "member": {
               "atom": "MemberId"
-            }
-          }
-        },
-        "late": {
-          "is": [
-            ">",
-            [
-              "ask",
-              "clock",
-              "Today",
-              {}
-            ],
-            [
-              "apply",
-              [
-                "state",
-                "dueOf"
-              ],
-              [
-                "var",
-                "book"
-              ]
-            ]
-          ],
-          "params": {
-            "book": {
-              "atom": "BookId"
-            }
-          }
-        },
-        "notLent": {
-          "is": [
-            "not",
-            [
-              "in",
-              [
-                "var",
-                "book"
-              ],
-              [
-                "dom",
-                [
-                  "state",
-                  "lentTo"
-                ]
-              ]
-            ]
-          ],
-          "params": {
-            "book": {
-              "atom": "BookId"
             }
           }
         },
@@ -709,26 +664,7 @@
             "unpaid"
           ]
         },
-        "Return.notLent": {
-          "assign": {},
-          "calls": [],
-          "command": "Return",
-          "guard": [
-            "cond",
-            "notLent",
-            {
-              "book": [
-                "var",
-                "book"
-              ]
-            }
-          ],
-          "output": [
-            "lit",
-            "not-lent"
-          ]
-        },
-        "Return.otherwise": {
+        "Return.case1": {
           "assign": {
             "dueOf": [
               "dsub",
@@ -765,6 +701,48 @@
                     {}
                   ],
                   [
+                    "nonNull",
+                    [
+                      "apply",
+                      [
+                        "state",
+                        "dueOf"
+                      ],
+                      [
+                        "var",
+                        "book"
+                      ]
+                    ]
+                  ]
+                ],
+                "member": [
+                  "nonNull",
+                  [
+                    "apply",
+                    [
+                      "state",
+                      "lentTo"
+                    ],
+                    [
+                      "var",
+                      "book"
+                    ]
+                  ]
+                ]
+              },
+              "command": "Charge",
+              "component": "fines",
+              "when": [
+                ">",
+                [
+                  "ask",
+                  "clock",
+                  "Today",
+                  {}
+                ],
+                [
+                  "nonNull",
+                  [
                     "apply",
                     [
                       "state",
@@ -775,50 +753,54 @@
                       "book"
                     ]
                   ]
-                ],
-                "member": [
-                  "apply",
-                  [
-                    "state",
-                    "lentTo"
-                  ],
-                  [
-                    "var",
-                    "book"
-                  ]
                 ]
-              },
-              "command": "Charge",
-              "component": "fines",
-              "when": [
-                "cond",
-                "late",
-                {
-                  "book": [
-                    "var",
-                    "book"
-                  ]
-                }
               ]
             }
           ],
           "command": "Return",
           "guard": [
-            "not",
+            "in",
             [
-              "cond",
-              "notLent",
-              {
-                "book": [
-                  "var",
-                  "book"
-                ]
-              }
+              "var",
+              "book"
+            ],
+            [
+              "dom",
+              [
+                "state",
+                "lentTo"
+              ]
             ]
           ],
           "output": [
             "lit",
             "returned"
+          ]
+        },
+        "Return.otherwise": {
+          "assign": {},
+          "calls": [],
+          "command": "Return",
+          "guard": [
+            "not",
+            [
+              "in",
+              [
+                "var",
+                "book"
+              ],
+              [
+                "dom",
+                [
+                  "state",
+                  "lentTo"
+                ]
+              ]
+            ]
+          ],
+          "output": [
+            "lit",
+            "not-on-loan"
           ]
         }
       },
@@ -844,13 +826,13 @@
                 ]
               ],
               [
-                "b"
+                "book"
               ],
               [
                 "in",
                 [
                   "var",
-                  "b"
+                  "book"
                 ],
                 [
                   "dom",
@@ -901,33 +883,27 @@
       "queries": {
         "LoansOf": {
           "is": [
-            "filter",
+            "dom",
             [
-              "dom",
+              "filter",
               [
                 "state",
                 "lentTo"
-              ]
-            ],
-            [
-              "b"
-            ],
-            [
-              "=",
+              ],
               [
-                "apply",
+                "_",
+                "m"
+              ],
+              [
+                "=",
                 [
-                  "state",
-                  "lentTo"
+                  "var",
+                  "m"
                 ],
                 [
                   "var",
-                  "b"
+                  "member"
                 ]
-              ],
-              [
-                "var",
-                "member"
               ]
             ]
           ],
@@ -971,8 +947,8 @@
       "commands": {
         "Extend": {
           "events": [
-            "Extend.notRegistered",
-            "Extend.otherwise"
+            "Extend.otherwise",
+            "Extend.case1"
           ],
           "output": {
             "enum": [
@@ -988,55 +964,7 @@
         },
         "Register": {
           "events": [
-            "Register.registered",
             "Register.otherwise"
-          ],
-          "output": {
-            "enum": [
-              "already",
-              "registered"
-            ]
-          },
-          "params": {
-            "member": {
-              "atom": "MemberId"
-            }
-          }
-        }
-      },
-      "conditions": {
-        "notRegistered": {
-          "is": [
-            "not",
-            [
-              "in",
-              [
-                "var",
-                "member"
-              ],
-              [
-                "state",
-                "members"
-              ]
-            ]
-          ],
-          "params": {
-            "member": {
-              "atom": "MemberId"
-            }
-          }
-        },
-        "registered": {
-          "is": [
-            "in",
-            [
-              "var",
-              "member"
-            ],
-            [
-              "state",
-              "members"
-            ]
           ],
           "params": {
             "member": {
@@ -1046,26 +974,7 @@
         }
       },
       "events": {
-        "Extend.notRegistered": {
-          "assign": {},
-          "calls": [],
-          "command": "Extend",
-          "guard": [
-            "cond",
-            "notRegistered",
-            {
-              "member": [
-                "var",
-                "member"
-              ]
-            }
-          ],
-          "output": [
-            "lit",
-            "not-member"
-          ]
-        },
-        "Extend.otherwise": {
+        "Extend.case1": {
           "assign": {
             "extended": [
               "add",
@@ -1082,21 +991,42 @@
           "calls": [],
           "command": "Extend",
           "guard": [
-            "not",
+            "in",
             [
-              "cond",
-              "notRegistered",
-              {
-                "member": [
-                  "var",
-                  "member"
-                ]
-              }
+              "var",
+              "member"
+            ],
+            [
+              "state",
+              "members"
             ]
           ],
           "output": [
             "lit",
             "extended"
+          ]
+        },
+        "Extend.otherwise": {
+          "assign": {},
+          "calls": [],
+          "command": "Extend",
+          "guard": [
+            "not",
+            [
+              "in",
+              [
+                "var",
+                "member"
+              ],
+              [
+                "state",
+                "members"
+              ]
+            ]
+          ],
+          "output": [
+            "lit",
+            "not-member"
           ]
         },
         "Register.otherwise": {
@@ -1115,42 +1045,7 @@
           },
           "calls": [],
           "command": "Register",
-          "guard": [
-            "not",
-            [
-              "cond",
-              "registered",
-              {
-                "member": [
-                  "var",
-                  "member"
-                ]
-              }
-            ]
-          ],
-          "output": [
-            "lit",
-            "registered"
-          ]
-        },
-        "Register.registered": {
-          "assign": {},
-          "calls": [],
-          "command": "Register",
-          "guard": [
-            "cond",
-            "registered",
-            {
-              "member": [
-                "var",
-                "member"
-              ]
-            }
-          ],
-          "output": [
-            "lit",
-            "already"
-          ]
+          "guard": true
         }
       },
       "init": {
@@ -1266,8 +1161,6 @@
     "library": "図書館。本を貸し、返してもらい、延滞料を取る。",
     "library.commands.Return": "本を返してもらう。期限を過ぎていれば、過ぎた日数を延滞料に付ける。",
     "library.conditions.atLimit": "上限まで借りている",
-    "library.conditions.late": "期限を過ぎている",
-    "library.conditions.notLent": "その本は貸していない",
     "library.conditions.notMember": "会員でない",
     "library.conditions.onLoan": "その本は貸出中",
     "library.conditions.unpaid": "未払いの延滞料がある",
@@ -1279,9 +1172,7 @@
     "library.rules.dueForEveryLoan": "貸出中の本には、必ず期限がある",
     "library.rules.returnedNotLent": "返された本は、次の時点で貸出中でない",
     "library.state.dueOf": "貸している本ごとの、返す期限",
-    "members": "会員を登録し、会員か、延長会員かを答える。",
-    "members.conditions.notRegistered": "会員でない",
-    "members.conditions.registered": "すでに会員"
+    "members": "会員を登録し、会員か、延長会員かを答える。"
   },
   "root": "library",
   "sorts": [
@@ -1290,24 +1181,30 @@
   ],
   "trace": {
     "fines:延滞料": [
-      "Fines"
+      "owed",
+      "Owed"
     ],
     "fines:払えば 0 になる": [
       "Pay"
     ],
     "fines:期限を過ぎて返した日数 × 10 円を、会員ごとに足していく": [
-      "Charge"
+      "Charge",
+      "owed"
     ],
     "library.does.rememberDue": [
       "Library.commands.Borrow"
     ],
-    "members:会員か、延長会員かを答える": [
-      "IsMember",
-      "IsExtended",
-      "Extend"
+    "members:会員か": [
+      "IsMember"
     ],
     "members:会員を登録し": [
-      "Register"
+      "Register",
+      "members"
+    ],
+    "members:延長会員かを答える": [
+      "IsExtended",
+      "Extend",
+      "extended"
     ]
   }
 }
