@@ -454,8 +454,12 @@ export type TrialOptions = { adapter?: Adapter8; coverage?: Record<string, numbe
 export async function trial(ir: Ir8, raw: RawStep[], options: TrialOptions = {}): Promise<{ steps: Step8[]; expected: Observed8; actual: Observed8 | { error: string } } | undefined> {
   const adapter = options.adapter;
   const sim = new Simulation(ir, options.coverage);
-  let current: { answers: Answers } | undefined;
+  let current: { answers: Answers; asked: Record<string, unknown> } | undefined;
   let recorded: { port: string; args: unknown }[] = [];
+  // a query with a parameter asked about something the specification does not ask about in this step (while it asks the
+  // same query about something else): the implementation asked about the wrong thing. Fails even if production code
+  // swallows the exception
+  let wrongAsk: string | undefined;
   const outside = Object.entries(ir.components).filter(([, c]) => c.external);
   const ports: Record<string, unknown> = Object.fromEntries(
     outside.map(([id, c]) => [
@@ -467,6 +471,13 @@ export async function trial(ir: Ir8, raw: RawStep[], options: TrialOptions = {})
             (input?: Record<string, unknown>) => {
               if (!current) throw new Error(`ports.${id}.${name}() was called outside a command; ask while executing one`);
               const args = Object.fromEntries(Object.keys(port.params).map((p) => [p, fromPlain(input?.[p], port.params[p])]));
+              if (Object.keys(port.params).length > 0) {
+                const key = `${id}.${name}(${keyOf(args)})`;
+                const specKeys = Object.keys(current.asked).filter((k) => k.startsWith(`${id}.${name}(`));
+                if (specKeys.length > 0 && !specKeys.includes(key) && wrongAsk === undefined) {
+                  wrongAsk = `ports.${id}.${name} was asked about ${JSON.stringify(plain(args))}, but in this step the specification asks it about ${specKeys.map((k) => k.slice(id.length + name.length + 1)).join(", ")}`;
+                }
+              }
               const value = current.answers(id, name, args);
               if (value === FAILED) throw new Error(`ports.${id}.${name}: the dependency is unavailable`);
               return structuredClone(plain(value));
@@ -504,12 +515,14 @@ export async function trial(ir: Ir8, raw: RawStep[], options: TrialOptions = {})
         expected = planned.expected;
         if (!adapter) continue;
         const { entry, step } = planned;
-        current = { answers: planned.answers };
+        current = { answers: planned.answers, asked: planned.step.answers };
         recorded = [];
+        wrongAsk = undefined;
         const command = { name: step.name, input: structuredClone(step.input) };
         const returned = entry.kind === "command" ? await adapter.executeCommand(command) : await adapter.executeQuery!(command);
         current = undefined;
         const actual: Observed8 = { state: null, effects: recorded, ...(entry.output !== undefined ? { output: normalized(returned, entry.output) } : {}) };
+        if (wrongAsk !== undefined) return { steps: sim.steps, expected, actual: { error: wrongAsk } };
         const answers = entry.output !== undefined;
         if (!decided("observation-compare", { expected, actual, answers }, observationsEqualStage0(expected, actual, answers))) return { steps: sim.steps, expected, actual };
       }
