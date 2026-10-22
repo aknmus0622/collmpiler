@@ -225,6 +225,8 @@ export function evaluate(e: Expr | unknown, env: Env): unknown {
       if (parts.every((p) => Array.isArray(p))) return (parts as unknown[][]).flat();
       return fail(`concat: 文字列どうしか並びどうしを、つなぎます`);
     }
+    case "join":
+      return (ev(a[0]) as string[]).join(str(a[1]));
     case "str":
       return String(ev(a[0]));
     case "strlen":

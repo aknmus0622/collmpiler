@@ -45,6 +45,7 @@ export const OPS: Op[] = [
   { name: "nonNull", meaning: "the value, which is never null here (TypeScript's `x!`)", ja: ([a], r) => `${r(a)}（null ではない）`, en: ([a], r) => `${r(a)}!` },
   { name: "??", meaning: "the first value, or the second when the first is null", ja: ([a, b], r) => `${r(a)}（無ければ ${r(b)}）`, en: ([a, b], r) => `${r(a)} ?? ${r(b)}` },
   { name: "concat", meaning: "strings joined, or lists joined, in order", ja: (a, r) => a.map((x) => r(x)).join(" ++ "), en: (a, r) => a.map((x) => r(x)).join(" ++ ") },
+  { name: "join", meaning: '`["join", list, sep]`: the strings of the list, in order, with sep between them (Array.prototype.join)', ja: ([l, s], r) => `${r(l)} を ${r(s)} でつないだもの`, en: ([l, s], r) => `join(${r(l)}, ${r(s)})` },
   { name: "str", meaning: "an integer written as a decimal string", ja: ([a], r) => `${r(a)} を文字列にしたもの`, en: ([a], r) => `String(${r(a)})` },
   { name: "strlen", meaning: "the number of characters (Unicode code points, `[...s].length`)", ja: ([a], r) => `${r(a)} の文字数`, en: ([a], r) => `length(${r(a)})` },
   { name: "trim", meaning: "the string without leading and trailing whitespace (String.prototype.trim)", ja: ([a], r) => `${r(a)} の前後の空白を除いたもの`, en: ([a], r) => `trim(${r(a)})` },

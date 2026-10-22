@@ -163,6 +163,8 @@ function typeSource(node: import("./syntax.ts").TypeNode, module: Unit["module"]
 }
 
 /** The draft to start from: what each unit left as prose, as TODO comments under the heading it belongs to. */
+const pascal = (id: string) => id.split("-").map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join("");
+
 function skeleton(target: Target, specsDir: string, pinned?: Map<string, Ir8>): string {
   const imports = new Map<string, Set<string>>();
   const use = (file: string, name: string) => imports.set(file, new Set([...(imports.get(file) ?? []), name]));
@@ -208,9 +210,27 @@ function skeleton(target: Target, specsDir: string, pinned?: Map<string, Ir8>): 
       .join("\n");
     blocks.push(`export const ${unit.exportName}Interpretation = interpretation(${unit.exportName}, {\n${body}\n});`);
   }
+  // the outside world the first session declared (part of the fixed boundary): given as it is
+  const declared = new Set(readProgram(specsDir).units.map((u) => u.id));
+  const outside: string[] = [];
+  for (const ir of pinned?.values() ?? []) {
+    for (const [id, c] of Object.entries(ir.components)) {
+      if (!c.external || declared.has(id) || outside.some((text) => text.includes(`export const ${pascal(id)} =`))) continue;
+      const params = (ps: Record<string, Type>) => Object.entries(ps).map(([p, t]) => `${p}: ${typeText(t)}`).join(", ");
+      const promise = (port: { promise?: string; mayFail?: true }) => {
+        const parts = [...(port.promise ? [`${port.promise}: true`] : []), ...(port.mayFail ? ["mayFail: true"] : [])];
+        return parts.length ? `{ ${parts.join(", ")} }` : "";
+      };
+      const queries = Object.entries(c.external.queries).map(([name, port]) => `    ${name}: (${params(port.params)}): ${typeText(port.result)} => answer(${promise(port)}),`);
+      const commands = Object.entries(c.external.commands).map(([name, port]) => `    ${name}(${params(port.params)}) {},`);
+      outside.push(
+        `export const ${pascal(id)} = external(${JSON.stringify(ir.notes?.[id] ?? id)}, {\n${queries.length ? `  queries: {\n${queries.join("\n")}\n  },\n` : ""}${commands.length ? `  commands: {\n${commands.join("\n")}\n  },\n` : ""}});`,
+      );
+    }
+  }
   const importLines = [...imports].map(([file, names]) => `import { ${[...names].sort().join(", ")} } from "./${rel(dirname(target.final), file)}";`);
-  void specsDir;
-  return `import { after, always, does, init, interpretation, is, List, Map, requires, Set, value } from "@clp/core/v1";
+  if (outside.length) blocks.unshift(`// The outside world, as the first interpretation declared it (fixed: keep it as it is)\n${outside.join("\n\n")}`);
+  return `import { after, always, answer, does, external, init, interpretation, is, List, Map, requires, Set, value } from "@clp/core/v1";
 import type { Id, Int, Json, SpecMap, SpecSet } from "@clp/core/v1";
 ${importLines.join("\n")}
 
@@ -312,7 +332,7 @@ Bodies are read as expressions, so only this subset is allowed (anything else is
 (\`===\`, \`!==\`, \`<\` …), \`+ - * %\`, \`Math.floor(a / b)\` (integer division), \`Math.min/max/abs\`, \`&& || !\`, \`??\`,
 \`c ? a : b\`, template strings, \`[...list, item]\`, \`{ ...record, field: value }\`, and on values: Map \`has get set
 delete keys values size some every count filter sum\`, Set \`has add delete size some every count filter map sum\`,
-list (an array) \`length includes some every filter map find\` and \`[...a, ...b]\` (count with \`filter(…).length\`), string \`length trim toLowerCase toUpperCase startsWith
+list (an array) \`length includes some every filter map find join\` and \`[...a, ...b]\` (count with \`filter(…).length\`), string \`length trim toLowerCase toUpperCase startsWith
 endsWith includes\`. A string's \`length\` counts characters (Unicode code points, as \`[...s].length\`), not UTF-16 units;
 \`trim()\` removes what JavaScript's \`trim\` removes. State is \`this.field\`; writes are \`this.f = v\`, \`this.f += v\`, \`this.m.set(k, v)\`,
 \`this.m.delete(k)\`, \`this.s.add(x)\`, \`this.s.delete(x)\`.

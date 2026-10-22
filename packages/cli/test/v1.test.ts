@@ -214,3 +214,12 @@ test("PBT: 範囲外 (requires) のコマンドを引いた手は、実行でき
   assert.equal(checked.ok, true);
   assert.ok(checked.ok && (checked.coverage.events["p.Back.otherwise"] ?? 0) > 0);
 });
+
+test("並びの文字列は join でつなぐ（いくつあっても）", async () => {
+  const { ir, problems } = compile(specs({ "j.component.ts": `import { service } from "@clp/core/v1";
+export const J = service("J", { queries: { Joined(parts: string[]): string { return parts.join(" | "); } } });
+` }), "j");
+  assert.deepEqual(problems.filter((p) => p.severity === "error").map(problemText), []);
+  assert.deepEqual(ir!.components.j.queries!.Joined.is, ["join", ["var", "parts"], ["lit", " | "]]);
+  assert.ok((await selfCheck8(ir!, { seed: 1 })).ok);
+});

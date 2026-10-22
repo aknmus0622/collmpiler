@@ -170,8 +170,9 @@ export const VARIANTS: Record<string, Variant[]> = {
         name: fc.constantFrom("MemberId", "BookId"),
         inner: fc.constantFrom("number", "string", "A | B", "{ a: number }"),
         key: fc.constantFrom("string", "MemberId"),
-        entries: fc.array(fc.record({ name: fc.constantFrom("a", "b-c", "id"), text: fc.constantFrom("number", "string | null"), plain: bool }), { maxLength: 3 }),
-        members: fc.array(fc.constantFrom('"a"', '"b"', "1"), { maxLength: 3 }),
+        // up to 12: a record or an enumeration of any size is written whole
+        entries: fc.array(fc.record({ name: fc.constantFrom("a", "b-c", "id"), text: fc.constantFrom("number", "string | null"), plain: bool }), { maxLength: 12 }),
+        members: fc.array(fc.constantFrom('"a"', '"b"', "1"), { maxLength: 12 }),
       }),
       (f) => ({ question: f, stage0: typeText8Stage0(f), ask: query("TypeText", f) }),
     ),

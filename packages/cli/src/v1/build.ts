@@ -1642,6 +1642,9 @@ export class Builder {
             return { e: ["concat", object.e, other.e], t };
           }
           break;
+        case "join":
+          if (isList(t) && baseOf(element) === "string") return { e: ["join", object.e, this.expect(this.tx(expr.args[0], cx), "string", cx, "join").e], t: "string" };
+          break;
       }
       if (name === "push" || name === "add" || name === "delete" || name === "set") return this.fail("syntax", cx.where, `${name}(…) は this.状態 にだけ書けます`, expr.at);
     }

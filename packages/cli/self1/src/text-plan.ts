@@ -195,7 +195,7 @@ export function typeText(parts: TypeParts): string {
       return "Json";
     case "enum":
       if (parts.members.length === 0) return "never";
-      return parts.members.slice(0, MAX_WRITTEN).join(" | ");
+      return parts.members.join(" | ");
     case "atom":
       return parts.name;
     case "optional":
@@ -204,20 +204,24 @@ export function typeText(parts: TypeParts): string {
     case "set":
       return elementText(parts.inner) + "[]";
     case "map":
-      return "{ key: " + parts.key + "; value: " + parts.inner + " }[]";
+      return OBJECT_OPEN + " key: " + parts.key + "; value: " + parts.inner + " " + OBJECT_CLOSE + "[]";
     case "record":
       if (parts.entries.length === 0) return "Record<string, never>";
-      return "{ " + parts.entries.slice(0, MAX_WRITTEN).map(fieldText).join("; ") + " }";
+      return OBJECT_OPEN + " " + parts.entries.map(fieldText).join("; ") + " " + OBJECT_CLOSE;
   }
 }
 
-/** How many members of an enumeration, or fields of a record, are written at most. */
-const MAX_WRITTEN = 8;
+/** How an object-literal type (a map entry or a record) opens and closes. */
+const OBJECT_OPEN = "{";
+const OBJECT_CLOSE = "}";
 
-/** The element type of a list or set, parenthesized when `[]` would bind to only part of it. */
+/**
+ * The element type of a list or set, parenthesized when `[]` would bind to
+ * only part of it. An object-literal type is already delimited by its braces.
+ */
 function elementText(inner: string): string {
   const compound = inner.includes("|") || inner.includes("&");
-  return compound && !inner.startsWith("{") ? "(" + inner + ")" : inner;
+  return compound && !inner.startsWith(OBJECT_OPEN) ? "(" + inner + ")" : inner;
 }
 
 /** One field of a record as `name: text`, quoting a name that is not plain. */
