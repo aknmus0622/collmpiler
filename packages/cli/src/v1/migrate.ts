@@ -143,18 +143,16 @@ export async function migrateComponent(dir: string, name: string): Promise<{ fil
       }
       const promise = [...(shape.promise ? [`${shape.promise}: true`] : []), ...(shape.mayFail ? ["mayFail: true"] : [])];
       const comment = shape.description ? `/** ${shape.description} */ ` : "";
-      queries.push(`${comment}${q}: (${Object.entries(shape.input ?? {}).map(([k, t]) => `${k}: ${typeText(t)}`).join(", ")}): ${typeText(shape.output)} => answer(${promise.length ? `{ ${promise.join(", ")} }` : ""}),`);
+      queries.push(`${comment.replace(/ $/, "\n    ")}${q}: (${Object.entries(shape.input ?? {}).map(([k, t]) => `${k}: ${typeText(t)}`).join(", ")}): ${typeText(shape.output)} => answer(${promise.length ? `{ ${promise.join(", ")} }` : ""}),`);
     }
   const es = layer1.effects;
   if (es && "$description" in es) notes.push(`What it does to the world around it: ${(es as { $description: string }).$description}`);
   else
     for (const [e, entry] of Object.entries((es ?? {}) as Record<string, { $description?: string; $fragment?: { input?: Record<string, FieldSchema>; description?: string } }>)) {
       const shape = entry.$fragment;
-      if (!shape?.input && entry.$description) {
-        notes.push(`It tells the world ${e}: ${entry.$description}`);
-        continue;
-      }
-      const comment = shape?.description ? `/** ${shape.description} */ ` : "";
+      // an effect given only as a sentence: a command that carries nothing (correct it by hand if it should carry something)
+      const text = shape?.description ?? entry.$description;
+      const comment = text ? `/** ${text} */\n    ` : "";
       effects.push(`${comment}${e}(${Object.entries(shape?.input ?? {}).map(([k, t]) => `${k}: ${typeText(t)}`).join(", ")}) {},`);
     }
 
@@ -193,12 +191,21 @@ export async function migrateComponent(dir: string, name: string): Promise<{ fil
         ...(shape.onlyIf ?? []).map(condition),
       ];
       if (requires.length) body.push(`requires(${requires.map((r) => (requires.length > 1 && r.includes("||") ? `(${r})` : r)).join(" && ")});`);
-      for (const [answer, asked] of Object.entries(shape.asks ?? {})) {
-        for (const [query, { input }] of Object.entries(asked)) body.push(`const ${answer} = ${env}.${query}(${Object.values(input).map((v) => value(v, inputs)).join(", ")});`);
+      for (const [answer, asked] of Object.entries((shape.asks ?? {}) as Record<string, unknown>)) {
+        const one = asked as { query?: string; input?: Record<string, unknown> };
+        const pairs: [string, Record<string, unknown>][] = one.query !== undefined ? [[one.query, one.input ?? {}]] : Object.entries(asked as Record<string, Record<string, unknown>>).map(([q, x]) => [q, (x as { input?: Record<string, unknown> }).input ?? x]);
+        for (const [query, input] of pairs) body.push(`const ${answer} = ${env}.${query}(${Object.values(input).map((v) => value(v, inputs)).join(", ")});`);
       }
       for (const [answer, call] of Object.entries(shape.calls ?? {})) body.push(`const ${answer} = ${call.part}.${call.command}(${Object.values(call.input).map((v) => value(v, inputs)).join(", ")});`);
       const answers = shape.output !== undefined;
-      const fragment = (base: string) => keyOf(`${command} ${base}`, taken);
+      // a command's prose fragments are named after it: placeOrder, placeOrder2, …
+      const lower = command.charAt(0).toLowerCase() + command.slice(1);
+      const fragment = (_text: string) => {
+        let key = lower;
+        for (let n = 2; taken.has(key); n++) key = `${lower}${n}`;
+        taken.add(key);
+        return key;
+      };
       const outcome = (o: { goTo?: unknown; does?: string; responds?: unknown; nothing?: true }, indent: string, last: boolean): string[] => {
         const lines: string[] = [];
         if (typeof o.goTo === "string") lines.push(`this.status = ${quote(o.goTo)};`);
@@ -268,5 +275,13 @@ ${headings.join("\n")}
 
 export async function migrate(dir: string): Promise<{ file: string; source: string }[]> {
   const root = resolve(process.cwd(), dir);
-  return Promise.all((await listComponents(root)).map((name) => migrateComponent(root, name)));
+  const done: { file: string; source: string }[] = [];
+  for (const name of await listComponents(root)) {
+    try {
+      done.push(await migrateComponent(root, name));
+    } catch (error) {
+      console.error(`${name}: 移せませんでした: ${error instanceof Error ? error.stack : String(error)}`);
+    }
+  }
+  return done;
 }

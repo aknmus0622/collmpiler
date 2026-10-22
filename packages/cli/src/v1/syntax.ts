@@ -4,6 +4,10 @@
 //
 // The type checker (tsc) still checks the same files for completion and light errors; this parser only reads them.
 
+import { subsetStage0 } from "./subset.ts";
+import type { Refusal } from "./subset.ts";
+import { decided } from "./decide.ts";
+
 export type Pos = { file: string; line: number; col: number };
 
 export type TypeNode =
@@ -36,6 +40,7 @@ export type Expr =
   | { k: "bin"; op: BinOp; left: Expr; right: Expr; at: Pos }
   | { k: "cond"; test: Expr; then: Expr; else: Expr; at: Pos }
   | { k: "as"; expr: Expr; type: TypeNode | "const"; at: Pos }
+  | { k: "nonNull"; expr: Expr; at: Pos }
   | { k: "assign"; op: "=" | "+=" | "-="; target: Expr; value: Expr; at: Pos };
 
 export type BinOp = "+" | "-" | "*" | "/" | "%" | "<" | "<=" | ">" | ">=" | "===" | "!==" | "==" | "!=" | "&&" | "||" | "??";
@@ -253,28 +258,26 @@ function tokenize(src: string, file: string, comments: { line: number; text: str
 
 const KEYWORD_TYPES = new Set(["string", "number", "boolean", "void", "unknown", "any", "undefined", "never", "null"]);
 // Statements and expressions that read as code but are outside the subset (DSL.md §17.5)
-const NOT_IN_SUBSET: Record<string, string> = {
-  for: "ループは書けません。some / every / count / filter / map を使ってください",
-  while: "ループは書けません。some / every / count / filter / map を使ってください",
-  do: "ループは書けません。some / every / count / filter / map を使ってください",
-  let: "let は書けません。値は const で一度だけ名前を付けます",
-  var: "var は書けません。値は const で一度だけ名前を付けます",
-  try: "例外は書けません。断ることは、答えの1つとして return します",
-  throw: "例外は書けません。断ることは、答えの1つとして return します",
+const MESSAGES: Record<Exclude<Refusal, "allowed">, string> = {
+  loop: "ループは書けません。some / every / count / filter / map を使ってください",
+  let: "let / var は書けません。値は const で一度だけ名前を付けます",
+  exception: "例外は書けません。断ることは、答えの1つとして return します",
   switch: "switch は書けません。if を上から順に書きます",
   function: "関数の宣言は書けません。名前を付けた条件・計算 (condition / calc) を使ってください",
   class: "class は書けません",
-  await: "非同期は書けません",
   async: "非同期は書けません",
-  yield: "ジェネレーターは書けません",
+  generator: "ジェネレーターは書けません",
   new: "new は書けません",
   delete: "delete 演算子は書けません。Map / Set の delete(…) を使ってください",
   typeof: "typeof は書けません",
-  instanceof: "instanceof は書けません",
-  in: "in 演算子は書けません。has(…) を使ってください",
-  break: "break は書けません",
-  continue: "continue は書けません",
+  in: "in / instanceof は書けません。has(…) を使ってください",
+  jump: "break / continue は書けません",
 };
+/** Why a word cannot be written, or undefined when it can (syntax-check decides). */
+function refused(word: string): string | undefined {
+  const decision = decided("syntax-check", { word }, subsetStage0(word));
+  return decision === "allowed" ? undefined : MESSAGES[decision];
+}
 
 class Parser {
   private toks: Tok[];
@@ -372,7 +375,7 @@ class Parser {
         continue;
       }
       if (this.is("interface")) this.fail("interface は書けません。type で書いてください");
-      const word = this.tok.t === "id" ? NOT_IN_SUBSET[this.tok.v] : undefined;
+      const word = this.tok.t === "id" ? refused(this.tok.v) : undefined;
       this.fail(word ?? "ファイルの最上位に書けるのは、import と、const と type の宣言だけです");
     }
     return { file: this.file, imports, decls, comments };
@@ -526,7 +529,8 @@ class Parser {
     if (this.is("{")) return this.block();
     if (this.eat(";")) return { k: "block", body: [], at };
     if (t.t === "id") {
-      if (t.v in NOT_IN_SUBSET && !(t.v === "delete" && this.peek().t === "p")) this.fail(NOT_IN_SUBSET[t.v]);
+      const refusal = t.v === "delete" && this.peek().t === "p" ? undefined : refused(t.v);
+      if (refusal) this.fail(refusal);
       if (t.v === "const") {
         this.i++;
         if (this.is("{") || this.is("[")) this.fail("分割代入は書けません。const で1つずつ名前を付けます");
@@ -606,7 +610,7 @@ class Parser {
         else left = { k: "as", expr: left, type: this.type(), at: t.at };
         continue;
       }
-      if (t.t === "id" && (t.v === "in" || t.v === "instanceof")) this.fail(NOT_IN_SUBSET[t.v]);
+      if (t.t === "id" && (t.v === "in" || t.v === "instanceof")) this.fail(refused(t.v) ?? `${t.v} は書けません`);
       if (t.t !== "p") return left;
       if (t.v === "**") this.fail("** は書けません");
       if (t.v === "|" || t.v === "&" || t.v === "^" || t.v === "~") this.fail("ビット演算は書けません");
@@ -624,7 +628,7 @@ class Parser {
     if (this.eat("+")) return { k: "unary", op: "+", expr: this.unary(), at };
     if (this.is("++") || this.is("--")) this.fail("++ / -- は書けません");
     if (this.tok.t === "id" && (this.tok.v === "typeof" || this.tok.v === "await" || this.tok.v === "new" || this.tok.v === "void" || this.tok.v === "delete")) {
-      this.fail(NOT_IN_SUBSET[this.tok.v] ?? `${this.tok.v} は書けません`);
+      this.fail(refused(this.tok.v) ?? `${this.tok.v} は書けません`);
     }
     return this.postfix(this.primary());
   }
@@ -647,8 +651,9 @@ class Parser {
         continue;
       }
       if (this.is("!") && !this.tok.nl && !(this.peek().t === "p" && (this.peek() as { v: string }).v === "=")) {
-        // a non-null assertion: only for the type checker
+        // a non-null assertion: the value is never null here (if it is, the spec is wrong)
         this.i++;
+        expr = { k: "nonNull", expr, at };
         continue;
       }
       if (this.is("<")) {
@@ -747,7 +752,8 @@ class Parser {
         return { k: "this", at };
       }
       if (t.v === "function") this.fail("function は書けません。アロー関数 (x) => … を使ってください");
-      if (t.v in NOT_IN_SUBSET && t.v !== "delete") this.fail(NOT_IN_SUBSET[t.v]);
+      const refusal = t.v === "delete" ? undefined : refused(t.v);
+      if (refusal) this.fail(refusal);
       // a single-parameter arrow function: x => …
       if (this.peek().t === "p" && (this.peek() as { v: string }).v === "=>") {
         this.i++;

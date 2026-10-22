@@ -1,0 +1,197 @@
+{
+  "components": {
+    "fines": {
+      "commands": {
+        "Charge": {
+          "events": [
+            "Charge.otherwise"
+          ],
+          "params": {
+            "days": "int",
+            "member": {
+              "atom": "MemberId"
+            }
+          },
+          "requires": [
+            ">=",
+            [
+              "var",
+              "days"
+            ],
+            1
+          ]
+        },
+        "Pay": {
+          "events": [
+            "Pay.otherwise"
+          ],
+          "params": {
+            "member": {
+              "atom": "MemberId"
+            }
+          }
+        }
+      },
+      "events": {
+        "Charge.otherwise": {
+          "assign": {
+            "owed": [
+              "override",
+              [
+                "state",
+                "owed"
+              ],
+              [
+                "var",
+                "member"
+              ],
+              [
+                "+",
+                [
+                  "ite",
+                  [
+                    "in",
+                    [
+                      "var",
+                      "member"
+                    ],
+                    [
+                      "dom",
+                      [
+                        "state",
+                        "owed"
+                      ]
+                    ]
+                  ],
+                  [
+                    "apply",
+                    [
+                      "state",
+                      "owed"
+                    ],
+                    [
+                      "var",
+                      "member"
+                    ]
+                  ],
+                  0
+                ],
+                [
+                  "*",
+                  [
+                    "var",
+                    "days"
+                  ],
+                  10
+                ]
+              ]
+            ]
+          },
+          "calls": [],
+          "command": "Charge",
+          "guard": true
+        },
+        "Pay.otherwise": {
+          "assign": {
+            "owed": [
+              "dsub",
+              [
+                "state",
+                "owed"
+              ],
+              [
+                "var",
+                "member"
+              ]
+            ]
+          },
+          "calls": [],
+          "command": "Pay",
+          "guard": true
+        }
+      },
+      "init": {
+        "owed": [
+          "emptyMap"
+        ]
+      },
+      "queries": {
+        "Owed": {
+          "is": [
+            "ite",
+            [
+              "in",
+              [
+                "var",
+                "member"
+              ],
+              [
+                "dom",
+                [
+                  "state",
+                  "owed"
+                ]
+              ]
+            ],
+            [
+              "apply",
+              [
+                "state",
+                "owed"
+              ],
+              [
+                "var",
+                "member"
+              ]
+            ],
+            0
+          ],
+          "params": {
+            "member": {
+              "atom": "MemberId"
+            }
+          },
+          "result": "int"
+        }
+      },
+      "state": {
+        "owed": {
+          "map": [
+            {
+              "atom": "MemberId"
+            },
+            "int"
+          ]
+        }
+      }
+    }
+  },
+  "entries": {
+    "commands": [
+      "fines.Charge",
+      "fines.Pay"
+    ],
+    "queries": [
+      "fines.Owed"
+    ]
+  },
+  "irVersion": 8,
+  "notes": {
+    "fines": "延滞料。期限を過ぎて返した日数 × 10 円を、会員ごとに足していく。払えば 0 になる。"
+  },
+  "root": "fines",
+  "sorts": [
+    "MemberId"
+  ],
+  "trace": {
+    "fines:延滞料": [
+      "Fines"
+    ],
+    "fines:払えば 0 になる": [
+      "Pay"
+    ],
+    "fines:期限を過ぎて返した日数 × 10 円を、会員ごとに足していく": [
+      "Charge"
+    ]
+  }
+}

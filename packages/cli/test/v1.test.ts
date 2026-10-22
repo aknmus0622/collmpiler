@@ -48,7 +48,7 @@ export const Counter = service("数を数える。上限は 3。", {
 test("構文: 部分集合の外は、場所つきの誤りになる", () => {
   for (const [source, message] of [
     ["const x = () => { for (;;) {} };", /ループは書けません/],
-    ["const x = () => { let a = 1; };", /let は書けません/],
+    ["const x = () => { let a = 1; };", /let \/ var は書けません/],
     ["const x = () => { throw 1; };", /例外は書けません/],
     ["const x = /a/;", /正規表現は書けません/],
   ] as const) {

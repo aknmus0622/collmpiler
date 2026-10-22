@@ -210,6 +210,11 @@ export function evaluate(e: Expr | unknown, env: Env): unknown {
       return Math.max(int(a[0]), int(a[1]));
     case "abs":
       return Math.abs(int(a[0]));
+    case "nonNull": {
+      const v = ev(a[0]);
+      if (v === null) fail(`! と書いた値が null です`);
+      return v;
+    }
     case "??": {
       const v = ev(a[0]);
       return v === null ? evaluate(a[1], env) : v;

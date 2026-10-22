@@ -2,7 +2,8 @@
 // against the adapter and print the result on one line.
 
 import { parseArgs } from "node:util";
-import { compile } from "./load.ts";
+import { compileChecked } from "./load.ts";
+import { deciders8 } from "./stage1.ts";
 import { check8, entriesOf } from "./pbt.ts";
 import type { Adapter8, PbtResult8 } from "./pbt.ts";
 import { specHash8 } from "./generate.ts";
@@ -28,7 +29,7 @@ export async function runPbt(options: { specs: string; adapter: Adapter8; compon
     options: { seed: { type: "string" }, path: { type: "string" }, runs: { type: "string" }, drafts: { type: "boolean", default: false } },
   });
   let result: PbtResult8;
-  const { ir, problems } = compile(options.specs, options.component, { drafts: values.drafts });
+  const { ir, problems } = await compileChecked(options.specs, options.component, { drafts: values.drafts });
   const errors = problems.filter((p) => p.severity === "error");
   if (!ir || errors.length > 0) result = { status: "error", message: `仕様に誤りがあります: ${errors.map((p) => `${p.where} ${p.message}`).join(" / ")}` };
   else {
@@ -37,7 +38,7 @@ export async function runPbt(options: { specs: string; adapter: Adapter8; compon
       ...(values.path ? { path: values.path } : {}),
       numRuns: values.runs === undefined ? defaultRuns8(ir) : Number(values.runs),
       traces: tracesFor(ir),
-    });
+    }, await deciders8());
   }
   console.log(RESULT_PREFIX + JSON.stringify(result));
   if (result.status !== "pass") process.exitCode = 1;

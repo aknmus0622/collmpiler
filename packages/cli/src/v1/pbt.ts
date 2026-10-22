@@ -532,12 +532,14 @@ export function coverageOf(ir: Ir8, counts: Record<string, number>): Coverage {
 }
 
 /** The spec run alone (DSL.md §17.13 ①, the part without Alloy): no case missing, no two at once, no missing key, properties hold. */
-export async function selfCheck8(ir: Ir8, params: { seed: number; numRuns?: number }): Promise<{ ok: true; coverage: Coverage } | { ok: false; message: string; steps: Step8[] }> {
+export async function selfCheck8(ir: Ir8, params: { seed: number; numRuns?: number }, deciders?: Deciders8): Promise<{ ok: true; coverage: Coverage } | { ok: false; message: string; steps: Step8[] }> {
   const coverage: Record<string, number> = {};
+  const cache = new Map<string, unknown>();
   try {
     await fc.assert(
       fc.asyncProperty(sequences(ir), async (raw) => {
-        await trial(ir, raw, { coverage });
+        const { asked } = await recordingAsync(() => trial(ir, raw, { coverage }));
+        await agree(asked, deciders, cache);
       }),
       { seed: params.seed, numRuns: params.numRuns ?? 300 },
     );
@@ -545,6 +547,7 @@ export async function selfCheck8(ir: Ir8, params: { seed: number; numRuns?: numb
   } catch (error) {
     const cause = (error as { cause?: unknown }).cause ?? error;
     if (cause instanceof SpecError) return { ok: false, message: cause.message, steps: (cause as SpecError & { steps?: Step8[] }).steps ?? [] };
+    if (cause instanceof FrameworkError) return { ok: false, message: `フレームワークの誤り: ${cause.message}`, steps: [] };
     const message = messageOf(cause);
     const match = /Got error: (SpecError: .*)/s.exec(error instanceof Error ? error.message : "");
     return { ok: false, message: match ? match[1].split("\n")[0] : message, steps: [] };

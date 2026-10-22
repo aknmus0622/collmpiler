@@ -273,6 +273,8 @@ function term(e: Expr | unknown, cx: Ctx): string {
       return `(${formula(a[0], cx)} => ${t(a[1])} else ${t(a[2])})`;
     case "??":
       return `(some ${t(a[0])} => ${t(a[0])} else ${t(a[1])})`;
+    case "nonNull":
+      return t(a[0]);
     case "emptySet":
     case "emptyMap":
       return "none";

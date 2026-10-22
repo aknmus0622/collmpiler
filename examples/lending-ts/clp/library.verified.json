@@ -1,0 +1,23 @@
+{
+  "roots": [
+    "library.component.ts",
+    "library.interpretation.ts"
+  ],
+  "specs": "sha256:dbbe69c09e4d071f716a48fc9affb357144cbc0210c499e213e6755eb4e14e10",
+  "code": "sha256:0cae8f879dfc53b3fdcb06835a1d6b7caee142c10b64fe432fdd4ef3a6a1b32f",
+  "files": [
+    "../src/fines/fines.ts",
+    "../src/fines/index.ts",
+    "../src/fines/lateFee.ts",
+    "../src/ids.ts",
+    "../src/library/clock.ts",
+    "../src/library/index.ts",
+    "../src/library/library.ts",
+    "../src/library/rules.ts",
+    "../src/members/index.ts",
+    "../src/members/members.ts",
+    "../src/members/outcomes.ts",
+    "library.adapter.ts"
+  ],
+  "gradedBy": "stage1"
+}

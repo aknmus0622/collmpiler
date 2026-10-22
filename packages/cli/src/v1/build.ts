@@ -8,6 +8,12 @@ import type { Entry, Heading, Names, Problem, Program, Unit } from "./read.ts";
 import { Names as NameTable } from "./read.ts";
 import type { Block, Expr as Syn, Module, Param, Pos, Stmt, TypeNode } from "./syntax.ts";
 import { IR8_VERSION } from "./ir.ts";
+import { fillStage0 } from "./fills.ts";
+import { promiseStage0, rowStage0 } from "./declared.ts";
+import { traceStage0 } from "./trace.ts";
+import type { TraceFacts } from "./trace.ts";
+import type { FillDecision } from "./fills.ts";
+import { decided } from "./decide.ts";
 import type { Call, ComponentIr, Event, Expr, Ir8, Params, TraceStep, Type } from "./ir.ts";
 import { baseOf, concrete, fits, isAtom, isEnum, isList, isMap, isOptional, isRecord, isSet, join, nonNull, show } from "./types.ts";
 import type { T } from "./types.ts";
@@ -45,6 +51,10 @@ type PathState = {
   named: string[];
   output?: TE;
   returned: boolean;
+  /** Per expression compared with constants (`r === "created"`): the values ruled out on this path, and how many it can have. */
+  excluded: Map<string, { values: Set<unknown>; of: number }>;
+  /** Every value of some enumeration was ruled out: the path cannot happen. */
+  impossible?: true;
 };
 
 type Cx = {
@@ -57,6 +67,8 @@ type Cx = {
   ps?: PathState;
   where: string;
   hasThis: boolean;
+  /** Expressions known not to be null here (narrowed by `x !== null`, as TypeScript does). */
+  nonNull?: Set<string>;
 };
 
 const clone = (ps: PathState): PathState => ({
@@ -69,8 +81,9 @@ const clone = (ps: PathState): PathState => ({
   requires: [...ps.requires],
   when: [...ps.when],
   named: [...ps.named],
+  excluded: new Map([...ps.excluded].map(([k, v]) => [k, { values: new Set(v.values), of: v.of }])),
 });
-const fresh = (): PathState => ({ guard: [], assign: new Map(), written: new Set(), calls: [], called: new Set(), requires: [], started: false, when: [], named: [], returned: false });
+const fresh = (): PathState => ({ guard: [], assign: new Map(), written: new Set(), calls: [], called: new Set(), requires: [], started: false, when: [], named: [], returned: false, excluded: new Map() });
 
 const containsReturn = (stmt: Stmt | undefined): boolean =>
   stmt === undefined ? false : stmt.k === "return" ? true : stmt.k === "block" ? stmt.body.some(containsReturn) : stmt.k === "if" ? containsReturn(stmt.then) || containsReturn(stmt.else) : false;
@@ -225,9 +238,13 @@ export class Builder {
           else this.fail("syntax", where, "answer の約束は fresh / increasing / mayFail: true です", prop.at);
         }
       }
-      if (promise.fresh && promise.increasing) this.fail("bad-promise", where, "fresh と increasing は同時に約束できません", port.at);
-      if (promise.increasing && baseOf(result) !== "int") this.fail("bad-promise", where, "increasing を約束できるのは整数だけです", port.at);
-      if (port.params.length > 0 && (promise.fresh || promise.increasing)) this.fail("bad-promise", where, "fresh / increasing を約束できるのは、引数の無い問い合わせだけです", port.at);
+      const facts = { fresh: promise.fresh === true, increasing: promise.increasing === true, integer: baseOf(result) === "int", hasParams: port.params.length > 0 };
+      const messages = {
+        "fresh-and-increasing": "fresh と increasing は同時に約束できません",
+        "increasing-not-integer": "increasing を約束できるのは整数だけです",
+        "promise-with-params": "fresh / increasing を約束できるのは、引数の無い問い合わせだけです",
+      } as const;
+      for (const problem of decided("type-check", { promise: facts }, promiseStage0(facts))) this.fail("bad-promise", where, messages[problem], port.at);
       queries[name] = {
         params: this.paramsOf(port.params, unit.module, where),
         result: concrete(result),
@@ -288,8 +305,10 @@ export class Builder {
       for (const embedded of unit.description.embedded) {
         if (embedded.k !== "id") continue;
         const used = this.unitOf(unit.module, embedded.name);
-        if (!used) this.fail("unknown-name", unit.exportName, `説明に埋め込んだ "${embedded.name}" は部品ではありません`, embedded.at);
-        else if (![...b.uses].includes(used)) this.fail("sentence-unused", unit.exportName, `説明に埋め込んだ ${embedded.name} を、どの本体も使っていません`, embedded.at);
+        const facts = { kind: "embedded", isComponent: used !== undefined, used: used !== undefined && [...b.uses].includes(used) } as const;
+        const problem = decided("sentence-trace", facts, traceStage0(facts));
+        if (problem === "unknown-name") this.fail("unknown-name", unit.exportName, `説明に埋め込んだ "${embedded.name}" は部品ではありません`, embedded.at);
+        if (problem === "embedded-unused") this.fail("sentence-unused", unit.exportName, `説明に埋め込んだ ${embedded.name} を、どの本体も使っていません`, embedded.at);
       }
     }
     this.traceSentences(b);
@@ -303,14 +322,15 @@ export class Builder {
     const added = [...unit.entries.values()].some((e) => e.layer === 2 && e.replaced === undefined && (e.heading === "commands" || e.heading === "queries"));
     const sentences = sentencesOf(unit.description?.text ?? "");
     const names = new Set<string>([unit.exportName, unit.id, ...unit.entries.keys(), ...Object.keys(b.ir.events ?? {}), ...Object.keys(b.ir.conditions ?? {}), ...this.program.units.map((u) => u.exportName)]);
+    const judge = (facts: TraceFacts) => decided("sentence-trace", facts, traceStage0(facts));
     for (const [key, targets] of unit.trace) {
-      if (!sentences.some((sentence) => sentence.includes(key))) this.fail("unknown-sentence", where, `「${key}」は ${unit.exportName} の説明の文にありません`);
-      for (const target of targets) if (!names.has(target)) this.fail("unknown-name", where, `「${key}」が指す "${target}" はありません`);
+      if (judge({ kind: "key", inDescription: sentences.some((sentence) => sentence.includes(key)) }) !== "none") this.fail("unknown-sentence", where, `「${key}」は ${unit.exportName} の説明の文にありません`);
+      for (const target of targets) if (judge({ kind: "target", exists: names.has(target) }) !== "none") this.fail("unknown-name", where, `「${key}」が指す "${target}" はありません`);
       b.trace[`${unit.id}:${key}`] = targets;
     }
-    if (!added) return;
     sentences.forEach((sentence, index) => {
-      if (![...unit.trace.keys()].some((key) => sentence.includes(key))) {
+      const covered = [...unit.trace.keys()].some((key) => sentence.includes(key));
+      if (judge({ kind: "sentence", covered, added }) !== "none") {
         this.fail("sentence-unused", `${unit.exportName}.description[${index + 1}]`, `「${sentence}」から作られたものがありません（解釈の trace に、その文と作ったものの名前を書きます）`);
       }
     });
@@ -461,7 +481,7 @@ export class Builder {
         }
         // return does.name("文"): what its content does, and the answer it returns
         if (stmt.expr?.k === "call" && stmt.expr.callee.k === "member" && stmt.expr.callee.object.k === "id" && stmt.expr.callee.object.name === "does" && this.names.resolve(cx.module, "does").k === "core") {
-          return this.doesPaths(stmt.expr, clone(ps), scoped, stmt.at, true).map((after) => ({ ...after, returned: true, started: true }));
+          return this.doesPaths(stmt.expr, clone(ps), scoped, stmt.at, "answer").map((after) => ({ ...after, returned: true, started: true }));
         }
         const done = clone(ps);
         done.started = true;
@@ -504,7 +524,16 @@ export class Builder {
           const no = clone(ps);
           no.started = true;
           no.guard.push(not(test.e));
-          return [...this.exec([stmt.then], [yes], { ...cx, vars: new Map(cx.vars) }), ...this.exec(stmt.else ? [stmt.else] : [], [no], { ...cx, vars: new Map(cx.vars) })];
+          // `x === "a"` on an enumeration: once every value is ruled out, the rest cannot happen
+          const compared = this.comparedWithConstant(stmt.test, scoped);
+          if (compared) {
+            const seen = no.excluded.get(compared.key) ?? { values: new Set<unknown>(), of: compared.of };
+            seen.values.add(compared.value);
+            no.excluded.set(compared.key, seen);
+            if (seen.values.size >= seen.of) no.impossible = true;
+          }
+          const otherwise = no.impossible ? [] : this.exec(stmt.else ? [stmt.else] : [], [no], { ...this.narrowed(cx, stmt.test, false), vars: new Map(cx.vars) });
+          return [...this.exec([stmt.then], [yes], { ...this.narrowed(cx, stmt.test, true), vars: new Map(cx.vars) }), ...otherwise];
         }
         // only what happens is conditional
         const base = clone(ps);
@@ -513,8 +542,8 @@ export class Builder {
         yes.when.push(test.e);
         const no = clone(base);
         no.when.push(not(test.e));
-        const [a] = this.exec([stmt.then], [yes], { ...cx, vars: new Map(cx.vars) });
-        const [n] = this.exec(stmt.else ? [stmt.else] : [], [no], { ...cx, vars: new Map(cx.vars) });
+        const [a] = this.exec([stmt.then], [yes], { ...this.narrowed(cx, stmt.test, true), vars: new Map(cx.vars) });
+        const [n] = this.exec(stmt.else ? [stmt.else] : [], [no], { ...this.narrowed(cx, stmt.test, false), vars: new Map(cx.vars) });
         const merged = clone(base);
         for (const field of new Set([...a.written, ...n.written])) {
           const before = base.assign.get(field) ?? (["state", field] as Expr);
@@ -528,8 +557,27 @@ export class Builder {
         return [merged];
       }
       case "expr":
+        // does.name("…") may split the path into cases (its content can return)
+        if (stmt.expr.k === "call" && stmt.expr.callee.k === "member" && stmt.expr.callee.object.k === "id" && stmt.expr.callee.object.name === "does" && this.names.resolve(cx.module, "does").k === "core") {
+          const started = clone(ps);
+          started.started = true;
+          if (ps.when.length > 0) return [this.doesFragment(stmt.expr, started, scoped, stmt.at)];
+          return this.doesPaths(stmt.expr, started, scoped, stmt.at, "statement");
+        }
         return [this.statement(stmt.expr, ps, scoped, stmt.at)];
     }
+  }
+
+  /** `x === "a"` (or `"a" === x`) where x is an enumeration: the expression, the value, and how many values x has. */
+  private comparedWithConstant(test: Syn, cx: Cx): { key: string; value: unknown; of: number } | undefined {
+    if (test.k !== "bin" || (test.op !== "===" && test.op !== "==")) return undefined;
+    const [side, constant] = test.right.k === "str" || test.right.k === "num" || test.right.k === "bool" ? [test.left, test.right] : test.left.k === "str" || test.left.k === "num" || test.left.k === "bool" ? [test.right, test.left] : [];
+    if (!side || !constant) return undefined;
+    const value = this.tx(side, cx);
+    const t = value.t;
+    const of = isEnum(t) ? t.enum.length : t === "bool" ? 2 : undefined;
+    if (of === undefined) return undefined;
+    return { key: JSON.stringify(value.e), value: (constant as { value: unknown }).value, of };
   }
 
   private conditionName(test: Syn): string | undefined {
@@ -661,14 +709,16 @@ export class Builder {
     return { e: ["state", field], t };
   }
 
-  private doesFragment(expr: Extract<Syn, { k: "call" }>, ps: PathState, cx: Cx, at: Pos, answers = false): PathState {
-    const paths = this.doesPaths(expr, ps, cx, at, answers);
+  private doesFragment(expr: Extract<Syn, { k: "call" }>, ps: PathState, cx: Cx, at: Pos): PathState {
+    const paths = this.doesPaths(expr, ps, cx, at, "plain");
     if (paths.length > 1) this.fail("syntax", cx.where, `does.${(expr.callee as { name: string }).name} の中で場合を分けられるのは、return does.名前(…) の形で使うときだけです`, at);
     return paths[0] ?? ps;
   }
 
   /** The paths a `does` fragment's content leads to (it may split into cases when it also answers). */
-  private doesPaths(expr: Extract<Syn, { k: "call" }>, ps: PathState, cx: Cx, at: Pos, answers = false): PathState[] {
+  // plain: inside a conditional `if` (one path, no return); statement: may split and return; answer: `return does.x(…)`, every path answers
+  private doesPaths(expr: Extract<Syn, { k: "call" }>, ps: PathState, cx: Cx, at: Pos, mode: "plain" | "statement" | "answer"): PathState[] {
+    const answers = mode === "answer";
     const name = (expr.callee as { name: string }).name;
     const text = proseOf(expr.args[0]);
     if (text === undefined) {
@@ -676,24 +726,44 @@ export class Builder {
       return [ps];
     }
     const owner = cx.owner;
+    if (this.fragmentClash(owner, name, "does", cx, at)) return [ps];
     this.usedFragments.add(`${owner.id}#${name}`);
     this.note(cx.b, `${cx.b.unit.id}.does.${name}`, text);
-    const fill = owner.entries.get(name);
-    if (!fill || fill.heading !== "does") {
+    const { decision, fill } = this.fillOf(owner, name, "does", false);
+    if (decision === "prose-left" || !fill) {
       this.fail("prose-left", cx.where, `「${text}」(does.${name}) の中身がありません`, at);
       return [ps];
     }
-    if (!fill.method) {
+    if (decision !== "fill" || !fill.method) {
       this.fail("syntax", `${owner.exportName}.does.${name}`, "does の中身は 名前(引数) { … } のメソッドで書きます", fill.at);
       return [ps];
     }
     const module = this.moduleOf(owner, fill);
     const vars = this.bindFillParams(fill, cx, module);
     const paths = this.exec(fill.method.body.body, [ps], { ...cx, module, vars, where: `${owner.exportName}.does.${name}` });
-    if (paths.some((p) => p.returned) && !answers) this.fail("syntax", `${owner.exportName}.does.${name}`, "答えを返す does は、return does.名前(…) の形で使います", fill.at);
+    if (paths.some((p) => p.returned && p.output) && !answers) this.fail("syntax", `${owner.exportName}.does.${name}`, "答えを返す does は、return does.名前(…) の形で使います", fill.at);
     if (answers && paths.some((p) => !p.returned)) this.fail("missing-output", `${owner.exportName}.does.${name}`, "答えを返す does の中身は、どの場合でも return します", fill.at);
     cx.b.trace[`${cx.b.unit.id}.does.${name}`] = [cx.where];
     return paths;
+  }
+
+  /** What a fragment becomes (fill-check). */
+  private fillOf(owner: Unit, name: string, kind: "is" | "does" | "value", inline: boolean): { decision: FillDecision; fill?: Entry } {
+    const heading: Heading = kind === "is" ? "conditions" : kind === "does" ? "does" : "calcs";
+    const fill = owner.entries.get(name);
+    const entry = !fill ? "none" : fill.heading !== heading ? (fill.layer === 1 ? "elsewhere" : "none") : fill.prose !== undefined ? "prose" : fill.method ? "method" : "expression";
+    const facts = { kind, inline, entry, byInterpretation: fill?.layer === 2 } as const;
+    return { decision: decided("fill-check", facts, fillStage0(facts)), ...(fill && fill.heading === heading ? { fill } : {}) };
+  }
+
+  /** A fragment's name must not be the name of something under another heading (one namespace per component). */
+  private fragmentClash(owner: Unit, name: string, heading: Heading, cx: Cx, at: Pos): boolean {
+    const other = owner.entries.get(name);
+    if (other && other.heading !== heading && other.layer === 1) {
+      this.fail("name-collision", cx.where, `断片の名前 "${name}" は、${other.heading} の "${name}" と同じです。名前は部品の中で1つです`, at);
+      return true;
+    }
+    return false;
   }
 
   /** The parameters of a fill (`conditions.x(member, book)`, `does.x(…)`) are the names of the place where its fragment is written. */
@@ -806,8 +876,12 @@ export class Builder {
         if (stmt.k === "block") return go([...stmt.body, ...stmts.slice(i + 1)]);
         if (stmt.k === "if") {
           const test = this.expect(this.tx(stmt.test, scoped), "bool", scoped, "if の条件", stmt.at);
+          const outer = scoped.nonNull;
+          scoped.nonNull = this.narrowed(scoped, stmt.test, true).nonNull;
           const yes = go([stmt.then]);
+          scoped.nonNull = this.narrowed({ ...scoped, nonNull: outer }, stmt.test, false).nonNull;
           const no = go([...(stmt.else ? [stmt.else] : []), ...stmts.slice(i + 1)]);
+          scoped.nonNull = outer;
           const t = join(yes.t, no.t);
           if (t === undefined) this.fail("type-mismatch", cx.where, `答えの型 ${show(yes.t)} と ${show(no.t)} がそろいません`, stmt.at);
           return { e: ["ite", test.e, yes.e, no.e], t: t ?? "any" };
@@ -901,6 +975,31 @@ export class Builder {
   // --- Expressions ---
 
   tx(expr: Syn, cx: Cx): TE {
+    const value = this.tx0(expr, cx);
+    return cx.nonNull?.has(JSON.stringify(value.e)) && isOptional(value.t) ? { e: value.e, t: nonNull(value.t) } : value;
+  }
+
+  /** The expressions a test shows not to be null when it holds (`positive`) or when it does not. */
+  private narrowing(test: Syn, cx: Cx, positive: boolean): string[] {
+    if (test.k === "unary" && test.op === "!") return this.narrowing(test.expr, cx, !positive);
+    if (test.k === "bin" && test.op === "&&" && positive) return [...this.narrowing(test.left, cx, true), ...this.narrowing(test.right, cx, true)];
+    if (test.k === "bin" && test.op === "||" && !positive) return [...this.narrowing(test.left, cx, false), ...this.narrowing(test.right, cx, false)];
+    if (test.k === "bin" && ["===", "==", "!==", "!="].includes(test.op)) {
+      const side = test.right.k === "null" ? test.left : test.left.k === "null" ? test.right : undefined;
+      if (!side) return [];
+      const notNullWhen = test.op === "!==" || test.op === "!=";
+      if (notNullWhen !== positive) return [];
+      const quiet = new Builder(this.program);
+      return [JSON.stringify(quiet.tx0(side, cx).e)];
+    }
+    return [];
+  }
+  private narrowed(cx: Cx, test: Syn, positive: boolean): Cx {
+    const keys = this.narrowing(test, cx, positive);
+    return keys.length === 0 ? cx : { ...cx, nonNull: new Set([...(cx.nonNull ?? []), ...keys]) };
+  }
+
+  private tx0(expr: Syn, cx: Cx): TE {
     switch (expr.k) {
       case "num":
         if (!Number.isInteger(expr.value)) return this.fail("not-integer", cx.where, `${expr.value}: 数は整数だけです`, expr.at);
@@ -951,7 +1050,8 @@ export class Builder {
           if (prop.k === "method") return this.fail("syntax", cx.where, "値の中にメソッドは書けません", prop.at);
           const value = this.tx(prop.value, cx);
           fields[prop.key] = value.e;
-          types[prop.key] = concrete(value.t === "null" ? { optional: "json" } : value.t);
+          // kept as read (a null stays null, so that joining it with a record type gives `| null`)
+          types[prop.key] = value.t as Type;
         }
         if (base) {
           const record = (nonNull(base.t) as { record: Record<string, Type> }).record;
@@ -1003,8 +1103,8 @@ export class Builder {
         return this.binary(expr, cx);
       case "cond": {
         const test = this.expect(this.tx(expr.test, cx), "bool", cx, "条件");
-        const yes = this.tx(expr.then, cx);
-        const no = this.tx(expr.else, cx);
+        const yes = this.tx(expr.then, this.narrowed(cx, expr.test, true));
+        const no = this.tx(expr.else, this.narrowed(cx, expr.test, false));
         const t = join(yes.t, no.t);
         if (t === undefined) return this.fail("type-mismatch", cx.where, `? : の両側の型 ${show(yes.t)} と ${show(no.t)} がそろいません`, expr.at);
         return { e: ["ite", test.e, yes.e, no.e], t };
@@ -1015,10 +1115,16 @@ export class Builder {
         const t = this.typeOf(expr.type, cx.module, cx.where);
         // a JSON value read as a type: taken as it is (a value that does not fit is found when the spec runs)
         if (value.t === "json" || (isList(value.t) && value.t.list === "json")) return { e: value.e, t };
+        // a string kept somewhere read back as an identifier, and the other way
+        if ((baseOf(value.t) === "string" && isAtom(t)) || (isAtom(value.t) && baseOf(t) === "string")) return { e: value.e, t };
         return this.expect(value, t, cx, "as");
       }
       case "assign":
         return this.fail("syntax", cx.where, "代入は文として書きます", expr.at);
+      case "nonNull": {
+        const value = this.tx(expr.expr, cx);
+        return { e: ["nonNull", value.e], t: nonNull(value.t) };
+      }
     }
   }
 
@@ -1063,7 +1169,7 @@ export class Builder {
 
   private binary(expr: Extract<Syn, { k: "bin" }>, cx: Cx): TE {
     const left = this.tx(expr.left, cx);
-    const right = this.tx(expr.right, cx);
+    const right = this.tx(expr.right, expr.op === "&&" ? this.narrowed(cx, expr.left, true) : expr.op === "||" ? this.narrowed(cx, expr.left, false) : cx);
     switch (expr.op) {
       case "&&":
       case "||":
@@ -1116,8 +1222,9 @@ export class Builder {
   private call(expr: Extract<Syn, { k: "call" }>, cx: Cx): TE {
     const callee = expr.callee;
     // is.name("文", 式?) / value.name("文")
-    if (callee.k === "member" && callee.object.k === "id" && callee.object.name === "is" && this.names.resolve(cx.module, "is").k === "core") return this.isFragment(expr, callee.name, cx);
-    if (callee.k === "member" && callee.object.k === "id" && callee.object.name === "value" && this.names.resolve(cx.module, "value").k === "core") return this.isFragment(expr, callee.name, cx, "calcs");
+    const core = (name: string) => !cx.vars.has(name) && this.names.resolve(cx.module, name).k === "core";
+    if (callee.k === "member" && callee.object.k === "id" && callee.object.name === "is" && core("is")) return this.isFragment(expr, callee.name, cx);
+    if (callee.k === "member" && callee.object.k === "id" && callee.object.name === "value" && core("value")) return this.isFragment(expr, callee.name, cx, "calcs");
     if (callee.k === "member" && callee.object.k === "id" && callee.object.name === "does") return this.fail("syntax", cx.where, "does.名前(…) は文として書きます", expr.at);
     if (callee.k === "id") {
       const sym = this.names.resolve(cx.module, callee.name);
@@ -1200,6 +1307,7 @@ export class Builder {
   private isFragment(expr: Extract<Syn, { k: "call" }>, name: string, cx: Cx, kind: "conditions" | "calcs" = "conditions"): TE {
     const owner = cx.owner;
     const word = kind === "conditions" ? "is" : "value";
+    if (this.fragmentClash(owner, name, kind, cx, expr.at)) return BAD;
     // is.name() / value.name(): the entry of that name under the heading
     const named = expr.args.length === 0 ? owner.entries.get(name) : undefined;
     const text = expr.args.length > 0 ? proseOf(expr.args[0]) : named?.heading === kind ? (named.prose ?? named.replaced ?? "") : undefined;
@@ -1207,13 +1315,12 @@ export class Builder {
     if (kind === "calcs") return this.valueFragment(expr, name, text, cx);
     this.usedFragments.add(`${owner.id}#${name}`);
     let value: TE;
-    if (expr.args[1]) {
-      const fill = owner.entries.get(name);
-      if (fill?.heading === "conditions" && fill.layer === 2) this.fail("overwrite", `${owner.exportName}.conditions.${name}`, `is.${name} は Layer 1 に式があります。解釈では書き換えられません`, fill.at);
+    const { decision, fill } = this.fillOf(owner, name, "is", expr.args[1] !== undefined);
+    if (decision === "overwrite") this.fail("overwrite", `${owner.exportName}.conditions.${name}`, `is.${name} は Layer 1 に式があります。解釈では書き換えられません`, fill?.at);
+    if (decision === "inline" || decision === "overwrite") {
       value = this.expect(this.tx(expr.args[1], cx), "bool", cx, `is.${name}`);
     } else {
-      const fill = owner.entries.get(name);
-      if (!fill || fill.heading !== "conditions" || fill.prose !== undefined) return { ...this.fail("prose-left", cx.where, `「${text}」(is.${name}) の中身（式）がありません`, expr.at), t: "bool" };
+      if (decision !== "fill" || !fill) return { ...this.fail("prose-left", cx.where, `「${text}」(is.${name}) の中身（式）がありません`, expr.at), t: "bool" };
       const module = this.moduleOf(owner, fill);
       const vars = this.bindFillParams(fill, cx, module);
       const fillCx: Cx = { ...cx, module, vars, where: `${owner.exportName}.conditions.${name}` };
@@ -1240,8 +1347,9 @@ export class Builder {
   private valueFragment(expr: Extract<Syn, { k: "call" }>, name: string, text: string, cx: Cx): TE {
     const owner = cx.owner;
     this.usedFragments.add(`${owner.id}#${name}`);
-    const fill = owner.entries.get(name);
-    if (!fill || fill.heading !== "calcs" || fill.prose !== undefined || !fill.method) return this.fail("prose-left", cx.where, `「${text}」(value.${name}) の中身（式）がありません`, expr.at);
+    const { decision, fill } = this.fillOf(owner, name, "value", false);
+    if (decision === "not-a-method") return this.fail("syntax", `${owner.exportName}.calcs.${name}`, "calcs の中身は 名前(引数) { … } のメソッドで書きます", fill?.at);
+    if (decision !== "fill" || !fill?.method) return this.fail("prose-left", cx.where, `「${text}」(value.${name}) の中身（式）がありません`, expr.at);
     const module = this.moduleOf(owner, fill);
     const vars = this.bindFillParams(fill, cx, module);
     const fillCx: Cx = { ...cx, module, vars, where: `${owner.exportName}.calcs.${name}` };
@@ -1308,7 +1416,8 @@ export class Builder {
       return { rows: [], t: "any" };
     }
     const rows: { when: Expr; then: Record<string, Expr> }[] = [];
-    let t: T = "any";
+    // each column's type: the cells' types joined (a null cell makes it `| null`)
+    const columnTypes = new Map<string, T>();
     list.items.forEach((item, index) => {
       if (item.k !== "arr" || item.items.length !== 2 || item.items[1].k !== "obj") {
         this.fail("bad-decision", unit.exportName, "行は [条件, { 列: 定数 }] で書きます", item.at);
@@ -1317,27 +1426,38 @@ export class Builder {
       const isLast = index === list.items.length - 1;
       const cond = item.items[0];
       const isOtherwise = cond.k === "id" && this.names.resolve(unit.module, cond.name).k === "core" && cond.name === "otherwise";
-      if (isLast && !isOtherwise) this.fail("bad-decision", unit.exportName, "決定表の最後の行は otherwise です", item.at);
-      if (!isLast && isOtherwise) this.fail("bad-decision", unit.exportName, "otherwise は最後の行にだけ書きます", item.at);
+      const cells = (item.items[1] as Extract<Syn, { k: "obj" }>).props;
+      const firstColumns = (list.items[0] as Extract<Syn, { k: "arr" }>).items?.[1];
+      const columnsOf = (o: Syn | undefined) => (o?.k === "obj" ? o.props.flatMap((p) => (p.k === "prop" ? [p.key] : [])).sort().join(",") : "");
+      const facts = {
+        last: isLast,
+        otherwise: isOtherwise,
+        constantCells: cells.every((p) => p.k === "prop" && ["num", "str", "bool", "null"].includes(p.value.k === "unary" ? p.value.expr.k : p.value.k)),
+        sameColumns: columnsOf(item.items[1]) === columnsOf(firstColumns),
+      };
+      const rowMessages = {
+        "last-not-otherwise": "決定表の最後の行は otherwise です",
+        "otherwise-not-last": "otherwise は最後の行にだけ書きます",
+        "cell-not-constant": "決定表のセルは定数です",
+        "columns-differ": "どの行も同じ列を持ちます",
+      } as const;
+      for (const problem of decided("type-check", { row: facts }, rowStage0(facts))) this.fail("bad-decision", unit.exportName, `行 ${index + 1}: ${rowMessages[problem]}`, item.at);
       const when = isOtherwise ? true : this.expect(this.tx(cond, cx), "bool", cx, "行の条件").e;
       const rowText = !isOtherwise && cond.k === "call" && cond.callee.k === "member" ? proseOf(cond.args[0]) : undefined;
       if (rowText !== undefined) cx.b.notes[`${cx.b.unit.id}.decisions.${unit.id}.rows[${index}]`] = rowText;
       const then: Record<string, Expr> = {};
-      const types: Record<string, Type> = {};
       for (const prop of (item.items[1] as Extract<Syn, { k: "obj" }>).props) {
         if (prop.k !== "prop") continue;
         const value = this.tx(prop.value, { ...cx, where: `${unit.exportName}.rows[${index}].${prop.key}` });
-        if (!isConstant(value.e)) this.fail("bad-decision", unit.exportName, `決定表のセル ${prop.key} は定数です`, prop.at);
         then[prop.key] = value.e;
-        types[prop.key] = concrete(value.t === "null" ? ({ optional: "json" } as T) : value.t);
+        const before = columnTypes.get(prop.key) ?? "any";
+        const joined = join(before, value.t);
+        if (joined === undefined) this.fail("bad-decision", unit.exportName, `列 ${prop.key} の型が、行によって違います (${show(before)} と ${show(value.t)})`, prop.at);
+        else columnTypes.set(prop.key, joined);
       }
       rows.push({ when, then });
-      const joined = join(t, { record: types });
-      if (joined === undefined) this.fail("bad-decision", unit.exportName, `行 ${index + 1} の列の型が、ほかの行とそろいません`, item.at);
-      else t = joined;
     });
-    const columns = rows.map((row) => Object.keys(row.then).sort().join(","));
-    if (new Set(columns).size > 1) this.fail("bad-decision", unit.exportName, "どの行も同じ列を持ちます");
+    const t: T = { record: Object.fromEntries([...columnTypes].map(([column, type]) => [column, concrete(type === "null" ? ({ optional: "json" } as T) : type)])) };
     return { rows, t };
   }
 

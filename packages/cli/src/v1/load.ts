@@ -6,6 +6,22 @@ import type { Problem, Program, Unit } from "./read.ts";
 import type { Ir8 } from "./ir.ts";
 import { hasProse, layer1Hash } from "./stamp.ts";
 import { shapeProblems } from "./shape.ts";
+import { usageWarnings } from "./usage.ts";
+import { FrameworkError, agree, recording } from "./decide.ts";
+import type { Asked } from "./decide.ts";
+
+/** compile, then the decisions it made put to Stage 1 (R4): a disagreement is an error of the framework. */
+export async function compileChecked(dir: string, component: string | undefined, options: { drafts?: boolean } = {}): Promise<Compiled> {
+  const compiled = compile(dir, component, options);
+  const { deciders8 } = await import("./stage1.ts");
+  try {
+    await agree(compiled.asked ?? [], await deciders8());
+  } catch (error) {
+    if (!(error instanceof FrameworkError)) throw error;
+    compiled.problems.push({ severity: "error", code: "framework", where: "", message: error.message });
+  }
+  return compiled;
+}
 import { relative, sep } from "node:path";
 
 /** Interpretations that cannot be used: missing where Layer 1 has prose, derived from another Layer 1 (stale), not reviewed. */
@@ -47,10 +63,14 @@ export function loadProgram(dir: string, options: { drafts?: boolean } = {}): Lo
 
 const hasPorts = (unit: Unit) => [...unit.entries.values()].some((entry) => entry.heading === "commands" || entry.heading === "queries");
 
-export type Compiled = { ir?: Ir8; problems: Problem[]; unit?: Unit; program: Program };
+export type Compiled = { ir?: Ir8; problems: Problem[]; unit?: Unit; program: Program; asked?: Asked[] };
 
 /** The IR of one component, and every problem found while reading and building it (the parsing problems of every file, too). */
 export function compile(dir: string, component: string | undefined, options: { drafts?: boolean } = {}): Compiled {
+  const { result, asked } = recording(() => compileNow(dir, component, options));
+  return { ...result, asked };
+}
+function compileNow(dir: string, component: string | undefined, options: { drafts?: boolean }): Compiled {
   const { program, components } = loadProgram(dir, options);
   const name = component ?? (components.length === 1 ? components[0] : undefined);
   if (name === undefined) {
@@ -63,6 +83,12 @@ export function compile(dir: string, component: string | undefined, options: { d
   const ir = builder.irOf(unit);
   const problems = [...program.problems, ...interpretationProblems(program, builder.units), ...builder.problems];
   // the IR's meaning has no prose left (a safety net behind the reader)
-  if (!problems.some((p) => p.severity === "error")) for (const found of shapeProblems(ir)) problems.push({ severity: "error", code: "ir-shape", where: unit.exportName, message: found });
+  if (!problems.some((p) => p.severity === "error")) {
+    for (const found of shapeProblems(ir)) problems.push({ severity: "error", code: "ir-shape", where: unit.exportName, message: found });
+    for (const warning of usageWarnings(ir)) {
+      const match = /^warning\[unused\] (\S+): (.*)$/.exec(warning);
+      if (match) problems.push({ severity: "warning", code: "unused", where: match[1], message: match[2] });
+    }
+  }
   return { ir, unit, program, problems };
 }

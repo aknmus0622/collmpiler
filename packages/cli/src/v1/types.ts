@@ -2,6 +2,7 @@
 // (`any` for an empty collection whose element type is not known yet, `null`, `void`, and temporal formulas).
 
 import type { Type } from "./ir.ts";
+import { decided } from "./decide.ts";
 
 export type T = Type | "any" | "null" | "void" | "temporal";
 
@@ -83,20 +84,54 @@ export function join(a: T, b: T): T | undefined {
 }
 const wrap = (inner: T | undefined, make: (t: Type) => T): T | undefined => (inner === undefined ? undefined : make(inner as Type));
 
-/** Whether a value of type `value` can be put where `target` is expected. */
+/** The kind of a type at one level (fit-check sees one level at a time). */
+export type Kind = "int" | "string" | "bool" | "json" | "enum" | "atom" | "record" | "list" | "set" | "map" | "optional" | "any" | "null" | "void" | "temporal";
+const kindOf = (t: T): Kind =>
+  typeof t === "string" ? t : isEnum(t) ? "enum" : isAtom(t) ? "atom" : isRecord(t) ? "record" : isList(t) ? "list" : isSet(t) ? "set" : isMap(t) ? "map" : "optional";
+
+export type FitFacts = {
+  value: Kind;
+  target: Kind;
+  /** For an enumeration: the base of the value's (`int`, `string`, `bool`), and whether its members are among the target's. */
+  base: "int" | "string" | "bool" | "none";
+  subset: boolean;
+  /** For atoms: whether they are of the same sort. */
+  sameSort: boolean;
+};
+/** fit-check (Stage 0): yes, no, compare what is inside (both are the same kind of structure), or compare with what is inside the target (a value put where `T | null` is). */
+export type FitDecision = "yes" | "no" | "inner" | "unwrap";
+export function fitStage0({ value, target, base, subset, sameSort }: FitFacts): FitDecision {
+  if (value === "any" || target === "any") return "yes";
+  if (target === "json") return value === "void" || value === "temporal" ? "no" : "yes";
+  if (value === "null") return target === "optional" ? "yes" : "no";
+  if (target === "optional") return value === "optional" ? "inner" : "unwrap";
+  if (value === "optional") return "no";
+  if (target === "enum") return value === "enum" && subset ? "yes" : "no";
+  if (value === "enum") return base === target ? "yes" : "no";
+  if (value === "atom" || target === "atom") return value === target && sameSort ? "yes" : "no";
+  if (["record", "list", "set", "map"].includes(target)) return value === target ? "inner" : "no";
+  return value === target ? "yes" : "no";
+}
+
+/** Whether a value of type `value` can be put where `target` is expected: fit-check, one level at a time. */
 export function fits(value: T, target: T): boolean {
-  if (value === "any" || target === "any") return true;
-  if (target === "json") return value !== "void" && value !== "temporal";
-  if (value === "null") return isOptional(target);
-  if (isOptional(target)) return isOptional(value) ? fits(value.optional, target.optional) : fits(value, target.optional);
-  if (isOptional(value)) return false;
-  if (isEnum(target)) return isEnum(value) && value.enum.every((v) => target.enum.includes(v));
-  if (isEnum(value)) return baseOf(value) === target;
-  if (isRecord(target)) return isRecord(value) && Object.keys(target.record).every((k) => fits(value.record[k] ?? "null", target.record[k])) && Object.keys(value.record).every((k) => k in target.record);
-  if (isList(target)) return isList(value) && fits(value.list, target.list);
-  if (isSet(target)) return isSet(value) && fits(value.set, target.set);
-  if (isMap(target)) return isMap(value) && fits(value.map[0], target.map[0]) && fits(value.map[1], target.map[1]);
-  return same(value, target);
+  const facts: FitFacts = {
+    value: kindOf(value),
+    target: kindOf(target),
+    base: isEnum(value) ? (baseOf(value) as "int" | "string" | "bool") : "none",
+    subset: isEnum(value) && isEnum(target) && value.enum.every((v) => target.enum.includes(v)),
+    sameSort: isAtom(value) && isAtom(target) && value.atom === target.atom,
+  };
+  const decision = decided("fit-check", facts, fitStage0(facts));
+  if (decision === "yes") return true;
+  if (decision === "no") return false;
+  if (decision === "unwrap") return fits(value, (target as { optional: Type }).optional);
+  if (isOptional(value) && isOptional(target)) return fits(value.optional, target.optional);
+  if (isRecord(target) && isRecord(value)) return Object.keys(target.record).every((k) => fits(value.record[k] ?? "null", target.record[k])) && Object.keys(value.record).every((k) => k in target.record);
+  if (isList(target) && isList(value)) return fits(value.list, target.list);
+  if (isSet(target) && isSet(value)) return fits(value.set, target.set);
+  if (isMap(target) && isMap(value)) return fits(value.map[0], target.map[0]) && fits(value.map[1], target.map[1]);
+  return false;
 }
 
 /** A type that can go into the IR (no `any` left inside); `any` becomes `json`. */

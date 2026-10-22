@@ -42,6 +42,7 @@ export const OPS: Op[] = [
   { name: "min", meaning: "the smaller of two integers", ja: ([a, b], r) => `${r(a)} と ${r(b)} の小さいほう`, en: ([a, b], r) => `min(${r(a)}, ${r(b)})` },
   { name: "max", meaning: "the larger of two integers", ja: ([a, b], r) => `${r(a)} と ${r(b)} の大きいほう`, en: ([a, b], r) => `max(${r(a)}, ${r(b)})` },
   { name: "abs", meaning: "absolute value", ja: ([a], r) => `${r(a)} の絶対値`, en: ([a], r) => `abs(${r(a)})` },
+  { name: "nonNull", meaning: "the value, which is never null here (TypeScript's `x!`)", ja: ([a], r) => `${r(a)}（null ではない）`, en: ([a], r) => `${r(a)}!` },
   { name: "??", meaning: "the first value, or the second when the first is null", ja: ([a, b], r) => `${r(a)}（無ければ ${r(b)}）`, en: ([a, b], r) => `${r(a)} ?? ${r(b)}` },
   { name: "concat", meaning: "strings joined, or lists joined, in order", ja: (a, r) => a.map((x) => r(x)).join(" ++ "), en: (a, r) => a.map((x) => r(x)).join(" ++ ") },
   { name: "str", meaning: "an integer written as a decimal string", ja: ([a], r) => `${r(a)} を文字列にしたもの`, en: ([a], r) => `String(${r(a)})` },

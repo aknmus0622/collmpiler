@@ -1,0 +1,281 @@
+{
+  "components": {
+    "members": {
+      "commands": {
+        "Extend": {
+          "events": [
+            "Extend.notRegistered",
+            "Extend.otherwise"
+          ],
+          "output": {
+            "enum": [
+              "not-member",
+              "extended"
+            ]
+          },
+          "params": {
+            "member": {
+              "atom": "MemberId"
+            }
+          }
+        },
+        "Register": {
+          "events": [
+            "Register.registered",
+            "Register.otherwise"
+          ],
+          "output": {
+            "enum": [
+              "already",
+              "registered"
+            ]
+          },
+          "params": {
+            "member": {
+              "atom": "MemberId"
+            }
+          }
+        }
+      },
+      "conditions": {
+        "notRegistered": {
+          "is": [
+            "not",
+            [
+              "in",
+              [
+                "var",
+                "member"
+              ],
+              [
+                "state",
+                "members"
+              ]
+            ]
+          ],
+          "params": {
+            "member": {
+              "atom": "MemberId"
+            }
+          }
+        },
+        "registered": {
+          "is": [
+            "in",
+            [
+              "var",
+              "member"
+            ],
+            [
+              "state",
+              "members"
+            ]
+          ],
+          "params": {
+            "member": {
+              "atom": "MemberId"
+            }
+          }
+        }
+      },
+      "events": {
+        "Extend.notRegistered": {
+          "assign": {},
+          "calls": [],
+          "command": "Extend",
+          "guard": [
+            "cond",
+            "notRegistered",
+            {
+              "member": [
+                "var",
+                "member"
+              ]
+            }
+          ],
+          "output": [
+            "lit",
+            "not-member"
+          ]
+        },
+        "Extend.otherwise": {
+          "assign": {
+            "extended": [
+              "add",
+              [
+                "state",
+                "extended"
+              ],
+              [
+                "var",
+                "member"
+              ]
+            ]
+          },
+          "calls": [],
+          "command": "Extend",
+          "guard": [
+            "not",
+            [
+              "cond",
+              "notRegistered",
+              {
+                "member": [
+                  "var",
+                  "member"
+                ]
+              }
+            ]
+          ],
+          "output": [
+            "lit",
+            "extended"
+          ]
+        },
+        "Register.otherwise": {
+          "assign": {
+            "members": [
+              "add",
+              [
+                "state",
+                "members"
+              ],
+              [
+                "var",
+                "member"
+              ]
+            ]
+          },
+          "calls": [],
+          "command": "Register",
+          "guard": [
+            "not",
+            [
+              "cond",
+              "registered",
+              {
+                "member": [
+                  "var",
+                  "member"
+                ]
+              }
+            ]
+          ],
+          "output": [
+            "lit",
+            "registered"
+          ]
+        },
+        "Register.registered": {
+          "assign": {},
+          "calls": [],
+          "command": "Register",
+          "guard": [
+            "cond",
+            "registered",
+            {
+              "member": [
+                "var",
+                "member"
+              ]
+            }
+          ],
+          "output": [
+            "lit",
+            "already"
+          ]
+        }
+      },
+      "init": {
+        "extended": [
+          "emptySet"
+        ],
+        "members": [
+          "emptySet"
+        ]
+      },
+      "queries": {
+        "IsExtended": {
+          "is": [
+            "in",
+            [
+              "var",
+              "member"
+            ],
+            [
+              "state",
+              "extended"
+            ]
+          ],
+          "params": {
+            "member": {
+              "atom": "MemberId"
+            }
+          },
+          "result": "bool"
+        },
+        "IsMember": {
+          "is": [
+            "in",
+            [
+              "var",
+              "member"
+            ],
+            [
+              "state",
+              "members"
+            ]
+          ],
+          "params": {
+            "member": {
+              "atom": "MemberId"
+            }
+          },
+          "result": "bool"
+        }
+      },
+      "state": {
+        "extended": {
+          "set": {
+            "atom": "MemberId"
+          }
+        },
+        "members": {
+          "set": {
+            "atom": "MemberId"
+          }
+        }
+      }
+    }
+  },
+  "entries": {
+    "commands": [
+      "members.Extend",
+      "members.Register"
+    ],
+    "queries": [
+      "members.IsExtended",
+      "members.IsMember"
+    ]
+  },
+  "irVersion": 8,
+  "notes": {
+    "members": "会員を登録し、会員か、延長会員かを答える。",
+    "members.conditions.notRegistered": "会員でない",
+    "members.conditions.registered": "すでに会員"
+  },
+  "root": "members",
+  "sorts": [
+    "MemberId"
+  ],
+  "trace": {
+    "members:会員か、延長会員かを答える": [
+      "IsMember",
+      "IsExtended",
+      "Extend"
+    ],
+    "members:会員を登録し": [
+      "Register"
+    ]
+  }
+}

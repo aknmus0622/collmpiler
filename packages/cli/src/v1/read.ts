@@ -8,6 +8,9 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { parseModule, SyntaxError1 } from "./syntax.ts";
 import type { Block, Decl, Expr, Module, Param, Pos, Prop, TypeNode } from "./syntax.ts";
+import { overlayStage0 } from "./overlay.ts";
+import type { OverlayFacts } from "./overlay.ts";
+import { decided } from "./decide.ts";
 
 export const CORE = "@clp/core/v1";
 export const DRAFT_SUFFIX = ".draft.ts";
@@ -340,18 +343,29 @@ function entryOf(heading: Heading, item: Exclude<Prop, { k: "spread" }>, layer: 
 function overlayEntry(unit: Unit, entry: Entry, problems: Problem[]) {
   const fail = (code: string, message: string) => problems.push({ severity: "error", code, where: where(unit, entry.heading, entry.name), message, at: entry.at });
   const written = unit.entries.get(entry.name);
-  if (written) {
-    if (written.heading !== entry.heading) return fail("wrong-heading", `Layer 1 では ${written.heading} の "${entry.name}" です。解釈は同じ見出しで埋めます`);
-    if (written.layer === 2) return fail("name-collision", `"${entry.name}" を2回埋めています`);
-    if (written.prose === undefined) return fail("overwrite", `Layer 1 が書いた "${entry.name}" は、解釈では書き換えられません（Layer 1 が勝ちます）`);
-    unit.entries.set(entry.name, { ...entry, replaced: written.prose });
-    return;
+  const facts: OverlayFacts = {
+    existing: !written ? "none" : written.layer === 2 ? "interpretation" : written.prose === undefined ? "code" : "prose",
+    sameHeading: written?.heading === entry.heading,
+    closedHeading: (entry.heading === "commands" || entry.heading === "queries") && unit.layer1Headings.has(entry.heading),
+    layer1Only: entry.heading === "examples" || entry.heading === "components",
+  };
+  switch (decided("overlay-check", facts, overlayStage0(facts))) {
+    case "wrong-heading":
+      return fail("wrong-heading", `Layer 1 では ${written!.heading} の "${entry.name}" です。解釈は同じ見出しで埋めます`);
+    case "twice":
+      return fail("name-collision", `"${entry.name}" を2回埋めています`);
+    case "overwrite":
+      return fail("overwrite", `Layer 1 が書いた "${entry.name}" は、解釈では書き換えられません（Layer 1 が勝ちます）`);
+    case "closed-heading":
+      return fail("closed-heading", `Layer 1 が ${entry.heading} を書いているので、解釈は新しい ${entry.heading === "commands" ? "コマンド" : "問い合わせ"} を足せません`);
+    case "layer1-only":
+      return fail("overwrite", `${entry.heading} は Layer 1 だけが書けます`);
+    case "fill":
+      unit.entries.set(entry.name, { ...entry, replaced: written!.prose });
+      return;
+    case "add":
+      unit.entries.set(entry.name, entry);
   }
-  if ((entry.heading === "commands" || entry.heading === "queries") && unit.layer1Headings.has(entry.heading)) {
-    return fail("closed-heading", `Layer 1 が ${entry.heading} を書いているので、解釈は新しい ${entry.heading === "commands" ? "コマンド" : "問い合わせ"} を足せません`);
-  }
-  if (entry.heading === "examples" || entry.heading === "components") return fail("overwrite", `${entry.heading} は Layer 1 だけが書けます`);
-  unit.entries.set(entry.name, entry);
 }
 
 function overlayInterpretations(module: Module, names: Names, units: Unit[], problems: Problem[]) {

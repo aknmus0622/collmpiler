@@ -26,7 +26,7 @@ async function compileV1(dir: string, values: { drafts?: boolean; component?: st
     process.exitCode = 1;
   }
   for (const name of names) {
-    const { ir, problems } = prepare(dir, name, { drafts: values.drafts });
+    const { ir, problems } = await prepare(dir, name, { drafts: values.drafts });
     const tag = names.length > 1 ? `${name}: ` : "";
     for (const p of problems) {
       const text = problemText(p);

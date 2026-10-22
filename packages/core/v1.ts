@@ -74,6 +74,8 @@ export type Contents<S> = {
   routes?: Record<string, string>;
   /** Files and text attached to the agent's requests (not part of the meaning). */
   assets?: readonly Asset[];
+  /** (Interpretation) which names each sentence of the description became: "part of a sentence": ["names"]. */
+  trace?: Record<string, string | readonly string[]>;
 };
 
 declare const STATE: unique symbol;

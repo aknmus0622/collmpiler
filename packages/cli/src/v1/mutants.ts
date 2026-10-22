@@ -12,7 +12,9 @@ import { Simulation, fixedSteps, literalsOf, sequencesFrom, stepArbitrary } from
 import type { RawStep } from "./pbt.ts";
 
 export type Site = { where: string; value: string | number | boolean; mutate: (ir: Ir8) => void };
-export type Unobservable = { where: string; value: unknown; verdict: "unobserved" | "rare" | "precondition"; severity: "error" | "warning" };
+import { verdictStage0 } from "./verdict.ts";
+import type { Trial, Unobservable } from "./verdict.ts";
+export type { Unobservable };
 
 /** The constants the mutation gate breaks, each with how to change it in a copy of the IR. */
 export function sitesOf(ir: Ir8): Site[] {
@@ -58,7 +60,8 @@ export function sitesOf(ir: Ir8): Site[] {
     };
     walk([], get(ir));
   };
-  for (const [id, c] of Object.entries(ir.components)) {
+  // only the root's own constants: a part's are verified with the part
+  for (const [id, c] of Object.entries(ir.components).filter(([id]) => id === ir.root)) {
     for (const [name, table] of Object.entries(c.decisions ?? {})) {
       table.rows.forEach((row, r) => {
         for (const column of Object.keys(row.then)) {
@@ -109,18 +112,20 @@ function differs(original: Ir8, mutant: Ir8, raw: RawStep[]): Shown {
   return precondition ? "precondition" : "none";
 }
 
-export function observability8(ir: Ir8, params: { seed: number; numRuns?: number; traces?: { steps: TraceStep[] }[] }): Unobservable[] {
-  const found: Unobservable[] = [];
+/** Each constant as a trial: the spec run on the same sequences, with the constant changed. */
+export function trialsOf(ir: Ir8, params: { seed: number; numRuns?: number; traces?: { steps: TraceStep[] }[] }): Trial[] {
   const fixed = (params.traces ?? []).map((t) => fixedSteps(ir, t.steps)).filter((t): t is RawStep[] => t !== undefined);
   const sequences = sequencesFrom(ir, fixed, stepArbitrary(ir, literalsOf(ir)));
-  for (const site of sitesOf(ir)) {
-    const mutant = structuredClone(ir);
-    site.mutate(mutant);
-    let precondition = false;
-    const tryUnder = (seed: number): boolean => {
-      for (const raw of fixed) {
+  return sitesOf(ir).map((site) => ({
+    where: site.where,
+    value: site.value,
+    async run(extra: number) {
+      const mutant = structuredClone(ir);
+      site.mutate(mutant);
+      let precondition = false;
+      for (const raw of extra === 0 ? fixed : []) {
         const shown = differs(ir, mutant, raw);
-        if (shown === "shows") return true;
+        if (shown === "shows") return { changed: true, enablementDiffers: precondition };
         if (shown === "precondition") precondition = true;
       }
       const details = fc.check(
@@ -129,16 +134,21 @@ export function observability8(ir: Ir8, params: { seed: number; numRuns?: number
           if (shown === "precondition") precondition = true;
           return shown !== "shows";
         }),
-        { seed, numRuns: params.numRuns ?? 1000 },
+        { seed: params.seed + extra, numRuns: params.numRuns ?? 1000 },
       );
-      return details.failed;
-    };
-    if (tryUnder(params.seed)) continue;
-    const rare = [params.seed + 1, params.seed + 2].some(tryUnder);
-    const verdict = rare ? "rare" : precondition ? "precondition" : "unobserved";
-    found.push({ where: site.where, value: site.value, verdict, severity: rare || typeof site.value === "boolean" ? "warning" : "error" });
-  }
-  return found;
+      return { changed: details.failed, enablementDiffers: precondition };
+    },
+  }));
+}
+
+/** Spec mutation: the verdict is mutation-verdict's (`judge`, Stage 1), or Stage 0's when it cannot judge. */
+export async function observability8(
+  ir: Ir8,
+  params: { seed: number; numRuns?: number; traces?: { steps: TraceStep[] }[] },
+  judge?: (trials: Trial[]) => Promise<Unobservable[] | undefined>,
+): Promise<Unobservable[]> {
+  const trials = trialsOf(ir, params);
+  return (await judge?.(trials)) ?? verdictStage0(trials);
 }
 
 export const describeUnobservable8 = (found: Unobservable) =>

@@ -310,9 +310,15 @@ Bodies are read as expressions, so only this subset is allowed (anything else is
 (\`===\`, \`!==\`, \`<\` …), \`+ - * %\`, \`Math.floor(a / b)\` (integer division), \`Math.min/max/abs\`, \`&& || !\`, \`??\`,
 \`c ? a : b\`, template strings, \`[...list, item]\`, \`{ ...record, field: value }\`, and on values: Map \`has get set
 delete keys values size some every count filter sum\`, Set \`has add delete size some every count filter map sum\`,
-list \`length includes some every count filter map find sum\`, string \`length trim toLowerCase toUpperCase startsWith
-endsWith includes\`. State is \`this.field\`; writes are \`this.f = v\`, \`this.f += v\`, \`this.m.set(k, v)\`,
+list (an array) \`length includes some every filter map find\` and \`[...a, ...b]\` (count with \`filter(…).length\`), string \`length trim toLowerCase toUpperCase startsWith
+endsWith includes\`. A string's \`length\` counts characters (Unicode code points, as \`[...s].length\`), not UTF-16 units;
+\`trim()\` removes what JavaScript's \`trim\` removes. State is \`this.field\`; writes are \`this.f = v\`, \`this.f += v\`, \`this.m.set(k, v)\`,
 \`this.m.delete(k)\`, \`this.s.add(x)\`, \`this.s.delete(x)\`.
+A value that can be \`null\` is narrowed as TypeScript does (\`if (x !== null) …\`, \`x !== null && …\`), or asserted with
+\`x!\` (if it is null there, the spec is wrong). Never add a fallback value that is never used (\`x ?? "…"\`): a constant that
+changes nothing is rejected.
+A JSON value (\`Json\`, as a store keeps it) is read as a type with \`as\` (\`entry.value as Todo\`), and a string that holds
+an identifier with \`as TodoId\` (an identifier written into a string with \`\${id}\` or \`String(id)\`).
 Not allowed: loops (use \`some\` / \`every\` / \`count\` / \`filter\`), \`let\`, exceptions, \`switch\`, functions of your own,
 regular expressions, \`/\` without \`Math.floor\`, \`undefined\` (use \`null\`), reading a state field after writing it in
 the same body (every expression reads the state **before** the command), a query written to the state.
@@ -447,7 +453,8 @@ async function attemptOnce(s: Session, attempt: number, problems: string | undef
   } finally {
     rmSync(sandbox, { recursive: true, force: true });
   }
-  log(`[${s.label} #${attempt}] ${outcome === "ok" ? "ok" : "rejected"}`);
+  log(`[${s.label} #${attempt}] ${outcome === "ok" ? "ok" : `rejected (${outcome})`}`);
+  if (outcome !== "ok" && found) log(found.split("\n").map((line) => `  ${line}`).join("\n"));
   return { outcome, ...(found === undefined ? {} : { problems: found }), ...(irs ? { irs } : {}) };
 }
 

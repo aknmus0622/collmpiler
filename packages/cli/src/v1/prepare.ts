@@ -6,7 +6,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 import { resolveAssets } from "../assets.ts";
 import type { Asset } from "../assets.ts";
-import { compile } from "./load.ts";
+import { compileChecked } from "./load.ts";
 import type { Problem, Unit } from "./read.ts";
 import { CORE } from "./read.ts";
 import type { Ir8 } from "./ir.ts";
@@ -14,6 +14,10 @@ import { checkExamples, selfCheck8 } from "./pbt.ts";
 import { seedOf8 } from "./runtime.ts";
 import { alloyEnabled, checked as alloyChecked, tracesFor } from "./traces.ts";
 import { describeUnobservable8, observability8 } from "./mutants.ts";
+import type { Trial, Unobservable } from "./verdict.ts";
+import { reportedStage0 } from "./reported.ts";
+import type { VerdictFacts } from "./reported.ts";
+import { decided } from "./decide.ts";
 import { javaAvailable } from "./alloy.ts";
 import type { Expr } from "./syntax.ts";
 
@@ -40,8 +44,8 @@ export type Prepared = {
 };
 
 /** Reads and builds one component; nothing is run. */
-export function prepare(specsDir: string, component: string, options: { drafts?: boolean } = {}): Prepared {
-  const { ir, problems, unit } = compile(specsDir, component, options);
+export async function prepare(specsDir: string, component: string, options: { drafts?: boolean } = {}): Promise<Prepared> {
+  const { ir, problems, unit } = await compileChecked(specsDir, component, options);
   const rel = (file: string) => relative(specsDir, file).split(sep).join("/");
   const roots = unit ? [unit.file, ...(unit.interpretation ? [unit.interpretation.file] : [])].map(rel) : [];
   let assets: Asset[] = [];
@@ -75,10 +79,12 @@ function assetDeclarations(expr: Expr): { kind: "file" | "dir" | "text"; path: s
 export type Checked = { problems: Problem[]; warnings: string[] };
 
 /** Runs the spec alone: spec errors, examples, and events never reached. */
-export async function checkSpec(ir: Ir8, options: { runs?: number } = {}): Promise<Checked> {
+export async function checkSpec(ir: Ir8, options: { runs?: number; judge?: (trials: Trial[]) => Promise<Unobservable[] | undefined> } = {}): Promise<Checked> {
   const problems: Problem[] = [];
   const warnings: string[] = [];
-  const checked = await selfCheck8(ir, { seed: 1 });
+  const { deciders8, judgeTrials } = await import("./stage1.ts");
+  const deciders = await deciders8();
+  const checked = await selfCheck8(ir, { seed: 1 }, deciders);
   if (!checked.ok) {
     problems.push({ severity: "error", code: "spec-check", where: ir.root, message: `${checked.message}\n  再現する手順: ${JSON.stringify(checked.steps)}` });
     return { problems, warnings };
@@ -90,15 +96,20 @@ export async function checkSpec(ir: Ir8, options: { runs?: number } = {}): Promi
   const shown = (steps: { event: string; params: Record<string, unknown> }[] | undefined) =>
     steps?.length ? `\n  反例の手順: ${steps.map((s) => `${s.event}(${JSON.stringify(s.params)})`).join(" → ")}` : "";
   const reached = new Set<string>();
-  for (const skipped of formal?.skipped ?? []) warnings.push(`warning[out-of-range] ${ir.root}: ${skipped}`);
+  const report = (facts: VerdictFacts) => decided("checker-verdict", facts, reportedStage0(facts));
+  for (const skipped of formal?.skipped ?? []) {
+    if (report({ kind: "skipped", status: "skipped" }).severity === "warning") warnings.push(`warning[out-of-range] ${ir.root}: ${skipped}`);
+  }
   for (const verdict of formal?.verdicts ?? []) {
+    const { severity, code } = report({ kind: verdict.kind, status: verdict.status });
     if (verdict.kind === "reach") {
       if (verdict.status === "reached") reached.add(verdict.what);
-      if (verdict.status === "unreachable") warnings.push(`warning[unreached-case] ${verdict.what}: Alloy で探した範囲 (原子は種類ごとに 3 個、12 ステップまで) では、この場合に至る手順がありません。この場合の結果は検証されません`);
+      if (severity === "warning" && code === "unreached-case") warnings.push(`warning[unreached-case] ${verdict.what}: Alloy で探した範囲 (原子は種類ごとに 6 個、12 ステップまで) では、この場合に至る手順がありません。この場合の結果は検証されません`);
+      if (severity === "warning" && code === "out-of-range") warnings.push(`warning[out-of-range] ${verdict.what}: Alloy では確かめられませんでした`);
       continue;
     }
-    if (verdict.status !== "broken") continue;
-    const code = verdict.kind === "property" ? "property" : verdict.kind === "defined" ? "undefined-value" : "requires-broken";
+    if (severity === "warning") warnings.push(`warning[${code}] ${verdict.what}: Alloy では確かめられませんでした`);
+    if (severity !== "error") continue;
     const message =
       verdict.kind === "property"
         ? `性質 ${verdict.what} が成り立たない手順があります`
@@ -109,14 +120,14 @@ export async function checkSpec(ir: Ir8, options: { runs?: number } = {}): Promi
   }
   // spec mutation: every constant the mutation gate breaks must show in what the spec answers or sends
   if (problems.length === 0) {
-    for (const found of observability8(ir, { seed: seedOf8(ir), traces: tracesFor(ir, formal) })) {
+    for (const found of await observability8(ir, { seed: seedOf8(ir), traces: tracesFor(ir, formal) }, options.judge ?? judgeTrials)) {
       const text = `${ir.root}: ${describeUnobservable8(found)}`;
       if (found.severity === "error") problems.push({ severity: "error", code: "unobservable-value", where: ir.root, message: describeUnobservable8(found) });
       else warnings.push(`warning[unobservable-value] ${text}`);
     }
   }
   if (!formal) {
-    const more = await selfCheck8(ir, { seed: seedOf8(ir), numRuns: options.runs ?? 1000 });
+    const more = await selfCheck8(ir, { seed: seedOf8(ir), numRuns: options.runs ?? 1000 }, deciders);
     const never = new Set(checked.coverage.never.filter((e) => (more.ok ? more.coverage.never.includes(e) : true)));
     for (const event of never) warnings.push(`warning[unreached-case] ${event}: 仕様を実行しても、この場合には一度も当たりませんでした。この場合の結果は検証されません`);
   }

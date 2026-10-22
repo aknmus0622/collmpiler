@@ -14,6 +14,8 @@ import { isIr8 } from "./generate.ts";
 import { loadProgram } from "./v1/load.ts";
 import { checkSpec, isV1Specs, prepare } from "./v1/prepare.ts";
 import { boundary8, defaultRuns8 } from "./v1/runtime.ts";
+import { planContract8 } from "./v1/stage1.ts";
+import type { Ir8 } from "./v1/ir.ts";
 import { DEFAULT_GUIDE } from "./guide.ts";
 import { DRAFT_SUFFIX, listComponents, loadSpecs } from "./loader.ts";
 import type { MutationStrategy } from "./mutation.ts";
@@ -116,7 +118,7 @@ export async function implement(options: ImplementOptions) {
   if (v1) {
     // 1.0 の書き方 (DSL.md §17): 読み取り、IR 版 8、仕様だけの実行、具体例
     for (const name of names) {
-      const prepared = prepare(specsDir, name, { drafts });
+      const prepared = await prepare(specsDir, name, { drafts });
       const errors = prepared.problems.filter((p) => p.severity === "error");
       for (const p of prepared.problems.filter((p) => p.severity === "warning")) log(`注意 (${name}): ${p.where}: ${p.message}`);
       if (errors.length > 0 || !prepared.ir) throw new Error(`仕様 (${name}) にエラーがあります:\n${errors.map((p) => `  ${p.where}: ${p.message}`).join("\n")}`);
@@ -124,6 +126,8 @@ export async function implement(options: ImplementOptions) {
       if (checked.problems.length > 0) throw new Error(`仕様 (${name}) に誤りがあります:\n${checked.problems.map((p) => `  ${p.where}: ${p.message}`).join("\n")}`);
       for (const warning of checked.warnings) log(`注意 (${name}): ${warning}`);
       const ir = JSON.parse(stableStringify(prepared.ir)) as Ir;
+      // the contract's text decisions, made beforehand by text-plan (Stage 1) when it can
+      await planContract8(ir as Ir8);
       units.push({ name, ir, ws: workspaceOf(layout, target.files, name, names), seed: seedOf(ir), assets: prepared.assets, roots: prepared.roots });
     }
   }
