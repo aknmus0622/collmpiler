@@ -1,303 +1,196 @@
 {
-  "behaviors": [
-    {
-      "description": "One thing a command asks, and how many queries it names. Unless exactly one, the problem is one-query.",
-      "from": [
-        "READY"
-      ],
-      "name": "Asks",
-      "onlyIf": [],
-      "when": {
-        "The thing asked names a number of queries other than exactly one": {
-          "emits": [
-            {
-              "effect": "Problem",
-              "input": {
-                "code": "one-query"
-              }
-            }
-          ]
-        },
-        "otherwise": {}
-      }
-    },
-    {
-      "from": [
-        "READY"
-      ],
-      "name": "Branching",
-      "onlyIf": [],
-      "when": {
-        "otherwise": {
-          "does": "How a command branches into cases. If Layer 1 wrote the cases: an outcome written outside the cases (`flat`) is the problem flat-in-cases, and a goTo, does or responds Layer 1 wrote outside the cases (`layer1Outcome`) is the problem layer1-outside-cases (both may be reported, in that order). Otherwise, if the interpretation wrote the cases: `flat` is the problem flat-in-cases, and a goTo Layer 1 wrote (`layer1GoTo`) is the problem branch-over-goto (both may be reported, in that order). If nobody wrote cases, there is no problem.",
-          "emits": [
-            {
-              "effect": "Problem",
-              "input": {
-                "code": "flat-in-cases"
-              },
-              "onlyWhen": "Someone (Layer 1 or the interpretation) wrote the cases, and an outcome is written outside the cases (`flat`)"
-            },
-            {
-              "effect": "Problem",
-              "input": {
-                "code": "layer1-outside-cases"
-              },
-              "onlyWhen": "Layer 1 wrote the cases, and Layer 1 wrote a goTo, does or responds outside the cases"
-            },
-            {
-              "effect": "Problem",
-              "input": {
-                "code": "branch-over-goto"
-              },
-              "onlyWhen": "Layer 1 did not write the cases, the interpretation did, and Layer 1 wrote a goTo"
-            }
-          ]
-        }
-      }
-    },
-    {
-      "description": "A command calls a contained component. If there is no such component, the problem is no-part. Otherwise, if it is one of many (`keyedPart`) but no key was written, the problem is key-missing; if it is a single component but a key was written, the problem is key-extra.",
-      "from": [
-        "READY"
-      ],
-      "name": "Call",
-      "onlyIf": [],
-      "when": {
-        "The contained component exists, it is a single component, and a key was written": {
-          "emits": [
-            {
-              "effect": "Problem",
-              "input": {
-                "code": "key-extra"
-              }
-            }
-          ]
-        },
-        "The contained component exists, it is one of many, and no key was written": {
-          "emits": [
-            {
-              "effect": "Problem",
-              "input": {
-                "code": "key-missing"
-              }
-            }
-          ]
-        },
-        "There is no such contained component": {
-          "emits": [
-            {
-              "effect": "Problem",
-              "input": {
-                "code": "no-part"
-              }
-            }
-          ]
-        },
-        "otherwise": {}
-      }
-    },
-    {
-      "description": "An entry the interpretation wrote into a group (a datum, a command, a case, ...). If Layer 1 lists that group's entries (`listed`), the group is closed to new entries (`closed`), and Layer 1 does not have this one, the problem is closed.",
-      "from": [
-        "READY"
-      ],
-      "name": "Entry",
-      "onlyIf": [],
-      "when": {
-        "Layer 1 lists the group's entries, the group is closed to new entries, and Layer 1 does not have this entry": {
-          "emits": [
-            {
-              "effect": "Problem",
-              "input": {
-                "code": "closed"
-              }
-            }
-          ]
-        },
-        "otherwise": {}
-      }
-    },
-    {
-      "description": "A key the interpretation wrote. If it cannot be written there (`known` is false), the problem is unknown-key.",
-      "from": [
-        "READY"
-      ],
-      "name": "Key",
-      "onlyIf": [],
-      "when": {
-        "The key cannot be written there (`known` is false)": {
-          "emits": [
-            {
-              "effect": "Problem",
-              "input": {
-                "code": "unknown-key"
-              }
-            }
-          ]
-        },
-        "otherwise": {}
-      }
-    },
-    {
-      "description": "One place, and whether Layer 1 and the interpretation each wrote it. If it is not a place that can be written (`known` is false), the problem is unknown-key; otherwise, if both wrote it, the problem is conflict (Layer 1 wins, and the interpretation may not write over it).",
-      "from": [
-        "READY"
-      ],
-      "name": "Slot",
-      "onlyIf": [],
-      "when": {
-        "The place can be written, and both Layer 1 and the interpretation wrote it": {
-          "emits": [
-            {
-              "effect": "Problem",
-              "input": {
-                "code": "conflict"
-              }
-            }
-          ]
-        },
-        "The place is not a place that can be written (`known` is false)": {
-          "emits": [
-            {
-              "effect": "Problem",
-              "input": {
-                "code": "unknown-key"
-              }
-            }
-          ]
-        },
-        "otherwise": {}
-      }
-    },
-    {
-      "description": "The hash of Layer 1 recorded in the interpretation (if any) and the hash of Layer 1 now. If one was recorded and it differs, the problem is stale.",
-      "from": [
-        "READY"
-      ],
-      "name": "Stamp",
-      "onlyIf": [],
-      "when": {
-        "A hash of Layer 1 was recorded, and it differs from the hash of Layer 1 now": {
-          "emits": [
-            {
-              "effect": "Problem",
-              "input": {
-                "code": "stale"
-              }
-            }
-          ]
-        },
-        "otherwise": {}
-      }
-    },
-    {
-      "description": "A state Layer 1 listed by name. If it has no description, the problem is undescribed.",
-      "from": [
-        "READY"
-      ],
-      "name": "State",
-      "onlyIf": [],
-      "when": {
-        "The state has no description": {
-          "emits": [
-            {
-              "effect": "Problem",
-              "input": {
-                "code": "undescribed"
-              }
-            }
-          ]
-        },
-        "otherwise": {}
-      }
-    }
-  ],
-  "decisions": {},
-  "descriptions": {
-    "component": "Reports the problems found when an interpretation is laid over Layer 1, one fact at a time.",
-    "effects.Problem": "A problem shown by the fact just given."
-  },
-  "irVersion": 7,
-  "model": {
-    "commands": {
-      "Asks": {
-        "count": {
-          "max": 3,
-          "min": 0,
-          "type": "integer"
-        }
-      },
-      "Branching": {
-        "flat": "boolean",
-        "interpretationCases": "boolean",
-        "layer1Cases": "boolean",
-        "layer1GoTo": "boolean",
-        "layer1Outcome": "boolean"
-      },
-      "Call": {
-        "exists": "boolean",
-        "keyGiven": "boolean",
-        "keyedPart": "boolean"
-      },
-      "Entry": {
-        "closed": "boolean",
-        "inLayer1": "boolean",
-        "listed": "boolean"
-      },
-      "Key": {
-        "known": "boolean"
-      },
-      "Slot": {
-        "interpretation": "boolean",
-        "known": "boolean",
-        "layer1": "boolean"
-      },
-      "Stamp": {
-        "current": {
-          "examples": [
-            "sha256:a",
-            "sha256:b"
-          ],
-          "type": "string"
-        },
-        "recorded": {
-          "optional": {
-            "examples": [
-              "sha256:a",
-              "sha256:b"
+  "components": {
+    "overlay-check": {
+      "calcs": {
+        "entry": {
+          "is": [
+            "ite",
+            [
+              "not",
+              [
+                "=",
+                [
+                  "var",
+                  "existing"
+                ],
+                [
+                  "lit",
+                  "none"
+                ]
+              ]
             ],
-            "type": "string"
+            [
+              "ite",
+              [
+                "not",
+                [
+                  "var",
+                  "sameHeading"
+                ]
+              ],
+              [
+                "lit",
+                "wrong-heading"
+              ],
+              [
+                "ite",
+                [
+                  "=",
+                  [
+                    "var",
+                    "existing"
+                  ],
+                  [
+                    "lit",
+                    "interpretation"
+                  ]
+                ],
+                [
+                  "lit",
+                  "twice"
+                ],
+                [
+                  "ite",
+                  [
+                    "=",
+                    [
+                      "var",
+                      "existing"
+                    ],
+                    [
+                      "lit",
+                      "code"
+                    ]
+                  ],
+                  [
+                    "lit",
+                    "overwrite"
+                  ],
+                  [
+                    "lit",
+                    "fill"
+                  ]
+                ]
+              ]
+            ],
+            [
+              "ite",
+              [
+                "var",
+                "closedHeading"
+              ],
+              [
+                "lit",
+                "closed-heading"
+              ],
+              [
+                "ite",
+                [
+                  "var",
+                  "layer1Only"
+                ],
+                [
+                  "lit",
+                  "layer1-only"
+                ],
+                [
+                  "lit",
+                  "add"
+                ]
+              ]
+            ]
+          ],
+          "params": {
+            "closedHeading": "bool",
+            "existing": {
+              "enum": [
+                "none",
+                "prose",
+                "code",
+                "interpretation"
+              ]
+            },
+            "layer1Only": "bool",
+            "sameHeading": "bool"
+          },
+          "result": {
+            "enum": [
+              "fill",
+              "add",
+              "wrong-heading",
+              "twice",
+              "overwrite",
+              "closed-heading",
+              "layer1-only"
+            ]
           }
         }
       },
-      "State": {
-        "described": "boolean"
-      }
-    },
-    "data": {},
-    "effects": {
-      "Problem": {
-        "code": [
-          "unknown-key",
-          "conflict",
-          "undescribed",
-          "closed",
-          "flat-in-cases",
-          "layer1-outside-cases",
-          "branch-over-goto",
-          "one-query",
-          "no-part",
-          "key-missing",
-          "key-extra",
-          "stale"
-        ]
-      }
-    },
-    "init": "READY",
-    "queries": {},
-    "states": [
-      "READY"
+      "init": {},
+      "queries": {
+        "Entry": {
+          "is": [
+            "calc",
+            "entry",
+            {
+              "closedHeading": [
+                "var",
+                "closedHeading"
+              ],
+              "existing": [
+                "var",
+                "existing"
+              ],
+              "layer1Only": [
+                "var",
+                "layer1Only"
+              ],
+              "sameHeading": [
+                "var",
+                "sameHeading"
+              ]
+            }
+          ],
+          "params": {
+            "closedHeading": "bool",
+            "existing": {
+              "enum": [
+                "none",
+                "prose",
+                "code",
+                "interpretation"
+              ]
+            },
+            "layer1Only": "bool",
+            "sameHeading": "bool"
+          },
+          "result": {
+            "enum": [
+              "fill",
+              "add",
+              "wrong-heading",
+              "twice",
+              "overwrite",
+              "closed-heading",
+              "layer1-only"
+            ]
+          }
+        }
+      },
+      "state": {}
+    }
+  },
+  "entries": {
+    "commands": [],
+    "queries": [
+      "overlay-check.Entry"
     ]
-  }
+  },
+  "irVersion": 8,
+  "notes": {
+    "overlay-check": "Decides what happens with each entry an interpretation writes.",
+    "overlay-check.calcs.entry": "An entry of the interpretation, given what is already under its name: nothing, prose Layer 1 wrote, code Layer 1 wrote, or an entry of the interpretation itself; whether that is under the same heading; whether the heading is closed to new entries (Layer 1 wrote the commands or queries heading); and whether only Layer 1 may write the heading (examples, components). When something is there: under another heading it is wrong-heading; the interpretation's own entry written again is twice; Layer 1's code cannot be overwritten (overwrite); Layer 1's prose is filled. When nothing is there: a closed heading refuses it (closed-heading), a heading only Layer 1 writes refuses it (layer1-only), and otherwise it is added."
+  },
+  "root": "overlay-check",
+  "sorts": []
 }

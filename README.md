@@ -6,32 +6,35 @@
 
 ## Current Scope
 
-Version 0.3. TypeScript targets only. What 0.1 and 0.3 set out to complete, and what comes next, is in
-[`ROADMAP.md`](ROADMAP.md) (in Japanese).
+The 1.0 notation (`DSL.md` §17; what 1.0 is to complete is in [`ROADMAP.md`](ROADMAP.md), in Japanese).
+TypeScript targets only.
 
-- **Write a spec as TypeScript data. (Spec Driven Development)** Decision tables, plus a component described as
-  roughly or as precisely as you like: prose alone, or prose with structure wherever you want to pin something
-  down (states, inputs, transitions). No functions. An LLM derives the rest — the missing structure, and the
-  meaning of every sentence — into an *interpretation* that you review; it can never override the structure you wrote.
-- **Have an LLM agent write the production code from the spec (Harness/Loop Engineering)**, test-first, in three isolated sessions:
-  design a skeleton, wire it to the test harness, then implement it. The framework generates test-side code
-  only and places nothing in production code.
+- **Write a spec in TypeScript that is read, never run. (Spec Driven Development)** A component is a
+  `service("sentence", { ... })` whose commands and queries are methods; anything you have not decided yet can stay
+  a sentence — a whole component, one command, one condition inside a body (`is.onLoan("The book is on loan")`).
+  An LLM writes the content of every sentence, in the same notation, into an *interpretation* that you review; it
+  can never override what you wrote.
+- **The spec is a formal model.** It compiles to an IR of expressions. Before any agent runs, the spec is run on
+  its own, its properties and the reachability of every case are checked with Alloy, and every constant is changed
+  to see that it shows in what can be verified.
+- **Have an LLM agent write the production code from the spec (Harness/Loop Engineering)**, test-first, in three
+  isolated sessions: design a skeleton, wire it to the test harness, then implement it. The framework generates
+  test-side code only and places nothing in production code.
 - **Run it again when the spec changes.** The same command brings the code back into agreement with the spec:
   only the steps the change calls for are run, existing code is kept, and the agent is first shown where the
   current code falls short. If nothing changed, it only verifies.
-- **A web application, persistence and failing dependencies included.** A command answers whoever executed it,
-  values can be records and lists, components contain components, and an HTTP route is part of the spec. Agents
-  write everything down to the `node:http` server; a person writes only the composition root (a port, a database
-  file). Data that must survive a restart (`durable`, on `node:sqlite`) is verified by restarting the system
-  between steps, and a dependency that can fail (`mayFail`) fails during verification (`examples/todo-db-ts`).
+- **A web application, persistence and failing dependencies included.** Commands answer, values are records,
+  lists, sets and maps, components contain components, and an HTTP route is part of the spec. Agents write
+  everything down to the `node:http` server; a person writes only the composition root. Data that must survive a
+  restart (`durable`, on `node:sqlite`) is verified by restarting the system between steps, and a dependency that
+  can fail (`mayFail`) fails during verification (`examples/todo-db-ts`).
 - **A person stays in the loop.** Questions the interpreting LLM could not settle, and places where two
   independent interpretations behave differently, block until a person resolves them — by making the spec more
   precise or by marking the reading as reviewed.
-- **The framework is built with itself.** Nineteen of its own parts — the checks, the pipeline, the grading
-  verdicts, and the execution of a spec's meaning during verification — are specs, implemented by agents and
-  used by the framework. A small hand-written version of each stays as the trusted base: parts that grade are
-  always graded by it, and its answers must agree with theirs. Deleted, all nineteen are rebuilt by `clp apply`
-  alone (`SELF_HOSTING.md`).
+- **The framework is built with itself.** Nineteen of its own decisions — the reader's judgements, the oracle's
+  choices, the grading verdicts, the pipeline and the interpret flow — are specs in the same notation, implemented by
+  agents and used by the framework. A small hand-written version of each stays as the trusted base: parts that grade
+  are always graded by it, and its answers must agree with theirs (`SELF_HOSTING.md`).
 
 ## Requirements and Setup
 
@@ -97,130 +100,72 @@ cancelled (`specs/`), the implementation an LLM agent wrote from it (`src/`), an
 Paths and commands are relative to that directory.
 
 More examples: `examples/library-ts/` starts from a deliberately rough spec and shows how it was made
-precise (see its `README.md`); `examples/todo-ts/` is a to-do list behind an HTTP API, server included, where a
+precise (see its `README.md`); `examples/lending-ts/` is a library of several components that contain one
+another; `examples/todo-ts/` is a to-do list behind an HTTP API, server included, where a
 person wrote only the composition root; `examples/todo-db-ts/` makes it persistent and lets a dependency fail
 (each has a `README.md`); `packages/cli/self/` describes parts of the framework itself in the same way, and the
 framework runs on them (`examples/co-llm-piler` is a link to it).
 
 ### 1. Write the spec
 
-You write **decision tables** and a **component**. A scenario, a domain part, and a UI part are all written
-as components of the same shape. Neither contains a function.
-
-Nothing is referred to by a string: a state, a condition, a data field, an effect is declared once, as a
-**handle**, and used through it, so a typo is a type error.
-
-**Decision tables** (`specs/order.decisions.ts`). Each row is a condition in natural language, declared as a
-handle; cells are values, or `null` where a row gives no value for a column. `otherwise` is mandatory.
+Everything goes in `specs/order.component.ts`: the outside world the order talks to, two decision tables, and the
+order itself. Commands and queries are methods; what you have not pinned down stays a sentence.
 
 ```ts
-export const CampaignIf = conditions({
-  customerGoldMemberMonthEnd: "The customer is a Gold member and it is month-end",
-  customerSilverMember: "The customer is a Silver member",
+import { answer, decisions, does, external, init, is, otherwise, requires, service } from "@clp/core";
+import type { Int } from "@clp/core";
+
+export type Rank = "Gold" | "Silver" | "Bronze";
+
+// The outside world: no contents, only what it answers and what it is told
+export const Calendar = external("The calendar.", { queries: { IsMonthEnd: (): boolean => answer() } });
+export const Payment = external("The external payment module.", {
+  queries: { Active: (): boolean => answer(), Result: (): "succeeded" | "failed" => answer() },
 });
-export const Campaign = decisionTable(
-  when(CampaignIf.customerGoldMemberMonthEnd, { discountPercent: 20, grantsCoupon: true, coupon: "Premium" }),
-  when(CampaignIf.customerSilverMember, { discountPercent: 5, grantsCoupon: false, coupon: null }),
-  otherwise({ discountPercent: 0, grantsCoupon: false, coupon: null }),
-);
-```
-
-**The component** (`specs/order.component.ts`). The roughest form is prose alone:
-
-```ts
-export const Order = component(description("An order: placed by a customer, paid, then shipped or cancelled. ..."));
-```
-
-From there, write as structure only what you want to pin down. Every entry — a data field, a query, an
-effect, a calculation, a command — is prose (`description`), parts, or both bundled by `component`. The
-vocabulary is declared first, as groups of handles, and exported so that the interpretation can use it too:
-
-```ts
-const Rank = ["Gold", "Silver", "Bronze"] as const;
-const Yen = integer({ min: 0, max: 1_000_000, around: [10_000] });
-
-export const If = conditions({
-  externalPaymentModuleActive: "The external payment module is active",
-  paymentSucceeded: "The payment succeeded",
+export const Customer = external("Messages sent to the customer.", {
+  commands: { OrderConfirmation() {}, Receipt(discountPercent: Int, amount: Int) {}, Coupon(type: "Premium" | "Standard") {}, /* ... */ },
 });
-export const State = states("DRAFT", "PENDING", "PAID", "SHIPPED", "CANCELLED");
-export const Data = data({ rank: Rank, price: Yen });         // what the order remembers: a type is written as it is
-export const Query = queries({                                // what it asks its dependencies
-  isMonthEnd: component(description("Whether today is the last day of the month."), output("boolean")),
-  paymentModuleActive: output("boolean"),
-  paymentResult: component(description("What the payment module answered for this order."), output(["succeeded", "failed"])),
-});
-export const Effect = effects({                               // what it does to its dependencies
-  SendReceipt: input({ discountPercent: "integer", amount: "integer" }),
-  IssueCoupon: input({ type: ["Premium", "Standard"] }),
-  Refund: description("What the customer paid is returned."),   // prose only
-  // ...
-});
-export const Calc = calculations({
-  amountCharged: component(description("price × (100 − discount percent) ÷ 100, rounded down to a whole yen"), output("integer")),
-});
-export const Inv = invariants({ everyOrderPastDraftState: "Every order past the draft state has a member rank and a price" });
-export const PlaceOrderInput = input({ customerRank: Rank, listPrice: Yen });
 
-export const Order = component({
-  description: "An order: placed by a customer, paid through an external payment module, then shipped or cancelled.",
-  states: State,
-  init: State.DRAFT,
-  data: Data,
-  queries: Query,
-  effects: Effect,
-  decisions: { campaign: Campaign, shipping: Shipping },
-  calculations: Calc,
-  invariants: Inv,
+// A row is a condition and constants; the first row that holds is chosen. null: the row gives no value
+export const Campaign = decisions("The campaign that applies to the order", () => [
+  [is.goldAtMonthEnd("The customer is a Gold member and it is month-end"), { discountPercent: 20, grantsCoupon: true, coupon: "Premium" }],
+  [is.silver("The customer is a Silver member"), { discountPercent: 5, grantsCoupon: false, coupon: null }],
+  [otherwise, { discountPercent: 0, grantsCoupon: false, coupon: null }],
+]);
 
-  commands: {                                                 // what drives it from outside
-    // fully structured: input, where it applies, where it leads
-    PlaceOrder: component(
-      PlaceOrderInput,
-      from(State.DRAFT),
-      goTo(State.PENDING),
-      does("The order remembers the customer's rank and the list price. An order confirmation is sent."),
-    ),
-    Checkout: component(
-      from(State.PENDING),
-      onlyIf(If.externalPaymentModuleActive),
-      when(
-        If.paymentSucceeded,
-        goTo(State.PAID),
-        does("A receipt is sent with the campaign's discount percent and the amount charged. Then a coupon is issued if the campaign grants one."),
-      ),
-      otherwise(does("The customer is notified of the payment failure.")),   // no goTo: the state stays
-    ),
-    // partly structured: the resulting state is left to the prose
-    Ship: component(from(State.PAID), does("The order becomes shipped. A shipping notice is sent, with priority as the shipping decision says.")),
-    // prose only
-    Cancel: description("A pending or paid order can be cancelled. If the order had been paid, a refund is issued."),
+export const Order = service("An order: placed by a customer, paid through an external payment module, then shipped or cancelled.", {
+  state: {
+    status: init<"DRAFT" | "PENDING" | "PAID" | "SHIPPED" | "CANCELLED">("DRAFT"),
+    rank: init<Rank | null>(null),
+    price: init<Int>(0),
   },
-});
-```
-
-Parts are values, so a fragment shared by several commands is written once
-(`const rejected = component(when(...), otherwise(...))`): a `component(...)` without a name dissolves into
-wherever it is placed. `{ ... }` is always shorthand for a list of named things, and the word that receives it
-says what they are: fields with their types in `input({ ... })`, settings in `integer({ ... })`, entries by
-name under `commands`. A bare `{ ... }` is never a type.
-
-A query can take an input, when it is a question *about something*. The command then says what it asks about,
-and names the answer; the implementation is tested against that, and fails if it asks about anything else:
-
-```ts
-export const Query = queries({ stateDeclared: component(input({ name: "string" }), output("boolean")) });
-export const GoToInput = input({ state: "string" });
-// ...
   commands: {
-    GoTo: component(
-      GoToInput,
-      Query.stateDeclared({ name: GoToInput.state }).as("declared"),    // read as `state.declared`
-      when(If.namedStateNotDeclared, does("An unknown-state diagnostic is reported.")),
-      otherwise(),
-    ),
+    // where it applies and where it leads are code; what it remembers and sends is a sentence
+    PlaceOrder(customerRank: Rank, listPrice: Int) {
+      requires(this.status === "DRAFT" && listPrice >= 0 && listPrice <= 1000000);
+      this.status = "PENDING";
+      does.place("The order remembers the customer's rank and the list price. An order confirmation is sent.");
+    },
+    Checkout() {
+      requires(this.status === "PENDING" && is.paymentModuleActive("The external payment module is active"));
+      if (is.paid("The payment succeeded")) {
+        this.status = "PAID";
+        does.receipt("A receipt is sent with the campaign's discount percent and the amount charged (price × (100 − discount percent) ÷ 100, rounded down to a whole yen). Then a coupon is issued if the campaign grants one.");
+        return;
+      }
+      does.failure("The customer is notified of the payment failure.");
+    },
+    // a sentence only
+    Cancel: "A pending or paid order can be cancelled. If the order had been paid, the customer is refunded what they paid.",
+    // ...
   },
+  queries: { Status: "The order's current status" },
+  rules: { pastDraftHasRankAndPrice: "Every order past the draft state has a member rank" },
+});
 ```
+
+`requires` puts a situation outside the spec: it is never tested. A rule the code must enforce is an answer
+(`return "limit";`) instead. Everything you can write is on one page: [`REFERENCE.md`](REFERENCE.md).
 
 ### 2. Have an LLM interpret it
 
@@ -229,86 +174,76 @@ pnpm exec clp interpret \
   --agent 'claude -p "Read clp/REQUEST.md and carry out the request." --permission-mode acceptEdits'
 ```
 
-The agent writes the **interpretation**: the structure Layer 1 left as prose, and the meaning of every
-sentence as a function attached to its handle. You do not write this file.
+The agent writes the **interpretation**: the content of every sentence, as code in the same notation. You do not
+write this file.
 
 ```ts
 // specs/order.interpretation.ts — generated
-import { Campaign, CampaignIf, Shipping, ShippingIf } from "./order.decisions.ts";
-import { Calc, Data, Effect, If, Inv, Order, PlaceOrderInput, State } from "./order.component.ts";
+export const Refunds = external("Refunds paid back to the customer through the external payment module.", {
+  commands: { Refund(amount: Int) {} },
+});
 
-export const Interpretation = interpretation(Order, {
-  // Structure: declarations and handles, no functions, in the same words as Layer 1. It goes into the IR.
+export const OrderInterpretation = interpretation(Order, {
+  state: { amountPaid: init<Int>(0) },
   commands: {
-    PlaceOrder: component(Effect.SendOrderConfirmation(), Data.rank.set(PlaceOrderInput.customerRank), Data.price.set(PlaceOrderInput.listPrice)),
-    Checkout: component(
-      when(
-        If.paymentSucceeded,
-        Effect.SendReceipt({ discountPercent: Campaign.discountPercent, amount: Calc.amountCharged }),
-        Effect.IssueCoupon({ type: Campaign.coupon }, onlyWhen(Campaign.grantsCoupon)),
-      ),
-      otherwise(Effect.NotifyPaymentFailure()),
-    ),
-    Ship: component(goTo(State.SHIPPED), Effect.SendShippingNotice({ priority: Shipping.priority })),
-    Cancel: component(from(State.PENDING, State.PAID), goTo(State.CANCELLED), Effect.Refund(onlyWhen(was(State.PAID)))),
+    Cancel() {
+      if (this.status === "PAID") {
+        this.status = "CANCELLED";
+        Refunds.Refund(this.amountPaid);
+        return "cancelled";
+      }
+      if (this.status === "PENDING") {
+        this.status = "CANCELLED";
+        return "cancelled";
+      }
+      return "not-cancellable";
+    },
   },
-
-  // meanings: functions. The oracle for the tests; never shown to the implementing agent.
-  meanings: [
-    CampaignIf.customerGoldMemberMonthEnd.means((state) => state.rank === "Gold" && state.isMonthEnd),
-    If.paymentSucceeded.means((state) => state.paymentResult === "succeeded"),
-    Calc.amountCharged.means((state) => Math.floor(((state.price ?? 0) * (100 - Campaign.of(state).discountPercent)) / 100)),
+  conditions: { paid() { return Payment.Result() === "succeeded"; } /* ... */ },
+  does: {
+    receipt() {
+      const campaign = Campaign();
+      const amount = Math.floor((this.price * (100 - campaign.discountPercent)) / 100);
+      this.amountPaid = amount;
+      Customer.Receipt(campaign.discountPercent, amount);
+      if (campaign.grantsCoupon && campaign.coupon !== null) Customer.Coupon(campaign.coupon!);
+    },
     // ...
-  ],
+  },
 });
 ```
 
-The interpretation **cannot override structure written in Layer 1**: where you gave states, an input, `from`,
-a `goTo`, or the cases of a `when`, it may only add what is missing. It is checked against the grammar (what
-may be written inside what) and against Layer 1, and run on its own over random command sequences, before it
-is written out.
+It **fills, never overrides**: writing again what you wrote as code is rejected. It is read and type-checked with
+the rest of the spec, run on its own, and checked with Alloy before it is written out.
 
-Because the interpretation is what the implementation is judged against, it is not used until you accept it.
-It goes to `specs/order.interpretation.draft.ts`, and you are told where the prose was ambiguous, in two ways:
+Because the interpretation is what the implementation is judged against, it is not used until you accept it. It
+goes to `specs/order.interpretation.draft.ts`, and you are told where the prose was ambiguous, in two ways:
 
-- **Questions the agent left** (`// REVIEW:`). From a deliberately rough version of this component (vocabulary
-  and most commands as prose):
-
-  ```text
-  the member ranks are not listed anywhere, so the rank is kept as free text
-  Layer 1 mentions a "discounted amount" but states no discount rule
-  "a coupon may be issued" gives no condition. Month-end is assumed, only because that query is declared
-  "good customers" is not defined
-  ```
-
-- **Where another reading behaves differently.** A second session interprets the same prose without seeing
-  the first (only the vocabulary is shared), and is asked to take, wherever the prose leaves room, a reading
-  that is defensible but not the most obvious one. Both are run on the same command sequences, and each
-  disagreement is reported as the shortest sequence that shows it:
+- **Questions the agent left** (`// REVIEW:`), for example: *Layer 1 does not say what Return answers. Chosen:
+  "returned", or "refused" for a lost book.*
+- **Where another reading behaves differently.** A second session interprets the same prose without seeing the
+  first (only the boundary is shared: commands, queries, their answers, the outside world), and is asked to take a
+  reading that is defensible but not the most obvious one. Both are run on the same sequences, and each difference
+  is reported with the shortest sequence that shows it:
 
   ```text
-  Ship: PlaceOrder {"memberRank":"SILVER", ...} → Checkout {...} → Ship {...}
-    first:  state SHIPPED, effects [ShippingNotice {priority: false}]
-    second: state SHIPPED, effects [ShippingNotice {priority: true}]
+  2 つ目の解釈と食い違う (Return、外の世界へのコマンド loan-world.NotifyNextMember):
+    Borrow({} 外の世界: {"loan-world.ReservedBySomeoneElse":false}) → Return({} 外の世界: {"loan-world.ReservedBySomeoneElse":true})
+    1つ目: {"effects":[{"port":"loan-world.NotifyNextMember","args":{}}],"output":"returned"}、2 つ目: {"effects":[],"output":"returned"}
   ```
 
-  `--sessions <n>` sets the number of sessions (default 2; `1` skips the comparison). In our trials the
-  second session found every command with a disagreement, and a third and fourth added none.
-
-Both are written into the draft, the disagreements as `// REVIEW(clp):` lines, and **the draft cannot be
-accepted while any of them is left**. To resolve one, **make Layer 1 more precise** (add a decision table, a
-state, a `goTo`) and run `interpret` again; only what the change affects is redone. If the draft's reading is
-the one you meant, change that line's `REVIEW` to `REVIEWED`: it stays in the file as the record of what you
-confirmed. When nothing is left to resolve, read the draft and accept it:
+Both are written into the draft (the differences as `// REVIEW(clp):` lines), and **the draft cannot be accepted
+while any is left**. Resolve one by making Layer 1 more precise and interpreting again, or, if the draft's reading
+is the one you meant, change that line's `REVIEW` to `REVIEWED`: it stays as the record. `clp interpret` also
+prints every sentence next to what it became, read aloud. Then:
 
 ```bash
 pnpm exec clp interpret --accept
 ```
 
-The interpretation records the Layer 1 it was derived from. If Layer 1 changes afterwards, the interpretation
-is stale and nothing runs until it is derived again (or accepted again, when you only reworded a sentence).
-Changing a value in a decision table does not make it stale. For unattended runs, `clp apply --drafts` uses
-the draft as it is; the result then records that the oracle was not reviewed.
+The interpretation records the Layer 1 it was derived from. If Layer 1 changes afterwards, it is stale and nothing
+runs until it is derived again (or accepted again, when you only reworded a sentence). Changing a value in a
+decision table does not make it stale.
 
 ### 3. Check the spec
 
@@ -316,26 +251,15 @@ the draft as it is; the result then records that the oracle was not reviewed.
 pnpm -s exec clp compile
 ```
 
-This checks the spec against the grammar (a part written where it does not belong is reported with its file
-and line), runs it on its own (conflicting conditions, broken invariants), changes each value
-of the decision tables to see that it matters to what the spec expects (a value that never does cannot be
-verified in an implementation either), and prints the IR: the spec as language-independent JSON. The
-prose and the structure are both there, under the same keys as in the spec, wherever they were written; the
-functions of the interpretation are left out, so the IR says *what* must hold but not *how* to decide it.
+This reads and type-checks the spec, runs it on its own (properties, a missing map key, a step no case applies to),
+runs your examples, checks it with Alloy (every property, and a trace to every case — which also become the first
+sequences tried during verification), changes each constant to see that it shows in what can be verified, and
+prints the IR: the spec as a formal model, in JSON. Expressions are s-expressions:
 
 ```json
-"The payment succeeded": {
-  "goTo": "PAID",
-  "does": "A receipt is sent with the campaign's discount percent and the amount charged. Then a coupon is issued if the campaign grants one.",
-  "emits": [
-    { "effect": "SendReceipt",
-      "input": {
-        "discountPercent": { "$ref": "decision:campaign.discountPercent" },
-        "amount": { "$ref": "calculation:amountCharged" } } },
-    { "effect": "IssueCoupon",
-      "input": { "type": { "$ref": "decision:campaign.coupon" } },
-      "onlyWhen": { "$ref": "decision:campaign.grantsCoupon" } }
-  ]
+"Checkout.paid": {
+  "assign": { "status": ["lit", "PAID"], "amountPaid": ["div", ["*", ["state", "price"], ["-", 100, ["field", ["decide", "campaign", {}], "discountPercent"]]], 100] },
+  "calls": [{ "component": "customer", "command": "Receipt", "args": { "discountPercent": ["field", ["decide", "campaign", {}], "discountPercent"], "amount": ["div", "…"] } }, "…"]
 }
 ```
 
@@ -351,9 +275,9 @@ that sees different things:
 
 | Step | The agent sees | The agent writes | Then the framework checks |
 | --- | --- | --- | --- |
-| 1. Design | the IR | a skeleton of the production code: signatures, no behaviour | that it type-checks and loads |
+| 1. Design | the IR, and the spec read aloud | a skeleton of the production code: signatures, no behaviour | that it type-checks and loads |
 | 2. Wiring | the test harness contract and the skeleton, **not the IR** | the adapter | that it type-checks, and that the tests **fail** because nothing is implemented yet |
-| 3. Implementation | the IR and the skeleton, **not the adapter** | the bodies | that it still type-checks against the adapter, that the tests pass, and the mutation gate |
+| 3. Implementation | the IR, the spec read aloud, and the skeleton, **not the adapter** | the bodies | that it still type-checks against the adapter, that the tests pass, and the mutation gate |
 
 Because the wiring step never sees the spec, the adapter cannot make business decisions; because the other two
 steps never see the test harness, production code is not shaped by it. Each session runs in a temporary
@@ -363,14 +287,13 @@ To pass project conventions to the agent (architecture rules, naming, a glossary
 component. They are attached to the design and implementation requests:
 
 ```ts
-export const Order = component({
+export const Order = service("An order ...", {
+  // ...
   assets: [
     file("docs/architecture.md"),                     // a file
     dir("docs/conventions"),                          // every file in a directory
     text("Money is always handled as whole yen."),    // a short note, put straight into the request
   ],
-  states: ["DRAFT", "PENDING", "PAID", "SHIPPED", "CANCELLED"],
-  // ...
 });
 ```
 
@@ -379,12 +302,12 @@ A second argument chooses the steps an asset goes to, for example `text("...", {
 ```text
 [1] design #1: ok
 [1] wiring #1: ok (tests fail as expected: not implemented)
-[1] implementation #1: pass (mutation: builtin, 9/12 killed)
+[1] implementation #1: pass (mutation: builtin, …)
 ```
 
-Here every step passed on its first attempt. A run fails when changing a value from a decision table leaves
-the tests passing; other surviving mutations are reported but do not fail the run (here, constants in the
-agent's own month-end calendar logic, which the spec's month-end flag cannot exercise).
+Here every step passed on its first attempt. A run fails when changing a value the spec fixes (a decision-table
+cell, a constant answered or sent to the outside world) leaves the tests passing; other surviving mutations are
+reported but do not fail the run.
 
 The specs directory may hold several components. They share the production code, and each gets its own
 test-side files, named after it (`clp/order.adapter.ts`). All of them are brought into agreement in turn
@@ -415,61 +338,45 @@ examples/checkout-ts/
 ├── specs/                    written by you (Layer 1), plus the accepted interpretation
 ├── src/                      written by the agent; no framework imports, no framework types
 │   ├── types.ts
-│   ├── ports.ts              the dependencies, in the production code's own terms
-│   ├── policy.ts             the business decisions, as pure functions
+│   ├── dependencies.ts       the dependencies, in the production code's own terms
+│   ├── rules.ts              the business decisions, as pure functions
 │   ├── order.ts
 │   └── index.ts
 └── clp/                      the test side
     ├── order.ir.json               generated
     ├── order.adapter.contract.ts   generated
     ├── order.verify.ts             generated
+    ├── order.verified.json         the pass record
     └── order.adapter.ts            skeleton generated, filled in by the agent
 ```
 
-**Production code** (`src/policy.ts`). The agent turned the natural-language conditions into code: the
-decision table, the calculation with its rounding, and the 10,000-yen threshold.
+**Production code** (`src/rules.ts`). The agent turned the expressions of the IR into code: the decision table,
+the amount with its rounding, and the 10,000-yen threshold.
 
 ```ts
-export function decideCampaign(rank: MemberRank, today: CalendarDate): CampaignTerms {
-  if (rank === "Gold" && isMonthEnd(today)) {
-    return { discountPercent: 20, coupon: "Premium" };
-  }
-  if (rank === "Silver") {
-    return { discountPercent: 5, coupon: null };
-  }
-  return { discountPercent: 0, coupon: null };
+export function decideCampaign(rank: CustomerRank, isMonthEnd: boolean): Campaign {
+  if (rank === "Gold" && isMonthEnd) return { coupon: "Premium", discountPercent: 20, grantsCoupon: true };
+  if (rank === "Silver") return { coupon: null, discountPercent: 5, grantsCoupon: false };
+  return { coupon: null, discountPercent: 0, grantsCoupon: false };
 }
 
-export function amountCharged(price: number, discountPercent: number): number {
+export function chargedAmount(price: number, discountPercent: number): number {
   return Math.floor((price * (100 - discountPercent)) / 100);
 }
 
-export function isPriorityShipping(rank: MemberRank, price: number): boolean {
-  return rank === "Gold" || price >= PRIORITY_SHIPPING_MIN_PRICE;
+export function decideShipping(rank: CustomerRank, price: number): ShippingPlan {
+  return { priority: rank === "Gold" || price >= 10000 };
 }
 ```
 
 **The adapter** (`clp/order.adapter.ts`). Production code defines its dependencies in its own terms; the adapter
-connects them to the stand-ins the test harness provides, translating where the two differ. Here the
-production calendar returns a date, while the spec speaks of a month-end flag.
+connects them to the stand-ins the test harness provides.
 
 ```ts
-const MONTH_END_DATE = { year: 2025, month: 1, day: 31 };
-const MID_MONTH_DATE = { year: 2025, month: 1, day: 15 };
-
-function connect(ports: Ports): OrderDependencies {
-  return {
-    calendar: {
-      today: () => (ports.queries.isMonthEnd() ? MONTH_END_DATE : MID_MONTH_DATE),
-    },
-    payments: {
-      isActive: () => ports.queries.paymentModuleActive(),
-      charge: () => ports.queries.paymentResult(),
-      refund: () => ports.effects.Refund({}),
-    },
-    // ...
-  };
-}
+calendar: { isMonthEnd: () => ports.calendar.IsMonthEnd() },
+payment: { isActive: () => ports.payment.Active(), result: () => ports.payment.Result() },
+customer: { sendReceipt: (amount, discountPercent) => ports.customer.Receipt({ amount, discountPercent }), /* ... */ },
+refunds: { refund: (amount) => ports.refunds.Refund({ amount }) },
 ```
 
 ### 6. Verify again at any time
@@ -484,12 +391,13 @@ When an implementation is wrong, the test reports the shortest sequence of comma
 implementation that forgets the refund when a paid order is cancelled:
 
 ```text
-PlaceOrder  →  Checkout (The payment succeeded)  →  Cancel
-expected: state CANCELLED, effects [Refund]
-actual:   state CANCELLED, effects []
+PlaceOrder {"customerRank":"Gold","listPrice":0}  →  Checkout (order.Checkout.paid)  →  Cancel (order.Cancel.case1)
+expected: effects [refunds.Refund {"amount":0}], answer "cancelled"
+actual:   effects [], answer "cancelled"
 ```
 
 ## Future Scope
 
-See [`ROADMAP.md`](ROADMAP.md) (in Japanese): what versions 0.1 and 0.3 completed, the steps towards them, and
-the direction towards 1.0.
+See [`ROADMAP.md`](ROADMAP.md) (in Japanese): what versions 0.1 and 0.3 completed, and the stages towards 1.0
+(the notation, the formal model, the checker and the self-hosted parts are done; running the spec as a program,
+`clp run`, is next).

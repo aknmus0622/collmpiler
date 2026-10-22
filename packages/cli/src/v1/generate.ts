@@ -279,7 +279,7 @@ export function verify8(ir: Ir8, ws: Workspace, specsDir: string): string {
   const specs = relative(testsDirOf(ws), specsDir).split(sep).join("/");
   return `${header(ir)}
 import { fileURLToPath } from "node:url";
-import { runPbt } from "@clp/cli/v1/runtime";
+import { runPbt } from "@clp/cli/runtime";
 import { adapter } from "./${posix.basename(ws.paths.adapter)}";
 
 await runPbt({ specs: fileURLToPath(new URL(${JSON.stringify(specs + "/")}, import.meta.url)), component: ${JSON.stringify(ws.component)}, adapter });

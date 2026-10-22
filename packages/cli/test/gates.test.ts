@@ -3,13 +3,11 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { checkWorkspace } from "../src/check.ts";
-import { extract, stableStringify } from "../src/extract.ts";
 import { scrubEnv } from "../src/gates.ts";
 import { generateAdapterSkeleton, generateContract, generateVerify } from "../src/generate.ts";
 import type { Ir } from "../src/generate.ts";
 import { DEFAULT_GUIDE } from "../src/guide.ts";
 import { resolveLayout, workspaceOf } from "../src/layout.ts";
-import { loadSpecs } from "../src/loader.ts";
 import { implement } from "../src/loop.ts";
 import type { ImplementOptions } from "../src/loop.ts";
 import { judge } from "../src/mutation.ts";
@@ -41,7 +39,7 @@ test("対象言語: 流れとゲートは Target だけを通して、生成・�
     check: (...args) => (calls.push("check"), typescriptTarget.check(...args)),
     load: (ws) => (calls.push("load"), typescriptTarget.load(ws)),
     // 常に合格と答える
-    runTests: () => (calls.push("runTests"), { result: { status: "pass", seed: 0, numRuns: 0 } }),
+    runTests: () => (calls.push("runTests"), { result: { status: "pass", seed: 0, numRuns: 0, coverage: { events: {}, never: [] } } }),
     staticCheck: undefined,
     mutation: undefined,
   };
@@ -75,7 +73,7 @@ test("ループ: 1つの段階が上限回数まで直らなければ、設計�
   ]);
   assert.deepEqual(attempts.map((a) => a.round), [1, 1, 1, 1, 2, 2, 2]);
   // やり直しの周は、前の周の成果を引き継がない
-  assert.deepEqual(Object.keys(of(seen, "design")[1].files).sort(), ["clp/REQUEST.md", "clp/order.ir.json"]);
+  assert.deepEqual(Object.keys(of(seen, "design")[1].files).sort(), ["clp/REQUEST.md", "clp/order.ir.json", "clp/order.spec.md"]);
 });
 
 test("ループ: やり直しの上限まで直らなければ失敗で止まる", async () => {

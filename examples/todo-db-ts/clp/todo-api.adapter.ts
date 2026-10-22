@@ -1,81 +1,128 @@
-import type { Command, Ports, StateName, TargetSystemAdapter } from "./todo-api.adapter.contract.ts";
-import { TodoApiServer } from "../src/todo-api.ts";
-import type { IdSource } from "../src/todo-api.ts";
+import type {
+  Command,
+  CommandOutput,
+  Json,
+  Ports,
+  Query,
+  QueryOutput,
+  TargetSystemAdapter,
+} from "./todo-api.adapter.contract.ts";
+import { routes } from "./todo-api.adapter.contract.ts";
+import { Store } from "../src/store.ts";
+import { startTodoApi } from "../src/todo-api.ts";
+import type { RunningTodoApi } from "../src/todo-api.ts";
+import { Todos } from "../src/todos.ts";
+import type { IdSource } from "../src/todos.ts";
 
 // Import the production code from ../src/ and forward each call to it. No business logic here.
 
-let currentPorts: Ports | null = null;
-let server: TodoApiServer | null = null;
+let ports: Ports | undefined;
+let running: RunningTodoApi | undefined;
 
-async function startServer(ports: Ports): Promise<TodoApiServer> {
-  // Forward every request for an identifier to the harness; exceptions reach the production code unchanged.
-  const ids: IdSource = { newId: () => ports.queries["todos.newId"]() };
-  return TodoApiServer.start({ port: 0, storagePath: ports.storage, ids });
+/** The production `IdSource`, forwarding to the harness's `ids` port (exceptions pass through). */
+function idSource(p: Ports): IdSource {
+  return { newId: () => p.ids.NewId() };
 }
 
-async function stopServer(): Promise<void> {
-  const running = server;
-  server = null;
-  if (running !== null) {
-    await running.stop();
-  }
+async function start(): Promise<void> {
+  if (ports === undefined) throw new Error("adapter: setupIsolation was not called");
+  running = await startTodoApi({ port: 0, location: ports.storage, ids: idSource(ports) });
 }
 
-async function send(method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> {
-  if (server === null) {
-    throw new Error("the system is not running");
-  }
-  const response = await fetch(`http://127.0.0.1:${server.port}${path}`, {
+async function stop(): Promise<void> {
+  const current = running;
+  running = undefined;
+  if (current !== undefined) await current.stop();
+}
+
+/** Sends one routed request to the running server and answers `{ status, body }`. */
+async function send(
+  route: string,
+  input: Record<string, unknown>,
+): Promise<{ status: number; body: Json }> {
+  if (running === undefined) throw new Error("adapter: the system is not running");
+  const [method, pattern] = route.split(" ") as [string, string];
+  const rest: Record<string, unknown> = { ...input };
+  const path = pattern.replace(/:([A-Za-z0-9_]+)/g, (_, name: string) => {
+    const value = rest[name];
+    delete rest[name];
+    return encodeURIComponent(String(value));
+  });
+  const hasBody = "body" in rest;
+  const body = rest.body;
+  delete rest.body;
+  const search = new URLSearchParams();
+  for (const [name, value] of Object.entries(rest)) search.append(name, String(value));
+  const query = search.toString();
+  const url = `http://127.0.0.1:${running.port}${path}${query === "" ? "" : `?${query}`}`;
+  const response = await fetch(url, {
     method,
-    headers: body === undefined ? undefined : { "content-type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    headers: hasBody ? { "content-type": "application/json" } : undefined,
+    body: hasBody ? JSON.stringify(body) : undefined,
   });
   const text = await response.text();
-  return { status: response.status, body: text === "" ? null : JSON.parse(text) };
+  return { status: response.status, body: text === "" ? null : (JSON.parse(text) as Json) };
+}
+
+/** Opens the store at the system's storage location for the duration of `use`. */
+function withStore<T>(use: (store: Store) => T): T {
+  if (ports === undefined) throw new Error("adapter: setupIsolation was not called");
+  const store = Store.open(ports.storage);
+  try {
+    return use(store);
+  } finally {
+    store.close();
+  }
 }
 
 export const adapter: TargetSystemAdapter = {
-  async setupIsolation(ports) {
-    currentPorts = ports;
-    server = await startServer(ports);
+  async setupIsolation(p) {
+    ports = p;
+    running = undefined;
+    await start();
   },
   async teardownIsolation() {
     try {
-      await stopServer();
+      await stop();
     } finally {
-      currentPorts = null;
+      ports = undefined;
     }
   },
   async executeCommand(command: Command) {
     switch (command.name) {
+      case "PostTodos": {
+        const { status, body } = await send(routes.PostTodos, command.input);
+        return { status, body } as CommandOutput["PostTodos"];
+      }
       case "CompleteTodo": {
-        const { status } = await send("POST", `/todos/${encodeURIComponent(command.input.id)}/complete`);
-        return { status };
+        const { status } = await send(routes.CompleteTodo, command.input);
+        return { status } satisfies CommandOutput["CompleteTodo"];
       }
       case "DeleteTodo": {
-        const { status } = await send("DELETE", `/todos/${encodeURIComponent(command.input.id)}`);
-        return { status };
-      }
-      case "GetTodos": {
-        const query = new URLSearchParams({ only: command.input.only });
-        const { status, body } = await send("GET", `/todos?${query}`);
-        return { status, body };
-      }
-      case "PostTodos": {
-        const { status, body } = await send("POST", "/todos", command.input.body);
-        return { status, body };
+        const { status } = await send(routes.DeleteTodo, command.input);
+        return { status } satisfies CommandOutput["DeleteTodo"];
       }
     }
   },
-  async getCurrentState(): Promise<StateName> {
-    // The production code has a single state (specification state `READY`) and exposes no accessor for it.
-    return "READY";
+  async executeQuery(query: Query) {
+    switch (query.name) {
+      case "GetTodos": {
+        const { status, body } = await send(routes.GetTodos, query.input);
+        return { status, body } as QueryOutput["GetTodos"];
+      }
+      case "todos.List": {
+        const p = ports!;
+        return withStore((store) =>
+          new Todos(store, idSource(p)).list(query.input.only),
+        ) satisfies QueryOutput["todos.List"];
+      }
+      case "store.Entries": {
+        return withStore((store) => store.entries()) as QueryOutput["store.Entries"];
+      }
+    }
   },
   async restartSystem() {
-    if (currentPorts === null) {
-      throw new Error("the system is not running");
-    }
-    await stopServer();
-    server = await startServer(currentPorts);
+    await stop();
+    await start();
   },
 };

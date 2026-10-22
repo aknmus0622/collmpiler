@@ -1,234 +1,130 @@
 /**
- * Chooses, for the simulator of a specification, the command executed at a
- * step and the case that happens.
+ * Step choice: chooses which case of a command happens.
  *
- * Corresponds to the specification component "step-choice". The component has
- * no states of its own (it is always in the specification state `READY`) and
- * performs no effects. One `StepChoice` object remembers what it has been told
- * between calls; each method performs one specification command. Nothing is
- * kept across a restart of the system.
+ * Corresponds to the specification component `step-choice`. It relies on one
+ * dependency, the oracle ({@link CaseOracle}, specification component
+ * `oracle`), and is not durable. Its entries map onto this module as follows:
  *
- * Choosing a command: call `beginStep` with the state of the step, then, for
- * each command of the simulated specification, describe it with `consider`,
- * followed by its facts in this order: every `from`, then every `pathValue`,
- * then every `onlyIf`, and finally `considered`. Then ask `choose`.
+ * - Commands `BeginCases` and `Case` and query `Decision`: the methods of
+ *   {@link StepChoice}, one instance per command whose case is being chosen
+ *   (it can be reused: `beginCases` starts over).
  *
- * Choosing a case: call `beginCases`, then `caseNamed` once per case of the
- * simulated outcome table (in the order of the table), then ask `decideCase`.
- *
- * Command -> method:
- *   `BeginCases` -> `beginCases`
- *   `BeginStep`  -> `beginStep`
- *   `Case`       -> `caseNamed`
- *   `Choose`     -> `choose`
- *   `Consider`   -> `consider`
- *   `Considered` -> `considered`
- *   `DecideCase` -> `decideCase`
- *   `From`       -> `from`
- *   `OnlyIf`     -> `onlyIf`
- *   `PathValue`  -> `pathValue`
- *
- * Query -> dependency method:
- *   `holds` -> `ConditionOracle.holds`
- *
- * Remembered data (spec `data`: `considering`, `enabled`, `hits`, `possible`,
- * `stepState`) is private; it is observable only through the answers of
- * `choose` and `decideCase` and through the questions put to the
- * `ConditionOracle`. It starts as in the specification's `model.initial`.
- * The specification calculations are the exported pure functions at the end
- * of this file.
+ * The decisions themselves live in the pure functions {@link afterCase} and
+ * {@link decideCase}; the class only asks the oracle and holds the state
+ * between commands.
  */
 
 /**
- * The environment's answer to whether a named condition holds in the situation
- * being simulated (spec query `holds`).
+ * The name of a case (specification sort `CaseName`): an opaque identifier,
+ * compared only for equality. A case is named by its condition.
  */
-export interface ConditionOracle {
+export type CaseName = string;
+
+/**
+ * The oracle (specification component `oracle`, the outside world): it
+ * evaluates a case's condition in the situation being considered.
+ */
+export interface CaseOracle {
   /**
-   * Whether the condition named `condition` (spec input field `condition`)
-   * holds, for the command being considered or for the case being chosen.
-   * Asked by `onlyIf` and by `caseNamed`, at the moment the answer is needed;
-   * the answer may differ from one call to the next.
+   * Specification query `oracle.Holds`: whether the condition of the case
+   * `name` holds in the situation being considered. Asked once by every
+   * {@link StepChoice.considerCase} call, with that call's case name.
    */
-  holds(condition: string): boolean;
+  holds(name: CaseName): boolean;
 }
 
-/** Input of `choose` (spec command `Choose`). Field names identical to the specification's. */
-export interface ChooseInput {
-  /**
-   * The command another component calls at this step, or `null` when no
-   * command is forced.
-   */
-  forced: string | null;
-  /** A non-negative integer selecting among the commands that can be executed. */
-  pick: number;
-  /** Whether a forced command that cannot be executed at this step is refused. */
-  strict: boolean;
-}
-
-/** Answer of `choose` (spec output `Choose`). */
-export interface CommandChoice {
-  /** The command executed at this step, or `null` when none is chosen. */
-  chosen: string | null;
-  /** Whether a forced call was refused. */
-  refused: boolean;
-}
-
-/** Answer of `decideCase` (spec output `DecideCase`). */
+/**
+ * Which case happens: the answer of the specification query `Decision`
+ * (calculation `decision`). Each field is the specification field of the
+ * same name.
+ */
 export interface CaseDecision {
-  /**
-   * The name of the case that happens (possibly `"otherwise"`), or `null`
-   * when none is chosen.
-   */
-  chosen: string | null;
-  /** The cases in conflict, in the order they were given; empty when there is no conflict. */
-  conflict: string[];
-}
-
-/** The case without a condition, which happens when no other case holds. */
-const OTHERWISE = "otherwise";
-
-/** Whether `value` cannot be sent as a path segment of an HTTP route. */
-function isUnsendablePathSegment(value: string): boolean {
-  return value === "." || value === "..";
+  /** The case that happens, or `null` when no single case is chosen (field `chosen`). */
+  chosen: CaseName | null;
+  /** The cases in conflict, in the order they were given; empty when there is no conflict (field `conflict`). */
+  conflict: CaseName[];
+  /** Whether the otherwise case happens (field `otherwise`). */
+  otherwise: boolean;
 }
 
 /**
- * Remembers the step being simulated, the command being considered, the
- * commands found executable, and the cases found to hold.
+ * The cases given since the last `beginCases` whose condition held, in the
+ * order they were given (specification state `hits`), after one more case was
+ * given (the update of specification command `Case`).
+ *
+ * Pure: answers a new list, does not change `hits`.
+ *
+ * @param hits the cases whose condition held so far (state `hits` before the command).
+ * @param name the case just given (parameter `name` of `Case`).
+ * @param holds the oracle's answer for that case (`oracle.Holds(name)`).
+ * @returns the new value of state `hits`.
+ */
+export function afterCase(hits: readonly CaseName[], name: CaseName, holds: boolean): CaseName[] {
+  return holds ? [...hits, name] : [...hits];
+}
+
+/**
+ * Which case happens, given the cases whose condition held (specification
+ * calculation `decision`).
+ *
+ * Pure: answers the same result for the same argument, touches nothing.
+ *
+ * @param hits the cases whose condition held, in the order given (state `hits`).
+ * @returns the decision (the specification's result of `Decision`).
+ */
+export function decideCase(hits: readonly CaseName[]): CaseDecision {
+  if (hits.length === 0) return { chosen: null, conflict: [], otherwise: true };
+  if (hits.length === 1) return { chosen: hits[0], conflict: [], otherwise: false };
+  return { chosen: null, conflict: [...hits], otherwise: false };
+}
+
+/**
+ * The choice of the case of one command: give it the command's cases one by
+ * one, then read which one happens.
+ *
+ * Typical use: `beginCases()`, then `considerCase(name)` for each case in the
+ * order the command lists them, then `decision()`.
  */
 export class StepChoice {
-  private readonly oracle: ConditionOracle;
-  private stepState = "";
-  private enabled: string[] = [];
-  private considering = "";
-  private possible = false;
-  private hits: string[] = [];
+  private readonly oracle: CaseOracle;
+  /** The cases given since the last `beginCases` whose condition held, in order (specification state `hits`). */
+  private hits: CaseName[];
 
   /**
-   * @param oracle answers whether a named condition holds (spec query `holds`).
+   * Starts with no case given (the specification's `init`).
+   *
+   * @param oracle asked whether each given case's condition holds.
    */
-  constructor(oracle: ConditionOracle) {
+  constructor(oracle: CaseOracle) {
     this.oracle = oracle;
+    this.hits = [];
   }
 
   /**
-   * Spec command `BeginCases`: a case is chosen next; forgets the cases given
-   * so far (spec data `hits`).
+   * Specification command `BeginCases`: a case is chosen next; no case has
+   * been given yet. Forgets the cases given before. Does not ask the oracle.
    */
   beginCases(): void {
     this.hits = [];
   }
 
   /**
-   * Spec command `BeginStep`: a new step starts in the simulated state
-   * `state` (spec data `stepState`); forgets the commands found executable so
-   * far (spec data `enabled`). The cases given so far are kept.
+   * Specification command `Case`: gives one case, named by its condition.
+   * Asks the oracle ({@link CaseOracle.holds}) about this case exactly once,
+   * even when another case already holds; see {@link afterCase}.
+   *
+   * @param name the case (parameter `name`).
    */
-  beginStep(state: string): void {
-    this.stepState = state;
-    this.enabled = [];
+  considerCase(name: CaseName): void {
+    this.hits = afterCase(this.hits, name, this.oracle.holds(name));
   }
 
   /**
-   * Spec command `Case`: a case of the table being decided, named by its
-   * condition `name` (the name `"otherwise"` included). May ask the
-   * `ConditionOracle` about `name`.
+   * Specification query `Decision`: which case happens, from the cases given
+   * since the last `beginCases`; see {@link decideCase}. Does not ask the
+   * oracle and changes nothing.
    */
-  caseNamed(name: string): void {
-    if (name === OTHERWISE) return;
-    if (this.oracle.holds(name)) this.hits = hitsWithCase(this.hits, name);
+  decision(): CaseDecision {
+    return decideCase(this.hits);
   }
-
-  /**
-   * Spec command `Choose`: answers which command is executed at this step,
-   * from the commands found executable since `beginStep`. Changes nothing.
-   */
-  choose(input: ChooseInput): CommandChoice {
-    const { forced, pick, strict } = input;
-    if (forced === null) {
-      if (this.enabled.length === 0) return { chosen: null, refused: false };
-      return { chosen: pickedCommand(this.enabled, pick), refused: false };
-    }
-    if (strict && !this.enabled.includes(forced)) return { chosen: null, refused: true };
-    return { chosen: forced, refused: false };
-  }
-
-  /**
-   * Spec command `Consider`: the command named `command` is considered next
-   * (spec data `considering`). `everywhere` tells whether it names no states
-   * it is executed from (spec data `possible` starts from it).
-   */
-  consider(command: string, everywhere: boolean): void {
-    this.considering = command;
-    this.possible = everywhere;
-  }
-
-  /**
-   * Spec command `Considered`: every fact about the command being considered
-   * has been given; it may be added to the commands found executable at this
-   * step (spec data `enabled`).
-   */
-  considered(): void {
-    if (this.possible) this.enabled = enabledWithConsidered(this.enabled, this.considering);
-  }
-
-  /**
-   * Spec command `DecideCase`: answers which case happens, from the cases
-   * given since `beginCases`. Changes nothing.
-   */
-  decideCase(): CaseDecision {
-    if (this.hits.length === 1) return { chosen: onlyHit(this.hits), conflict: [] };
-    if (this.hits.length === 0) return { chosen: OTHERWISE, conflict: [] };
-    return { chosen: null, conflict: [...this.hits] };
-  }
-
-  /**
-   * Spec command `From`: `state` is a simulated state the command being
-   * considered can be executed from.
-   */
-  from(state: string): void {
-    if (state === this.stepState) this.possible = true;
-  }
-
-  /**
-   * Spec command `OnlyIf`: `condition` names a condition that must hold for
-   * the command being considered to be executed. May ask the
-   * `ConditionOracle` about `condition`.
-   */
-  onlyIf(condition: string): void {
-    if (this.possible && !this.oracle.holds(condition)) this.possible = false;
-  }
-
-  /**
-   * Spec command `PathValue`: `value` is a value the command being considered
-   * would put into a path segment of its HTTP route.
-   */
-  pathValue(value: string): void {
-    if (isUnsendablePathSegment(value)) this.possible = false;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Calculations
-// ---------------------------------------------------------------------------
-
-/** Spec calculation `enabledWithConsidered`: the executable commands after adding `considering` to `enabled`. */
-export function enabledWithConsidered(enabled: readonly string[], considering: string): string[] {
-  return [...enabled, considering];
-}
-
-/** Spec calculation `hitsWithCase`: the holding cases after adding the case `name` to `hits`. */
-export function hitsWithCase(hits: readonly string[], name: string): string[] {
-  return [...hits, name];
-}
-
-/** Spec calculation `pickedCommand`: the command selected by `pick` among `enabled` (non-empty). */
-export function pickedCommand(enabled: readonly string[], pick: number): string {
-  return enabled[pick % enabled.length];
-}
-
-/** Spec calculation `onlyHit`: the single case in `hits`. */
-export function onlyHit(hits: readonly string[]): string {
-  return hits[0];
 }

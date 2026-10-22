@@ -1,81 +1,70 @@
-import type { Command, Ports, TargetSystemAdapter } from "./order.adapter.contract.ts";
-import { Order } from "../src/order.ts";
-import type { OrderDependencies } from "../src/ports.ts";
+import type { Command, Ports, Query, TargetSystemAdapter } from "./order.adapter.contract.ts";
+import { Order } from "../src/index.ts";
+import type { OrderDependencies } from "../src/index.ts";
 
 // Import the production code from ../src/ and forward each call to it. No business logic here.
+let order: Order | null = null;
 
-// The production code asks for today's date instead of the `isMonthEnd` flag; these are the two
-// dates its Calendar port documents as standing for `true` and `false`.
-const MONTH_END_DATE = { year: 2025, month: 1, day: 31 };
-const MID_MONTH_DATE = { year: 2025, month: 1, day: 15 };
-
-function connect(ports: Ports): OrderDependencies {
+function dependenciesFor(ports: Ports): OrderDependencies {
   return {
     calendar: {
-      today: () => (ports.queries.isMonthEnd() ? MONTH_END_DATE : MID_MONTH_DATE),
+      isMonthEnd: () => ports.calendar.IsMonthEnd(),
     },
-    payments: {
-      isActive: () => ports.queries.paymentModuleActive(),
-      charge: () => ports.queries.paymentResult(),
-      refund: () => ports.effects.Refund({}),
+    payment: {
+      isActive: () => ports.payment.Active(),
+      result: () => ports.payment.Result(),
     },
-    notifier: {
-      sendOrderConfirmation: () => ports.effects.SendOrderConfirmation({}),
-      sendReceipt: (receipt) =>
-        ports.effects.SendReceipt({
-          amount: receipt.amount,
-          discountPercent: receipt.discountPercent,
-        }),
-      notifyPaymentFailure: () => ports.effects.NotifyPaymentFailure({}),
-      sendShippingNotice: (priority) => ports.effects.SendShippingNotice({ priority }),
+    customer: {
+      sendOrderConfirmation: () => ports.customer.OrderConfirmation({}),
+      sendReceipt: (amount, discountPercent) => ports.customer.Receipt({ amount, discountPercent }),
+      issueCoupon: (type) => ports.customer.Coupon({ type }),
+      sendPaymentFailure: () => ports.customer.PaymentFailure({}),
+      sendShippingNotice: (priority) => ports.customer.ShippingNotice({ priority }),
     },
-    coupons: {
-      issue: (type) => ports.effects.IssueCoupon({ type }),
+    refunds: {
+      refund: (amount) => ports.refunds.Refund({ amount }),
     },
   };
 }
 
-let order: Order | null = null;
-
 function current(): Order {
-  if (order === null) {
-    throw new Error("adapter: setupIsolation has not been called");
-  }
+  if (order === null) throw new Error("adapter: setupIsolation has not been called");
   return order;
 }
 
 export const adapter: TargetSystemAdapter = {
   async setupIsolation(ports) {
-    order = new Order(connect(ports));
+    order = new Order(dependenciesFor(ports));
   },
   async teardownIsolation() {
     order = null;
   },
   async executeCommand(command: Command) {
-    const target = current();
+    const o = current();
     switch (command.name) {
       case "PlaceOrder":
-        target.placeOrder({
-          customerRank: command.input.customerRank,
-          listPrice: command.input.listPrice,
-        });
-        return;
+        return o.placeOrder(command.input.customerRank, command.input.listPrice);
       case "Checkout":
-        target.checkout();
-        return;
+        return o.checkout();
       case "Ship":
-        target.ship();
-        return;
+        return o.ship();
       case "Cancel":
-        target.cancel();
-        return;
+        return o.cancel();
       default: {
         const unknown: never = command;
         throw new Error(`adapter: unknown command ${JSON.stringify(unknown)}`);
       }
     }
   },
-  async getCurrentState() {
-    return current().status;
+  async executeQuery(query: Query) {
+    const o = current();
+    switch (query.name) {
+      case "Status":
+        return o.status();
+      default: {
+        const unknown: never = query.name;
+        throw new Error(`adapter: unknown query ${JSON.stringify(unknown)}`);
+      }
+    }
   },
 };

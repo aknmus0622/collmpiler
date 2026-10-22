@@ -1,506 +1,1811 @@
 {
-  "behaviors": [
-    {
-      "from": [
-        "GRADING"
-      ],
-      "name": "CurrentCodeGraded",
-      "onlyIf": [],
-      "when": {
-        "The check passed": {
-          "does": "Nothing: there is nothing to implement.",
-          "goTo": "DONE"
-        },
-        "otherwise": {
-          "does": "An implementation session is started (attempt 1).",
-          "emits": [
-            {
-              "effect": "StartSession",
-              "input": {
-                "attempt": 1,
-                "phase": "implementation",
-                "round": {
-                  "$ref": "data:round"
-                }
-              }
-            }
-          ],
-          "goTo": "IMPLEMENTATION"
-        }
-      }
-    },
-    {
-      "from": [
-        "DESIGN"
-      ],
-      "name": "DesignChecked",
-      "onlyIf": [],
-      "when": {
-        "(not \"The check passed\" and \"Attempts remain in this phase\")": {
-          "does": "The attempt number goes up by one. A session of the same phase is started with the new attempt number.",
-          "emits": [
-            {
-              "effect": "StartSession",
-              "input": {
-                "attempt": {
-                  "$ref": "calculation:nextAttempt"
-                },
-                "phase": "design",
-                "round": {
-                  "$ref": "data:round"
-                }
-              }
-            }
-          ],
-          "set": {
-            "attempt": {
-              "$ref": "calculation:nextAttempt"
-            }
-          }
-        },
-        "(not \"The check passed\" and not \"Attempts remain in this phase\" and \"Rounds remain\")": {
-          "does": "The round number goes up by one and the attempt number goes back to 1. Then a design session is started in the new round.",
-          "emits": [
-            {
-              "effect": "DiscardCode",
-              "input": {},
-              "onlyWhen": "not \"Existing code is being changed (the code was not written from nothing)\""
-            },
-            {
-              "effect": "StartSession",
-              "input": {
-                "attempt": 1,
-                "phase": "design",
-                "round": {
-                  "$ref": "calculation:nextRound"
-                }
-              }
-            }
-          ],
-          "goTo": "DESIGN",
-          "set": {
-            "attempt": 1,
-            "round": {
-              "$ref": "calculation:nextRound"
-            }
-          }
-        },
-        "The check passed": {
-          "does": "The attempt number goes back to 1. A wiring session is started.",
-          "emits": [
-            {
-              "effect": "StartSession",
-              "input": {
-                "attempt": 1,
-                "phase": "wiring",
-                "round": {
-                  "$ref": "data:round"
-                }
-              }
-            }
-          ],
-          "goTo": "WIRING",
-          "set": {
-            "attempt": 1
-          }
-        },
-        "otherwise": {
-          "goTo": "FAILED"
-        }
-      }
-    },
-    {
-      "from": [
-        "IMPLEMENTATION"
-      ],
-      "name": "ImplementationChecked",
-      "onlyIf": [],
-      "when": {
-        "(not \"The check passed\" and \"Attempts remain in this phase\")": {
-          "does": "The attempt number goes up by one. A session of the same phase is started with the new attempt number.",
-          "emits": [
-            {
-              "effect": "StartSession",
-              "input": {
-                "attempt": {
-                  "$ref": "calculation:nextAttempt"
-                },
-                "phase": "implementation",
-                "round": {
-                  "$ref": "data:round"
-                }
-              }
-            }
-          ],
-          "set": {
-            "attempt": {
-              "$ref": "calculation:nextAttempt"
-            }
-          }
-        },
-        "(not \"The check passed\" and not \"Attempts remain in this phase\" and \"Rounds remain\")": {
-          "does": "The round number goes up by one and the attempt number goes back to 1. Then a design session is started in the new round.",
-          "emits": [
-            {
-              "effect": "DiscardCode",
-              "input": {},
-              "onlyWhen": "not \"Existing code is being changed (the code was not written from nothing)\""
-            },
-            {
-              "effect": "StartSession",
-              "input": {
-                "attempt": 1,
-                "phase": "design",
-                "round": {
-                  "$ref": "calculation:nextRound"
-                }
-              }
-            }
-          ],
-          "goTo": "DESIGN",
-          "set": {
-            "attempt": 1,
-            "round": {
-              "$ref": "calculation:nextRound"
-            }
-          }
-        },
-        "The check passed": {
-          "goTo": "DONE"
-        },
-        "otherwise": {
-          "goTo": "FAILED"
-        }
-      }
-    },
-    {
-      "description": "The pipeline remembers the two limits and whether the plan is incremental, and that this is round 1, attempt 1. Then a session of the plan's phase is started; where the plan has no phase, the current code is graded instead.",
-      "from": [
-        "IDLE"
-      ],
-      "name": "Start",
-      "onlyIf": [],
-      "when": {
-        "otherwise": {
-          "emits": [
-            {
-              "effect": "StartSession",
-              "input": {
-                "attempt": 1,
-                "phase": {
-                  "$ref": "decision:plan.phase"
-                },
-                "round": 1
-              },
-              "onlyWhen": "The plan has a phase"
-            },
-            {
-              "effect": "GradeCurrentCode",
-              "input": {
-                "round": 1
-              },
-              "onlyWhen": "The plan has no phase"
-            }
-          ],
-          "goTo": {
-            "$ref": "decision:plan.next"
+  "components": {
+    "output": {
+      "external": {
+        "commands": {},
+        "queries": {
+          "BoundaryChanged": {
+            "params": {},
+            "result": "bool"
           },
-          "set": {
-            "attempt": 1,
-            "incremental": {
-              "$ref": "decision:plan.incremental"
-            },
-            "maxAttempts": {
-              "$ref": "input:attemptsPerPhase"
-            },
-            "maxRounds": {
-              "$ref": "input:rounds"
-            },
-            "round": 1
+          "HasAdapter": {
+            "params": {},
+            "result": "bool"
+          },
+          "HasProductionCode": {
+            "params": {},
+            "result": "bool"
           }
         }
       }
     },
-    {
-      "from": [
-        "WIRING"
-      ],
-      "name": "WiringChecked",
-      "onlyIf": [],
-      "when": {
-        "(\"The check passed\" and \"Existing code is being changed (the code was not written from nothing)\")": {
-          "does": "The attempt number goes back to 1. The current code is graded.",
-          "emits": [
-            {
-              "effect": "GradeCurrentCode",
-              "input": {
-                "round": {
-                  "$ref": "data:round"
+    "pipeline": {
+      "commands": {
+        "CurrentCodeGraded": {
+          "events": [
+            "CurrentCodeGraded.case1",
+            "CurrentCodeGraded.otherwise"
+          ],
+          "params": {
+            "passed": "bool"
+          },
+          "requires": [
+            "=",
+            [
+              "state",
+              "status"
+            ],
+            [
+              "lit",
+              "GRADING"
+            ]
+          ]
+        },
+        "DesignChecked": {
+          "events": [
+            "DesignChecked.case1",
+            "DesignChecked.otherwise"
+          ],
+          "params": {
+            "passed": "bool"
+          },
+          "requires": [
+            "=",
+            [
+              "state",
+              "status"
+            ],
+            [
+              "lit",
+              "DESIGN"
+            ]
+          ]
+        },
+        "ImplementationChecked": {
+          "events": [
+            "ImplementationChecked.case1",
+            "ImplementationChecked.otherwise"
+          ],
+          "params": {
+            "passed": "bool"
+          },
+          "requires": [
+            "=",
+            [
+              "state",
+              "status"
+            ],
+            [
+              "lit",
+              "IMPLEMENTATION"
+            ]
+          ]
+        },
+        "Start": {
+          "events": [
+            "Start.otherwise"
+          ],
+          "params": {
+            "attemptsPerPhase": "int",
+            "rounds": "int"
+          },
+          "requires": [
+            "and",
+            [
+              "and",
+              [
+                "and",
+                [
+                  "and",
+                  [
+                    "=",
+                    [
+                      "state",
+                      "status"
+                    ],
+                    [
+                      "lit",
+                      "IDLE"
+                    ]
+                  ],
+                  [
+                    ">=",
+                    [
+                      "var",
+                      "attemptsPerPhase"
+                    ],
+                    1
+                  ]
+                ],
+                [
+                  "<=",
+                  [
+                    "var",
+                    "attemptsPerPhase"
+                  ],
+                  3
+                ]
+              ],
+              [
+                ">=",
+                [
+                  "var",
+                  "rounds"
+                ],
+                1
+              ]
+            ],
+            [
+              "<=",
+              [
+                "var",
+                "rounds"
+              ],
+              3
+            ]
+          ]
+        },
+        "WiringChecked": {
+          "events": [
+            "WiringChecked.case1",
+            "WiringChecked.otherwise"
+          ],
+          "params": {
+            "passed": "bool"
+          },
+          "requires": [
+            "=",
+            [
+              "state",
+              "status"
+            ],
+            [
+              "lit",
+              "WIRING"
+            ]
+          ]
+        }
+      },
+      "decisions": {
+        "plan": {
+          "params": {},
+          "result": {
+            "record": {
+              "incremental": "bool",
+              "next": {
+                "enum": [
+                  "DESIGN",
+                  "WIRING",
+                  "GRADING"
+                ]
+              },
+              "phase": {
+                "optional": {
+                  "enum": [
+                    "design",
+                    "wiring"
+                  ]
                 }
               }
             }
-          ],
-          "goTo": "GRADING",
-          "set": {
-            "attempt": 1
-          }
-        },
-        "(\"The check passed\" and not \"Existing code is being changed (the code was not written from nothing)\")": {
-          "does": "The attempt number goes back to 1. An implementation session is started.",
-          "emits": [
+          },
+          "rows": [
             {
-              "effect": "StartSession",
-              "input": {
+              "then": {
+                "incremental": false,
+                "next": [
+                  "lit",
+                  "DESIGN"
+                ],
+                "phase": [
+                  "lit",
+                  "design"
+                ]
+              },
+              "when": [
+                "not",
+                [
+                  "ask",
+                  "output",
+                  "HasProductionCode",
+                  {}
+                ]
+              ]
+            },
+            {
+              "then": {
+                "incremental": true,
+                "next": [
+                  "lit",
+                  "DESIGN"
+                ],
+                "phase": [
+                  "lit",
+                  "design"
+                ]
+              },
+              "when": [
+                "and",
+                [
+                  "ask",
+                  "output",
+                  "HasProductionCode",
+                  {}
+                ],
+                [
+                  "ask",
+                  "output",
+                  "BoundaryChanged",
+                  {}
+                ]
+              ]
+            },
+            {
+              "then": {
+                "incremental": true,
+                "next": [
+                  "lit",
+                  "WIRING"
+                ],
+                "phase": [
+                  "lit",
+                  "wiring"
+                ]
+              },
+              "when": [
+                "and",
+                [
+                  "and",
+                  [
+                    "ask",
+                    "output",
+                    "HasProductionCode",
+                    {}
+                  ],
+                  [
+                    "not",
+                    [
+                      "ask",
+                      "output",
+                      "BoundaryChanged",
+                      {}
+                    ]
+                  ]
+                ],
+                [
+                  "not",
+                  [
+                    "ask",
+                    "output",
+                    "HasAdapter",
+                    {}
+                  ]
+                ]
+              ]
+            },
+            {
+              "then": {
+                "incremental": true,
+                "next": [
+                  "lit",
+                  "GRADING"
+                ],
+                "phase": null
+              },
+              "when": true
+            }
+          ]
+        }
+      },
+      "events": {
+        "CurrentCodeGraded.case1": {
+          "assign": {
+            "status": [
+              "lit",
+              "DONE"
+            ]
+          },
+          "calls": [],
+          "command": "CurrentCodeGraded",
+          "guard": [
+            "var",
+            "passed"
+          ]
+        },
+        "CurrentCodeGraded.otherwise": {
+          "assign": {
+            "memory": [
+              "with",
+              [
+                "state",
+                "memory"
+              ],
+              {
+                "attempt": 1
+              }
+            ],
+            "status": [
+              "lit",
+              "IMPLEMENTATION"
+            ]
+          },
+          "calls": [
+            {
+              "args": {
                 "attempt": 1,
-                "phase": "implementation",
-                "round": {
-                  "$ref": "data:round"
-                }
-              }
+                "phase": [
+                  "lit",
+                  "implementation"
+                ],
+                "round": [
+                  "field",
+                  [
+                    "state",
+                    "memory"
+                  ],
+                  "round"
+                ]
+              },
+              "command": "StartSession",
+              "component": "pipeline-driver"
             }
           ],
-          "goTo": "IMPLEMENTATION",
-          "set": {
-            "attempt": 1
-          }
+          "command": "CurrentCodeGraded",
+          "guard": [
+            "not",
+            [
+              "var",
+              "passed"
+            ]
+          ]
         },
-        "(not \"The check passed\" and \"Attempts remain in this phase\")": {
-          "does": "The attempt number goes up by one. A session of the same phase is started with the new attempt number.",
-          "emits": [
-            {
-              "effect": "StartSession",
-              "input": {
-                "attempt": {
-                  "$ref": "calculation:nextAttempt"
-                },
-                "phase": "wiring",
-                "round": {
-                  "$ref": "data:round"
-                }
+        "DesignChecked.case1": {
+          "assign": {
+            "memory": [
+              "with",
+              [
+                "state",
+                "memory"
+              ],
+              {
+                "attempt": 1
               }
+            ],
+            "status": [
+              "lit",
+              "WIRING"
+            ]
+          },
+          "calls": [
+            {
+              "args": {
+                "attempt": 1,
+                "phase": [
+                  "lit",
+                  "wiring"
+                ],
+                "round": [
+                  "field",
+                  [
+                    "state",
+                    "memory"
+                  ],
+                  "round"
+                ]
+              },
+              "command": "StartSession",
+              "component": "pipeline-driver"
             }
           ],
-          "set": {
-            "attempt": {
-              "$ref": "calculation:nextAttempt"
-            }
-          }
+          "command": "DesignChecked",
+          "guard": [
+            "var",
+            "passed"
+          ]
         },
-        "(not \"The check passed\" and not \"Attempts remain in this phase\" and \"Rounds remain\")": {
-          "does": "The round number goes up by one and the attempt number goes back to 1. Then a design session is started in the new round.",
-          "emits": [
+        "DesignChecked.otherwise": {
+          "assign": {
+            "memory": [
+              "ite",
+              [
+                "<",
+                [
+                  "field",
+                  [
+                    "state",
+                    "memory"
+                  ],
+                  "attempt"
+                ],
+                [
+                  "field",
+                  [
+                    "state",
+                    "memory"
+                  ],
+                  "attemptsPerPhase"
+                ]
+              ],
+              [
+                "with",
+                [
+                  "state",
+                  "memory"
+                ],
+                {
+                  "attempt": [
+                    "+",
+                    [
+                      "field",
+                      [
+                        "state",
+                        "memory"
+                      ],
+                      "attempt"
+                    ],
+                    1
+                  ]
+                }
+              ],
+              [
+                "ite",
+                [
+                  "<",
+                  [
+                    "field",
+                    [
+                      "state",
+                      "memory"
+                    ],
+                    "round"
+                  ],
+                  [
+                    "field",
+                    [
+                      "state",
+                      "memory"
+                    ],
+                    "rounds"
+                  ]
+                ],
+                [
+                  "with",
+                  [
+                    "state",
+                    "memory"
+                  ],
+                  {
+                    "attempt": 1,
+                    "round": [
+                      "+",
+                      [
+                        "field",
+                        [
+                          "state",
+                          "memory"
+                        ],
+                        "round"
+                      ],
+                      1
+                    ]
+                  }
+                ],
+                [
+                  "state",
+                  "memory"
+                ]
+              ]
+            ],
+            "status": [
+              "ite",
+              [
+                "<",
+                [
+                  "field",
+                  [
+                    "state",
+                    "memory"
+                  ],
+                  "attempt"
+                ],
+                [
+                  "field",
+                  [
+                    "state",
+                    "memory"
+                  ],
+                  "attemptsPerPhase"
+                ]
+              ],
+              [
+                "state",
+                "status"
+              ],
+              [
+                "ite",
+                [
+                  "<",
+                  [
+                    "field",
+                    [
+                      "state",
+                      "memory"
+                    ],
+                    "round"
+                  ],
+                  [
+                    "field",
+                    [
+                      "state",
+                      "memory"
+                    ],
+                    "rounds"
+                  ]
+                ],
+                [
+                  "lit",
+                  "DESIGN"
+                ],
+                [
+                  "lit",
+                  "FAILED"
+                ]
+              ]
+            ]
+          },
+          "calls": [
             {
-              "effect": "DiscardCode",
-              "input": {},
-              "onlyWhen": "not \"Existing code is being changed (the code was not written from nothing)\""
+              "args": {
+                "attempt": [
+                  "+",
+                  [
+                    "field",
+                    [
+                      "state",
+                      "memory"
+                    ],
+                    "attempt"
+                  ],
+                  1
+                ],
+                "phase": [
+                  "lit",
+                  "design"
+                ],
+                "round": [
+                  "field",
+                  [
+                    "state",
+                    "memory"
+                  ],
+                  "round"
+                ]
+              },
+              "command": "StartSession",
+              "component": "pipeline-driver",
+              "when": [
+                "<",
+                [
+                  "field",
+                  [
+                    "state",
+                    "memory"
+                  ],
+                  "attempt"
+                ],
+                [
+                  "field",
+                  [
+                    "state",
+                    "memory"
+                  ],
+                  "attemptsPerPhase"
+                ]
+              ]
             },
             {
-              "effect": "StartSession",
-              "input": {
+              "args": {},
+              "command": "DiscardCode",
+              "component": "pipeline-driver",
+              "when": [
+                "and",
+                [
+                  "not",
+                  [
+                    "<",
+                    [
+                      "field",
+                      [
+                        "state",
+                        "memory"
+                      ],
+                      "attempt"
+                    ],
+                    [
+                      "field",
+                      [
+                        "state",
+                        "memory"
+                      ],
+                      "attemptsPerPhase"
+                    ]
+                  ]
+                ],
+                [
+                  "<",
+                  [
+                    "field",
+                    [
+                      "state",
+                      "memory"
+                    ],
+                    "round"
+                  ],
+                  [
+                    "field",
+                    [
+                      "state",
+                      "memory"
+                    ],
+                    "rounds"
+                  ]
+                ],
+                [
+                  "not",
+                  [
+                    "field",
+                    [
+                      "state",
+                      "memory"
+                    ],
+                    "incremental"
+                  ]
+                ]
+              ]
+            },
+            {
+              "args": {
                 "attempt": 1,
-                "phase": "design",
-                "round": {
-                  "$ref": "calculation:nextRound"
-                }
-              }
+                "phase": [
+                  "lit",
+                  "design"
+                ],
+                "round": [
+                  "+",
+                  [
+                    "field",
+                    [
+                      "state",
+                      "memory"
+                    ],
+                    "round"
+                  ],
+                  1
+                ]
+              },
+              "command": "StartSession",
+              "component": "pipeline-driver",
+              "when": [
+                "and",
+                [
+                  "not",
+                  [
+                    "<",
+                    [
+                      "field",
+                      [
+                        "state",
+                        "memory"
+                      ],
+                      "attempt"
+                    ],
+                    [
+                      "field",
+                      [
+                        "state",
+                        "memory"
+                      ],
+                      "attemptsPerPhase"
+                    ]
+                  ]
+                ],
+                [
+                  "<",
+                  [
+                    "field",
+                    [
+                      "state",
+                      "memory"
+                    ],
+                    "round"
+                  ],
+                  [
+                    "field",
+                    [
+                      "state",
+                      "memory"
+                    ],
+                    "rounds"
+                  ]
+                ]
+              ]
             }
           ],
-          "goTo": "DESIGN",
-          "set": {
-            "attempt": 1,
-            "round": {
-              "$ref": "calculation:nextRound"
+          "command": "DesignChecked",
+          "guard": [
+            "not",
+            [
+              "var",
+              "passed"
+            ]
+          ]
+        },
+        "ImplementationChecked.case1": {
+          "assign": {
+            "status": [
+              "lit",
+              "DONE"
+            ]
+          },
+          "calls": [],
+          "command": "ImplementationChecked",
+          "guard": [
+            "var",
+            "passed"
+          ]
+        },
+        "ImplementationChecked.otherwise": {
+          "assign": {
+            "memory": [
+              "ite",
+              [
+                "<",
+                [
+                  "field",
+                  [
+                    "state",
+                    "memory"
+                  ],
+                  "attempt"
+                ],
+                [
+                  "field",
+                  [
+                    "state",
+                    "memory"
+                  ],
+                  "attemptsPerPhase"
+                ]
+              ],
+              [
+                "with",
+                [
+                  "state",
+                  "memory"
+                ],
+                {
+                  "attempt": [
+                    "+",
+                    [
+                      "field",
+                      [
+                        "state",
+                        "memory"
+                      ],
+                      "attempt"
+                    ],
+                    1
+                  ]
+                }
+              ],
+              [
+                "ite",
+                [
+                  "<",
+                  [
+                    "field",
+                    [
+                      "state",
+                      "memory"
+                    ],
+                    "round"
+                  ],
+                  [
+                    "field",
+                    [
+                      "state",
+                      "memory"
+                    ],
+                    "rounds"
+                  ]
+                ],
+                [
+                  "with",
+                  [
+                    "state",
+                    "memory"
+                  ],
+                  {
+                    "attempt": 1,
+                    "round": [
+                      "+",
+                      [
+                        "field",
+                        [
+                          "state",
+                          "memory"
+                        ],
+                        "round"
+                      ],
+                      1
+                    ]
+                  }
+                ],
+                [
+                  "state",
+                  "memory"
+                ]
+              ]
+            ],
+            "status": [
+              "ite",
+              [
+                "<",
+                [
+                  "field",
+                  [
+                    "state",
+                    "memory"
+                  ],
+                  "attempt"
+                ],
+                [
+                  "field",
+                  [
+                    "state",
+                    "memory"
+                  ],
+                  "attemptsPerPhase"
+                ]
+              ],
+              [
+                "state",
+                "status"
+              ],
+              [
+                "ite",
+                [
+                  "<",
+                  [
+                    "field",
+                    [
+                      "state",
+                      "memory"
+                    ],
+                    "round"
+                  ],
+                  [
+                    "field",
+                    [
+                      "state",
+                      "memory"
+                    ],
+                    "rounds"
+                  ]
+                ],
+                [
+                  "lit",
+                  "DESIGN"
+                ],
+                [
+                  "lit",
+                  "FAILED"
+                ]
+              ]
+            ]
+          },
+          "calls": [
+            {
+              "args": {
+                "attempt": [
+                  "+",
+                  [
+                    "field",
+                    [
+                      "state",
+                      "memory"
+                    ],
+                    "attempt"
+                  ],
+                  1
+                ],
+                "phase": [
+                  "lit",
+                  "implementation"
+                ],
+                "round": [
+                  "field",
+                  [
+                    "state",
+                    "memory"
+                  ],
+                  "round"
+                ]
+              },
+              "command": "StartSession",
+              "component": "pipeline-driver",
+              "when": [
+                "<",
+                [
+                  "field",
+                  [
+                    "state",
+                    "memory"
+                  ],
+                  "attempt"
+                ],
+                [
+                  "field",
+                  [
+                    "state",
+                    "memory"
+                  ],
+                  "attemptsPerPhase"
+                ]
+              ]
+            },
+            {
+              "args": {},
+              "command": "DiscardCode",
+              "component": "pipeline-driver",
+              "when": [
+                "and",
+                [
+                  "not",
+                  [
+                    "<",
+                    [
+                      "field",
+                      [
+                        "state",
+                        "memory"
+                      ],
+                      "attempt"
+                    ],
+                    [
+                      "field",
+                      [
+                        "state",
+                        "memory"
+                      ],
+                      "attemptsPerPhase"
+                    ]
+                  ]
+                ],
+                [
+                  "<",
+                  [
+                    "field",
+                    [
+                      "state",
+                      "memory"
+                    ],
+                    "round"
+                  ],
+                  [
+                    "field",
+                    [
+                      "state",
+                      "memory"
+                    ],
+                    "rounds"
+                  ]
+                ],
+                [
+                  "not",
+                  [
+                    "field",
+                    [
+                      "state",
+                      "memory"
+                    ],
+                    "incremental"
+                  ]
+                ]
+              ]
+            },
+            {
+              "args": {
+                "attempt": 1,
+                "phase": [
+                  "lit",
+                  "design"
+                ],
+                "round": [
+                  "+",
+                  [
+                    "field",
+                    [
+                      "state",
+                      "memory"
+                    ],
+                    "round"
+                  ],
+                  1
+                ]
+              },
+              "command": "StartSession",
+              "component": "pipeline-driver",
+              "when": [
+                "and",
+                [
+                  "not",
+                  [
+                    "<",
+                    [
+                      "field",
+                      [
+                        "state",
+                        "memory"
+                      ],
+                      "attempt"
+                    ],
+                    [
+                      "field",
+                      [
+                        "state",
+                        "memory"
+                      ],
+                      "attemptsPerPhase"
+                    ]
+                  ]
+                ],
+                [
+                  "<",
+                  [
+                    "field",
+                    [
+                      "state",
+                      "memory"
+                    ],
+                    "round"
+                  ],
+                  [
+                    "field",
+                    [
+                      "state",
+                      "memory"
+                    ],
+                    "rounds"
+                  ]
+                ]
+              ]
             }
+          ],
+          "command": "ImplementationChecked",
+          "guard": [
+            "not",
+            [
+              "var",
+              "passed"
+            ]
+          ]
+        },
+        "Start.otherwise": {
+          "assign": {
+            "memory": [
+              "record",
+              {
+                "attempt": 1,
+                "attemptsPerPhase": [
+                  "var",
+                  "attemptsPerPhase"
+                ],
+                "incremental": [
+                  "field",
+                  [
+                    "decide",
+                    "plan",
+                    {}
+                  ],
+                  "incremental"
+                ],
+                "round": 1,
+                "rounds": [
+                  "var",
+                  "rounds"
+                ]
+              }
+            ],
+            "status": [
+              "field",
+              [
+                "decide",
+                "plan",
+                {}
+              ],
+              "next"
+            ]
+          },
+          "calls": [
+            {
+              "args": {
+                "attempt": 1,
+                "phase": [
+                  "field",
+                  [
+                    "decide",
+                    "plan",
+                    {}
+                  ],
+                  "phase"
+                ],
+                "round": 1
+              },
+              "command": "StartSession",
+              "component": "pipeline-driver",
+              "when": [
+                "not",
+                [
+                  "=",
+                  [
+                    "field",
+                    [
+                      "decide",
+                      "plan",
+                      {}
+                    ],
+                    "phase"
+                  ],
+                  null
+                ]
+              ]
+            },
+            {
+              "args": {
+                "round": 1
+              },
+              "command": "GradeCurrentCode",
+              "component": "pipeline-driver",
+              "when": [
+                "=",
+                [
+                  "field",
+                  [
+                    "decide",
+                    "plan",
+                    {}
+                  ],
+                  "phase"
+                ],
+                null
+              ]
+            }
+          ],
+          "command": "Start",
+          "guard": true
+        },
+        "WiringChecked.case1": {
+          "assign": {
+            "memory": [
+              "with",
+              [
+                "state",
+                "memory"
+              ],
+              {
+                "attempt": 1
+              }
+            ],
+            "status": [
+              "ite",
+              [
+                "field",
+                [
+                  "state",
+                  "memory"
+                ],
+                "incremental"
+              ],
+              [
+                "lit",
+                "GRADING"
+              ],
+              [
+                "lit",
+                "IMPLEMENTATION"
+              ]
+            ]
+          },
+          "calls": [
+            {
+              "args": {
+                "round": [
+                  "field",
+                  [
+                    "state",
+                    "memory"
+                  ],
+                  "round"
+                ]
+              },
+              "command": "GradeCurrentCode",
+              "component": "pipeline-driver",
+              "when": [
+                "field",
+                [
+                  "state",
+                  "memory"
+                ],
+                "incremental"
+              ]
+            },
+            {
+              "args": {
+                "attempt": 1,
+                "phase": [
+                  "lit",
+                  "implementation"
+                ],
+                "round": [
+                  "field",
+                  [
+                    "state",
+                    "memory"
+                  ],
+                  "round"
+                ]
+              },
+              "command": "StartSession",
+              "component": "pipeline-driver",
+              "when": [
+                "not",
+                [
+                  "field",
+                  [
+                    "state",
+                    "memory"
+                  ],
+                  "incremental"
+                ]
+              ]
+            }
+          ],
+          "command": "WiringChecked",
+          "guard": [
+            "var",
+            "passed"
+          ]
+        },
+        "WiringChecked.otherwise": {
+          "assign": {
+            "memory": [
+              "ite",
+              [
+                "<",
+                [
+                  "field",
+                  [
+                    "state",
+                    "memory"
+                  ],
+                  "attempt"
+                ],
+                [
+                  "field",
+                  [
+                    "state",
+                    "memory"
+                  ],
+                  "attemptsPerPhase"
+                ]
+              ],
+              [
+                "with",
+                [
+                  "state",
+                  "memory"
+                ],
+                {
+                  "attempt": [
+                    "+",
+                    [
+                      "field",
+                      [
+                        "state",
+                        "memory"
+                      ],
+                      "attempt"
+                    ],
+                    1
+                  ]
+                }
+              ],
+              [
+                "ite",
+                [
+                  "<",
+                  [
+                    "field",
+                    [
+                      "state",
+                      "memory"
+                    ],
+                    "round"
+                  ],
+                  [
+                    "field",
+                    [
+                      "state",
+                      "memory"
+                    ],
+                    "rounds"
+                  ]
+                ],
+                [
+                  "with",
+                  [
+                    "state",
+                    "memory"
+                  ],
+                  {
+                    "attempt": 1,
+                    "round": [
+                      "+",
+                      [
+                        "field",
+                        [
+                          "state",
+                          "memory"
+                        ],
+                        "round"
+                      ],
+                      1
+                    ]
+                  }
+                ],
+                [
+                  "state",
+                  "memory"
+                ]
+              ]
+            ],
+            "status": [
+              "ite",
+              [
+                "<",
+                [
+                  "field",
+                  [
+                    "state",
+                    "memory"
+                  ],
+                  "attempt"
+                ],
+                [
+                  "field",
+                  [
+                    "state",
+                    "memory"
+                  ],
+                  "attemptsPerPhase"
+                ]
+              ],
+              [
+                "state",
+                "status"
+              ],
+              [
+                "ite",
+                [
+                  "<",
+                  [
+                    "field",
+                    [
+                      "state",
+                      "memory"
+                    ],
+                    "round"
+                  ],
+                  [
+                    "field",
+                    [
+                      "state",
+                      "memory"
+                    ],
+                    "rounds"
+                  ]
+                ],
+                [
+                  "lit",
+                  "DESIGN"
+                ],
+                [
+                  "lit",
+                  "FAILED"
+                ]
+              ]
+            ]
+          },
+          "calls": [
+            {
+              "args": {
+                "attempt": [
+                  "+",
+                  [
+                    "field",
+                    [
+                      "state",
+                      "memory"
+                    ],
+                    "attempt"
+                  ],
+                  1
+                ],
+                "phase": [
+                  "lit",
+                  "wiring"
+                ],
+                "round": [
+                  "field",
+                  [
+                    "state",
+                    "memory"
+                  ],
+                  "round"
+                ]
+              },
+              "command": "StartSession",
+              "component": "pipeline-driver",
+              "when": [
+                "<",
+                [
+                  "field",
+                  [
+                    "state",
+                    "memory"
+                  ],
+                  "attempt"
+                ],
+                [
+                  "field",
+                  [
+                    "state",
+                    "memory"
+                  ],
+                  "attemptsPerPhase"
+                ]
+              ]
+            },
+            {
+              "args": {},
+              "command": "DiscardCode",
+              "component": "pipeline-driver",
+              "when": [
+                "and",
+                [
+                  "not",
+                  [
+                    "<",
+                    [
+                      "field",
+                      [
+                        "state",
+                        "memory"
+                      ],
+                      "attempt"
+                    ],
+                    [
+                      "field",
+                      [
+                        "state",
+                        "memory"
+                      ],
+                      "attemptsPerPhase"
+                    ]
+                  ]
+                ],
+                [
+                  "<",
+                  [
+                    "field",
+                    [
+                      "state",
+                      "memory"
+                    ],
+                    "round"
+                  ],
+                  [
+                    "field",
+                    [
+                      "state",
+                      "memory"
+                    ],
+                    "rounds"
+                  ]
+                ],
+                [
+                  "not",
+                  [
+                    "field",
+                    [
+                      "state",
+                      "memory"
+                    ],
+                    "incremental"
+                  ]
+                ]
+              ]
+            },
+            {
+              "args": {
+                "attempt": 1,
+                "phase": [
+                  "lit",
+                  "design"
+                ],
+                "round": [
+                  "+",
+                  [
+                    "field",
+                    [
+                      "state",
+                      "memory"
+                    ],
+                    "round"
+                  ],
+                  1
+                ]
+              },
+              "command": "StartSession",
+              "component": "pipeline-driver",
+              "when": [
+                "and",
+                [
+                  "not",
+                  [
+                    "<",
+                    [
+                      "field",
+                      [
+                        "state",
+                        "memory"
+                      ],
+                      "attempt"
+                    ],
+                    [
+                      "field",
+                      [
+                        "state",
+                        "memory"
+                      ],
+                      "attemptsPerPhase"
+                    ]
+                  ]
+                ],
+                [
+                  "<",
+                  [
+                    "field",
+                    [
+                      "state",
+                      "memory"
+                    ],
+                    "round"
+                  ],
+                  [
+                    "field",
+                    [
+                      "state",
+                      "memory"
+                    ],
+                    "rounds"
+                  ]
+                ]
+              ]
+            }
+          ],
+          "command": "WiringChecked",
+          "guard": [
+            "not",
+            [
+              "var",
+              "passed"
+            ]
+          ]
+        }
+      },
+      "init": {
+        "memory": [
+          "record",
+          {
+            "attempt": 0,
+            "attemptsPerPhase": 0,
+            "incremental": false,
+            "round": 0,
+            "rounds": 0
           }
-        },
-        "otherwise": {
-          "goTo": "FAILED"
-        }
-      }
-    }
-  ],
-  "conditions": {
-    "(\"The check passed\" and \"Existing code is being changed (the code was not written from nothing)\")": {
-      "all": [
-        "The check passed",
-        "Existing code is being changed (the code was not written from nothing)"
-      ]
-    },
-    "(\"The check passed\" and not \"Existing code is being changed (the code was not written from nothing)\")": {
-      "all": [
-        "The check passed",
-        "not \"Existing code is being changed (the code was not written from nothing)\""
-      ]
-    },
-    "(not \"The check passed\" and \"Attempts remain in this phase\")": {
-      "all": [
-        "not \"The check passed\"",
-        "Attempts remain in this phase"
-      ]
-    },
-    "(not \"The check passed\" and not \"Attempts remain in this phase\" and \"Rounds remain\")": {
-      "all": [
-        "not \"The check passed\"",
-        "not \"Attempts remain in this phase\"",
-        "Rounds remain"
-      ]
-    },
-    "not \"Attempts remain in this phase\"": {
-      "not": "Attempts remain in this phase"
-    },
-    "not \"Existing code is being changed (the code was not written from nothing)\"": {
-      "not": "Existing code is being changed (the code was not written from nothing)"
-    },
-    "not \"The check passed\"": {
-      "not": "The check passed"
-    }
-  },
-  "decisions": {
-    "plan": {
-      "rows": {
-        "There is no production code yet": {
-          "incremental": false,
-          "next": "DESIGN",
-          "phase": "design"
-        },
-        "There is production code, and the boundary differs from the previous run": {
-          "incremental": true,
-          "next": "DESIGN",
-          "phase": "design"
-        },
-        "There is production code, the boundary is unchanged, and there is no adapter": {
-          "incremental": true,
-          "next": "WIRING",
-          "phase": "wiring"
-        },
-        "otherwise": {
-          "incremental": true,
-          "next": "GRADING",
-          "phase": null
-        }
-      }
-    }
-  },
-  "descriptions": {
-    "component": "Reconciles one component with its specification in up to three phases (design, wiring, implementation). Each phase is an agent session followed by a check. A rejected check repeats the phase; a phase that runs out of attempts restarts the pipeline from design, until the rounds run out.",
-    "effects.GradeCurrentCode": "Grade the production code as it is, without an agent.",
-    "queries.boundaryChanged": "Whether the component's boundary differs from the one the previous run worked from."
-  },
-  "irVersion": 7,
-  "model": {
-    "calculations": {
-      "nextAttempt": {
-        "description": "the current attempt number plus one",
-        "output": "integer"
-      },
-      "nextRound": {
-        "description": "the current round number plus one",
-        "output": "integer"
-      }
-    },
-    "commands": {
-      "CurrentCodeGraded": {
-        "passed": "boolean"
-      },
-      "DesignChecked": {
-        "passed": "boolean"
-      },
-      "ImplementationChecked": {
-        "passed": "boolean"
-      },
-      "Start": {
-        "attemptsPerPhase": {
-          "max": 3,
-          "min": 1,
-          "type": "integer"
-        },
-        "rounds": {
-          "max": 3,
-          "min": 1,
-          "type": "integer"
-        }
-      },
-      "WiringChecked": {
-        "passed": "boolean"
-      }
-    },
-    "data": {
-      "attempt": {
-        "max": 4,
-        "min": 1,
-        "type": "integer"
-      },
-      "incremental": "boolean",
-      "maxAttempts": {
-        "max": 3,
-        "min": 1,
-        "type": "integer"
-      },
-      "maxRounds": {
-        "max": 3,
-        "min": 1,
-        "type": "integer"
-      },
-      "round": {
-        "max": 4,
-        "min": 1,
-        "type": "integer"
-      }
-    },
-    "effects": {
-      "DiscardCode": {},
-      "GradeCurrentCode": {
-        "round": {
-          "max": 4,
-          "min": 1,
-          "type": "integer"
-        }
-      },
-      "StartSession": {
-        "attempt": {
-          "max": 4,
-          "min": 1,
-          "type": "integer"
-        },
-        "phase": [
-          "design",
-          "wiring",
-          "implementation"
         ],
-        "round": {
-          "max": 4,
-          "min": 1,
-          "type": "integer"
+        "status": [
+          "lit",
+          "IDLE"
+        ]
+      },
+      "properties": {
+        "attemptsWithinLimit": {
+          "is": [
+            "always",
+            [
+              "<=",
+              [
+                "field",
+                [
+                  "state",
+                  "memory"
+                ],
+                "attempt"
+              ],
+              [
+                "field",
+                [
+                  "state",
+                  "memory"
+                ],
+                "attemptsPerPhase"
+              ]
+            ]
+          ],
+          "kind": "invariant"
+        },
+        "roundsWithinLimit": {
+          "is": [
+            "always",
+            [
+              "<=",
+              [
+                "field",
+                [
+                  "state",
+                  "memory"
+                ],
+                "round"
+              ],
+              [
+                "field",
+                [
+                  "state",
+                  "memory"
+                ],
+                "rounds"
+              ]
+            ]
+          ],
+          "kind": "invariant"
+        }
+      },
+      "queries": {
+        "Status": {
+          "is": [
+            "state",
+            "status"
+          ],
+          "params": {},
+          "result": {
+            "enum": [
+              "IDLE",
+              "DESIGN",
+              "WIRING",
+              "GRADING",
+              "IMPLEMENTATION",
+              "DONE",
+              "FAILED"
+            ]
+          }
+        }
+      },
+      "relies": [
+        "output",
+        "pipeline-driver"
+      ],
+      "state": {
+        "memory": {
+          "record": {
+            "attempt": "int",
+            "attemptsPerPhase": "int",
+            "incremental": "bool",
+            "round": "int",
+            "rounds": "int"
+          }
+        },
+        "status": {
+          "enum": [
+            "IDLE",
+            "DESIGN",
+            "WIRING",
+            "GRADING",
+            "IMPLEMENTATION",
+            "DONE",
+            "FAILED"
+          ]
         }
       }
     },
-    "init": "IDLE",
-    "invariants": [
-      "The attempt number never exceeds the limit of attempts per phase",
-      "The round number never exceeds the limit of rounds"
-    ],
-    "queries": {
-      "boundaryChanged": {
-        "input": {},
-        "output": "boolean"
-      },
-      "hasAdapter": {
-        "input": {},
-        "output": "boolean"
-      },
-      "hasProductionCode": {
-        "input": {},
-        "output": "boolean"
+    "pipeline-driver": {
+      "external": {
+        "commands": {
+          "DiscardCode": {
+            "params": {}
+          },
+          "GradeCurrentCode": {
+            "params": {
+              "round": "int"
+            }
+          },
+          "StartSession": {
+            "params": {
+              "attempt": "int",
+              "phase": {
+                "enum": [
+                  "design",
+                  "wiring",
+                  "implementation"
+                ]
+              },
+              "round": "int"
+            }
+          }
+        },
+        "queries": {}
       }
-    },
-    "states": [
-      "IDLE",
-      "DESIGN",
-      "WIRING",
-      "GRADING",
-      "IMPLEMENTATION",
-      "DONE",
-      "FAILED"
+    }
+  },
+  "entries": {
+    "commands": [
+      "pipeline.CurrentCodeGraded",
+      "pipeline.DesignChecked",
+      "pipeline.ImplementationChecked",
+      "pipeline.Start",
+      "pipeline.WiringChecked"
+    ],
+    "queries": [
+      "pipeline.Status"
+    ]
+  },
+  "irVersion": 8,
+  "notes": {
+    "output": "What the output directory holds.",
+    "pipeline": "Reconciles one component with its specification in up to three phases (design, wiring, implementation). Each phase is an agent session followed by a check. A rejected check repeats the phase; a phase that runs out of attempts restarts the pipeline from design, until the rounds run out.",
+    "pipeline-driver": "The driver: it runs what the pipeline asks for, and answers with a command.",
+    "pipeline.decisions.plan": "The plan: where the pipeline starts",
+    "pipeline.decisions.plan.rows[0]": "There is no production code yet",
+    "pipeline.decisions.plan.rows[1]": "There is production code, and the boundary differs from the previous run",
+    "pipeline.decisions.plan.rows[2]": "There is production code, the boundary is unchanged, and there is no adapter",
+    "pipeline.does.afterWiring": "The attempt number goes back to 1. When existing code is being changed (the code was not written from nothing), the current code is graded; otherwise an implementation session is started.",
+    "pipeline.does.implement": "An implementation session is started (attempt 1).",
+    "pipeline.does.rejected": "The check rejected the phase (as for DesignChecked).",
+    "pipeline.does.start": "The pipeline remembers the two limits and whether the plan is incremental, and that this is round 1, attempt 1. Then a session of the plan's phase is started; where the plan has no phase, the current code is graded instead.",
+    "pipeline.does.toWiring": "The attempt number goes back to 1. A wiring session is started.",
+    "pipeline.rules.attemptsWithinLimit": "The attempt number never exceeds the limit of attempts per phase",
+    "pipeline.rules.roundsWithinLimit": "The round number never exceeds the limit of rounds",
+    "pipeline.state.memory": "The two limits, whether the plan is incremental, the round and the attempt"
+  },
+  "root": "pipeline",
+  "sorts": [],
+  "trace": {
+    "pipeline.does.afterWiring": [
+      "Pipeline.commands.WiringChecked"
+    ],
+    "pipeline.does.implement": [
+      "Pipeline.commands.CurrentCodeGraded"
+    ],
+    "pipeline.does.rejected": [
+      "Pipeline.commands.ImplementationChecked"
+    ],
+    "pipeline.does.start": [
+      "Pipeline.commands.Start"
+    ],
+    "pipeline.does.toWiring": [
+      "Pipeline.commands.DesignChecked"
     ]
   }
 }

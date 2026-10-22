@@ -3,31 +3,34 @@ import { spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { after, test } from "node:test";
-import { extract } from "../src/extract.ts";
-import { accept, interpret } from "../src/interpret.ts";
-import { loadSpecs, stampIn } from "../src/loader.ts";
+import { accept8, interpret8 } from "../src/v1/interpret.ts";
 import type { Assignment, ImplementationStrategy } from "../src/strategy.ts";
-import { unstamped } from "./support.ts";
+import { specsDir } from "./support.ts";
 
-// 解釈 (Layer 2) を導く工程。LLM の代役として、決まった内容を書く Strategy を使う。
+// 解釈 (Layer 2) を導く工程 (1.0)。LLM の代役として、決まった内容を書く Strategy を使う。
 // 仕様のコピーは packages/cli 配下に置く（@clp/core を解決できる場所）
+process.env.CLP_ALLOY = "off";
 
 const repoRoot = join(import.meta.dirname, "../../..");
 const tmpRoot = join(import.meta.dirname, ".tmp-interpret");
 mkdirSync(tmpRoot, { recursive: true });
 after(() => rmSync(tmpRoot, { recursive: true, force: true }));
 
+const DRAFT = "order.interpretation.draft.ts";
+const FINAL = "order.interpretation.ts";
 // 例の解釈の中身（先頭の、生成物であることとハッシュの行を除いたもの）
-const reviewed = unstamped(readFileSync(join(repoRoot, "examples/checkout-ts/specs/order.interpretation.ts"), "utf8")).replace(/^\/\/ Code generated[^\n]*\n/, "");
+const reviewed = readFileSync(join(specsDir, FINAL), "utf8")
+  .split("\n")
+  .filter((line) => !line.startsWith("// Code generated") && !line.startsWith("// layer1 "))
+  .join("\n");
 
-// 例の決定表とコンポーネント (Layer 1) だけを写した仕様ディレクトリ（解釈は無い）
+// 例の Layer 1 だけを写した仕様ディレクトリ（解釈は無い）
 function specDir() {
   const dir = mkdtempSync(join(mkdtempSync(join(tmpRoot, "d-")), "specs-"));
-  for (const name of ["order.decisions.ts", "order.component.ts"]) copyFileSync(join(repoRoot, "examples/checkout-ts/specs", name), join(dir, name));
+  copyFileSync(join(specsDir, "order.component.ts"), join(dir, "order.component.ts"));
   return dir;
 }
-// 仕様を写して、Layer 1 を書き換えたもの。別のディレクトリにする
-// （同じプロセスで同じファイルを読み直しても、モジュールのキャッシュのために前の内容が返るため）
+// 仕様を写して、Layer 1 を書き換えたもの
 function fork(from: string, edit: (component: string) => string) {
   const dir = mkdtempSync(join(mkdtempSync(join(tmpRoot, "d-")), "specs-"));
   for (const name of readdirSync(from)) {
@@ -40,8 +43,10 @@ const replaced = (from: string, to: string) => (text: string) => {
   assert.ok(text.includes(from), from);
   return text.replace(from, to);
 };
-const DRAFT = "order.interpretation.draft.ts";
-const FINAL = "order.interpretation.ts";
+const variant = (from: string, to: string) => {
+  assert.ok(reviewed.includes(from), from);
+  return reviewed.replace(from, to);
+};
 
 // 呼ばれるたびに決まった下書きを書き、作業場所で見えたものを記録する
 function scripted(drafts: string[], options: { file?: string; extra?: (assignment: Assignment) => void } = {}) {
@@ -63,79 +68,73 @@ function scripted(drafts: string[], options: { file?: string; extra?: (assignmen
   return { strategy, seen };
 }
 
-const compile = (dir: string, ...flags: string[]) =>
-  spawnSync(process.execPath, [join(repoRoot, "packages/cli/bin/clp.ts"), "compile", dir, ...flags], { encoding: "utf8" });
+const compile = (dir: string, ...flags: string[]) => spawnSync(process.execPath, [join(repoRoot, "packages/cli/bin/clp.ts"), "compile", dir, ...flags], { encoding: "utf8" });
 
-test("解釈: Layer 1 が名前を挙げたものを並べた雛形から始め、検査に通ったら下書きとして書き出す", async () => {
+// 解釈の変え方: 保留中の注文のキャンセルでも、払い戻す（0 円）
+const ALWAYS_REFUND = ['      if (this.status === "PENDING") {\n        this.status = "CANCELLED";', '      if (this.status === "PENDING") {\n        this.status = "CANCELLED";\n        Refunds.Refund(0);'] as const;
+
+test("解釈: 文の場所を並べた雛形から始め、検査に通ったら下書きとして書き出す", async () => {
   const dir = specDir();
   const { strategy, seen } = scripted([reviewed]);
-  const result = await interpret({ specs: dir, strategy });
+  const result = await interpret8({ specs: dir, strategy });
 
-  assert.ok(result.status === "interpreted" && result.attempts === 1 && result.component === "order");
+  assert.ok(result.status === "interpreted" && result.attempts === 1 && result.component === "order", JSON.stringify(result));
   // エージェントには Layer 1 のファイルと、書くべきファイルが渡る
-  assert.deepEqual(seen[0].files, ["order.component.ts", "order.decisions.ts", DRAFT]);
-  // 雛形: コマンドは、文をコメントに添えた空の宣言。Layer 1 が場合分けを書いたコマンドは、場合ごと
-  assert.match(seen[0].start, /\/\/ A pending or paid order can be cancelled\. If the order had been paid, a refund is issued\.\n  Command\.Cancel\.with\(\{\}\),/);
-  assert.match(seen[0].start, /Command\.Checkout\.with\(\{\n    cases: \[\n      \/\/ A receipt is sent[^\n]*\n      If\.paymentSucceeded\.then\(\{\}\),\n      \/\/ The customer is notified[^\n]*\n      otherwise\(\{\}\),/);
-  // Layer 1 が構造で書いた語彙 (states など) は、雛形に出ない
-  assert.doesNotMatch(seen[0].start, /\/\/ TODO:/);
-  assert.match(seen[0].start, /CampaignIf\.customerSilverMember\.means\(\(state\) => \{\n    throw new Error\("TODO"\);/);
-  assert.match(seen[0].start, /\/\/ price × \(100 − discount percent\) ÷ 100, rounded down to a whole yen\n  Calc\.amountCharged\.means\(\(state\) =>/);
-  // 参照は、Layer 1 が export する取っ手で書く
-  assert.match(seen[0].start, /import \{ Calc, Command, Data, Effect, If, Inv, Order, PlaceOrderInput, Query, State \} from "\.\/order\.component\.ts";/);
-  assert.match(seen[0].request, /Nothing is referred to by a string/);
+  assert.deepEqual(seen[0].files, [DRAFT, "order.component.ts"].sort());
+  // 雛形: 文の場所ごとの、空の宣言（文をコメントに添える）
+  assert.match(seen[0].start, /interpretation\(Order, \{/);
+  assert.match(seen[0].start, /A pending or paid order can be cancelled/);
+  assert.match(seen[0].start, /The customer is a Silver member/);
   assert.match(seen[0].request, /^# Write the interpretation of a specification \(attempt 1\)/);
-  assert.match(seen[0].request, /You cannot override what Layer 1 wrote as structure/);
 
-  // 書き出された下書きには、生成物であることと、導いたときの Layer 1 のハッシュが記される
+  // 書き出された下書きには、生成物であることと、導いたときの Layer 1 のハッシュが部品ごとに記される
   const draft = readFileSync(join(dir, DRAFT), "utf8");
-  assert.match(draft, /^\/\/ Code generated by clp interpret\. Do not edit[^\n]*\n\/\/ layer1: sha256:[0-9a-f]{64}\n/);
+  assert.match(draft, /^\/\/ Code generated by clp interpret\. Do not edit[^\n]*\n(\/\/ layer1 \w+: sha256:[0-9a-f]{64}\n){3}/);
   assert.ok(draft.endsWith(reviewed));
+  // 人が確かめるための読み下し
+  assert.match(result.status === "interpreted" ? (result.reading ?? "") : "", /Order\.commands\.Cancel/);
 });
 
 test("解釈: 人が確定するまで、検証には使われない。確定すると、下書きが確定版になる", async () => {
   const dir = specDir();
-  await interpret({ specs: dir, strategy: scripted([reviewed]).strategy });
+  await interpret8({ specs: dir, strategy: scripted([reviewed]).strategy });
 
   // 既定の読み込みは下書きを無視するので、解釈は無いまま
-  assert.deepEqual(extract(await loadSpecs(dir)).diagnostics.map((d) => d.code), ["unbound-specification"]);
+  assert.match(compile(dir).stderr, /unbound-specification/);
   // 下書きを読むよう明示したときだけ、仕様として通る
-  assert.equal(compile(dir, "--drafts").status, 0);
+  assert.equal(compile(dir, "--drafts").status, 0, compile(dir, "--drafts").stderr);
 
-  assert.deepEqual(await accept({ specs: dir }), { accepted: [join(dir, FINAL)], problems: [] });
+  assert.deepEqual(await accept8({ specs: dir }), { accepted: [join(dir, FINAL)], problems: [] });
   assert.ok(!existsSync(join(dir, DRAFT)));
   assert.equal(compile(dir).status, 0);
   // もう導くものは無い
   const again = scripted([reviewed]);
-  assert.deepEqual(await interpret({ specs: dir, strategy: again.strategy }), { status: "up-to-date" });
+  assert.deepEqual(await interpret8({ specs: dir, strategy: again.strategy }), { status: "up-to-date" });
   assert.deepEqual(again.seen, []);
-  assert.deepEqual(await accept({ specs: dir }), { accepted: [], problems: [] });
 });
 
-test("解釈: 検査に落ちたら、書き直させる (仕様に無い名前、条件の衝突、Layer 1 の書き換え)", async () => {
-  const typo = reviewed.replace("state.paymentModuleActive", "state.paymentModuleActiv");
-  // シルバー会員の条件を「常に真」にすると、ゴールド会員かつ月末の条件と同時に成り立つ
-  const conflicting = reviewed.replace('(state) => state.rank === "Silver"', "() => true");
-  // Layer 1 が決めた遷移先 (PAID) を、解釈が書き換えている
-  const overriding = reviewed.replace("      If.paymentSucceeded.then({\n        emits: [", "      If.paymentSucceeded.then({\n        goTo: State.SHIPPED,\n        emits: [");
-  assert.ok(typo !== reviewed && conflicting !== reviewed && overriding !== reviewed);
+test("解釈: 検査に落ちたら、書き直させる (仕様に無い名前、届かない行、Layer 1 の書き換え)", async () => {
+  const typo = variant("Payment.Active()", "Payment.Activ()");
+  // シルバー会員の条件を「常に真」にすると、最後の行 (otherwise) に届かず、その値が確かめられない
+  const conflicting = variant('return this.rank === "Silver";', "return true;");
+  // Layer 1 がコードで書いたコマンドを、解釈が書き直している
+  const overriding = variant("    Cancel() {\n", '    Ship() {\n      this.status = "SHIPPED";\n    },\n    Cancel() {\n');
   const dir = specDir();
   const { strategy, seen } = scripted([typo, conflicting, overriding, reviewed]);
-  const result = await interpret({ specs: dir, strategy, maxAttempts: 4 });
+  const result = await interpret8({ specs: dir, strategy, maxAttempts: 4 });
 
-  assert.ok(result.status === "interpreted" && result.attempts === 4);
-  assert.match(seen[1].request, /Problems found in the previous attempt[\s\S]*spec-check[\s\S]*仕様に無い名前 "paymentModuleActiv" を読みました/);
-  assert.match(seen[2].request, /Problems found in the previous attempt[\s\S]*複数の条件が同時に成立しました/);
-  assert.match(seen[3].request, /Problems found in the previous attempt[\s\S]*bad-interpretation[\s\S]*commands\.Checkout\.cases\.The payment succeeded\.goTo: Layer 1 に書かれているので、解釈では書けません/);
+  assert.ok(result.status === "interpreted" && result.attempts === 4, JSON.stringify(result));
+  assert.match(seen[1].request, /Problems found in the previous attempt[\s\S]*Activ/);
+  assert.match(seen[2].request, /Problems found in the previous attempt[\s\S]*unobservable-value\] order: order\.decisions\.campaign\[2\]/);
+  assert.match(seen[3].request, /Problems found in the previous attempt[\s\S]*(overwrite|wrong-heading)[\s\S]*Ship/);
   // 2回目からは、前回の下書きから始まる（先頭の行は除いて渡す）
   assert.equal(seen[1].start, typo);
 });
 
 test("解釈: 上限回数まで直らなければ失敗で終わり、問題を報告する。仕様のファイルを書き換えたら差し戻す", async () => {
-  const unfinished = reviewed.replace('(state) => state.paymentResult === "succeeded"', '() => { throw new Error("TODO"); }');
-  const failed = await interpret({ specs: specDir(), strategy: scripted([unfinished]).strategy, maxAttempts: 2 });
+  const failed = await interpret8({ specs: specDir(), strategy: scripted([variant("Payment.Active()", "Payment.Activ()")]).strategy, maxAttempts: 2 });
   assert.ok(failed.status === "failed" && failed.attempts === 2);
-  assert.match(failed.problems ?? "", /TODO/);
+  assert.match(failed.problems ?? "", /Activ/);
 
   const dir = specDir();
   const original = readFileSync(join(dir, "order.component.ts"), "utf8");
@@ -144,17 +143,16 @@ test("解釈: 上限回数まで直らなければ失敗で終わり、問題を
       if (attempt === 1) writeFileSync(join(sandbox, "spec/order.component.ts"), "// changed\n");
     },
   });
-  const result = await interpret({ specs: dir, strategy });
+  const result = await interpret8({ specs: dir, strategy });
   assert.ok(result.status === "interpreted" && result.attempts === 2);
   assert.match(seen[1].request, /Only order\.interpretation\.draft\.ts may be edited, but these files were changed: order\.component\.ts/);
   assert.equal(readFileSync(join(dir, "order.component.ts"), "utf8"), original);
 });
 
 test("解釈: 疑問点 (// REVIEW:) を集めて返す。添付資料を渡せる", async () => {
-  const doubtful = reviewed.replace("  Command.Cancel.with(", "  // REVIEW: does a pending order that failed to pay count as paid?\n  Command.Cancel.with(");
-  assert.notEqual(doubtful, reviewed);
+  const doubtful = variant("  queries: {\n", "  // REVIEW: does a pending order that failed to pay count as paid?\n  queries: {\n");
   const { strategy, seen } = scripted([doubtful]);
-  const result = await interpret({
+  const result = await interpret8({
     specs: specDir(),
     strategy,
     assets: [
@@ -165,306 +163,103 @@ test("解釈: 疑問点 (// REVIEW:) を集めて返す。添付資料を渡せ�
   assert.ok(result.status === "interpreted");
   assert.deepEqual(result.questions.map((q) => q.text), ["does a pending order that failed to pay count as paid?"]);
   assert.ok(readFileSync(result.draft, "utf8").split("\n")[result.questions[0].line - 1].includes("REVIEW:"));
-  assert.match(seen[0].request, /## Project conventions[\s\S]*- Prices never include tax\.[\s\S]*`clp\/assets\/glossary\.md`/);
+  assert.match(seen[0].request, /- Prices never include tax\.[\s\S]*`clp\/assets\/glossary\.md`|`clp\/assets\/glossary\.md`[\s\S]*- Prices never include tax\./);
 });
 
 test("解釈: Layer 1 の文が変わったら、いまの解釈を出発点にして直させる。確定版は書き換えない", async () => {
   const accepted = specDir();
-  await interpret({ specs: accepted, strategy: scripted([reviewed]).strategy });
-  await accept({ specs: accepted });
+  await interpret8({ specs: accepted, strategy: scripted([reviewed]).strategy });
+  await accept8({ specs: accepted });
   const final = readFileSync(join(accepted, FINAL), "utf8");
 
-  // 払い戻しの文を変える（支払い済みに加えて、保留中でも払い戻す）
-  const dir = fork(accepted, replaced("If the order had been paid, a refund is issued.", "A refund is always issued."));
+  // 払い戻しの文を変える
+  const dir = fork(accepted, replaced("If the order had been paid, the customer is refunded what they paid.", "The customer is always refunded what they paid (nothing, if they had not paid)."));
   // 古い解釈は、正解として使われない
   assert.match(compile(dir).stderr, /stale-interpretation/);
 
-  const updated = reviewed.replace("Effect.Refund().onlyWhen(was(State.PAID))", "Effect.Refund()");
-  assert.notEqual(updated, reviewed);
+  const updated = variant(...ALWAYS_REFUND);
   const { strategy, seen } = scripted([updated]);
-  const result = await interpret({ specs: dir, strategy });
+  const result = await interpret8({ specs: dir, strategy });
 
   assert.ok(result.status === "interpreted");
   assert.equal(result.updates, join(dir, FINAL));
   assert.match(seen[0].request, /^# Update the interpretation of a specification/);
-  assert.match(seen[0].request, /Change only what Layer 1 now requires/);
   assert.match(seen[0].request, /Problems with the current interpretation[\s\S]*stale-interpretation/);
-  // 構造が変わったのは Cancel だけ（文が変わったので説明も変わる）。語彙とほかのコマンドは、そのまま
-  assert.deepEqual(result.changed, ["Cancel"]);
-  assert.equal(result.unchanged, 11);
   // 出発点は、いまの解釈。作業場所に、確定版は置かれない
   assert.equal(seen[0].start, reviewed);
-  assert.deepEqual(seen[0].files, ["order.component.ts", "order.decisions.ts", DRAFT]);
+  assert.deepEqual(seen[0].files, [DRAFT, "order.component.ts"].sort());
   // 確定版はそのまま。確定すると置き換わり、いまの Layer 1 のハッシュが記される
   assert.equal(readFileSync(join(dir, FINAL), "utf8"), final);
-  await accept({ specs: dir });
+  await accept8({ specs: dir });
   assert.ok(readFileSync(join(dir, FINAL), "utf8").endsWith(updated));
-  assert.notEqual(stampIn(readFileSync(join(dir, FINAL), "utf8")), stampIn(final));
+  assert.notEqual(readFileSync(join(dir, FINAL), "utf8").split("\n").slice(0, 4).join("\n"), final.split("\n").slice(0, 4).join("\n"));
   assert.equal(compile(dir).status, 0);
 });
 
 test("確定: 文を直したが解釈はそのままでよいとき、導き直さずに確定できる。合わなくなっていれば断る", async () => {
   const accepted = specDir();
-  await interpret({ specs: accepted, strategy: scripted([reviewed]).strategy });
-  await accept({ specs: accepted });
+  await interpret8({ specs: accepted, strategy: scripted([reviewed]).strategy });
+  await accept8({ specs: accepted });
 
   // 言い回しだけを変える
   const dir = fork(accepted, replaced("An order confirmation is sent.", "A confirmation of the order is sent."));
   assert.match(compile(dir).stderr, /stale-interpretation/);
-  assert.deepEqual(await accept({ specs: dir }), { accepted: [join(dir, FINAL)], problems: [] });
+  assert.deepEqual(await accept8({ specs: dir }), { accepted: [join(dir, FINAL)], problems: [] });
   assert.equal(compile(dir).status, 0);
 
-  // 解釈が使っている副作用を、Layer 1 から消す
-  const broken = fork(accepted, replaced('  Refund: "What the customer paid is returned.",\n', ""));
-  const refused = await accept({ specs: broken });
+  // 解釈が使っている外の世界のコマンドを、Layer 1 から消す
+  const broken = fork(accepted, replaced("    PaymentFailure() {},\n", ""));
+  const refused = await accept8({ specs: broken });
   assert.deepEqual(refused.accepted, []);
-  assert.match(refused.problems[0], /order: 解釈が、いまの Layer 1 に合いません/);
+  assert.match(refused.problems[0], /解釈が、いまの Layer 1 に合いません/);
 });
 
-test("2つの解釈: 同じ語彙のもとで独立に導かせ、同じコマンド列で実行して、食い違う所を報告する", async () => {
-  // 2つ目は、払い戻しを「支払い済みのときだけ」ではなく「常に」と読んだ
-  const always = reviewed.replace("Effect.Refund().onlyWhen(was(State.PAID))", "Effect.Refund()");
+test("2つの解釈: 同じ境界のもとで独立に導かせ、同じコマンド列で実行して、食い違う所を下書きに REVIEW(clp) として書く", async () => {
+  const always = variant(...ALWAYS_REFUND);
   const dir = specDir();
   const { strategy, seen } = scripted([reviewed, always]);
-  const result = await interpret({ specs: dir, strategy, sessions: 2 });
+  const result = await interpret8({ specs: dir, strategy, sessions: 2 });
 
-  assert.ok(result.status === "interpreted" && result.comparisons?.[0].status === "compared");
-  // 2つ目のセッションは、1つ目の下書きを見ない。Layer 1 が書かなかった入力が、埋めてある
+  assert.ok(result.status === "interpreted" && result.comparisons?.[0].status === "compared", JSON.stringify(result));
+  // 2つ目のセッションは、1つ目の下書きを見ない
   assert.equal(seen.length, 2);
-  assert.match(seen[1].request, /The vocabulary is fixed/);
-  assert.match(seen[1].start, /Command\.Cancel\.with\(\{ input: input\(\{\}\) \}\),/);
-  assert.doesNotMatch(seen[1].start, /Refund/);
+  assert.doesNotMatch(seen[1].start, /amountPaid/);
   // 食い違いは Cancel にだけある。最短のコマンド列（保留中の注文のキャンセル）で示される
-  assert.deepEqual(result.comparisons?.[0].differences.map((d) => d.command), ["Cancel"]);
+  assert.deepEqual([...new Set(result.comparisons?.[0].differences.map((d) => d.command))], ["Cancel"]);
   const [difference] = result.comparisons![0].differences;
-  assert.deepEqual(difference.steps.map((step) => `${step.from}:${step.command}`), ["DRAFT:PlaceOrder", "PENDING:Cancel"]);
-  assert.deepEqual(difference.first, { state: "CANCELLED", effects: [] });
-  assert.deepEqual(difference.other, { state: "CANCELLED", effects: [{ name: "Refund", payload: {} }] });
-  // 残るのは1つ目の下書きだけ。2つ目のための写しは消える
-  assert.ok(readFileSync(join(dir, DRAFT), "utf8").endsWith(reviewed));
-  assert.deepEqual(readdirSync(dirname(dir)).filter((name) => name.startsWith(".tmp-clp-interpret-")), []);
-});
-
-test("人の確認: 疑問点が残っていれば確定しない。その読み方でよいと確かめて REVIEWED にすれば確定でき、記録として残る", async () => {
-  const doubtful = reviewed.replace("  Command.Cancel.with(", "  // REVIEW: does a pending order that failed to pay count as paid?\n  Command.Cancel.with(");
-  const dir = specDir();
-  await interpret({ specs: dir, strategy: scripted([doubtful]).strategy });
-  const refused = await accept({ specs: dir });
-  assert.deepEqual(refused.accepted, []);
-  assert.match(refused.problems[0], /order: 確かめていない疑問点・食い違いが 1 件あります[\s\S]*does a pending order/);
-  assert.ok(existsSync(join(dir, DRAFT)));
-
-  writeFileSync(join(dir, DRAFT), readFileSync(join(dir, DRAFT), "utf8").replace("// REVIEW:", "// REVIEWED:"));
-  assert.deepEqual(await accept({ specs: dir }), { accepted: [join(dir, FINAL)], problems: [] });
-  assert.match(readFileSync(join(dir, FINAL), "utf8"), /\/\/ REVIEWED: does a pending order/);
-  assert.equal(compile(dir).status, 0);
-});
-
-test("人の確認: 2つの解釈の食い違いは下書きに REVIEW(clp) として書かれ、確かめるまで確定しない。導き直すと書き直される", async () => {
-  const always = reviewed.replace("Effect.Refund().onlyWhen(was(State.PAID))", "Effect.Refund()");
-  const dir = specDir();
-  await interpret({ specs: dir, strategy: scripted([reviewed, always]).strategy, sessions: 2 });
+  assert.deepEqual(difference.steps.map((step) => step.name), ["PlaceOrder", "Cancel"]);
+  // 下書きには、食い違いが REVIEW(clp) として書かれ、確かめるまで確定しない
   const marks = readFileSync(join(dir, DRAFT), "utf8").split("\n").filter((line) => line.includes("REVIEW(clp)"));
-  assert.equal(marks.length, 1);
-  assert.match(marks[0], /^\/\/ REVIEW\(clp\): 2 つ目の解釈と食い違う \(Cancel、副作用 Refund\): PlaceOrder .* → Cancel .*1つ目: .*2 つ目: .*Refund/);
-  assert.match((await accept({ specs: dir })).problems[0], /確かめていない疑問点・食い違いが 1 件あります/);
+  assert.ok(marks.length >= 1 && /2 つ目の解釈と食い違う \(Cancel、/.test(marks[0]), marks.join("\n"));
+  assert.match((await accept8({ specs: dir })).problems[0], /確かめていない疑問点・食い違いが \d+ 件あります/);
+  // 2つ目のための写しは消える
+  assert.deepEqual(readdirSync(dirname(dir)).filter((name) => name.startsWith(".tmp-clp-interpret-")), []);
 
-  // Layer 1 を変えて導き直す: 出発点から前の食い違いは消え、新しい比較の結果だけが書かれる
-  const changed = fork(dir, replaced("An order confirmation is sent.", "A confirmation of the order is sent."));
-  const { strategy, seen } = scripted([reviewed, reviewed]);
-  await interpret({ specs: changed, strategy, sessions: 2 });
-  assert.doesNotMatch(seen[0].start, /REVIEW\(clp\)/);
-  assert.doesNotMatch(readFileSync(join(changed, DRAFT), "utf8"), /REVIEW\(clp\)/);
-  assert.deepEqual(await accept({ specs: changed }), { accepted: [join(changed, FINAL)], problems: [] });
+  // 確かめて REVIEWED にすれば確定でき、記録として残る
+  writeFileSync(join(dir, DRAFT), readFileSync(join(dir, DRAFT), "utf8").replaceAll("// REVIEW(clp):", "// REVIEWED(clp):"));
+  assert.deepEqual(await accept8({ specs: dir }), { accepted: [join(dir, FINAL)], problems: [] });
+  assert.match(readFileSync(join(dir, FINAL), "utf8"), /\/\/ REVIEWED\(clp\): 2 つ目の解釈と食い違う/);
+});
+
+test("2つの解釈: 一致すれば、食い違いは無い。2つ目が境界を変えたら差し戻す", async () => {
+  const same = await interpret8({ specs: specDir(), strategy: scripted([reviewed, reviewed]).strategy, sessions: 2 });
+  assert.ok(same.status === "interpreted" && same.comparisons?.[0].status === "compared");
+  assert.deepEqual(same.comparisons?.[0].differences, []);
+
+  // 2つ目が、キャンセルの答えに値を足した（境界が変わる）
+  const widened = variant('      return "not-cancellable";', '      return "too-late";');
+  const { strategy, seen } = scripted([reviewed, widened, reviewed]);
+  const result = await interpret8({ specs: specDir(), strategy, sessions: 2 });
+  assert.ok(result.status === "interpreted" && result.comparisons?.[0].status === "compared", JSON.stringify(result));
+  assert.match(seen[2].request, /Problems found in the previous attempt[\s\S]*The fixed boundary was changed/);
 });
 
 test("人の確認: 確定版に確かめていない印が残っていれば、正解として使わない", async () => {
   const dir = specDir();
-  await interpret({ specs: dir, strategy: scripted([reviewed]).strategy });
-  await accept({ specs: dir });
-  const tampered = fork(dir, (text) => text);
-  writeFileSync(join(tampered, FINAL), readFileSync(join(tampered, FINAL), "utf8").replace("  Command.Cancel.with(", "  // REVIEW: is this right?\n  Command.Cancel.with("));
-  const compiled = compile(tampered);
+  await interpret8({ specs: dir, strategy: scripted([reviewed]).strategy });
+  await accept8({ specs: dir });
+  writeFileSync(join(dir, FINAL), readFileSync(join(dir, FINAL), "utf8").replace("  queries: {\n", "  // REVIEW: is this right?\n  queries: {\n"));
+  const compiled = compile(dir);
   assert.notEqual(compiled.status, 0);
-  assert.match(compiled.stderr, /unreviewed-interpretation.*order\.interpretation\.ts:\d+/);
-});
-
-test("2つの解釈: 一致すれば、食い違いは無い。2つ目が語彙を変えたら差し戻す", async () => {
-  const same = await interpret({ specs: specDir(), strategy: scripted([reviewed, reviewed]).strategy, sessions: 2 });
-  assert.ok(same.status === "interpreted" && same.comparisons?.[0].status === "compared");
-  assert.deepEqual(same.comparisons?.[0].differences, []);
-
-  // 2つ目が、キャンセルに入力を足した（境界が変わる）
-  const widened = reviewed.replace("Command.Cancel.with({ from: [State.PENDING, State.PAID],", 'Command.Cancel.with({ input: input({ reason: "string" }), from: [State.PENDING, State.PAID],').replace("import { interpretation,", "import { input, interpretation,");
-  assert.notEqual(widened, reviewed);
-  const { strategy, seen } = scripted([reviewed, widened, reviewed]);
-  const result = await interpret({ specs: specDir(), strategy, sessions: 2 });
-  assert.ok(result.status === "interpreted" && result.comparisons?.[0].status === "compared");
-  assert.match(seen[2].request, /Problems found in the previous attempt[\s\S]*The fixed vocabulary was changed/);
-});
-
-test("3つ以上の解釈: 1つ目と、ほかのそれぞれを比べる。どれも互いの下書きを見ない", async () => {
-  const always = reviewed.replace("Effect.Refund().onlyWhen(was(State.PAID))", "Effect.Refund()");
-  // 3つ目は、失敗した支払いのあとも通知しないと読んだ
-  const silent = reviewed.replace("otherwise({ emits: [Effect.NotifyPaymentFailure()] }),", "otherwise({ nothing: true }),");
-  assert.notEqual(silent, reviewed);
-  const dir = specDir();
-  const { strategy, seen } = scripted([reviewed, always, silent, reviewed]);
-  const result = await interpret({ specs: dir, strategy, sessions: 4 });
-
-  assert.ok(result.status === "interpreted");
-  assert.deepEqual(result.comparisons?.map((c) => [c.session, c.status, c.differences.map((d) => d.command)]), [
-    [2, "compared", ["Cancel"]],
-    [3, "compared", ["Checkout"]],
-    [4, "compared", []],
-  ]);
-  assert.equal(seen.length, 4);
-  for (const later of seen.slice(1)) assert.doesNotMatch(later.start, /Refund|NotifyPaymentFailure: \{\} \}\]/);
-  assert.ok(readFileSync(join(dir, DRAFT), "utf8").endsWith(reviewed));
-});
-
-test("比較: 意味の関数に書かれた定数を、入力の生成に混ぜる（自由な文字列を定数と比べる条件の違いを見つける）", async () => {
-  const dir = mkdtempSync(join(mkdtempSync(join(tmpRoot, "d-")), "specs-"));
-  writeFileSync(
-    join(dir, "gate.component.ts"),
-    `import { service } from "@clp/core";\nexport const Gate = service({ description: "A gate that opens for gold members." });\n`,
-  );
-  const gate = (rank: string) => `import { commands, conditions, input, interpretation, otherwise, states } from "@clp/core";
-import { Gate } from "./gate.component.ts";
-export const State = states(["CLOSED", "OPEN"]);
-export const If = conditions({ memberGold: "The member is gold" });
-export const Command = commands({
-  Arrive: { input: input({ rank: "string" }), from: State.CLOSED, cases: [If.memberGold.then({ goTo: State.OPEN }), otherwise] },
-});
-export const Interpretation = interpretation(Gate, [Gate.with({ init: State.CLOSED }), State, Command, If.memberGold.means((state) => state.rank === "${rank}")]);
-`;
-  const result = await interpret({ specs: dir, strategy: scripted([gate("GOLD"), gate("gold")], { file: "gate.interpretation.draft.ts" }).strategy, sessions: 2 });
-  assert.ok(result.status === "interpreted");
-  const [difference] = result.comparisons![0].differences;
-  assert.equal(difference.command, "Arrive");
-  assert.ok(["GOLD", "gold"].includes(difference.steps[0].input.rank as string));
-});
-
-test("比較: 1つのコマンドに食い違いが複数あれば、観点ごとに報告する。ほかのコマンドの食い違いに隠れない", async () => {
-  // もう一方は、支払いの成功で: 領収書の割引率を常に 0 にし、失敗の通知も出す。出荷では優先扱いを常に付ける
-  const other = reviewed
-    .replace("discountPercent: Decision.campaign.discountPercent,", "discountPercent: 0,")
-    .replace("Effect.IssueCoupon({ type: Decision.campaign.coupon }).onlyWhen(Decision.campaign.grantsCoupon),", "Effect.IssueCoupon({ type: Decision.campaign.coupon }).onlyWhen(Decision.campaign.grantsCoupon),\n          Effect.NotifyPaymentFailure(),")
-    .replace("Effect.SendShippingNotice({ priority: Decision.shipping.priority })", "Effect.SendShippingNotice({ priority: true })")
-    .replace("Command.Cancel.with({ from: [State.PENDING, State.PAID], goTo: State.CANCELLED, emits: [Effect.Refund().onlyWhen(was(State.PAID))] })", "Command.Cancel.with({ from: [State.PENDING], goTo: State.CANCELLED })");
-  assert.ok(other.includes("discountPercent: 0,") && other.split("Effect.NotifyPaymentFailure()").length === 3 && other.includes("priority: true") && other.includes("from: [State.PENDING], goTo"));
-  const log: string[] = [];
-  const result = await interpret({ specs: specDir(), strategy: scripted([reviewed, other]).strategy, sessions: 2, log: (line) => log.push(line) });
-  assert.ok(result.status === "interpreted");
-  assert.equal(result.comparisons![0].status, "compared", log.join("\n"));
-  assert.deepEqual(result.comparisons![0].differences.map((d) => `${d.command}:${d.aspect}`), [
-    // 支払い済みの注文をキャンセルできるかどうか
-    "Cancel:runs",
-    // 失敗の通知と領収書は、別々に報告される
-    "Checkout:effect:NotifyPaymentFailure",
-    "Checkout:effect:SendReceipt",
-    // 支払いの食い違いの先にある、出荷の食い違いも見つかる
-    "Ship:effect:SendShippingNotice",
-  ]);
-  const notice = result.comparisons![0].differences[1];
-  assert.deepEqual(notice.steps.map((step) => step.command), ["PlaceOrder", "Checkout"]);
-});
-
-// 文だけのコンポーネント。構造は、すべて解釈が決める
-const COUNTER = `import { service } from "@clp/core";
-export const Counter = service({ description: "A counter that can be raised by a step. It reports each new total. It can be closed." });
-`;
-const counter = (close: string) => `import { calculations, commands, data, effects, input, integer, interpretation, states } from "@clp/core";
-import { Counter } from "./counter.component.ts";
-
-export const State = states(["OPEN", "CLOSED"]);
-export const Data = data({ total: "integer" });
-export const Effect = effects({ ReportTotal: input({ total: "integer" }) });
-export const Calc = calculations({ raised: { description: "the total so far (0 if none) plus the step", output: "integer" } });
-export const RaiseInput = input({ step: integer({ min: 0, max: 10 }) });
-export const Command = commands({
-  Raise: { input: RaiseInput, from: State.OPEN, set: [Data.total.set(Calc.raised)], emits: [Effect.ReportTotal({ total: Calc.raised })] },
-  Close: ${close},
-});
-
-export const Interpretation = interpretation(Counter, [
-  Counter.with({ init: State.OPEN }),
-  State,
-  Data,
-  Effect,
-  Calc,
-  Command,
-  Calc.raised.means((state) => (state.total ?? 0) + (state.step ?? 0)),
-]);
-`;
-
-test("文だけのコンポーネント: 雛形は、決めるべきものを TODO で示す。2つ目には、1つ目が決めた語彙が渡る", async () => {
-  const dir = mkdtempSync(join(mkdtempSync(join(tmpRoot, "d-")), "specs-"));
-  writeFileSync(join(dir, "counter.component.ts"), COUNTER);
-  const file = "counter.interpretation.draft.ts";
-  // 2つ目は、閉じたあとでも、もう一度閉じられると読んだ。
-  // （「Close で状態を変えない」という読み方は、CLOSED にたどり着けなくなるので、グラフの検査が差し戻す）
-  const { strategy, seen } = scripted([counter(`{ from: State.OPEN, goTo: State.CLOSED }`), counter(`{ goTo: State.CLOSED }`)], { file });
-  const result = await interpret({ specs: dir, strategy, sessions: 2 });
-
-  assert.ok(result.status === "interpreted" && result.comparisons?.[0].status === "compared");
-  for (const todo of ["the state names", "Counter.with({ init: ", "what the component remembers", "what it asks", "the effects", "commands —"]) assert.ok(seen[0].start.includes(`// TODO: ${todo}`), todo);
-  // 2つ目の雛形: 状態・初期状態・副作用・コマンドの入力が埋めてあり、data は自分で決める
-  assert.match(seen[1].start, /export const State = states\(\["OPEN", "CLOSED"\]\);/);
-  assert.match(seen[1].start, /Counter\.with\(\{ init: State\.OPEN \}\),/);
-  assert.match(seen[1].start, /export const RaiseInput = input\(\{ step: integer\(\{ max: 10, min: 0 \}\) \}\);/);
-  assert.match(seen[1].start, /Raise: \{ input: RaiseInput \},/);
-  assert.match(seen[1].start, /ReportTotal: \{ input: input\(\{ total: "integer" \}\) \},/);
-  assert.match(seen[1].start, /\/\/ TODO: what the component remembers/);
-  assert.deepEqual(result.comparisons?.[0].differences.map((d) => d.command), ["Close"]);
-  assert.equal(result.comparisons![0].differences[0].aspect, "runs");
-  assert.deepEqual(result.comparisons![0].differences[0].other, { state: "CLOSED", effects: [] });
-});
-
-test("解釈: コンポーネントが複数あれば、解釈が要る最初のものを選ぶ。名前で選ぶこともできる", async () => {
-  const dir = specDir();
-  writeFileSync(join(dir, "counter.component.ts"), COUNTER);
-  const full = counter(`{ from: State.OPEN, goTo: State.CLOSED }`);
-  const first = await interpret({ specs: dir, strategy: scripted([full], { file: "counter.interpretation.draft.ts" }).strategy });
-  assert.ok(first.status === "interpreted" && first.component === "counter");
-  // 下書きが、いまの Layer 1 のものであれば、次へ進む
-  const second = await interpret({ specs: dir, strategy: scripted([reviewed]).strategy });
-  assert.ok(second.status === "interpreted" && second.component === "order");
-  assert.deepEqual((await accept({ specs: dir })).accepted.map((path) => path.slice(dir.length + 1)), ["counter.interpretation.ts", FINAL]);
-  assert.equal(compile(dir).status, 0);
-  const chosen = await interpret({ specs: dir, component: "order", strategy: scripted([reviewed]).strategy });
-  assert.deepEqual(chosen, { status: "up-to-date" });
-});
-
-test("進め方 (N10g): 生成した状態機械 (Stage 1) は、手書きの手続き (Stage 0) と同じ順にセッションと試行を進め、同じ結果を返す", async () => {
-  const typo = reviewed.replace("state.paymentModuleActive", "state.paymentModuleActiv");
-  const always = reviewed.replace("Effect.Refund().onlyWhen(was(State.PAID))", "Effect.Refund()");
-  const widened = reviewed
-    .replace("Command.Cancel.with({ from: [State.PENDING, State.PAID],", 'Command.Cancel.with({ input: input({ reason: "string" }), from: [State.PENDING, State.PAID],')
-    .replace("import { interpretation,", "import { input, interpretation,");
-  // 1つ目: 1回落ちてから通る。2つ目: 語彙を変え続けて、比べられない。3つ目: 通って、比べられる
-  const run = async (stage: string) => {
-    const previous = process.env.CLP_STAGE;
-    process.env.CLP_STAGE = stage;
-    try {
-      const dir = specDir();
-      const { strategy, seen } = scripted([typo, reviewed, widened, widened, always]);
-      const result = await interpret({ specs: dir, strategy, sessions: 3, maxAttempts: 2 });
-      const draft = readFileSync(join(dir, DRAFT), "utf8");
-      // 確定: 食い違いの印が残っているので断り、印を確かめれば確定できる
-      const refused = await accept({ specs: dir });
-      writeFileSync(join(dir, DRAFT), draft.replaceAll("// REVIEW(clp):", "// REVIEWED(clp):"));
-      const accepted = await accept({ specs: dir });
-      const strip = (value: unknown) => JSON.parse(JSON.stringify(value).replaceAll(dir, "<dir>"));
-      return strip({ result, seen: seen.map((entry) => [entry.attempt, entry.request.split("\n")[0]]), draft, refused, accepted });
-    } finally {
-      if (previous === undefined) delete process.env.CLP_STAGE;
-      else process.env.CLP_STAGE = previous;
-    }
-  };
-  const stage0 = await run("0");
-  const stage1 = await run("");
-  assert.equal(stage0.result.status, "interpreted");
-  assert.deepEqual(stage0.result.comparisons.map((c: { session: number; status: string }) => [c.session, c.status]), [[2, "failed"], [3, "compared"]]);
-  assert.deepEqual(stage1, stage0);
+  assert.match(compiled.stderr, /unreviewed-interpretation/);
 });

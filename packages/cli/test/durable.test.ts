@@ -2,47 +2,56 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import { extract } from "../src/extract.ts";
-import { generateContract } from "../src/generate.ts";
-import type { Ir } from "../src/generate.ts";
-import { loadSpecs } from "../src/loader.ts";
-import { check, selfCheck } from "../src/runtime.ts";
-import type { Adapter, Ports } from "../src/runtime.ts";
+import { contract8 } from "../src/v1/generate.ts";
+import { compile } from "../src/v1/load.ts";
+import { problemText } from "../src/v1/read.ts";
+import { check8, selfCheck8 } from "../src/v1/pbt.ts";
+import type { Adapter8 } from "../src/v1/pbt.ts";
 
-// 本物の web (N9。DSL.md §16.4): 依存の失敗 (mayFail、W8)
+// 本物の web (N9。DSL.md §16.4、§17): 依存の失敗 (mayFail) と、再起動を越えて残るもの (durable)
+process.env.CLP_ALLOY = "off";
 
 const tmpRoot = join(import.meta.dirname, ".tmp-durable");
 mkdirSync(tmpRoot, { recursive: true });
 after(() => rmSync(tmpRoot, { recursive: true, force: true }));
 
-// 採番が失敗することがある。タイトルが空なら、採番の成否によらず 422
-const IDS = (cases: string) => `import { all, commands, conditions, input, interpretation, not, optional, otherwise, queries, record, service } from "@clp/core";
-export const Query = queries({ newId: { output: "string", fresh: true, mayFail: true }, region: "string" });
-export const If = conditions({ blank: "The title is blank" });
-export const When = conditions({ idFailed: all(not(If.blank), Query.newId.failed) });
-export const AddInput = input({ title: "string" });
-export const Command = commands({
-  Add: { input: AddInput, output: record({ status: [201, 422, 503], id: optional("string") }), cases: [${cases}] },
-});
-export const Ids = service({ uses: [Query, If, When, Command] });
-export const Interpretation = interpretation(Ids, [If.blank.means((state) => state.title.trim() === "")]);
-`;
-const HANDLED = `If.blank.then({ responds: { status: 422, id: null } }), When.idFailed.then({ responds: { status: 503, id: null } }), otherwise({ responds: { status: 201, id: Query.newId } })`;
-
-function specDir(source: string) {
+function specDir(files: Record<string, string>) {
   const dir = mkdtempSync(join(tmpRoot, "s-"));
-  writeFileSync(join(dir, "ids.component.ts"), source);
+  for (const [name, text] of Object.entries(files)) writeFileSync(join(dir, name), text);
   return dir;
 }
+const compiled = (dir: string, component: string) => {
+  const { ir, problems } = compile(dir, component);
+  assert.deepEqual(problems.filter((p) => p.severity === "error").map(problemText), []);
+  return ir!;
+};
+
+// 採番が失敗することがある。タイトルが空なら、採番の成否によらず 422
+const IDS = (body: string) => `import { answer, external, failed, service } from "@clp/core";
+export const Source = external("Issues identifiers. It can be unavailable.", {
+  queries: { NewId: (): string => answer({ fresh: true, mayFail: true }), Region: (): string => answer() },
+});
+export const Ids = service("Adds titled items.", {
+  commands: {
+    Add(title: string): { status: 201 | 422 | 503; id: string | null } {
+${body}
+    },
+  },
+});
+`;
+const HANDLED = `      if (title.trim() === "") return { status: 422, id: null };
+      const id = Source.NewId();
+      if (failed(id)) return { status: 503, id: null };
+      return { status: 201, id: id };`;
 
 // 手書きの実装。order: タイトルを先に確かめるか、採番を先にするか。catches: 失敗を受け止めるか
-function idsAdapter(options: { order: "title-first" | "id-first"; catches: boolean }): Adapter {
-  let ports: Ports;
+function idsAdapter(options: { order: "title-first" | "id-first"; catches: boolean }): Adapter8 {
+  let ports: { source: { NewId(): string } };
   const add = (title: string) => {
     const issue = () => {
-      if (!options.catches) return { id: ports.queries.newId() as string };
+      if (!options.catches) return { id: ports.source.NewId() };
       try {
-        return { id: ports.queries.newId() as string };
+        return { id: ports.source.NewId() };
       } catch {
         return { failed: true as const };
       }
@@ -56,66 +65,57 @@ function idsAdapter(options: { order: "title-first" | "id-first"; catches: boole
   };
   return {
     async setupIsolation(given) {
-      ports = given;
+      ports = given as typeof ports;
     },
     async teardownIsolation() {},
     async executeCommand(command) {
-      return add(command.input.title);
-    },
-    async getCurrentState() {
-      return "READY";
+      return add(command.input.title as string);
     },
   };
 }
 
-test("依存の失敗 (W8): 失敗は条件の1つ。代役はときどき失敗し、仕様は失敗の場合を言う。尋ねる順番も検証に現れる", async () => {
-  const dir = specDir(IDS(HANDLED));
-  const spec = await loadSpecs(dir);
-  assert.deepEqual(extract(spec).diagnostics, []);
-  assert.ok((await selfCheck(spec, { seed: 1 })).ok);
+test("依存の失敗 (mayFail): 失敗は値の1つ。代役はときどき失敗し、仕様は失敗の場合を言う。尋ねる順番も検証に現れる", async () => {
+  const ir = compiled(specDir({ "ids.component.ts": IDS(HANDLED) }), "ids");
+  assert.ok((await selfCheck8(ir, { seed: 1 })).ok);
 
-  // IR と契約: 失敗することがある問い合わせと、失敗の条件の中身
-  const { ir } = extract(spec);
-  assert.deepEqual(((ir as Ir).model as unknown as { queries: Record<string, unknown> }).queries.newId, { input: {}, output: "string", promise: "fresh", mayFail: true });
-  assert.deepEqual((ir as { conditions?: Record<string, unknown> }).conditions?.['query "newId" failed'], { failed: "newId" });
-  assert.match(generateContract(ir as Ir), /May fail: throws when the dependency is unavailable/);
+  // IR と契約: 失敗することがある問い合わせ
+  assert.deepEqual(ir.components.source.external!.queries.NewId, { params: {}, result: "string", promise: "fresh", mayFail: true });
+  assert.match(contract8(ir), /throws when the dependency is unavailable/i);
 
-  const verify = (adapter: Adapter) => check(dir, adapter, { drafts: false }, { seed: 3, numRuns: 300 });
+  const verify = (adapter: Adapter8) => check8(ir, adapter, { seed: 3, numRuns: 300 });
   assert.equal((await verify(idsAdapter({ order: "title-first", catches: true }))).status, "pass");
   // 失敗を受け止めない実装は、失敗した手で落ちる
   const uncaught = await verify(idsAdapter({ order: "title-first", catches: false }));
-  assert.equal(uncaught.status, "fail");
-  assert.ok(uncaught.status === "fail" && uncaught.steps.at(-1)?.failed?.includes("newId"));
+  assert.ok(uncaught.status === "fail" && "error" in uncaught.actual && /unavailable/.test(uncaught.actual.error), JSON.stringify(uncaught));
   // 採番を先にする実装は、タイトルが空で採番も失敗した手で、422 ではなく 503 を返して落ちる
   const early = await verify(idsAdapter({ order: "id-first", catches: true }));
-  assert.equal(early.status, "fail");
-  assert.ok(early.status === "fail" && early.steps.at(-1)?.case === "The title is blank");
+  assert.ok(early.status === "fail" && JSON.stringify(early.expected).includes("422") && JSON.stringify(early.actual).includes("503"), JSON.stringify(early));
 });
 
 test("依存の失敗: 失敗したときのことを書かない仕様は、エージェントを呼ぶ前に止まる。失敗しない問い合わせの failed は誤り", async () => {
-  const silent = await selfCheck(await loadSpecs(specDir(IDS(`If.blank.then({ responds: { status: 422, id: null } }), otherwise({ responds: { status: 201, id: Query.newId } })`))), { seed: 1 });
-  assert.ok(!silent.ok);
-  assert.match(silent.message, /問い合わせ "newId" が失敗した場面で、その答えが読まれました/);
+  const silent = compiled(specDir({ "ids.component.ts": IDS(`      if (title.trim() === "") return { status: 422, id: null };\n      return { status: 201, id: Source.NewId() };`) }), "ids");
+  const checked = await selfCheck8(silent, { seed: 1 });
+  assert.ok(!checked.ok);
+  assert.match(checked.message, /失敗/);
 
-  const wrong = IDS(HANDLED).replace(`all(not(If.blank), Query.newId.failed)`, `all(not(If.blank), Query.region.failed)`);
-  const found = extract(await loadSpecs(specDir(wrong))).diagnostics.map((d) => `${d.code}: ${d.message}`);
-  assert.ok(found.some((line) => /^bad-failure: query "region" failed: 問い合わせ region は失敗しません/.test(line)), found.join("\n"));
+  const wrong = IDS(HANDLED.replace("const id = Source.NewId();", "const id = Source.Region();"));
+  const { problems } = compile(specDir({ "ids.component.ts": wrong }), "ids");
+  assert.ok(problems.some((p) => p.severity === "error" && /Region/.test(problemText(p))), problems.map(problemText).join("\n"));
 });
 
-// 再起動を越えて残る (W7): 数を数える。数は、再起動のあとも残る
-const COUNTER = `import { calculations, commands, data, integer, interpretation, service } from "@clp/core";
-export const Data = data({ count: { type: integer({ min: 0, max: 100 }), initially: 0 } });
-export const Calc = calculations({ next: { description: "The count plus one, at most 100.", output: "integer" } });
-export const Command = commands({
-  Increment: { set: [Data.count.set(Calc.next)] },
-  Get: { output: "integer", responds: Data.count },
+// 再起動を越えて残る (durable): 数を数える。数は、再起動のあとも残る
+const COUNTER = `import { init, service } from "@clp/core";
+import type { Int } from "@clp/core";
+export const Counter = service("Counts, up to 100.", {
+  state: { count: init<Int>(0) },
+  commands: { Increment() { this.count = Math.min(100, this.count + 1); } },
+  queries: { Get() { return this.count; } },
+  durable: true,
 });
-export const Counter = service({ description: "Counts.", durable: true, uses: [Data, Calc, Command] });
-export const Interpretation = interpretation(Counter, [Calc.next.means((state) => Math.min(100, state.count + 1))]);
 `;
 
 // 手書きの実装。where: 数をどこに持つか
-function counterAdapter(where: "storage" | "memory", restartable = true): Adapter {
+function counterAdapter(where: "storage" | "memory", restartable = true): Adapter8 {
   type Code = { get(): number; increment(): void; close(): void };
   const open = async (path: string): Promise<Code> => {
     if (where === "memory") {
@@ -136,76 +136,46 @@ function counterAdapter(where: "storage" | "memory", restartable = true): Adapte
       close: () => db.close(),
     };
   };
-  let ports: Ports;
+  let storage: string;
   let code: Code;
-  const adapter: Adapter = {
+  const adapter: Adapter8 = {
     async setupIsolation(given) {
-      ports = given;
-      code = await open(given.storage!);
+      storage = (given as { storage: string }).storage;
+      code = await open(storage);
     },
     async teardownIsolation() {
       code.close();
     },
-    async executeCommand(command) {
-      if (command.name === "Get") return code.get();
+    async executeCommand() {
       code.increment();
     },
-    async getCurrentState() {
-      return "READY";
+    async executeQuery() {
+      return code.get();
     },
   };
   if (restartable) {
     adapter.restartSystem = async () => {
       code.close();
-      code = await open(ports.storage!);
+      code = await open(storage);
     };
   }
   return adapter;
 }
 
-test("再起動 (W7): durable の部品は、検証の途中で再起動される。保存先に持つ実装は通り、メモリにしか持たない実装は落ちる", async () => {
-  const dir = mkdtempSync(join(tmpRoot, "s-"));
-  writeFileSync(join(dir, "counter.component.ts"), COUNTER);
-  const spec = await loadSpecs(dir);
-  const { ir, diagnostics } = extract(spec);
-  assert.deepEqual(diagnostics, []);
-  assert.equal(((ir as Ir).model as unknown as { durable?: unknown }).durable, true);
-  const contract = generateContract(ir as Ir);
+test("再起動 (durable): 再起動を越えて残る部品は、検証の途中で再起動される。保存先に持つ実装は通り、メモリにしか持たない実装は落ちる", async () => {
+  const ir = compiled(specDir({ "counter.component.ts": COUNTER }), "counter");
+  assert.equal(ir.components.counter.durable, true);
+  const contract = contract8(ir);
   assert.match(contract, /storage: string;/);
   assert.match(contract, /restartSystem\(\): Promise<void>;/);
 
-  const verify = (adapter: Adapter) => check(dir, adapter, { drafts: false }, { seed: 5, numRuns: 200 });
+  const verify = (adapter: Adapter8) => check8(ir, adapter, { seed: 5, numRuns: 200 });
   assert.equal((await verify(counterAdapter("storage"))).status, "pass");
   const memory = await verify(counterAdapter("memory"));
-  assert.equal(memory.status, "fail");
-  assert.ok(memory.status === "fail" && memory.steps.some((step) => step.command === "(restart)"), JSON.stringify(memory));
+  assert.ok(memory.status === "fail" && memory.steps.some((step) => step.name === "(restart)"), JSON.stringify(memory));
   const missing = await verify(counterAdapter("storage", false));
   assert.ok(missing.status === "fail" && "error" in missing.actual && /restartSystem\(\) is missing/.test(missing.actual.error));
-});
 
-test("保存先の部品 (W7): durable に部品を渡すと、IR はその名前を指す。durable でない部品の契約は変わらない", async () => {
-  const dir = mkdtempSync(join(tmpRoot, "s-"));
-  writeFileSync(
-    join(dir, "store.component.ts"),
-    `import { commands, input, service, value } from "@clp/core";
-export const Command = commands({ Put: { input: input({ key: "string", value: value() }), nothing: true } });
-export const Store = service({ description: "Keeps values by key.", durable: true, uses: [Command] });
-`,
-  );
-  writeFileSync(join(dir, "store.interpretation.ts"), `import { interpretation } from "@clp/core";\nimport { Store } from "./store.component.ts";\nexport const Interpretation = interpretation(Store, []);\n`);
-  writeFileSync(join(dir, "counter.component.ts"), COUNTER.replace('import { calculations,', 'import { Store } from "./store.component.ts";\nimport { calculations,').replace("durable: true", "durable: Store"));
-  const spec = await loadSpecs(dir, { component: "counter" });
-  const { ir, diagnostics } = extract(spec);
-  assert.deepEqual(diagnostics, []);
-  assert.deepEqual(((ir as Ir).model as unknown as { durable?: unknown }).durable, { store: "store" });
-
-  const plainDir = specDir(IDS(HANDLED));
-  const contract = generateContract(extract(await loadSpecs(plainDir)).ir as Ir);
-  assert.doesNotMatch(contract, /restartSystem|storage/);
-});
-
-test("何でも入る値 (value) のフィールドには、null も入る（optional でなくても）", async () => {
-  const { conforms } = await import("../src/schema.ts");
-  assert.ok(conforms({ record: { key: "string", value: "value" } }, { key: "a", value: null }));
-  assert.ok(!conforms({ record: { key: "string", value: "string" } }, { key: "a", value: null }));
+  // 再起動を越えて残るものが無い部品の契約には、保存先も再起動も無い
+  assert.doesNotMatch(contract8(compiled(specDir({ "ids.component.ts": IDS(HANDLED) }), "ids")), /restartSystem|storage/);
 });

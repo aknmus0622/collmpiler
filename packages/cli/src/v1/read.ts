@@ -12,8 +12,14 @@ import { overlayStage0 } from "./overlay.ts";
 import type { OverlayFacts } from "./overlay.ts";
 import { decided } from "./decide.ts";
 
-export const CORE = "@clp/core/v1";
+export const CORE = "@clp/core";
 export const DRAFT_SUFFIX = ".draft.ts";
+
+/** The specs directory must exist (said the way a person can act on). */
+export function requireSpecsDir(root: string): void {
+  if (existsSync(root)) return;
+  throw new Error(`仕様のディレクトリがありません: ${root}\n  場所を指定するか (--specs <dir>。clp compile では引数)、仕様 (specs/) のあるディレクトリで実行してください`);
+}
 const INTERPRETATION_FILE = /\.interpretation(\.draft)?\.ts$/;
 
 export type Severity = "error" | "warning";

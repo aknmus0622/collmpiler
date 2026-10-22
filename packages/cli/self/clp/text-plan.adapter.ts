@@ -1,25 +1,30 @@
-import type { TargetSystemAdapter } from "./text-plan.adapter.contract.ts";
-import { contractSections, queryNotes, requestSections, typeText } from "../src/text-plan.ts";
+import type { Ports, Query, QueryOutput, TargetSystemAdapter } from "./text-plan.adapter.contract.ts";
+import { contractSections, queryNotes, typeText } from "../src/text-plan.ts";
 
 // Import the production code from ../src/ and forward each call to it. No business logic here.
-// The production component is stateless (always READY) and has no dependencies, so there is
-// nothing to build or discard per trial.
+// The text plan has no state and no dependencies: there is nothing to build or discard.
+let ports: Ports | null = null;
+
 export const adapter: TargetSystemAdapter = {
-  async setupIsolation(_ports) {},
-  async teardownIsolation() {},
-  async executeCommand(command) {
-    switch (command.name) {
-      case "ContractSections":
-        return contractSections(command.input);
-      case "QueryNotes":
-        return queryNotes(command.input);
-      case "RequestSections":
-        return requestSections(command.input);
-      case "TypeText":
-        return typeText(command.input);
-    }
+  async setupIsolation(given) {
+    ports = given;
   },
-  async getCurrentState() {
-    return "READY";
+  async teardownIsolation() {
+    ports = null;
+  },
+  async executeCommand(command) {
+    throw new Error(`unknown command: ${JSON.stringify(command)}`);
+  },
+  async executeQuery(query: Query): Promise<QueryOutput[keyof QueryOutput]> {
+    switch (query.name) {
+      case "Notes":
+        return queryNotes(query.input.promise, query.input.mayFail);
+      case "Sections":
+        return contractSections(query.input);
+      case "TypeText":
+        return typeText(query.input);
+      default:
+        throw new Error(`unknown query: ${JSON.stringify(query)}`);
+    }
   },
 };

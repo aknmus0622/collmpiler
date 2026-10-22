@@ -116,7 +116,9 @@ function differs(original: Ir8, mutant: Ir8, raw: RawStep[]): Shown {
 /** Each constant as a trial: the spec run on the same sequences, with the constant changed. */
 export function trialsOf(ir: Ir8, params: { seed: number; numRuns?: number; traces?: { steps: TraceStep[] }[] }): Trial[] {
   const fixed = (params.traces ?? []).map((t) => fixedSteps(ir, t.steps)).filter((t): t is RawStep[] => t !== undefined);
-  const sequences = sequencesFrom(ir, fixed, stepArbitrary(ir, literalsOf(ir)));
+  const step = stepArbitrary(ir, literalsOf(ir));
+  const sequences = sequencesFrom(ir, fixed, step);
+  const continuations = fixed.flatMap((prefix, i) => fc.sample(fc.array(step, { minLength: 1, maxLength: 4 }), { numRuns: 100, seed: params.seed + i }).map((rest) => [...prefix, ...rest]));
   return sitesOf(ir).map((site) => ({
     where: site.where,
     value: site.value,
@@ -126,6 +128,13 @@ export function trialsOf(ir: Ir8, params: { seed: number; numRuns?: number; trac
       let precondition = false;
       for (const raw of extra === 0 ? fixed : []) {
         const shown = differs(ir, mutant, raw);
+        if (shown === "shows") return { changed: true, enablementDiffers: precondition };
+        if (shown === "precondition") precondition = true;
+      }
+      // what happens after each hard-to-reach state: every fixed trace, followed by many short random continuations
+      // (a value chosen there often shows only a few steps later: a due date, then a late return, then the fee)
+      for (const continuation of extra === 0 ? continuations : []) {
+        const shown = differs(ir, mutant, continuation);
         if (shown === "shows") return { changed: true, enablementDiffers: precondition };
         if (shown === "precondition") precondition = true;
       }

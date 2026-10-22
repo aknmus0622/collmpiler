@@ -1,234 +1,197 @@
-import { Store } from "./store.ts";
-import { TodoItem } from "./todo-item.ts";
-import type { CompleteResult, TodoItemSnapshot } from "./todo-item.ts";
+import type { Json } from "./json.ts";
+import type { Store, StoreEntry } from "./store.ts";
 
-/** The longest title `Add` accepts, in characters (specification decision table `limits`, `maxTitleLength`). */
+/** The longest title, in characters, that `Add` accepts. */
 const MAX_TITLE_LENGTH = 100;
 
 /**
- * Which items {@link Todos.list} answers (specification input `only` of the command `List`):
- * - `"all"`: every item;
- * - `"open"`: only the items that are not done;
+ * Identifier of a to-do item: the specification's atom `TodoId`. An opaque string, compared only for
+ * equality. It is also the key the item is kept under in the {@link Store} (the specification's
+ * `String(id)`).
+ */
+export type TodoId = string;
+
+/**
+ * One to-do item, as the list answers it and as it is kept (as JSON) in the store.
+ * Corresponds to the specification's record `{ done, id, title }`.
+ */
+export interface Todo {
+  /** The item's identifier, given by the list when the item was added. */
+  id: TodoId;
+  /** The title exactly as it was given when the item was added. */
+  title: string;
+  /** `false` while the item is open, `true` once it is done. */
+  done: boolean;
+}
+
+/**
+ * The source of identifiers for new items: the specification's external component `ids`.
+ */
+export interface IdSource {
+  /**
+   * Asked once by {@link Todos.add} for each title that is not refused as invalid (the specification's
+   * query `ids.NewId`). Never answers the same identifier twice.
+   *
+   * @returns a fresh identifier for the new item
+   * @throws when the source is unavailable (the specification's `["failed", NewId]`); `add` then answers
+   *   `"unavailable"` instead of throwing
+   */
+  newId(): TodoId;
+}
+
+/**
+ * How {@link Todos.add} ended: the `result` field of the specification's `Add` output.
+ * - `"created"`: a new item was added; it is in {@link AddResult.todo}.
+ * - `"invalid"`: the title was refused; nothing changed.
+ * - `"unavailable"`: no identifier could be had from the {@link IdSource}; nothing changed.
+ */
+export type AddOutcome = "created" | "invalid" | "unavailable";
+
+/** The answer of {@link Todos.add}: the specification's `Add` output. */
+export interface AddResult {
+  /** How the add ended. */
+  result: AddOutcome;
+  /** The new item when `result` is `"created"`, otherwise `null`. */
+  todo: Todo | null;
+}
+
+/**
+ * The answer of {@link Todos.complete}: the specification's `Complete` output.
+ * - `"completed"`: the item was open and is now done.
+ * - `"already-done"`: the item was already done; nothing changed.
+ * - `"not-found"`: no item has that identifier; nothing changed.
+ */
+export type CompleteOutcome = "completed" | "already-done" | "not-found";
+
+/**
+ * The answer of {@link Todos.remove}: the specification's `Remove` output.
+ * - `"removed"`: the item was there and is now gone.
+ * - `"not-found"`: no item has that identifier; nothing changed.
+ */
+export type RemoveOutcome = "removed" | "not-found";
+
+/**
+ * Which items {@link Todos.list} answers: the specification's `only` parameter of `List`.
+ * - `"all"`: every item.
+ * - `"open"`: only the items that are not done.
  * - `"done"`: only the items that are done.
  */
 export type ListFilter = "all" | "open" | "done";
 
 /**
- * One item as the list shows it to the outside (the record `{ id, title, done }` of the specification
- * calculations `createdTodo` and `listedTodos`).
+ * Pure decision: whether a title is refused as invalid by `Add` (the specification's `Add.case1` guard).
+ *
+ * @param title the title as given to {@link Todos.add}
+ * @returns `true` if the title must be refused as `"invalid"`
  */
-export interface Todo {
-  /** The item's identifier, given by the list when the item was added (specification `id`, the item key). */
-  id: string;
-  /** The item's title, exactly as it was given when the item was added. */
-  title: string;
-  /** Whether the item is done (`true` when the contained `todo-item` is in its `DONE` state). */
-  done: boolean;
+export function isInvalidTitle(title: string): boolean {
+  return [...title.trim()].length === 0 || [...title].length > MAX_TITLE_LENGTH;
 }
 
 /**
- * How {@link Todos.add} ended (specification output `result` of the command `Add`):
- * - `"created"`: a new item was added;
- * - `"invalid"`: the title was refused, nothing was added;
- * - `"unavailable"`: no identifier could be had, nothing was added.
+ * Pure calculation: the items to list, from what the store keeps (the specification's calculation
+ * `listed`).
+ *
+ * @param entries the store's entries in its order (the answer of `store.Entries`); each value is a kept
+ *   {@link Todo}
+ * @param only which items to answer
+ * @returns the matching items, in the store's order (the order they were added)
  */
-export type AddResultKind = "created" | "invalid" | "unavailable";
-
-/** The answer of {@link Todos.add} (specification output of the command `Add`). */
-export interface AddResult {
-  /** How the command ended. */
-  result: AddResultKind;
-  /** The new item when `result` is `"created"`; `null` otherwise (specification output `todo`). */
-  todo: Todo | null;
+export function listedTodos(entries: readonly StoreEntry[], only: ListFilter): Todo[] {
+  const keep = LIST_FILTERS[only];
+  return entries.map((e) => e.value as unknown as Todo).filter(keep);
 }
 
-/**
- * The answer of {@link Todos.complete} (specification output of the command `Complete`):
- * - `"completed"` / `"already-done"`: the answer of the item itself (see {@link CompleteResult});
- * - `"not-found"`: no item has the given identifier, nothing changed.
- */
-export type TodoCompleteResult = CompleteResult | "not-found";
+/** Which items each {@link ListFilter} keeps. */
+const LIST_FILTERS: Readonly<Record<ListFilter, (todo: Todo) => boolean>> = {
+  all: () => true,
+  open: (todo) => !todo.done,
+  done: (todo) => todo.done,
+};
 
 /**
- * The answer of {@link Todos.remove} (specification output of the command `Remove`):
- * - `"removed"`: the item was removed;
- * - `"not-found"`: no item has the given identifier, nothing changed.
- */
-export type RemoveResult = "removed" | "not-found";
-
-/**
- * The source of identifiers for new items (specification query `newId`).
+ * The `todos` component: a to-do list kept in a {@link Store}, so it survives a restart (opening a new
+ * `Todos` on a store reopened at the same location sees the same items, in the same order, open or done
+ * as before).
  *
- * Asked by {@link Todos.add} once per item it is about to create, and only when an identifier is actually
- * needed. Every answer is an identifier never answered before; the list relies on that and does not check it.
- */
-export interface IdSource {
-  /**
-   * Answers a fresh identifier.
-   *
-   * @throws when the source is unavailable (specification condition `query "newId" failed`)
-   */
-  newId(): string;
-}
-
-/**
- * Pure function: whether `title` is refused as invalid by the command `Add` (the specification condition
- * about the title being empty, whitespace-only or too long, with the limit of the decision table `limits`).
+ * Specification mapping:
+ * - command `Add(title)` → {@link Todos.add}
+ * - command `Complete(id)` → {@link Todos.complete}
+ * - command `Remove(id)` → {@link Todos.remove}
+ * - query `List(only)` → {@link Todos.list}
  *
- * @param title the title given to `Add`, as given
- */
-export function isTitleInvalid(title: string): boolean {
-  return title.trim() === "" || [...title].length > MAX_TITLE_LENGTH;
-}
-
-/**
- * Pure function: the item answered by a successful `Add` (specification calculation `createdTodo`).
- *
- * @param id the fresh identifier the new item got
- * @param title the title given to `Add`
- */
-export function createdTodo(id: string, title: string): Todo {
-  return { id, title, done: false };
-}
-
-/**
- * Pure function: the answer of `List` (specification calculation `listedTodos`).
- * Does not modify `todos`; returns a new list.
- *
- * @param todos every item, in the order they were added
- * @param only which items to keep
- */
-export function listedTodos(todos: readonly Todo[], only: ListFilter): Todo[] {
-  const kept = only === "all" ? todos : todos.filter((todo) => todo.done === (only === "done"));
-  return kept.map((todo) => ({ id: todo.id, title: todo.title, done: todo.done }));
-}
-
-/**
- * A durable to-do list (specification component `todos`).
- *
- * The list has a single state (specification state `READY`): every method may be called at any time. It
- * contains one {@link TodoItem} per item (specification part `items`, keyed by `id`), each with its own
- * title and open/done state. Everything it has (the items, their order, and each item's state) is kept in
- * a {@link Store} (specification `durable: { store: "store" }`), so a new `Todos` on a store opened on the
- * same path comes back with the same items, in the same order, each open or done as before.
- *
- * Dependencies:
- * - a {@link Store}, read and written by every command that needs the items;
- * - an {@link IdSource}, asked for an identifier by {@link Todos.add} only.
- *
- * Usage:
- * ```ts
- * const todos = Todos.open("/var/lib/todos.db", ids);
- * const added = todos.add("Buy milk");        // { result: "created", todo: { id, title, done: false } }
- * todos.complete(added.todo!.id);             // "completed"
- * todos.list("open");                         // []
- * todos.remove(added.todo!.id);               // "removed"
- * todos.close();
- * ```
+ * Its state is the contained `store` component's state (`store.entries`): each item is kept under its
+ * identifier as key, with the item itself ({@link Todo}) as JSON value. Read it with
+ * {@link Store.entries}.
  */
 export class Todos {
-  private readonly store: Store;
-  private readonly ids: IdSource;
+  readonly #store: Store;
+  readonly #ids: IdSource;
 
   /**
-   * Creates the list on an already opened store; the list has whatever items the store already keeps.
-   *
-   * @param store where the list keeps its items (its storage location)
-   * @param ids the source of identifiers for new items
+   * @param store where the items are kept; it is read and changed by every command, and must stay open
+   *   while the list is used
+   * @param ids the source of identifiers, asked by {@link Todos.add} for a new item's identifier
    */
   constructor(store: Store, ids: IdSource) {
-    this.store = store;
-    this.ids = ids;
+    this.#store = store;
+    this.#ids = ids;
   }
 
   /**
-   * Opens the store kept in the database file at `path` (creating it if needed) and returns the list on it,
-   * with everything previously kept at that location.
+   * Performs the specification's `Add` command: adds a new open item with the given title, after the
+   * others. Asks the {@link IdSource} for the new identifier (only if the title is not invalid) and, if
+   * created, puts the item into the store under that identifier.
    *
-   * @param path filesystem path of the SQLite database file (the list's storage location)
-   * @param ids the source of identifiers for new items
-   */
-  static open(path: string, ids: IdSource): Todos {
-    return new Todos(Store.open(path), ids);
-  }
-
-  /**
-   * Performs the specification command `Add`: refuses the title, or creates a new item after the others
-   * with an identifier from the {@link IdSource} and the title stored exactly as given.
-   *
-   * @param title the title of the new item (specification input `title`), any string
-   * @returns how the command ended and, when created, the new item
+   * @param title the item's title, kept exactly as given (spec parameter `title`)
+   * @returns the outcome, with the new item when created; never throws because the id source failed
    */
   add(title: string): AddResult {
-    if (isTitleInvalid(title)) {
-      return { result: "invalid", todo: null };
-    }
-    let id: string;
+    if (isInvalidTitle(title)) return { result: "invalid", todo: null };
+    let id: TodoId;
     try {
-      id = this.ids.newId();
+      id = this.#ids.newId();
     } catch {
       return { result: "unavailable", todo: null };
     }
-    this.save(id, new TodoItem(title));
-    return { result: "created", todo: createdTodo(id, title) };
+    const todo: Todo = { done: false, id, title };
+    this.#store.put(id, { ...todo });
+    return { result: "created", todo };
   }
 
   /**
-   * Performs the specification command `Complete`: asks the item with identifier `id` to complete
-   * (its {@link TodoItem.complete}) and answers what it answered.
+   * Performs the specification's `Complete` command: marks the item with this identifier as done. Reads
+   * the store's entries and, if the item changes, puts it back under the same key.
    *
-   * @param id the identifier of the item (specification input `id`)
+   * @param id the item's identifier (spec parameter `id`)
+   * @returns what happened
    */
-  complete(id: string): TodoCompleteResult {
-    const item = this.find(id);
-    if (item === null) {
-      return "not-found";
-    }
-    const result = item.complete();
-    this.save(id, item);
-    return result;
+  complete(id: TodoId): CompleteOutcome {
+    const entry = this.#store.entries().find((e) => e.key === id);
+    if (entry === undefined) return "not-found";
+    if ((entry.value as unknown as Todo).done) return "already-done";
+    this.#store.put(id, { ...(entry.value as { [field: string]: Json }), done: true });
+    return "completed";
   }
 
   /**
-   * Performs the specification command `List`: answers the items in the order they were added, filtered
-   * by `only`. Changes nothing.
+   * Performs the specification's `Remove` command: deletes the item with this identifier from the store.
    *
-   * @param only which items to answer (specification input `only`)
-   * @returns a fresh list; modifying it does not affect the list
+   * @param id the item's identifier (spec parameter `id`)
+   * @returns what happened
+   */
+  remove(id: TodoId): RemoveOutcome {
+    return this.#store.delete(id) === "deleted" ? "removed" : "not-found";
+  }
+
+  /**
+   * Answers the specification's `List` query: the items, in the order they were added, as filtered.
+   * Only reads the store.
+   *
+   * @param only which items to answer (spec parameter `only`)
+   * @returns a fresh array of items
    */
   list(only: ListFilter): Todo[] {
-    const todos = this.store.entries().map((entry) => {
-      const item = TodoItem.fromSnapshot(entry.value as unknown as TodoItemSnapshot);
-      return { id: entry.key, title: item.title, done: item.status === "done" };
-    });
-    return listedTodos(todos, only);
-  }
-
-  /**
-   * Performs the specification command `Remove`: removes the item with identifier `id`.
-   *
-   * @param id the identifier of the item (specification input `id`)
-   */
-  remove(id: string): RemoveResult {
-    return this.store.delete(id) === "deleted" ? "removed" : "not-found";
-  }
-
-  /**
-   * Closes the underlying store. Everything kept stays in the file; open the same path again with
-   * {@link Todos.open} to continue. No other method may be called afterwards.
-   */
-  close(): void {
-    this.store.close();
-  }
-
-  /** The item kept under `id`, brought back from the store, or `null` when there is none. */
-  private find(id: string): TodoItem | null {
-    const entry = this.store.entries().find((candidate) => candidate.key === id);
-    return entry === undefined ? null : TodoItem.fromSnapshot(entry.value as unknown as TodoItemSnapshot);
-  }
-
-  /** Keeps `item` under `id` in the store, durably; a new identifier goes after the others. */
-  private save(id: string, item: TodoItem): void {
-    this.store.put(id, { ...item.snapshot() });
+    return listedTodos(this.#store.entries(), only);
   }
 }

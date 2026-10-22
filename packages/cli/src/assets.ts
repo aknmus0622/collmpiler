@@ -1,7 +1,12 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import type { Dirent } from "node:fs";
 import { join, normalize, relative, resolve, sep } from "node:path";
-import type { AssetDeclaration, AssetPhase } from "@clp/core";
+import type { AssetPhase } from "@clp/core";
+
+/** An asset as written in a spec (`file(path)`, `dir(path)`, `text(content)`) or given with --asset. */
+export type AssetDeclaration =
+  | { kind: "file" | "dir"; path: string; phases?: readonly AssetPhase[] }
+  | { kind: "text"; text: string; phases?: readonly AssetPhase[] };
 
 // 依頼に添付する資料（設計の決まり、用語集、コーディング規約など）。
 //   ファイル … 作業場所の clp/assets/ に、相対パスの構造を保って置く

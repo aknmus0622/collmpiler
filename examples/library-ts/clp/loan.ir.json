@@ -1,260 +1,797 @@
 {
-  "behaviors": [
-    {
-      "from": [
-        "AVAILABLE"
-      ],
-      "name": "Borrow",
-      "onlyIf": [],
-      "when": {
-        "The member already holds at least the policy's maximum number of books, or someone else has reserved the book": {
-          "does": "The borrowing is refused; nothing changes.",
-          "responds": {
-            "dueInDays": null,
-            "result": "refused"
-          }
-        },
-        "otherwise": {
-          "does": "The book is due in the policy's loan days. The member is told the due date. The answer is lent, with the number of days until the book is due.",
-          "emits": [
-            {
-              "effect": "DueDateNotice",
-              "input": {
-                "daysUntilDue": {
-                  "$ref": "decision:policy.loanDays"
-                }
-              }
-            }
+  "components": {
+    "loan": {
+      "commands": {
+        "Borrow": {
+          "events": [
+            "Borrow.atLimitOrReserved",
+            "Borrow.otherwise"
           ],
-          "goTo": "ON_LOAN",
-          "responds": {
-            "dueInDays": {
-              "$ref": "decision:policy.loanDays"
-            },
-            "result": "lent"
-          },
-          "set": {
-            "daysUntilDue": {
-              "$ref": "decision:policy.loanDays"
-            }
-          }
-        }
-      }
-    },
-    {
-      "description": "The given number of days passes. A loan is past its due date when fewer than zero days remain; on the due day itself it is not. A loan past its due date becomes overdue. A book past its due date by more than the policy's lost-after days is considered lost, and the member is charged for a replacement; that happens once, when the book becomes lost.",
-      "from": [
-        "ON_LOAN",
-        "OVERDUE"
-      ],
-      "name": "DayPasses",
-      "onlyIf": [],
-      "when": {
-        "The book is then past its due date by more than the policy's lost-after days": {
-          "emits": [
-            {
-              "effect": "ReplacementCharge",
-              "input": {}
-            }
-          ],
-          "goTo": "LOST",
-          "set": {
-            "daysUntilDue": {
-              "$ref": "calculation:daysUntilDueAfterDaysPass"
-            }
-          }
-        },
-        "The loan is then past its due date, but not by more than the policy's lost-after days": {
-          "goTo": "OVERDUE",
-          "set": {
-            "daysUntilDue": {
-              "$ref": "calculation:daysUntilDueAfterDaysPass"
-            }
-          }
-        },
-        "otherwise": {
-          "set": {
-            "daysUntilDue": {
-              "$ref": "calculation:daysUntilDueAfterDaysPass"
-            }
-          }
-        }
-      }
-    },
-    {
-      "from": [
-        "ON_LOAN"
-      ],
-      "name": "Extend",
-      "onlyIf": [],
-      "when": {
-        "The book is reserved by someone else": {
-          "does": "The extension is refused; nothing changes.",
-          "responds": "refused"
-        },
-        "otherwise": {
-          "does": "The due date moves later by the policy's extension days, counted from the current due date. The member is told the new due date. A loan can be extended any number of times. The answer is extended.",
-          "emits": [
-            {
-              "effect": "DueDateNotice",
-              "input": {
-                "daysUntilDue": {
-                  "$ref": "calculation:daysUntilDueAfterExtension"
-                }
-              }
-            }
-          ],
-          "responds": "extended",
-          "set": {
-            "daysUntilDue": {
-              "$ref": "calculation:daysUntilDueAfterExtension"
-            }
-          }
-        }
-      }
-    },
-    {
-      "description": "A book on loan or overdue can be returned; a lost book cannot. The book becomes available. Returning an overdue book is charged the late fee. Then, if someone else has reserved the book, the next member waiting is notified.",
-      "from": [
-        "ON_LOAN",
-        "OVERDUE"
-      ],
-      "name": "Return",
-      "onlyIf": [],
-      "when": {
-        "otherwise": {
-          "does": "The book is returned and becomes available again.",
-          "emits": [
-            {
-              "effect": "LateFeeCharge",
-              "input": {
-                "amount": {
-                  "$ref": "calculation:lateFee"
-                }
+          "output": {
+            "record": {
+              "dueInDays": {
+                "optional": "int"
               },
-              "onlyWhen": {
-                "$was": [
-                  "OVERDUE"
+              "result": {
+                "enum": [
+                  "lent",
+                  "refused"
                 ]
               }
-            },
-            {
-              "effect": "NextMemberNotice",
-              "input": {},
-              "onlyWhen": {
-                "$ref": "query:reservedBySomeoneElse"
-              }
             }
+          },
+          "params": {},
+          "requires": [
+            "=",
+            [
+              "state",
+              "status"
+            ],
+            [
+              "lit",
+              "AVAILABLE"
+            ]
+          ]
+        },
+        "DayPasses": {
+          "events": [
+            "DayPasses.otherwise"
           ],
-          "goTo": "AVAILABLE"
-        }
-      }
-    }
-  ],
-  "decisions": {
-    "policy": {
-      "rows": {
-        "otherwise": {
-          "extensionDays": 7,
-          "feeCap": 1000,
-          "feePerDay": 100,
-          "loanDays": 14,
-          "lostAfterDays": 30,
-          "maxBooks": 3
-        }
-      }
-    }
-  },
-  "descriptions": {
-    "component": "The loan of one book to a library member. The member is not identified here. There is no clock: time is counted only by the days that the DayPasses command reports, and the loan remembers how many days remain until the book is due (negative once it is past due). The numbers (how many books, how many days, the fees) are in the policy table.",
-    "effects": "A due-date notice to the member, carrying the number of days until the book is due; a late-fee charge, carrying the amount in yen; a notice to the next member waiting, carrying nothing; and a replacement charge, carrying nothing.",
-    "queries": "How many books the member currently has on loan, and whether someone else has reserved the book."
-  },
-  "irVersion": 7,
-  "model": {
-    "calculations": {
-      "daysUntilDueAfterDaysPass": {
-        "description": "The days until the loan is due, minus the days that pass",
-        "output": "integer"
-      },
-      "daysUntilDueAfterExtension": {
-        "description": "The days until the loan is due, plus the policy's extension days",
-        "output": "integer"
-      },
-      "lateFee": {
-        "description": "The number of days the book is past its due date, times the fee per day, but at most the fee cap.",
-        "output": "integer"
-      }
-    },
-    "commands": {
-      "Borrow": {},
-      "DayPasses": {
-        "days": {
-          "max": 30,
-          "min": 1,
-          "type": "integer"
-        }
-      },
-      "Extend": {},
-      "Return": {}
-    },
-    "data": {
-      "daysUntilDue": "integer"
-    },
-    "effects": {
-      "DueDateNotice": {
-        "daysUntilDue": "integer"
-      },
-      "LateFeeCharge": {
-        "amount": "integer"
-      },
-      "NextMemberNotice": {},
-      "ReplacementCharge": {}
-    },
-    "init": "AVAILABLE",
-    "invariants": [
-      "A loan is overdue exactly when it is past its due date"
-    ],
-    "outputs": {
-      "Borrow": {
-        "optional": [
-          "dueInDays"
-        ],
-        "record": {
-          "dueInDays": "integer",
-          "result": [
-            "lent",
-            "refused"
+          "params": {
+            "days": "int"
+          },
+          "requires": [
+            "and",
+            [
+              "and",
+              [
+                "or",
+                [
+                  "=",
+                  [
+                    "state",
+                    "status"
+                  ],
+                  [
+                    "lit",
+                    "ON_LOAN"
+                  ]
+                ],
+                [
+                  "=",
+                  [
+                    "state",
+                    "status"
+                  ],
+                  [
+                    "lit",
+                    "OVERDUE"
+                  ]
+                ]
+              ],
+              [
+                ">=",
+                [
+                  "var",
+                  "days"
+                ],
+                1
+              ]
+            ],
+            [
+              "<=",
+              [
+                "var",
+                "days"
+              ],
+              30
+            ]
+          ]
+        },
+        "Extend": {
+          "events": [
+            "Extend.reservedBySomeoneElse",
+            "Extend.otherwise"
+          ],
+          "output": {
+            "enum": [
+              "extended",
+              "refused"
+            ]
+          },
+          "params": {},
+          "requires": [
+            "=",
+            [
+              "state",
+              "status"
+            ],
+            [
+              "lit",
+              "ON_LOAN"
+            ]
+          ]
+        },
+        "Return": {
+          "events": [
+            "Return.case1",
+            "Return.otherwise"
+          ],
+          "output": {
+            "enum": [
+              "returned",
+              "refused"
+            ]
+          },
+          "params": {},
+          "requires": [
+            "not",
+            [
+              "=",
+              [
+                "state",
+                "status"
+              ],
+              [
+                "lit",
+                "AVAILABLE"
+              ]
+            ]
           ]
         }
       },
-      "Extend": [
-        "extended",
-        "refused"
-      ]
-    },
-    "queries": {
-      "booksOnLoan": {
-        "input": {},
-        "output": {
-          "around": [
-            3
+      "conditions": {
+        "atLimitOrReserved": {
+          "is": [
+            "or",
+            [
+              ">=",
+              [
+                "ask",
+                "loan-world",
+                "BooksOnLoan",
+                {}
+              ],
+              [
+                "field",
+                [
+                  "decide",
+                  "policy",
+                  {}
+                ],
+                "maxBooks"
+              ]
+            ],
+            [
+              "ask",
+              "loan-world",
+              "ReservedBySomeoneElse",
+              {}
+            ]
           ],
-          "max": 10,
-          "min": 0,
-          "type": "integer"
+          "params": {}
+        },
+        "reservedBySomeoneElse": {
+          "is": [
+            "ask",
+            "loan-world",
+            "ReservedBySomeoneElse",
+            {}
+          ],
+          "params": {}
         }
       },
-      "reservedBySomeoneElse": {
-        "input": {},
-        "output": "boolean"
+      "decisions": {
+        "policy": {
+          "params": {},
+          "result": {
+            "record": {
+              "extensionDays": "int",
+              "feeCap": "int",
+              "feePerDay": "int",
+              "loanDays": "int",
+              "lostAfterDays": "int",
+              "maxBooks": "int"
+            }
+          },
+          "rows": [
+            {
+              "then": {
+                "extensionDays": 7,
+                "feeCap": 1000,
+                "feePerDay": 100,
+                "loanDays": 14,
+                "lostAfterDays": 30,
+                "maxBooks": 3
+              },
+              "when": true
+            }
+          ]
+        }
+      },
+      "events": {
+        "Borrow.atLimitOrReserved": {
+          "assign": {},
+          "calls": [],
+          "command": "Borrow",
+          "guard": [
+            "cond",
+            "atLimitOrReserved",
+            {}
+          ],
+          "output": [
+            "record",
+            {
+              "dueInDays": null,
+              "result": [
+                "lit",
+                "refused"
+              ]
+            }
+          ]
+        },
+        "Borrow.otherwise": {
+          "assign": {
+            "daysUntilDue": [
+              "field",
+              [
+                "decide",
+                "policy",
+                {}
+              ],
+              "loanDays"
+            ],
+            "status": [
+              "lit",
+              "ON_LOAN"
+            ]
+          },
+          "calls": [
+            {
+              "args": {
+                "daysUntilDue": [
+                  "field",
+                  [
+                    "decide",
+                    "policy",
+                    {}
+                  ],
+                  "loanDays"
+                ]
+              },
+              "command": "NotifyDue",
+              "component": "loan-world"
+            }
+          ],
+          "command": "Borrow",
+          "guard": [
+            "not",
+            [
+              "cond",
+              "atLimitOrReserved",
+              {}
+            ]
+          ],
+          "output": [
+            "record",
+            {
+              "dueInDays": [
+                "field",
+                [
+                  "decide",
+                  "policy",
+                  {}
+                ],
+                "loanDays"
+              ],
+              "result": [
+                "lit",
+                "lent"
+              ]
+            }
+          ]
+        },
+        "DayPasses.otherwise": {
+          "assign": {
+            "daysUntilDue": [
+              "-",
+              [
+                "state",
+                "daysUntilDue"
+              ],
+              [
+                "var",
+                "days"
+              ]
+            ],
+            "status": [
+              "ite",
+              [
+                "<",
+                [
+                  "-",
+                  [
+                    "state",
+                    "daysUntilDue"
+                  ],
+                  [
+                    "var",
+                    "days"
+                  ]
+                ],
+                [
+                  "neg",
+                  [
+                    "field",
+                    [
+                      "decide",
+                      "policy",
+                      {}
+                    ],
+                    "lostAfterDays"
+                  ]
+                ]
+              ],
+              [
+                "lit",
+                "LOST"
+              ],
+              [
+                "ite",
+                [
+                  "<",
+                  [
+                    "-",
+                    [
+                      "state",
+                      "daysUntilDue"
+                    ],
+                    [
+                      "var",
+                      "days"
+                    ]
+                  ],
+                  0
+                ],
+                [
+                  "lit",
+                  "OVERDUE"
+                ],
+                [
+                  "state",
+                  "status"
+                ]
+              ]
+            ]
+          },
+          "calls": [
+            {
+              "args": {},
+              "command": "ChargeReplacement",
+              "component": "loan-world",
+              "when": [
+                "<",
+                [
+                  "-",
+                  [
+                    "state",
+                    "daysUntilDue"
+                  ],
+                  [
+                    "var",
+                    "days"
+                  ]
+                ],
+                [
+                  "neg",
+                  [
+                    "field",
+                    [
+                      "decide",
+                      "policy",
+                      {}
+                    ],
+                    "lostAfterDays"
+                  ]
+                ]
+              ]
+            }
+          ],
+          "command": "DayPasses",
+          "guard": true
+        },
+        "Extend.otherwise": {
+          "assign": {
+            "daysUntilDue": [
+              "+",
+              [
+                "state",
+                "daysUntilDue"
+              ],
+              [
+                "field",
+                [
+                  "decide",
+                  "policy",
+                  {}
+                ],
+                "extensionDays"
+              ]
+            ]
+          },
+          "calls": [
+            {
+              "args": {
+                "daysUntilDue": [
+                  "+",
+                  [
+                    "state",
+                    "daysUntilDue"
+                  ],
+                  [
+                    "field",
+                    [
+                      "decide",
+                      "policy",
+                      {}
+                    ],
+                    "extensionDays"
+                  ]
+                ]
+              },
+              "command": "NotifyDue",
+              "component": "loan-world"
+            }
+          ],
+          "command": "Extend",
+          "guard": [
+            "not",
+            [
+              "cond",
+              "reservedBySomeoneElse",
+              {}
+            ]
+          ],
+          "output": [
+            "lit",
+            "extended"
+          ]
+        },
+        "Extend.reservedBySomeoneElse": {
+          "assign": {},
+          "calls": [],
+          "command": "Extend",
+          "guard": [
+            "cond",
+            "reservedBySomeoneElse",
+            {}
+          ],
+          "output": [
+            "lit",
+            "refused"
+          ]
+        },
+        "Return.case1": {
+          "assign": {},
+          "calls": [],
+          "command": "Return",
+          "guard": [
+            "=",
+            [
+              "state",
+              "status"
+            ],
+            [
+              "lit",
+              "LOST"
+            ]
+          ],
+          "output": [
+            "lit",
+            "refused"
+          ]
+        },
+        "Return.otherwise": {
+          "assign": {
+            "status": [
+              "lit",
+              "AVAILABLE"
+            ]
+          },
+          "calls": [
+            {
+              "args": {
+                "yen": [
+                  "min",
+                  [
+                    "*",
+                    [
+                      "neg",
+                      [
+                        "state",
+                        "daysUntilDue"
+                      ]
+                    ],
+                    [
+                      "field",
+                      [
+                        "decide",
+                        "policy",
+                        {}
+                      ],
+                      "feePerDay"
+                    ]
+                  ],
+                  [
+                    "field",
+                    [
+                      "decide",
+                      "policy",
+                      {}
+                    ],
+                    "feeCap"
+                  ]
+                ]
+              },
+              "command": "ChargeLateFee",
+              "component": "loan-world",
+              "when": [
+                "=",
+                [
+                  "state",
+                  "status"
+                ],
+                [
+                  "lit",
+                  "OVERDUE"
+                ]
+              ]
+            },
+            {
+              "args": {},
+              "command": "NotifyNextMember",
+              "component": "loan-world",
+              "when": [
+                "ask",
+                "loan-world",
+                "ReservedBySomeoneElse",
+                {}
+              ]
+            }
+          ],
+          "command": "Return",
+          "guard": [
+            "not",
+            [
+              "=",
+              [
+                "state",
+                "status"
+              ],
+              [
+                "lit",
+                "LOST"
+              ]
+            ]
+          ],
+          "output": [
+            "lit",
+            "returned"
+          ]
+        }
+      },
+      "init": {
+        "daysUntilDue": 0,
+        "status": [
+          "lit",
+          "AVAILABLE"
+        ]
+      },
+      "properties": {
+        "statusMatchesDaysRemaining": {
+          "is": [
+            "always",
+            [
+              "and",
+              [
+                "and",
+                [
+                  "or",
+                  [
+                    "not",
+                    [
+                      "=",
+                      [
+                        "state",
+                        "status"
+                      ],
+                      [
+                        "lit",
+                        "ON_LOAN"
+                      ]
+                    ]
+                  ],
+                  [
+                    ">=",
+                    [
+                      "state",
+                      "daysUntilDue"
+                    ],
+                    0
+                  ]
+                ],
+                [
+                  "or",
+                  [
+                    "not",
+                    [
+                      "=",
+                      [
+                        "state",
+                        "status"
+                      ],
+                      [
+                        "lit",
+                        "OVERDUE"
+                      ]
+                    ]
+                  ],
+                  [
+                    "and",
+                    [
+                      "<",
+                      [
+                        "state",
+                        "daysUntilDue"
+                      ],
+                      0
+                    ],
+                    [
+                      ">=",
+                      [
+                        "state",
+                        "daysUntilDue"
+                      ],
+                      [
+                        "neg",
+                        [
+                          "field",
+                          [
+                            "decide",
+                            "policy",
+                            {}
+                          ],
+                          "lostAfterDays"
+                        ]
+                      ]
+                    ]
+                  ]
+                ]
+              ],
+              [
+                "or",
+                [
+                  "not",
+                  [
+                    "=",
+                    [
+                      "state",
+                      "status"
+                    ],
+                    [
+                      "lit",
+                      "LOST"
+                    ]
+                  ]
+                ],
+                [
+                  "<",
+                  [
+                    "state",
+                    "daysUntilDue"
+                  ],
+                  [
+                    "neg",
+                    [
+                      "field",
+                      [
+                        "decide",
+                        "policy",
+                        {}
+                      ],
+                      "lostAfterDays"
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ],
+          "kind": "invariant"
+        }
+      },
+      "relies": [
+        "loan-world"
+      ],
+      "state": {
+        "daysUntilDue": "int",
+        "status": {
+          "enum": [
+            "AVAILABLE",
+            "ON_LOAN",
+            "OVERDUE",
+            "LOST"
+          ]
+        }
       }
     },
-    "states": [
-      "AVAILABLE",
-      "ON_LOAN",
-      "OVERDUE",
-      "LOST"
+    "loan-world": {
+      "external": {
+        "commands": {
+          "ChargeLateFee": {
+            "params": {
+              "yen": "int"
+            }
+          },
+          "ChargeReplacement": {
+            "params": {}
+          },
+          "NotifyDue": {
+            "params": {
+              "daysUntilDue": "int"
+            }
+          },
+          "NotifyNextMember": {
+            "params": {}
+          }
+        },
+        "queries": {
+          "BooksOnLoan": {
+            "params": {},
+            "result": "int"
+          },
+          "ReservedBySomeoneElse": {
+            "params": {},
+            "result": "bool"
+          }
+        }
+      }
+    }
+  },
+  "entries": {
+    "commands": [
+      "loan.Borrow",
+      "loan.DayPasses",
+      "loan.Extend",
+      "loan.Return"
+    ],
+    "queries": []
+  },
+  "irVersion": 8,
+  "notes": {
+    "loan": "The loan of one book to a library member. The member is not identified here. There is no clock: time is counted only by the days that the DayPasses command reports, and the loan remembers how many days remain until the book is due (negative once it is past due). The numbers (how many books, how many days, the fees) are in the policy table, ${Policy}. It asks the world around it how many books the member currently has on loan, and whether someone else has reserved the book. It tells the world around it: a due-date notice to the member, carrying the number of days until the book is due; a late-fee charge, carrying the amount in yen; a notice to the next member waiting, carrying nothing; and a replacement charge, carrying nothing.",
+    "loan-world": "The library around one loan: the member, the reservations, and billing",
+    "loan.conditions.atLimitOrReserved": "The member already holds at least the policy's maximum number of books, or someone else has reserved the book",
+    "loan.conditions.reservedBySomeoneElse": "The book is reserved by someone else",
+    "loan.decisions.policy": "The library's policy",
+    "loan.does.daysPass": "The given number of days passes. A loan is past its due date when fewer than zero days remain; on the due day itself it is not. A loan past its due date becomes overdue. A book past its due date by more than the policy's lost-after days is considered lost, and the member is charged for a replacement; that happens once, when the book becomes lost.",
+    "loan.does.extend": "The due date moves later by the policy's extension days, counted from the current due date. The member is told the number of days until the new due date. A loan can be extended any number of times. The answer is extended.",
+    "loan.does.giveBack": "A book on loan or overdue is returned, and the answer is returned; a lost book cannot be returned: the answer is refused, and nothing changes. A returned book becomes available. Returning an overdue book is charged the late fee: the number of days the book is past its due date, times the fee per day, but at most the fee cap. Then, if someone else has reserved the book, the next member waiting is notified.",
+    "loan.does.lend": "The book is due in the policy's loan days. The member is told the due date. The answer is lent, with the number of days until the book is due."
+  },
+  "root": "loan",
+  "sorts": [],
+  "trace": {
+    "loan.does.daysPass": [
+      "Loan.commands.DayPasses"
+    ],
+    "loan.does.extend": [
+      "Loan.commands.Extend"
+    ],
+    "loan.does.giveBack": [
+      "Loan.commands.Return"
+    ],
+    "loan.does.lend": [
+      "Loan.commands.Borrow"
     ]
   }
 }

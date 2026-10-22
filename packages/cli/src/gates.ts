@@ -7,14 +7,11 @@ import type { Workspace } from "./layout.ts";
 import { assetsFor } from "./assets.ts";
 import type { Asset } from "./assets.ts";
 import type { Violation } from "./check.ts";
-import { stableStringify } from "./extract.ts";
-import { FILES, TEST_DIR } from "./generate.ts";
-import type { AnyIr as Ir } from "./generate.ts";
-import { isIr8 } from "./generate.ts";
+import { FILES, TEST_DIR, stableStringify } from "./generate.ts";
+import type { Ir } from "./generate.ts";
 import { specView } from "./v1/generate.ts";
 import { decisionValues8 } from "./v1/values.ts";
-import { decisionValues, judge, judgeEvents, judgeStage0 } from "./mutation.ts";
-import { gateVerdict, judgeDecided } from "./stage1.ts";
+import { judge, judgeEvents, judgeStage0 } from "./mutation.ts";
 import { gateVerdict8, judgeDecided8 } from "./v1/stage1.ts";
 import { changedFileStage0, mutationSiteStage0, partFileStage0, removedInputStage0, sandboxFileStage0, testsStage0, wiringStage0 } from "./rules.ts";
 import type { SandboxFileVerdict } from "./rules.ts";
@@ -25,7 +22,7 @@ import type { MutationStrategy } from "./mutation.ts";
 import { ASSETS_DIR, renderRequest } from "./request.ts";
 import type { RequestSections } from "./request.ts";
 import type { Phase } from "./request.ts";
-import type { PbtResult } from "./runtime.ts";
+import type { PbtResult8 as PbtResult } from "./v1/pbt.ts";
 import type { StaticCheckStrategy } from "./static-check.ts";
 import type { Usage } from "./target.ts";
 import type { Target } from "./target.ts";
@@ -152,7 +149,6 @@ export function entryGate(ctx: GateContext, phase: Phase, attempt: number, feedb
       incremental: ctx.incremental,
       others: visibleOthers(ctx).map((other) => other.ws.paths.ir),
       partFiles: ctx.partFiles ?? [],
-      irVersion: ctx.ir.irVersion,
     }, sections),
   };
   for (const asset of assets) if (asset.kind === "file") inputs[`${ASSETS_DIR}/${asset.name}`] = asset.content;
@@ -164,11 +160,11 @@ export function entryGate(ctx: GateContext, phase: Phase, attempt: number, feedb
   } else {
     inputs[ws.paths.ir] = stableStringify(ctx.ir);
     // 1.0: IR の読み下し (spec view)。実装するエージェントは式を見る
-    if (isIr8(ctx.ir)) inputs[specViewPath(ws.paths.ir)] = specView(ctx.ir);
+    inputs[specViewPath(ws.paths.ir)] = specView(ctx.ir);
     // ほかのコンポーネントの仕様。配線の段階には渡さない（配線は、どの仕様も見ない）
     for (const other of visibleOthers(ctx)) {
       inputs[other.ws.paths.ir] = stableStringify(other.ir);
-      if (isIr8(other.ir)) inputs[specViewPath(other.ws.paths.ir)] = specView(other.ir);
+      inputs[specViewPath(other.ws.paths.ir)] = specView(other.ir);
     }
   }
   // 本番コード: 設計の段階ではやり直しのときの前回の成果、以降の段階では骨組み
@@ -229,9 +225,9 @@ const scrub = (ctx: GateContext, text: string) =>
 // ほかのコンポーネントのうち、いまの仕様で配線まで済んでいるもの。
 // 出力先の IR がいまの仕様と同じで、アダプターがあるもの。仕様が変わってまだ一致させていないものは、
 // そのコンポーネントの番で直すので、ここでは見ない
-// 出口の門の判定 (gate-rules): 1.0 の仕様は、1.0 で書いたフレームワーク自身の部品 (self1) にも尋ねる
+// 出口の門の判定 (gate-rules): Stage 0 と、使えればフレームワーク自身の部品 (Stage 1) の、厳しい側
 function gateVerdictFor<R>(ctx: GateContext, name: string, facts: object, stage0: R, strict: (a: R, b: R) => R): Promise<R> {
-  return isIr8(ctx.ir) ? gateVerdict8(name, facts, stage0, strict) : gateVerdict(name, facts, stage0, strict);
+  return gateVerdict8(name, facts, stage0, strict);
 }
 
 function settledOthers(ctx: GateContext) {
@@ -253,19 +249,9 @@ function runVerify(ctx: GateContext, unit: { ws: Workspace; seed: number; runs?:
 function specSentencesIn(ctx: GateContext, files: string[]): Violation[] {
   const existing = ctx.baseline;
   const { ir } = ctx;
-  const sentences = isIr8(ir) ? new Set<string>(Object.values(ir.notes ?? {})) : new Set<string>([
-    ...Object.values(ir.decisions).flatMap((decision) => Object.keys(decision.rows)),
-    ...Object.values(ir.descriptions ?? {}),
-    ...ir.behaviors.flatMap((behavior) => [
-      ...(behavior.description ? [behavior.description] : []),
-      ...behavior.onlyIf,
-      ...Object.keys(behavior.when),
-      ...Object.values(behavior.when).flatMap((outcome) => (outcome.does ? [outcome.does] : [])),
-    ]),
-    ...Object.values(ir.model?.calculations ?? {}).map((calculation) => calculation.description),
-    ...(ir.model?.invariants ?? []),
-  ]);
-  if (isIr8(ir)) for (const sentence of [...sentences]) if (sentence.length < 8) sentences.delete(sentence);
+  const sentences = new Set<string>(Object.values(ir.notes ?? {}));
+  // short ones (a name, a word) are not sentences anyone would quote
+  for (const sentence of [...sentences]) if (sentence.length < 8) sentences.delete(sentence);
   sentences.delete("otherwise");
   const violations: Violation[] = [];
   for (const rel of files) {
@@ -429,7 +415,7 @@ async function judgeOutput(
     let error = result.status === "pass" ? undefined : "error" in result.actual ? result.actual.error : undefined;
     // 反例は1つだけなので、未実装の部分に当たった反例の陰に、アダプターの誤りが隠れていることがある。
     // 未実装の部分に当たった試行はそこで打ち切って、ほかの失敗が無いかを、もう一度探す
-    if (error?.includes(target.notImplemented) && isIr8(ctx.ir)) {
+    if (error?.includes(target.notImplemented)) {
       const again = runVerify(ctx, ctx, false, target.notImplemented);
       if (again.result?.status === "error") throw new Error(`PBT を実行できませんでした: ${again.result.message}`);
       if (!again.result) error = again.crash ?? "";
@@ -510,7 +496,7 @@ async function judgeOutput(
 
   // ミューテーション: 本番コードを壊して PBT が落ちることを確かめる。合否の基準はゲート (judge) が持つ
   if (!ctx.mutation) return { ...ran };
-  const values = isIr8(ctx.ir) ? decisionValues8(ctx.ir) : decisionValues(ctx.ir);
+  const values = decisionValues8(ctx.ir);
   // 壊す範囲の判定は、4つの事実だけで決まる。壊す処理は同期なので、事実の組み合わせすべてについて、前もって判定を下しておく
   const breaks = new Map<string, boolean>();
   for (const bits of [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]) {
@@ -554,7 +540,7 @@ async function judgeOutput(
   const adapterSource = readFileSync(join(ws.root, ADAPTER), "utf8");
   const shared = ctx.others.length > 0 && !usage;
   const events = [...judgeEvents(report, values, adapterSource, shared)];
-  const decided = isIr8(ctx.ir) ? await judgeDecided8(events, judgeStage0(events)) : await judgeDecided(events);
+  const decided = await judgeDecided8(events, judgeStage0(events));
   const survived = judge(report, values, adapterSource, ADAPTER, label(ws.src), shared, decided);
   return survived.length > 0
     ? { ...ran, feedback: { kind: "mutation", violations: survived }, mutation }

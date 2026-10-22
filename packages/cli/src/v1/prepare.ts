@@ -21,7 +21,7 @@ import { decided } from "./decide.ts";
 import { javaAvailable } from "./alloy.ts";
 import type { Expr } from "./syntax.ts";
 
-/** Whether a spec directory is written in the 1.0 notation (a file imports `@clp/core/v1`). */
+/** Whether a spec directory is written in the 1.0 notation (a file imports `@clp/core`). */
 export function isV1Specs(dir: string): boolean {
   if (!existsSync(dir)) return false;
   return (readdirSync(dir, { recursive: true }) as string[]).some((file) => {

@@ -2,88 +2,71 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import { extract } from "../src/extract.ts";
-import { generateContract } from "../src/generate.ts";
-import type { Ir } from "../src/generate.ts";
-import { loadSpecs } from "../src/loader.ts";
-import { check, selfCheck } from "../src/runtime.ts";
-import type { Adapter, Ports } from "../src/runtime.ts";
+import { contract8 } from "../src/v1/generate.ts";
+import { compile } from "../src/v1/load.ts";
+import { problemText } from "../src/v1/read.ts";
+import { check8, selfCheck8 } from "../src/v1/pbt.ts";
+import type { Adapter8 } from "../src/v1/pbt.ts";
 
-// 部品の中の部品（DSL.md §14）: 外側の部品が、含む部品のコマンドを呼ぶ。
-// 期待値は、外側と中の仕様を一緒に実行して作る。観測するのは、外側の答えと、外の世界への副作用すべて
+// 部品の中の部品（DSL.md §17）: 外側の部品が、中の部品のコマンドを呼ぶ。
+// 期待値は、外側と中の仕様を一緒に実行して作る。観測するのは、答えと、外の世界へのコマンドすべて
+process.env.CLP_ALLOY = "off";
 
 const tmpRoot = join(import.meta.dirname, ".tmp-parts");
 mkdirSync(tmpRoot, { recursive: true });
 after(() => rmSync(tmpRoot, { recursive: true, force: true }));
 
 // 中の部品: 口座。上限を超える入金は断る。入金のたびに監査に記録する
-const ACCOUNT = `import { commands, conditions, data, decisions, effects, input, integer, otherwise, service } from "@clp/core";
-export const Decision = decisions({ limits: [otherwise({ max: 300 })] });
-export const If = conditions({ overLimit: "The balance would go over the limit" });
-export const Data = data({ balance: { type: integer({ min: 0, max: 1000 }), initially: 0 } });
-export const Effect = effects({ Audit: input({ amount: "integer" }) });
-export const DepositInput = input({ amount: integer({ min: 1, max: 100 }) });
-export const Command = commands({
-  Deposit: {
-    input: DepositInput,
-    output: ["ok", "refused"],
-    cases: [If.overLimit.then({ does: "Refused.", responds: "refused" }), otherwise({ does: "The balance grows; the deposit is audited.", responds: "ok" })],
+const ACCOUNT = `import { external, init, requires, service } from "@clp/core";
+import type { Int } from "@clp/core";
+export const Audit = external("The audit log.", { commands: { Record(amount: Int) {} } });
+export const Account = service("A bank account. A deposit that would take the balance over 300 is refused.", {
+  state: { balance: init<Int>(0) },
+  commands: {
+    Deposit(amount: Int): "ok" | "refused" {
+      requires(amount >= 1 && amount <= 100);
+      if (this.balance + amount > 300) return "refused";
+      Audit.Record(amount);
+      this.balance += amount;
+      return "ok";
+    },
   },
-  Balance: { output: "integer", does: "The answer is the balance." },
+  queries: { Balance() { return this.balance; } },
 });
-export const Account = service({ description: "A bank account.", uses: [Data, Effect, Decision, If, Command] });
-`;
-const ACCOUNT_INTERPRETATION = `import { calculations, interpretation, otherwise } from "@clp/core";
-import { Account, Command, Data, Decision, DepositInput, Effect, If } from "./account.component.ts";
-export const Calc = calculations({ grown: { description: "balance + amount", output: "integer" } });
-export const Interpretation = interpretation(Account, [
-  Calc,
-  Command.Deposit.with({ cases: [otherwise({ set: [Data.balance.set(Calc.grown)], emits: [Effect.Audit({ amount: DepositInput.amount })] })] }),
-  Command.Balance.with({ responds: Data.balance }),
-  If.overLimit.means((state) => state.balance + state.amount > Decision.limits.of(state).max),
-  Calc.grown.means((state) => state.balance + state.amount),
-]);
 `;
 // 外側の部品: 窓口。支払いを口座に入金し、受け付けたら領収書を出す。閉じたら受け付けない
-const TELLER = `import { commands, conditions, effects, input, integer, otherwise, parts, record, service, states } from "@clp/core";
+const TELLER = (pay = "Account.Deposit(amount)", balance = "Account.Balance()") => `import { external, init, requires, service } from "@clp/core";
+import type { Int } from "@clp/core";
 import { Account } from "./account.component.ts";
-export const State = states(["OPEN", "CLOSED"]);
-export const Part = parts({ account: Account });
-export const If = conditions({ accepted: "The account accepted the deposit" });
-export const Effect = effects({ Receipt: input({ amount: "integer" }) });
-export const PayInput = input({ amount: integer({ min: 1, max: 100 }) });
-export const Command = commands({
-  Pay: {
-    input: PayInput,
-    from: State.OPEN,
-    calls: [Part.account.Deposit({ amount: PayInput.amount })],
-    output: record({ status: integer({ min: 100, max: 599 }) }),
-    cases: [If.accepted.then({ responds: { status: 201 }, does: "A receipt is given." }), otherwise({ responds: { status: 422 } })],
+export const Printer = external("Prints receipts.", { commands: { Receipt(amount: Int) {} } });
+export const Teller = service(\`A teller in front of \${Account}.\`, {
+  state: { open: init<boolean>(true) },
+  commands: {
+    Pay(amount: Int): { status: 201 | 422 } {
+      requires(this.open && amount >= 1 && amount <= 100);
+      const answer = ${pay};
+      if (answer === "refused") return { status: 422 };
+      Printer.Receipt(amount);
+      return { status: 201 };
+    },
+    Close() {
+      requires(this.open);
+      this.open = false;
+    },
   },
-  Check: { calls: [Part.account.Balance()], output: "integer", responds: Part.account.Balance.answer },
-  Close: { from: State.OPEN, goTo: State.CLOSED },
+  queries: { Check() { return ${balance}; } },
 });
-export const Teller = service({ description: "A teller in front of an account.", init: State.OPEN, uses: [State, Part, Effect, If, Command] });
-`;
-const TELLER_INTERPRETATION = `import { interpretation } from "@clp/core";
-import { Command, Effect, If, PayInput, Teller } from "./teller.component.ts";
-export const Interpretation = interpretation(Teller, [
-  Command.Pay.with({ cases: [If.accepted.then({ emits: [Effect.Receipt({ amount: PayInput.amount })] })] }),
-  If.accepted.means((state) => state.account.Deposit === "ok"),
-]);
 `;
 
-function specDir() {
+function specDir(teller = TELLER()) {
   const dir = mkdtempSync(join(tmpRoot, "s-"));
   writeFileSync(join(dir, "account.component.ts"), ACCOUNT);
-  writeFileSync(join(dir, "account.interpretation.ts"), ACCOUNT_INTERPRETATION);
-  writeFileSync(join(dir, "teller.component.ts"), TELLER);
-  writeFileSync(join(dir, "teller.interpretation.ts"), TELLER_INTERPRETATION);
+  writeFileSync(join(dir, "teller.component.ts"), teller);
   return dir;
 }
 
 // 手で書いた本番コード（の代わり）。中の部品は、外側から使われる、ふつうのクラス
-type Faults = { limit?: number; receiptAlways?: boolean; noAudit?: boolean; closedPays?: boolean };
+type Faults = { limit?: number; receiptAlways?: boolean; noAudit?: boolean };
 class AccountCode {
   balance = 0;
   audit: (amount: number) => void;
@@ -100,7 +83,7 @@ class AccountCode {
   }
 }
 class TellerCode {
-  state: "OPEN" | "CLOSED" = "OPEN";
+  open = true;
   account: AccountCode;
   receipt: (amount: number) => void;
   faults: Faults;
@@ -115,102 +98,90 @@ class TellerCode {
     return { status: result === "ok" ? 201 : 422 };
   }
 }
-// 外側の部品のアダプター: 中の部品の依存（account.Audit）も、外側の契約の名前で渡す
-function tellerAdapter(faults: Faults = {}): Adapter {
+// 外側の部品のアダプター: 中の部品の外の世界 (audit) も、外側の契約で渡る
+function tellerAdapter(faults: Faults = {}): Adapter8 {
   let teller: TellerCode;
   return {
-    async setupIsolation(ports: Ports) {
-      teller = new TellerCode(new AccountCode((amount) => ports.effects["account.Audit"]({ amount }), faults), (amount) => ports.effects.Receipt({ amount }), faults);
+    async setupIsolation(ports) {
+      const p = ports as { audit: { Record(input: { amount: number }): void }; printer: { Receipt(input: { amount: number }): void } };
+      teller = new TellerCode(new AccountCode((amount) => p.audit.Record({ amount }), faults), (amount) => p.printer.Receipt({ amount }), faults);
     },
     async teardownIsolation() {},
-    async executeCommand(command: { name: string; input: { amount?: number } }) {
-      if (command.name === "Pay") return teller.pay(command.input.amount!);
-      if (command.name === "Check") return teller.account.balance;
-      teller.state = "CLOSED";
+    async executeCommand(command) {
+      if (command.name === "Pay") return teller.pay(command.input.amount as number);
+      teller.open = false;
     },
-    async getCurrentState() {
-      return teller.state;
+    async executeQuery(query) {
+      return teller.account.balance;
     },
   };
 }
 
-test("部品の中の部品: IR に、含む部品の境界と、呼ぶことが出る。契約には、中の部品の依存が名前を修飾して並ぶ", async () => {
-  const dir = specDir();
-  const { ir, diagnostics } = extract(await loadSpecs(dir, { component: "teller" }));
-  assert.deepEqual(diagnostics, []);
-  const model = (ir as Ir).model!;
-  assert.deepEqual(Object.keys(model.parts ?? {}), ["account"]);
-  assert.equal(model.parts!.account.component, "account");
-  assert.deepEqual(model.parts!.account.outputs, { Balance: "integer", Deposit: ["ok", "refused"] });
-  assert.deepEqual(Object.keys(model.parts!.account.effects), ["Audit"]);
-  const pay = (ir as Ir).behaviors.find((behavior) => behavior.name === "Pay")!;
-  assert.deepEqual(pay.calls, { "account.Deposit": { part: "account", command: "Deposit", input: { amount: { $ref: "input:amount" } } } });
-  const contract = generateContract(ir as Ir);
-  assert.match(contract, /"account\.Audit"\(payload: \{ amount: number \}\): void;/);
-  assert.match(contract, /Receipt\(payload: \{ amount: number \}\): void;/);
+test("部品の中の部品: IR に、含む部品と、呼ぶことが出る。契約には、中の部品の外の世界も並ぶ", () => {
+  const { ir, problems } = compile(specDir(), "teller");
+  assert.deepEqual(problems.filter((p) => p.severity === "error").map(problemText), []);
+  assert.deepEqual(ir!.components.teller.contains, ["account"]);
+  // 外側が呼ぶ中のコマンドは、入り口ではない
+  assert.deepEqual(ir!.entries.commands, ["teller.Close", "teller.Pay"]);
+  const pay = ir!.components.teller.events!["Pay.otherwise"] ?? Object.values(ir!.components.teller.events!).find((e) => e.command === "Pay")!;
+  assert.ok(JSON.stringify(pay).includes('"Deposit"'), JSON.stringify(pay));
+  const contract = contract8(ir!);
+  assert.match(contract, /audit: \{\s*Record\(input: \{ amount: number \}\): void;/);
+  assert.match(contract, /printer: \{\s*Receipt\(input: \{ amount: number \}\): void;/);
 });
 
 test("部品の中の部品: 外側と中の仕様を一緒に実行する。正しい実装は通り、外側・中の誤りは見つかる", async () => {
-  const dir = specDir();
-  assert.ok((await selfCheck(await loadSpecs(dir, { component: "teller" }), { seed: 1 })).ok);
-  const run = (faults?: Faults) => check(dir, tellerAdapter(faults), { drafts: false, component: "teller" }, { seed: 1, numRuns: 300 });
+  const { ir } = compile(specDir(), "teller");
+  assert.ok((await selfCheck8(ir!, { seed: 1 })).ok);
+  const run = (faults?: Faults) => check8(ir!, tellerAdapter(faults), { seed: 1, numRuns: 300 });
 
   assert.equal((await run()).status, "pass");
   // 中の部品の判断の誤り（上限）: 外側の答え（422 のはずが 201）に現れる
-  const limit = await run({ limit: 250 });
-  assert.equal(limit.status, "fail");
-  // 中の部品の副作用を起こさない: 外の世界への副作用として観測する
+  assert.equal((await run({ limit: 250 })).status, "fail");
+  // 中の部品の外の世界へのコマンドを起こさない: 外の世界へのコマンドとして観測する
   const audit = await run({ noAudit: true });
-  assert.ok(audit.status === "fail" && JSON.stringify(audit.expected).includes("account.Audit"));
+  assert.ok(audit.status === "fail" && JSON.stringify(audit.expected).includes("audit.Record"), JSON.stringify(audit));
   // 外側の判断の誤り: 断られたのに領収書を出す
-  const receipt = await run({ receiptAlways: true });
-  assert.equal(receipt.status, "fail");
+  assert.equal((await run({ receiptAlways: true })).status, "fail");
 });
 
-test("部品の中の部品: 呼ぶコマンドの入力と、知らない部品・コマンドは、IR を作るときに報告する", async () => {
-  const dir = mkdtempSync(join(tmpRoot, "s-"));
-  writeFileSync(join(dir, "account.component.ts"), ACCOUNT);
-  writeFileSync(join(dir, "account.interpretation.ts"), ACCOUNT_INTERPRETATION);
-  writeFileSync(join(dir, "teller.component.ts"), TELLER.replace("Part.account.Deposit({ amount: PayInput.amount })", 'Part.account.Deposit({ amount: "ten" })').replace("Part.account.Balance()", "Part.account.Balanse()"));
-  writeFileSync(join(dir, "teller.interpretation.ts"), TELLER_INTERPRETATION);
-  const messages = extract(await loadSpecs(dir, { component: "teller" })).diagnostics.map((d) => `${d.code} ${d.behavior}: ${d.message}`);
-  assert.ok(messages.some((line) => line.startsWith('bad-value Pay: account.Deposit.amount: "ten" は')), messages.join("\n"));
-  assert.ok(messages.includes('unknown-command Check: account.Balanse: 部品 "account" (account) に、コマンド Balanse はありません'), messages.join("\n"));
+test("部品の中の部品: 呼ぶコマンドの引数の型と、知らないコマンドは、IR を作るときに報告する", () => {
+  const { problems } = compile(specDir(TELLER('Account.Deposit("ten")', "Account.Balanse()")), "teller");
+  const found = problems.map(problemText).join("\n");
+  assert.match(found, /error\[type-mismatch\] Teller\.commands\.Pay/);
+  assert.match(found, /Balanse/);
 });
 
 // 経路の path に入る値: "." と ".." は、パーセントエンコードしても URL の正規化で区切りになり、HTTP では送れない
-const THINGS = `import { commands, input, service, string } from "@clp/core";
-export const GetInput = input({ id: string({ examples: [".", "..", "a"] }), note: string({ examples: [".", ".."] }) });
-export const Things = service({
-  description: "Things by id.",
-  uses: [commands({ Get: { route: "GET /things/:id", input: GetInput, output: "string", responds: GetInput.id } })],
+const THINGS = `import { service } from "@clp/core";
+export const Things = service("Things by id.", {
+  commands: {
+    Get(id: string, note: string): string {
+      if (note === "." || note === "..") return "dots";
+      return id;
+    },
+  },
+  routes: { Get: "GET /things/:id" },
 });
-`;
-const THINGS_INTERPRETATION = `import { interpretation } from "@clp/core";
-import { Things } from "./things.component.ts";
-export const Interpretation = interpretation(Things, []);
 `;
 
 test("経路: path に入る値のうち HTTP で送れないもの (\".\"、\"..\") は、仕様の外として生成しない。path でない入力には使う", async () => {
   const dir = mkdtempSync(join(tmpRoot, "r-"));
   writeFileSync(join(dir, "things.component.ts"), THINGS);
-  writeFileSync(join(dir, "things.interpretation.ts"), THINGS_INTERPRETATION);
+  const { ir } = compile(dir, "things");
   const sent = { ids: new Set<string>(), notes: new Set<string>() };
-  const adapter: Adapter = {
+  const adapter: Adapter8 = {
     async setupIsolation() {},
     async teardownIsolation() {},
-    async executeCommand(command: { name: string; input: { id: string; note: string } }) {
-      sent.ids.add(command.input.id);
-      sent.notes.add(command.input.note);
-      return command.input.id;
-    },
-    async getCurrentState() {
-      return "READY";
+    async executeCommand(command) {
+      const { id, note } = command.input as { id: string; note: string };
+      sent.ids.add(id);
+      sent.notes.add(note);
+      return note === "." || note === ".." ? "dots" : id;
     },
   };
-  const result = await check(dir, adapter, { drafts: false }, { seed: 1, numRuns: 300 });
+  const result = await check8(ir!, adapter, { seed: 1, numRuns: 300 });
   assert.equal(result.status, "pass");
-  assert.ok(sent.ids.has("a"));
   assert.ok(!sent.ids.has(".") && !sent.ids.has(".."));
   assert.ok(sent.notes.has(".") && sent.notes.has(".."));
 });

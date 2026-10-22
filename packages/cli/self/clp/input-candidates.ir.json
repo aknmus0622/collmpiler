@@ -1,398 +1,1778 @@
 {
-  "behaviors": [
-    {
-      "from": [
-        "READY"
-      ],
-      "name": "Around",
-      "onlyIf": [],
-      "when": {
-        "otherwise": {
-          "does": "A threshold: a number found in the specification or declared with `around`.",
-          "set": {
-            "aroundValues": {
-              "$ref": "calculation:thresholdsWithNew"
+  "components": {
+    "input-candidates": {
+      "calcs": {
+        "decideAmong": {
+          "is": [
+            "ite",
+            [
+              "or",
+              [
+                "=",
+                [
+                  "state",
+                  "pickGiven"
+                ],
+                null
+              ],
+              [
+                "=",
+                [
+                  "len",
+                  [
+                    "state",
+                    "usablePositions"
+                  ]
+                ],
+                0
+              ]
+            ],
+            null,
+            [
+              "nonNull",
+              [
+                "find",
+                [
+                  "state",
+                  "usablePositions"
+                ],
+                [
+                  "p"
+                ],
+                [
+                  "=",
+                  [
+                    "len",
+                    [
+                      "filter",
+                      [
+                        "state",
+                        "usablePositions"
+                      ],
+                      [
+                        "q"
+                      ],
+                      [
+                        "<",
+                        [
+                          "var",
+                          "q"
+                        ],
+                        [
+                          "var",
+                          "p"
+                        ]
+                      ]
+                    ]
+                  ],
+                  [
+                    "mod",
+                    [
+                      "+",
+                      [
+                        "mod",
+                        [
+                          "state",
+                          "pickGiven"
+                        ],
+                        [
+                          "len",
+                          [
+                            "state",
+                            "usablePositions"
+                          ]
+                        ]
+                      ],
+                      [
+                        "len",
+                        [
+                          "state",
+                          "usablePositions"
+                        ]
+                      ]
+                    ],
+                    [
+                      "len",
+                      [
+                        "state",
+                        "usablePositions"
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ],
+          "params": {},
+          "result": {
+            "optional": "int"
+          }
+        },
+        "decideNumbers": {
+          "is": [
+            "record",
+            {
+              "limits": [
+                "ite",
+                [
+                  "and",
+                  [
+                    "not",
+                    [
+                      "=",
+                      [
+                        "state",
+                        "lowest"
+                      ],
+                      null
+                    ]
+                  ],
+                  [
+                    "not",
+                    [
+                      "=",
+                      [
+                        "state",
+                        "highest"
+                      ],
+                      null
+                    ]
+                  ]
+                ],
+                [
+                  "ite",
+                  [
+                    "<",
+                    [
+                      "state",
+                      "lowest"
+                    ],
+                    [
+                      "state",
+                      "highest"
+                    ]
+                  ],
+                  [
+                    "list",
+                    [
+                      "state",
+                      "lowest"
+                    ],
+                    [
+                      "state",
+                      "highest"
+                    ]
+                  ],
+                  [
+                    "ite",
+                    [
+                      "=",
+                      [
+                        "state",
+                        "lowest"
+                      ],
+                      [
+                        "state",
+                        "highest"
+                      ]
+                    ],
+                    [
+                      "list",
+                      [
+                        "state",
+                        "lowest"
+                      ]
+                    ],
+                    [
+                      "list"
+                    ]
+                  ]
+                ],
+                [
+                  "ite",
+                  [
+                    "not",
+                    [
+                      "=",
+                      [
+                        "state",
+                        "lowest"
+                      ],
+                      null
+                    ]
+                  ],
+                  [
+                    "list",
+                    [
+                      "state",
+                      "lowest"
+                    ]
+                  ],
+                  [
+                    "ite",
+                    [
+                      "not",
+                      [
+                        "=",
+                        [
+                          "state",
+                          "highest"
+                        ],
+                        null
+                      ]
+                    ],
+                    [
+                      "list",
+                      [
+                        "state",
+                        "highest"
+                      ]
+                    ],
+                    [
+                      "list"
+                    ]
+                  ]
+                ]
+              ],
+              "thresholds": [
+                "map",
+                [
+                  "filter",
+                  [
+                    "list",
+                    0,
+                    1,
+                    2,
+                    3,
+                    4,
+                    5,
+                    6,
+                    7,
+                    8,
+                    9,
+                    10,
+                    11,
+                    12,
+                    13,
+                    14,
+                    15,
+                    16,
+                    17,
+                    18,
+                    19
+                  ],
+                  [
+                    "k"
+                  ],
+                  [
+                    "<",
+                    [
+                      "var",
+                      "k"
+                    ],
+                    [
+                      "len",
+                      [
+                        "filter",
+                        [
+                          "list",
+                          -5,
+                          -4,
+                          -3,
+                          -2,
+                          -1,
+                          0,
+                          1,
+                          2,
+                          3,
+                          4,
+                          5,
+                          6,
+                          7,
+                          8,
+                          9,
+                          10,
+                          11,
+                          12,
+                          13,
+                          14
+                        ],
+                        [
+                          "v"
+                        ],
+                        [
+                          "and",
+                          [
+                            "and",
+                            [
+                              "or",
+                              [
+                                "=",
+                                [
+                                  "state",
+                                  "lowest"
+                                ],
+                                null
+                              ],
+                              [
+                                ">=",
+                                [
+                                  "var",
+                                  "v"
+                                ],
+                                [
+                                  "state",
+                                  "lowest"
+                                ]
+                              ]
+                            ],
+                            [
+                              "or",
+                              [
+                                "=",
+                                [
+                                  "state",
+                                  "highest"
+                                ],
+                                null
+                              ],
+                              [
+                                "<=",
+                                [
+                                  "var",
+                                  "v"
+                                ],
+                                [
+                                  "state",
+                                  "highest"
+                                ]
+                              ]
+                            ]
+                          ],
+                          [
+                            "some",
+                            [
+                              "state",
+                              "aroundValues"
+                            ],
+                            [
+                              "t"
+                            ],
+                            [
+                              "<=",
+                              [
+                                "abs",
+                                [
+                                  "-",
+                                  [
+                                    "var",
+                                    "t"
+                                  ],
+                                  [
+                                    "var",
+                                    "v"
+                                  ]
+                                ]
+                              ],
+                              [
+                                "ite",
+                                [
+                                  "state",
+                                  "wholeOnly"
+                                ],
+                                1,
+                                0
+                              ]
+                            ]
+                          ]
+                        ]
+                      ]
+                    ]
+                  ]
+                ],
+                [
+                  "k"
+                ],
+                [
+                  "nonNull",
+                  [
+                    "find",
+                    [
+                      "filter",
+                      [
+                        "list",
+                        -5,
+                        -4,
+                        -3,
+                        -2,
+                        -1,
+                        0,
+                        1,
+                        2,
+                        3,
+                        4,
+                        5,
+                        6,
+                        7,
+                        8,
+                        9,
+                        10,
+                        11,
+                        12,
+                        13,
+                        14
+                      ],
+                      [
+                        "v"
+                      ],
+                      [
+                        "and",
+                        [
+                          "and",
+                          [
+                            "or",
+                            [
+                              "=",
+                              [
+                                "state",
+                                "lowest"
+                              ],
+                              null
+                            ],
+                            [
+                              ">=",
+                              [
+                                "var",
+                                "v"
+                              ],
+                              [
+                                "state",
+                                "lowest"
+                              ]
+                            ]
+                          ],
+                          [
+                            "or",
+                            [
+                              "=",
+                              [
+                                "state",
+                                "highest"
+                              ],
+                              null
+                            ],
+                            [
+                              "<=",
+                              [
+                                "var",
+                                "v"
+                              ],
+                              [
+                                "state",
+                                "highest"
+                              ]
+                            ]
+                          ]
+                        ],
+                        [
+                          "some",
+                          [
+                            "state",
+                            "aroundValues"
+                          ],
+                          [
+                            "t"
+                          ],
+                          [
+                            "<=",
+                            [
+                              "abs",
+                              [
+                                "-",
+                                [
+                                  "var",
+                                  "t"
+                                ],
+                                [
+                                  "var",
+                                  "v"
+                                ]
+                              ]
+                            ],
+                            [
+                              "ite",
+                              [
+                                "state",
+                                "wholeOnly"
+                              ],
+                              1,
+                              0
+                            ]
+                          ]
+                        ]
+                      ]
+                    ],
+                    [
+                      "v"
+                    ],
+                    [
+                      "=",
+                      [
+                        "len",
+                        [
+                          "filter",
+                          [
+                            "filter",
+                            [
+                              "list",
+                              -5,
+                              -4,
+                              -3,
+                              -2,
+                              -1,
+                              0,
+                              1,
+                              2,
+                              3,
+                              4,
+                              5,
+                              6,
+                              7,
+                              8,
+                              9,
+                              10,
+                              11,
+                              12,
+                              13,
+                              14
+                            ],
+                            [
+                              "v"
+                            ],
+                            [
+                              "and",
+                              [
+                                "and",
+                                [
+                                  "or",
+                                  [
+                                    "=",
+                                    [
+                                      "state",
+                                      "lowest"
+                                    ],
+                                    null
+                                  ],
+                                  [
+                                    ">=",
+                                    [
+                                      "var",
+                                      "v"
+                                    ],
+                                    [
+                                      "state",
+                                      "lowest"
+                                    ]
+                                  ]
+                                ],
+                                [
+                                  "or",
+                                  [
+                                    "=",
+                                    [
+                                      "state",
+                                      "highest"
+                                    ],
+                                    null
+                                  ],
+                                  [
+                                    "<=",
+                                    [
+                                      "var",
+                                      "v"
+                                    ],
+                                    [
+                                      "state",
+                                      "highest"
+                                    ]
+                                  ]
+                                ]
+                              ],
+                              [
+                                "some",
+                                [
+                                  "state",
+                                  "aroundValues"
+                                ],
+                                [
+                                  "t"
+                                ],
+                                [
+                                  "<=",
+                                  [
+                                    "abs",
+                                    [
+                                      "-",
+                                      [
+                                        "var",
+                                        "t"
+                                      ],
+                                      [
+                                        "var",
+                                        "v"
+                                      ]
+                                    ]
+                                  ],
+                                  [
+                                    "ite",
+                                    [
+                                      "state",
+                                      "wholeOnly"
+                                    ],
+                                    1,
+                                    0
+                                  ]
+                                ]
+                              ]
+                            ]
+                          ],
+                          [
+                            "u"
+                          ],
+                          [
+                            "and",
+                            [
+                              "<=",
+                              [
+                                "abs",
+                                [
+                                  "-",
+                                  [
+                                    "nonNull",
+                                    [
+                                      "find",
+                                      [
+                                        "state",
+                                        "aroundValues"
+                                      ],
+                                      [
+                                        "t"
+                                      ],
+                                      [
+                                        "or",
+                                        [
+                                          "<=",
+                                          [
+                                            "abs",
+                                            [
+                                              "-",
+                                              [
+                                                "var",
+                                                "t"
+                                              ],
+                                              [
+                                                "var",
+                                                "u"
+                                              ]
+                                            ]
+                                          ],
+                                          [
+                                            "ite",
+                                            [
+                                              "state",
+                                              "wholeOnly"
+                                            ],
+                                            1,
+                                            0
+                                          ]
+                                        ],
+                                        [
+                                          "<=",
+                                          [
+                                            "abs",
+                                            [
+                                              "-",
+                                              [
+                                                "var",
+                                                "t"
+                                              ],
+                                              [
+                                                "var",
+                                                "v"
+                                              ]
+                                            ]
+                                          ],
+                                          [
+                                            "ite",
+                                            [
+                                              "state",
+                                              "wholeOnly"
+                                            ],
+                                            1,
+                                            0
+                                          ]
+                                        ]
+                                      ]
+                                    ]
+                                  ],
+                                  [
+                                    "var",
+                                    "u"
+                                  ]
+                                ]
+                              ],
+                              [
+                                "ite",
+                                [
+                                  "state",
+                                  "wholeOnly"
+                                ],
+                                1,
+                                0
+                              ]
+                            ],
+                            [
+                              "or",
+                              [
+                                ">",
+                                [
+                                  "abs",
+                                  [
+                                    "-",
+                                    [
+                                      "nonNull",
+                                      [
+                                        "find",
+                                        [
+                                          "state",
+                                          "aroundValues"
+                                        ],
+                                        [
+                                          "t"
+                                        ],
+                                        [
+                                          "or",
+                                          [
+                                            "<=",
+                                            [
+                                              "abs",
+                                              [
+                                                "-",
+                                                [
+                                                  "var",
+                                                  "t"
+                                                ],
+                                                [
+                                                  "var",
+                                                  "u"
+                                                ]
+                                              ]
+                                            ],
+                                            [
+                                              "ite",
+                                              [
+                                                "state",
+                                                "wholeOnly"
+                                              ],
+                                              1,
+                                              0
+                                            ]
+                                          ],
+                                          [
+                                            "<=",
+                                            [
+                                              "abs",
+                                              [
+                                                "-",
+                                                [
+                                                  "var",
+                                                  "t"
+                                                ],
+                                                [
+                                                  "var",
+                                                  "v"
+                                                ]
+                                              ]
+                                            ],
+                                            [
+                                              "ite",
+                                              [
+                                                "state",
+                                                "wholeOnly"
+                                              ],
+                                              1,
+                                              0
+                                            ]
+                                          ]
+                                        ]
+                                      ]
+                                    ],
+                                    [
+                                      "var",
+                                      "v"
+                                    ]
+                                  ]
+                                ],
+                                [
+                                  "ite",
+                                  [
+                                    "state",
+                                    "wholeOnly"
+                                  ],
+                                  1,
+                                  0
+                                ]
+                              ],
+                              [
+                                "<",
+                                [
+                                  "var",
+                                  "u"
+                                ],
+                                [
+                                  "var",
+                                  "v"
+                                ]
+                              ]
+                            ]
+                          ]
+                        ]
+                      ],
+                      [
+                        "var",
+                        "k"
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            }
+          ],
+          "params": {},
+          "result": {
+            "record": {
+              "limits": {
+                "list": "int"
+              },
+              "thresholds": {
+                "list": "int"
+              }
+            }
+          }
+        },
+        "decideStrings": {
+          "is": [
+            "record",
+            {
+              "known": [
+                "state",
+                "knownTexts"
+              ],
+              "lengths": [
+                "state",
+                "foundLengths"
+              ]
+            }
+          ],
+          "params": {},
+          "result": {
+            "record": {
+              "known": {
+                "list": "string"
+              },
+              "lengths": {
+                "list": "int"
+              }
             }
           }
         }
-      }
-    },
-    {
-      "from": [
-        "READY"
-      ],
-      "name": "BeginAmong",
-      "onlyIf": [],
-      "when": {
-        "otherwise": {
-          "does": "An input is to be picked from what the component remembers: at the position `pick`, or not at all when there is none. No remembered value has been given yet.",
-          "set": {
+      },
+      "commands": {
+        "Around": {
+          "events": [
+            "Around.otherwise"
+          ],
+          "params": {
+            "around": "int"
+          },
+          "requires": [
+            "and",
+            [
+              ">=",
+              [
+                "var",
+                "around"
+              ],
+              -4
+            ],
+            [
+              "<=",
+              [
+                "var",
+                "around"
+              ],
+              13
+            ]
+          ]
+        },
+        "BeginAmong": {
+          "events": [
+            "BeginAmong.otherwise"
+          ],
+          "params": {
+            "pick": {
+              "optional": "int"
+            }
+          }
+        },
+        "BeginNumbers": {
+          "events": [
+            "BeginNumbers.otherwise"
+          ],
+          "params": {
+            "integer": "bool",
+            "max": {
+              "optional": "int"
+            },
+            "min": {
+              "optional": "int"
+            }
+          }
+        },
+        "BeginStrings": {
+          "events": [
+            "BeginStrings.otherwise"
+          ],
+          "params": {}
+        },
+        "Item": {
+          "events": [
+            "Item.otherwise"
+          ],
+          "params": {
+            "usable": "bool"
+          }
+        },
+        "LengthNumber": {
+          "events": [
+            "LengthNumber.otherwise"
+          ],
+          "params": {
+            "number": "int"
+          },
+          "requires": [
+            "and",
+            [
+              ">=",
+              [
+                "var",
+                "number"
+              ],
+              -2
+            ],
+            [
+              "<=",
+              [
+                "var",
+                "number"
+              ],
+              10002
+            ]
+          ]
+        },
+        "Text": {
+          "events": [
+            "Text.otherwise"
+          ],
+          "params": {
+            "text": "string"
+          }
+        }
+      },
+      "events": {
+        "Around.otherwise": {
+          "assign": {
+            "aroundValues": [
+              "concat",
+              [
+                "state",
+                "aroundValues"
+              ],
+              [
+                "list",
+                [
+                  "var",
+                  "around"
+                ]
+              ]
+            ]
+          },
+          "calls": [],
+          "command": "Around",
+          "guard": true
+        },
+        "BeginAmong.otherwise": {
+          "assign": {
             "itemsGiven": 0,
-            "pickGiven": {
-              "$ref": "input:pick"
-            },
-            "usablePositions": []
-          }
+            "pickGiven": [
+              "var",
+              "pick"
+            ],
+            "usablePositions": [
+              "list"
+            ]
+          },
+          "calls": [],
+          "command": "BeginAmong",
+          "guard": true
+        },
+        "BeginNumbers.otherwise": {
+          "assign": {
+            "aroundValues": [
+              "list"
+            ],
+            "highest": [
+              "var",
+              "max"
+            ],
+            "lowest": [
+              "var",
+              "min"
+            ],
+            "wholeOnly": [
+              "var",
+              "integer"
+            ]
+          },
+          "calls": [],
+          "command": "BeginNumbers",
+          "guard": true
+        },
+        "BeginStrings.otherwise": {
+          "assign": {
+            "foundLengths": [
+              "list"
+            ],
+            "knownTexts": [
+              "list"
+            ]
+          },
+          "calls": [],
+          "command": "BeginStrings",
+          "guard": true
+        },
+        "Item.otherwise": {
+          "assign": {
+            "itemsGiven": [
+              "+",
+              [
+                "state",
+                "itemsGiven"
+              ],
+              1
+            ],
+            "usablePositions": [
+              "ite",
+              [
+                "var",
+                "usable"
+              ],
+              [
+                "concat",
+                [
+                  "state",
+                  "usablePositions"
+                ],
+                [
+                  "list",
+                  [
+                    "state",
+                    "itemsGiven"
+                  ]
+                ]
+              ],
+              [
+                "state",
+                "usablePositions"
+              ]
+            ]
+          },
+          "calls": [],
+          "command": "Item",
+          "guard": true
+        },
+        "LengthNumber.otherwise": {
+          "assign": {
+            "foundLengths": [
+              "ite",
+              [
+                "and",
+                [
+                  ">=",
+                  [
+                    "var",
+                    "number"
+                  ],
+                  1
+                ],
+                [
+                  "<=",
+                  [
+                    "var",
+                    "number"
+                  ],
+                  10000
+                ]
+              ],
+              [
+                "ite",
+                [
+                  "in",
+                  [
+                    "+",
+                    [
+                      "var",
+                      "number"
+                    ],
+                    1
+                  ],
+                  [
+                    "ite",
+                    [
+                      "in",
+                      [
+                        "var",
+                        "number"
+                      ],
+                      [
+                        "ite",
+                        [
+                          "in",
+                          [
+                            "-",
+                            [
+                              "var",
+                              "number"
+                            ],
+                            1
+                          ],
+                          [
+                            "state",
+                            "foundLengths"
+                          ]
+                        ],
+                        [
+                          "state",
+                          "foundLengths"
+                        ],
+                        [
+                          "concat",
+                          [
+                            "state",
+                            "foundLengths"
+                          ],
+                          [
+                            "list",
+                            [
+                              "-",
+                              [
+                                "var",
+                                "number"
+                              ],
+                              1
+                            ]
+                          ]
+                        ]
+                      ]
+                    ],
+                    [
+                      "ite",
+                      [
+                        "in",
+                        [
+                          "-",
+                          [
+                            "var",
+                            "number"
+                          ],
+                          1
+                        ],
+                        [
+                          "state",
+                          "foundLengths"
+                        ]
+                      ],
+                      [
+                        "state",
+                        "foundLengths"
+                      ],
+                      [
+                        "concat",
+                        [
+                          "state",
+                          "foundLengths"
+                        ],
+                        [
+                          "list",
+                          [
+                            "-",
+                            [
+                              "var",
+                              "number"
+                            ],
+                            1
+                          ]
+                        ]
+                      ]
+                    ],
+                    [
+                      "concat",
+                      [
+                        "ite",
+                        [
+                          "in",
+                          [
+                            "-",
+                            [
+                              "var",
+                              "number"
+                            ],
+                            1
+                          ],
+                          [
+                            "state",
+                            "foundLengths"
+                          ]
+                        ],
+                        [
+                          "state",
+                          "foundLengths"
+                        ],
+                        [
+                          "concat",
+                          [
+                            "state",
+                            "foundLengths"
+                          ],
+                          [
+                            "list",
+                            [
+                              "-",
+                              [
+                                "var",
+                                "number"
+                              ],
+                              1
+                            ]
+                          ]
+                        ]
+                      ],
+                      [
+                        "list",
+                        [
+                          "var",
+                          "number"
+                        ]
+                      ]
+                    ]
+                  ]
+                ],
+                [
+                  "ite",
+                  [
+                    "in",
+                    [
+                      "var",
+                      "number"
+                    ],
+                    [
+                      "ite",
+                      [
+                        "in",
+                        [
+                          "-",
+                          [
+                            "var",
+                            "number"
+                          ],
+                          1
+                        ],
+                        [
+                          "state",
+                          "foundLengths"
+                        ]
+                      ],
+                      [
+                        "state",
+                        "foundLengths"
+                      ],
+                      [
+                        "concat",
+                        [
+                          "state",
+                          "foundLengths"
+                        ],
+                        [
+                          "list",
+                          [
+                            "-",
+                            [
+                              "var",
+                              "number"
+                            ],
+                            1
+                          ]
+                        ]
+                      ]
+                    ]
+                  ],
+                  [
+                    "ite",
+                    [
+                      "in",
+                      [
+                        "-",
+                        [
+                          "var",
+                          "number"
+                        ],
+                        1
+                      ],
+                      [
+                        "state",
+                        "foundLengths"
+                      ]
+                    ],
+                    [
+                      "state",
+                      "foundLengths"
+                    ],
+                    [
+                      "concat",
+                      [
+                        "state",
+                        "foundLengths"
+                      ],
+                      [
+                        "list",
+                        [
+                          "-",
+                          [
+                            "var",
+                            "number"
+                          ],
+                          1
+                        ]
+                      ]
+                    ]
+                  ],
+                  [
+                    "concat",
+                    [
+                      "ite",
+                      [
+                        "in",
+                        [
+                          "-",
+                          [
+                            "var",
+                            "number"
+                          ],
+                          1
+                        ],
+                        [
+                          "state",
+                          "foundLengths"
+                        ]
+                      ],
+                      [
+                        "state",
+                        "foundLengths"
+                      ],
+                      [
+                        "concat",
+                        [
+                          "state",
+                          "foundLengths"
+                        ],
+                        [
+                          "list",
+                          [
+                            "-",
+                            [
+                              "var",
+                              "number"
+                            ],
+                            1
+                          ]
+                        ]
+                      ]
+                    ],
+                    [
+                      "list",
+                      [
+                        "var",
+                        "number"
+                      ]
+                    ]
+                  ]
+                ],
+                [
+                  "concat",
+                  [
+                    "ite",
+                    [
+                      "in",
+                      [
+                        "var",
+                        "number"
+                      ],
+                      [
+                        "ite",
+                        [
+                          "in",
+                          [
+                            "-",
+                            [
+                              "var",
+                              "number"
+                            ],
+                            1
+                          ],
+                          [
+                            "state",
+                            "foundLengths"
+                          ]
+                        ],
+                        [
+                          "state",
+                          "foundLengths"
+                        ],
+                        [
+                          "concat",
+                          [
+                            "state",
+                            "foundLengths"
+                          ],
+                          [
+                            "list",
+                            [
+                              "-",
+                              [
+                                "var",
+                                "number"
+                              ],
+                              1
+                            ]
+                          ]
+                        ]
+                      ]
+                    ],
+                    [
+                      "ite",
+                      [
+                        "in",
+                        [
+                          "-",
+                          [
+                            "var",
+                            "number"
+                          ],
+                          1
+                        ],
+                        [
+                          "state",
+                          "foundLengths"
+                        ]
+                      ],
+                      [
+                        "state",
+                        "foundLengths"
+                      ],
+                      [
+                        "concat",
+                        [
+                          "state",
+                          "foundLengths"
+                        ],
+                        [
+                          "list",
+                          [
+                            "-",
+                            [
+                              "var",
+                              "number"
+                            ],
+                            1
+                          ]
+                        ]
+                      ]
+                    ],
+                    [
+                      "concat",
+                      [
+                        "ite",
+                        [
+                          "in",
+                          [
+                            "-",
+                            [
+                              "var",
+                              "number"
+                            ],
+                            1
+                          ],
+                          [
+                            "state",
+                            "foundLengths"
+                          ]
+                        ],
+                        [
+                          "state",
+                          "foundLengths"
+                        ],
+                        [
+                          "concat",
+                          [
+                            "state",
+                            "foundLengths"
+                          ],
+                          [
+                            "list",
+                            [
+                              "-",
+                              [
+                                "var",
+                                "number"
+                              ],
+                              1
+                            ]
+                          ]
+                        ]
+                      ],
+                      [
+                        "list",
+                        [
+                          "var",
+                          "number"
+                        ]
+                      ]
+                    ]
+                  ],
+                  [
+                    "list",
+                    [
+                      "+",
+                      [
+                        "var",
+                        "number"
+                      ],
+                      1
+                    ]
+                  ]
+                ]
+              ],
+              [
+                "state",
+                "foundLengths"
+              ]
+            ]
+          },
+          "calls": [],
+          "command": "LengthNumber",
+          "guard": true
+        },
+        "Text.otherwise": {
+          "assign": {
+            "knownTexts": [
+              "ite",
+              [
+                "not",
+                [
+                  "in",
+                  [
+                    "var",
+                    "text"
+                  ],
+                  [
+                    "state",
+                    "knownTexts"
+                  ]
+                ]
+              ],
+              [
+                "concat",
+                [
+                  "state",
+                  "knownTexts"
+                ],
+                [
+                  "list",
+                  [
+                    "var",
+                    "text"
+                  ]
+                ]
+              ],
+              [
+                "state",
+                "knownTexts"
+              ]
+            ]
+          },
+          "calls": [],
+          "command": "Text",
+          "guard": true
         }
-      }
-    },
-    {
-      "from": [
-        "READY"
-      ],
-      "name": "BeginNumbers",
-      "onlyIf": [],
-      "when": {
-        "otherwise": {
-          "does": "The candidates for a number input are decided next: whether it takes integers only, and its smallest and largest value if it has them. No threshold has been given yet.",
-          "set": {
-            "aroundValues": [],
-            "highest": {
-              "$ref": "input:max"
-            },
-            "lowest": {
-              "$ref": "input:min"
-            },
-            "wholeOnly": {
-              "$ref": "input:integer"
-            }
+      },
+      "init": {
+        "aroundValues": [
+          "list"
+        ],
+        "foundLengths": [
+          "list"
+        ],
+        "highest": null,
+        "itemsGiven": 0,
+        "knownTexts": [
+          "list"
+        ],
+        "lowest": null,
+        "pickGiven": null,
+        "usablePositions": [
+          "list"
+        ],
+        "wholeOnly": false
+      },
+      "queries": {
+        "DecideAmong": {
+          "is": [
+            "calc",
+            "decideAmong",
+            {}
+          ],
+          "params": {},
+          "result": {
+            "optional": "int"
           }
-        }
-      }
-    },
-    {
-      "from": [
-        "READY"
-      ],
-      "name": "BeginStrings",
-      "onlyIf": [],
-      "when": {
-        "otherwise": {
-          "does": "The candidates for a string input are decided next. Nothing has been given yet.",
-          "set": {
-            "foundLengths": [],
-            "knownTexts": []
-          }
-        }
-      }
-    },
-    {
-      "from": [
-        "READY"
-      ],
-      "name": "DecideAmong",
-      "onlyIf": [],
-      "when": {
-        "otherwise": {
-          "does": "The answer: the position (among all the values given, from 0) of the value picked, or null. Among the values that can be used, the one at `pick` modulo their number is picked; none is picked when there is no `pick` or no value can be used.",
-          "responds": {
-            "$ref": "calculation:picked"
-          }
-        }
-      }
-    },
-    {
-      "from": [
-        "READY"
-      ],
-      "name": "DecideNumbers",
-      "onlyIf": [],
-      "when": {
-        "otherwise": {
-          "does": "The answer. The limits: the smallest and then the largest value, those that exist. The thresholds: for each threshold (taking a threshold given twice once), the threshold itself, or, for an input that takes integers only, one less, itself and one more. Both keep only values the input takes (an integer if it takes integers only, within its smallest and largest value), each once, in the order first found.",
-          "responds": {
-            "limits": {
-              "$ref": "calculation:limits"
-            },
-            "thresholds": {
-              "$ref": "calculation:thresholds"
-            }
-          }
-        }
-      }
-    },
-    {
-      "from": [
-        "READY"
-      ],
-      "name": "DecideStrings",
-      "onlyIf": [],
-      "when": {
-        "otherwise": {
-          "does": "The answer: the strings given (each once, in the order first given) and the lengths decided (each once, in the order first decided).",
-          "responds": {
-            "known": {
-              "$ref": "data:knownTexts"
-            },
-            "lengths": {
-              "$ref": "data:foundLengths"
-            }
-          }
-        }
-      }
-    },
-    {
-      "description": "A remembered value, and whether it can be used (it is not null and fits the input's type).",
-      "from": [
-        "READY"
-      ],
-      "name": "Item",
-      "onlyIf": [],
-      "when": {
-        "The remembered value can be used": {
-          "set": {
-            "itemsGiven": {
-              "$ref": "calculation:itemsAfter"
-            },
-            "usablePositions": {
-              "$ref": "calculation:positionsWithItem"
+        },
+        "DecideNumbers": {
+          "is": [
+            "calc",
+            "decideNumbers",
+            {}
+          ],
+          "params": {},
+          "result": {
+            "record": {
+              "limits": {
+                "list": "int"
+              },
+              "thresholds": {
+                "list": "int"
+              }
             }
           }
         },
-        "otherwise": {
-          "set": {
-            "itemsGiven": {
-              "$ref": "calculation:itemsAfter"
+        "DecideStrings": {
+          "is": [
+            "calc",
+            "decideStrings",
+            {}
+          ],
+          "params": {},
+          "result": {
+            "record": {
+              "known": {
+                "list": "string"
+              },
+              "lengths": {
+                "list": "int"
+              }
             }
           }
         }
-      }
-    },
-    {
-      "description": "A number found in the specification. If it is an integer from 1 to 10000, strings one shorter, of that length and one longer are to be tried (those lengths, in that order: the number minus one, the number, the number plus one; each kept once).",
-      "from": [
-        "READY"
-      ],
-      "name": "LengthNumber",
-      "onlyIf": [],
-      "when": {
-        "The number is an integer from 1 to 10000": {
-          "set": {
-            "foundLengths": {
-              "$ref": "calculation:lengthsWithNew"
-            }
-          }
+      },
+      "state": {
+        "aroundValues": {
+          "list": "int"
         },
-        "otherwise": {}
-      }
-    },
-    {
-      "from": [
-        "READY"
-      ],
-      "name": "Text",
-      "onlyIf": [],
-      "when": {
-        "otherwise": {
-          "does": "A string found in the specification, or an example declared for the input.",
-          "set": {
-            "knownTexts": {
-              "$ref": "calculation:textsWithNew"
-            }
-          }
-        }
+        "foundLengths": {
+          "list": "int"
+        },
+        "highest": {
+          "optional": "int"
+        },
+        "itemsGiven": "int",
+        "knownTexts": {
+          "list": "string"
+        },
+        "lowest": {
+          "optional": "int"
+        },
+        "pickGiven": {
+          "optional": "int"
+        },
+        "usablePositions": {
+          "list": "int"
+        },
+        "wholeOnly": "bool"
       }
     }
-  ],
-  "decisions": {},
-  "descriptions": {
-    "component": "Decides which values the generator of command inputs mixes in, and which remembered value an input is picked from.",
-    "data.aroundValues": "The thresholds given so far for a number input, in the order given.",
-    "data.foundLengths": "The lengths decided so far for a string input, each once, in the order first decided.",
-    "data.highest": "The largest value the number input takes, if any.",
-    "data.itemsGiven": "How many remembered values have been given so far.",
-    "data.knownTexts": "The strings given so far for a string input, each once, in the order first given.",
-    "data.lowest": "The smallest value the number input takes, if any.",
-    "data.pickGiven": "The position to pick, if one is to be picked.",
-    "data.usablePositions": "The positions (from 0) of the remembered values given so far that can be used.",
-    "data.wholeOnly": "Whether the number input takes integers only."
   },
-  "irVersion": 7,
-  "model": {
-    "calculations": {
-      "itemsAfter": {
-        "description": "The number of values given so far, plus one",
-        "output": "integer"
-      },
-      "lengthsWithNew": {
-        "description": "The lengths decided so far, followed by the number minus one, the number and the number plus one, in that order, each unless it is already there",
-        "output": {
-          "list": "integer"
-        }
-      },
-      "limits": {
-        "description": "The smallest and then the largest value, those that exist, keeping only values the input takes, each once",
-        "output": {
-          "list": "number"
-        }
-      },
-      "picked": {
-        "description": "null without pick or without any usable value; otherwise the usable position at pick modulo the number of usable positions",
-        "output": {
-          "optional": "integer"
-        }
-      },
-      "positionsWithItem": {
-        "description": "The usable positions so far, followed by the position of this value (the number of values given before it)",
-        "output": {
-          "list": "integer"
-        }
-      },
-      "textsWithNew": {
-        "description": "The strings given so far, followed by the string unless it was already given",
-        "output": {
-          "list": "string"
-        }
-      },
-      "thresholds": {
-        "description": "For each threshold given (a threshold given twice taken once), the threshold, or one less, itself and one more for an input that takes integers only; keeping only values the input takes, each once, in the order first found",
-        "output": {
-          "list": "number"
-        }
-      },
-      "thresholdsWithNew": {
-        "description": "The thresholds given so far, followed by the threshold",
-        "output": {
-          "list": "number"
-        }
-      }
-    },
-    "commands": {
-      "Around": {
-        "around": {
-          "around": [
-            0.5,
-            3
-          ],
-          "max": 13,
-          "min": -4,
-          "type": "number"
-        }
-      },
-      "BeginAmong": {
-        "pick": {
-          "optional": {
-            "max": 20,
-            "min": 0,
-            "type": "integer"
-          }
-        }
-      },
-      "BeginNumbers": {
-        "integer": "boolean",
-        "max": {
-          "optional": {
-            "max": 12,
-            "min": -3,
-            "type": "integer"
-          }
-        },
-        "min": {
-          "optional": {
-            "max": 12,
-            "min": -3,
-            "type": "integer"
-          }
-        }
-      },
-      "BeginStrings": {},
-      "DecideAmong": {},
-      "DecideNumbers": {},
-      "DecideStrings": {},
-      "Item": {
-        "usable": "boolean"
-      },
-      "LengthNumber": {
-        "number": {
-          "around": [
-            0,
-            1,
-            2.5,
-            10000,
-            10001
-          ],
-          "max": 10002,
-          "min": -2,
-          "type": "number"
-        }
-      },
-      "Text": {
-        "text": {
-          "examples": [
-            "a",
-            "b",
-            ""
-          ],
-          "type": "string"
-        }
-      }
-    },
-    "data": {
-      "aroundValues": {
-        "list": "number"
-      },
-      "foundLengths": {
-        "list": "integer"
-      },
-      "highest": {
-        "optional": "number"
-      },
-      "itemsGiven": "integer",
-      "knownTexts": {
-        "list": "string"
-      },
-      "lowest": {
-        "optional": "number"
-      },
-      "pickGiven": {
-        "optional": "integer"
-      },
-      "usablePositions": {
-        "list": "integer"
-      },
-      "wholeOnly": "boolean"
-    },
-    "effects": {},
-    "init": "READY",
-    "initial": {
-      "aroundValues": [],
-      "foundLengths": [],
-      "highest": null,
-      "itemsGiven": 0,
-      "knownTexts": [],
-      "lowest": null,
-      "pickGiven": null,
-      "usablePositions": [],
-      "wholeOnly": false
-    },
-    "outputs": {
-      "DecideAmong": {
-        "optional": "integer"
-      },
-      "DecideNumbers": {
-        "record": {
-          "limits": {
-            "list": "number"
-          },
-          "thresholds": {
-            "list": "number"
-          }
-        }
-      },
-      "DecideStrings": {
-        "record": {
-          "known": {
-            "list": "string"
-          },
-          "lengths": {
-            "list": "integer"
-          }
-        }
-      }
-    },
-    "queries": {},
-    "states": [
-      "READY"
+  "entries": {
+    "commands": [
+      "input-candidates.Around",
+      "input-candidates.BeginAmong",
+      "input-candidates.BeginNumbers",
+      "input-candidates.BeginStrings",
+      "input-candidates.Item",
+      "input-candidates.LengthNumber",
+      "input-candidates.Text"
+    ],
+    "queries": [
+      "input-candidates.DecideAmong",
+      "input-candidates.DecideNumbers",
+      "input-candidates.DecideStrings"
+    ]
+  },
+  "irVersion": 8,
+  "notes": {
+    "input-candidates": "Decides which values the generator of command inputs mixes in, and which remembered value an input is picked from.",
+    "input-candidates.calcs.decideAmong": "The answer: the position (among all the values given, from 0) of the value picked, or null. Among the values that can be used, the one at `pick` modulo their number is picked; none is picked when there is no `pick` or no value can be used.",
+    "input-candidates.calcs.decideNumbers": "The answer. The limits: the smallest and then the largest value, those that exist. The thresholds: for each threshold (taking a threshold given twice once), the threshold itself, or, for an input that takes integers only, one less, itself and one more. Both keep only values the input takes (an integer if it takes integers only, within its smallest and largest value), each once, in the order first found.",
+    "input-candidates.calcs.decideStrings": "The answer: the strings given (each once, in the order first given) and the lengths decided (each once, in the order first decided).",
+    "input-candidates.does.around": "A threshold: a number found in the specification or declared with `around`.",
+    "input-candidates.does.beginAmong": "An input is to be picked from what the component remembers: at the position `pick`, or not at all when there is none. No remembered value has been given yet.",
+    "input-candidates.does.beginNumbers": "The candidates for a number input are decided next: whether it takes integers only, and its smallest and largest value if it has them. No threshold has been given yet.",
+    "input-candidates.does.beginStrings": "The candidates for a string input are decided next. Nothing has been given yet.",
+    "input-candidates.does.item": "A remembered value, and whether it can be used (it is not null and fits the input's type).",
+    "input-candidates.does.lengthNumber": "A number found in the specification. If it is an integer from 1 to 10000, strings one shorter, of that length and one longer are to be tried (those lengths, in that order: the number minus one, the number, the number plus one; each kept once).",
+    "input-candidates.does.text": "A string found in the specification, or an example declared for the input."
+  },
+  "root": "input-candidates",
+  "sorts": [],
+  "trace": {
+    "input-candidates.does.around": [
+      "InputCandidates.commands.Around"
+    ],
+    "input-candidates.does.beginAmong": [
+      "InputCandidates.commands.BeginAmong"
+    ],
+    "input-candidates.does.beginNumbers": [
+      "InputCandidates.commands.BeginNumbers"
+    ],
+    "input-candidates.does.beginStrings": [
+      "InputCandidates.commands.BeginStrings"
+    ],
+    "input-candidates.does.item": [
+      "InputCandidates.commands.Item"
+    ],
+    "input-candidates.does.lengthNumber": [
+      "InputCandidates.commands.LengthNumber"
+    ],
+    "input-candidates.does.text": [
+      "InputCandidates.commands.Text"
     ]
   }
 }

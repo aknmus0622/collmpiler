@@ -1,87 +1,118 @@
-import { amountCharged, decideCampaign, isPriorityShipping } from "./policy.ts";
-import type { OrderDependencies } from "./ports.ts";
-import type { MemberRank, OrderStatus, PlaceOrderRequest } from "./types.ts";
+/**
+ * The order component (specification component `order`, the root).
+ */
+
+import type { OrderDependencies } from "./dependencies.ts";
+import { chargedAmount, couponToIssue, decideCampaign, decideShipping } from "./rules.ts";
+import type { CancelOutcome, CustomerRank, OrderStatus } from "./types.ts";
 
 /**
- * One customer order: the component described by the specification.
+ * One order, kept in memory (nothing survives a restart). A new instance starts in the specification's
+ * initial state. Each command method performs one specification command in a single synchronous step:
+ * it reads the stored fields, asks the dependencies it needs, updates the fields and sends the resulting
+ * notifications through the dependencies before returning.
  *
- * Create one instance per order; it starts in the specification's initial state. Drive it with
- * the four command methods and read the resulting state from `status`. All methods are
- * synchronous: every dependency call a command makes has happened by the time it returns, in
- * the order the specification lists the effects.
- *
- * Each command is meant to be called only in the states, and under the preconditions, that the
- * specification allows for it; what happens otherwise is unspecified.
+ * Callers only invoke commands with inputs and in situations the specification allows (its `requires`);
+ * behaviour outside those is unspecified.
  */
 export class Order {
-  private readonly deps: OrderDependencies;
-  private state: OrderStatus = "DRAFT";
-  // Set by placeOrder; every order past the draft state has both.
-  private rank: MemberRank = "Bronze";
-  private price = 0;
-
-  /** `deps` are the order's collaborators; they are kept and used by the command methods. */
-  constructor(deps: OrderDependencies) {
-    this.deps = deps;
-  }
-
-  /** The current state, as a specification state name. */
-  get status(): OrderStatus {
-    return this.state;
-  }
+  readonly #deps: OrderDependencies;
+  /** Specification state field `order.status`. */
+  #status!: OrderStatus;
+  /** Specification state field `order.rank`. */
+  #rank!: CustomerRank | null;
+  /** Specification state field `order.price`, in whole yen. */
+  #price!: number;
+  /** Specification state field `order.amountPaid`, in whole yen. */
+  #amountPaid!: number;
 
   /**
-   * Specification command `PlaceOrder`. Remembers the customer's rank and the list price from
-   * `request` (the specification's `rank` and `price` data) and tells the notifier to send the
-   * order confirmation.
+   * Creates a new order.
+   * @param deps calendar, payment module, customer notifier and refund service it talks to.
    */
-  placeOrder(request: PlaceOrderRequest): void {
-    this.rank = request.customerRank;
-    this.price = request.listPrice;
-    this.state = "PENDING";
-    this.deps.notifier.sendOrderConfirmation();
+  constructor(deps: OrderDependencies) {
+    this.#deps = deps;
+    this.#status = "DRAFT";
+    this.#rank = null;
+    this.#price = 0;
+    this.#amountPaid = 0;
   }
 
   /**
-   * Specification command `Checkout` (no input). Asks the payment gateway whether it is active
-   * and for the charge outcome, and the calendar for today's date; depending on the outcome it
-   * tells the notifier to send a receipt or a payment-failure notice, and may tell the coupon
-   * issuer to issue a coupon.
+   * Reads the lifecycle value (specification query `Status`); see {@link OrderStatus} for the values.
+   * Talks to no dependency.
+   */
+  status(): OrderStatus {
+    return this.#status;
+  }
+
+  /**
+   * Performs specification command `PlaceOrder`. Stores the inputs and calls
+   * {@link CustomerNotifier.sendOrderConfirmation}.
+   * @param customerRank membership rank (specification `customerRank`).
+   * @param listPrice list price in whole yen (specification `listPrice`).
+   */
+  placeOrder(customerRank: CustomerRank, listPrice: number): void {
+    this.#price = listPrice;
+    this.#rank = customerRank;
+    this.#status = "PENDING";
+    this.#deps.customer.sendOrderConfirmation();
+  }
+
+  /**
+   * Performs specification command `Checkout` (events `Checkout.paid` / `Checkout.otherwise`).
+   * Asks {@link PaymentModule.result}, may ask {@link Calendar.isMonthEnd}, then calls either
+   * {@link CustomerNotifier.sendReceipt} (possibly followed by {@link CustomerNotifier.issueCoupon}) or
+   * {@link CustomerNotifier.sendPaymentFailure}. Returns nothing.
    */
   checkout(): void {
-    const { calendar, payments, notifier, coupons } = this.deps;
-    if (!payments.isActive()) {
+    const { calendar, payment, customer } = this.#deps;
+    if (payment.result() !== "succeeded") {
+      customer.sendPaymentFailure();
       return;
     }
-    const terms = decideCampaign(this.rank, calendar.today());
-    const amount = amountCharged(this.price, terms.discountPercent);
-    if (payments.charge(amount) !== "succeeded") {
-      notifier.notifyPaymentFailure();
-      return;
-    }
-    this.state = "PAID";
-    notifier.sendReceipt({ amount, discountPercent: terms.discountPercent });
-    if (terms.coupon !== null) {
-      coupons.issue(terms.coupon);
+    const rank = this.#placedRank();
+    const campaign = decideCampaign(rank, rank === "Gold" && calendar.isMonthEnd());
+    const amount = chargedAmount(this.#price, campaign.discountPercent);
+    this.#amountPaid = amount;
+    this.#status = "PAID";
+    customer.sendReceipt(amount, campaign.discountPercent);
+    const coupon = couponToIssue(campaign);
+    if (coupon !== null) {
+      customer.issueCoupon(coupon);
     }
   }
 
   /**
-   * Specification command `Ship` (no input). Tells the notifier to send the shipping notice.
+   * Performs specification command `Ship` and calls {@link CustomerNotifier.sendShippingNotice}.
    */
   ship(): void {
-    this.state = "SHIPPED";
-    this.deps.notifier.sendShippingNotice(isPriorityShipping(this.rank, this.price));
+    const plan = decideShipping(this.#placedRank(), this.#price);
+    this.#status = "SHIPPED";
+    this.#deps.customer.sendShippingNotice(plan.priority);
   }
 
   /**
-   * Specification command `Cancel` (no input). May tell the payment gateway to refund.
+   * Performs specification command `Cancel` (events `Cancel.case1`, `Cancel.case2`, `Cancel.otherwise`).
+   * May call {@link RefundService.refund}.
+   * @returns the command's answer; see {@link CancelOutcome}.
    */
-  cancel(): void {
-    const wasPaid = this.state === "PAID";
-    this.state = "CANCELLED";
-    if (wasPaid) {
-      this.deps.payments.refund();
+  cancel(): CancelOutcome {
+    if (this.#status === "PAID") {
+      const refund = this.#amountPaid;
+      this.#status = "CANCELLED";
+      this.#deps.refunds.refund(refund);
+      return "cancelled";
     }
+    if (this.#status === "PENDING") {
+      this.#status = "CANCELLED";
+      return "cancelled";
+    }
+    return "not-cancellable";
+  }
+
+  /** The stored rank, which the specification guarantees is set once the order is past the draft state. */
+  #placedRank(): CustomerRank {
+    return this.#rank!;
   }
 }

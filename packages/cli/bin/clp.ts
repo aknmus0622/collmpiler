@@ -22,7 +22,6 @@ const COMMANDS: Record<string, () => Promise<Command>> = {
 const INTERNAL: Record<string, () => Promise<Command>> = {
   __compare: () => import("../src/commands/compare.ts"),
   __cases: () => import("../src/commands/cases.ts"),
-  __migrate: () => import("../src/commands/migrate.ts"),
   __agreement: () => import("../src/commands/agreement.ts"),
 };
 

@@ -3,13 +3,11 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { checkWorkspace } from "../src/check.ts";
-import { extract, stableStringify } from "../src/extract.ts";
 import { scrubEnv } from "../src/gates.ts";
 import { generateAdapterSkeleton, generateContract, generateVerify } from "../src/generate.ts";
 import type { Ir } from "../src/generate.ts";
 import { DEFAULT_GUIDE } from "../src/guide.ts";
 import { resolveLayout, workspaceOf } from "../src/layout.ts";
-import { loadSpecs } from "../src/loader.ts";
 import { implement } from "../src/loop.ts";
 import type { ImplementOptions } from "../src/loop.ts";
 import { judge } from "../src/mutation.ts";
@@ -44,9 +42,9 @@ test("3段階: 設計 → 配線 (赤) → 実装 (緑) の順に、別々の依
 test("3段階: 段階ごとに見せるものが違う (配線は IR を見ない。設計と実装はテストの口を見ない)", async () => {
   const { seen } = await run({}, { mutation: null });
   const keys = (phase: Phase) => Object.keys(of(seen, phase)[0].files).sort();
-  assert.deepEqual(keys("design"), ["clp/REQUEST.md", "clp/order.ir.json"]);
+  assert.deepEqual(keys("design"), ["clp/REQUEST.md", "clp/order.ir.json", "clp/order.spec.md"]);
   assert.deepEqual(keys("wiring"), ["clp/REQUEST.md", "clp/order.adapter.contract.ts", "clp/order.adapter.ts", "src/order-service.ts"]);
-  assert.deepEqual(keys("implementation"), ["clp/REQUEST.md", "clp/order.ir.json", "src/order-service.ts"]);
+  assert.deepEqual(keys("implementation"), ["clp/REQUEST.md", "clp/order.ir.json", "clp/order.spec.md", "src/order-service.ts"]);
 
   // 配線の段階には、条件の文も決定表の値も渡らない
   const wiring = Object.values(of(seen, "wiring")[0].files).join("\n");
@@ -185,19 +183,19 @@ test("実装 (緑): PBT の反例を差し戻し、次の試行で合格する",
   assert.equal(status, "pass");
   assert.deepEqual(trail, ["design:ok", "wiring:ok", "implementation:pbt", "implementation:ok"]);
 
-  // シルバー会員の割引違いが、最小の反例として報告される。
-  // 注文のときに覚えた会員ランクが、決済のときの data として示される
+  // シルバー会員の割引違いが、最小の反例として報告される。手ごとに、起きたイベントと外の世界の答えが付く
   const first = attempts[2].feedback;
   assert.ok(first?.kind === "pbt" && first.result.status === "fail");
+  const steps = first.result.steps as unknown as { name: string; input: Record<string, unknown>; events: string[] }[];
   assert.deepEqual(
-    first.result.steps.map((s) => [s.from, s.command, s.case, s.input.customerRank, s.data.rank]),
+    steps.map((s) => [s.name, s.input.customerRank, s.events]),
     [
-      ["DRAFT", "PlaceOrder", "otherwise", "Silver", undefined],
-      ["PENDING", "Checkout", "The payment succeeded", undefined, "Silver"],
+      ["PlaceOrder", "Silver", ["order.PlaceOrder.otherwise"]],
+      ["Checkout", undefined, ["order.Checkout.paid"]],
     ],
   );
   // 割引率だけが食い違う（価格は縮小の止まった値で、ここでは問わない）
-  const percentOf = (o: unknown) => (o as { effects: { payload: { discountPercent: number } }[] }).effects[0].payload.discountPercent;
+  const percentOf = (o: unknown) => (o as { effects: { args: { discountPercent: number } }[] }).effects[0].args.discountPercent;
   assert.equal(percentOf(first.result.expected), 5);
   assert.equal(percentOf(first.result.actual), 50);
 
@@ -207,12 +205,12 @@ test("実装 (緑): PBT の反例を差し戻し、次の試行で合格する",
   assert.match(retry.files["src/order-service.ts"], /percent = 50/);
 
   // 合格。使った Strategy と件数、生き残りは結果に残る。
-  // 生き残るのは price の初期値 0 だけ（必ず上書きされるので、変えても挙動が変わらない）。
+  // 生き残るのは price と paid の初期値 0 だけ（必ず上書きされてから読まれるので、変えても挙動が変わらない）。
   // 0 は決定表の値でもあるが、別の出現箇所が検出されているので不合格にはならない
   const mutation = attempts[3].mutation;
   assert.equal(mutation?.strategy, "builtin");
-  assert.ok(mutation.mutants >= 10 && mutation.killed === mutation.mutants - 1);
-  assert.deepEqual(mutation.survivors.map((s) => s.original), ["0"]);
+  assert.ok(mutation.mutants >= 10 && mutation.killed === mutation.mutants - 2);
+  assert.deepEqual(mutation.survivors.map((s) => s.original), ["0", "0"]);
 });
 
 test("複数ステップ: 3手でしか現れない不具合を、最小のコマンド列まで縮めて報告する", async () => {
@@ -220,33 +218,29 @@ test("複数ステップ: 3手でしか現れない不具合を、最小のコ�
   const feedback = attempts.at(-1)?.feedback;
   assert.ok(feedback?.kind === "pbt" && feedback.result.status === "fail");
   // 決済に成功してからキャンセルしたときだけ、返金が必要になる
-  assert.deepEqual(
-    feedback.result.steps.map((s) => [s.from, s.command, s.case]),
-    [
-      ["DRAFT", "PlaceOrder", "otherwise"],
-      ["PENDING", "Checkout", "The payment succeeded"],
-      ["PAID", "Cancel", "otherwise"],
-    ],
-  );
-  assert.deepEqual(feedback.result.expected, { state: "CANCELLED", effects: [{ name: "Refund", payload: {} }] });
-  assert.deepEqual(feedback.result.actual, { state: "CANCELLED", effects: [] });
+  const steps = feedback.result.steps as unknown as { name: string }[];
+  assert.deepEqual(steps.map((s) => s.name), ["PlaceOrder", "Checkout", "Cancel"]);
+  const expected = feedback.result.expected as unknown as { effects: { port: string }[]; output: unknown };
+  assert.deepEqual(expected.effects.map((e) => e.port), ["refunds.Refund"]);
+  assert.equal(expected.output, "cancelled");
+  assert.deepEqual(feedback.result.actual, { state: null, effects: [], output: "cancelled" });
 });
 
 test("しきい値: 「以上」と「より大きい」の取り違えを、ちょうどの値で見つける", async () => {
   const { attempts } = await run({ implementation: ["boundary"] }, { maxAttempts: 1 });
   const feedback = attempts.at(-1)?.feedback;
   assert.ok(feedback?.kind === "pbt" && feedback.result.status === "fail");
-  const ship = feedback.result.steps.at(-1);
-  assert.equal(ship?.command, "Ship");
-  assert.equal(ship.data.price, 10000);
-  assert.deepEqual(feedback.result.expected, { state: "SHIPPED", effects: [{ name: "SendShippingNotice", payload: { priority: true } }] });
-  assert.deepEqual(feedback.result.actual, { state: "SHIPPED", effects: [{ name: "SendShippingNotice", payload: { priority: false } }] });
+  const steps = feedback.result.steps as unknown as { name: string; input: Record<string, unknown> }[];
+  assert.equal(steps.at(-1)?.name, "Ship");
+  assert.equal(steps[0].input.listPrice, 10000);
+  assert.deepEqual(feedback.result.expected, { state: null, effects: [{ port: "customer.ShippingNotice", args: { priority: true } }] });
+  assert.deepEqual(feedback.result.actual, { state: null, effects: [{ port: "customer.ShippingNotice", args: { priority: false } }] });
 });
 
 test("計算: 丸め方の違い (切り捨てと四捨五入) を見つける", async () => {
   const { attempts } = await run({ implementation: ["rounding"] }, { maxAttempts: 1 });
   const feedback = attempts.at(-1)?.feedback;
   assert.ok(feedback?.kind === "pbt" && feedback.result.status === "fail");
-  const amountOf = (o: unknown) => (o as { effects: { payload: { amount: number } }[] }).effects[0].payload.amount;
+  const amountOf = (o: unknown) => (o as { effects: { args: { amount: number } }[] }).effects[0].args.amount;
   assert.equal(amountOf(feedback.result.actual), amountOf(feedback.result.expected) + 1);
 });

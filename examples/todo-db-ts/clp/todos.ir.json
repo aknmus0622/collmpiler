@@ -1,272 +1,1229 @@
 {
-  "behaviors": [
-    {
-      "description": "A title that is empty or made only of whitespace, or that has more characters than the limit (a title of exactly the limit is fine), is refused as invalid, with no item. Otherwise a new item with a fresh identifier and the given title, stored exactly as given (not trimmed), is created after the others, and the answer is created, with the item (not done). When no identifier can be had because the source of identifiers is unavailable, a title that is not invalid is refused as unavailable, with no item.",
-      "from": [
-        "READY"
-      ],
-      "name": "Add",
-      "onlyIf": [],
-      "when": {
-        "(not \"The title is empty, or made only of whitespace, or has more characters than the limit.\" and query \"newId\" failed)": {
-          "responds": {
-            "result": "unavailable",
-            "todo": null
-          }
-        },
-        "The title is empty, or made only of whitespace, or has more characters than the limit.": {
-          "responds": {
-            "result": "invalid",
-            "todo": null
-          }
-        },
-        "otherwise": {
-          "adds": [
-            {
-              "data": {
-                "title": {
-                  "$ref": "input:title"
-                }
-              },
-              "key": {
-                "$ref": "query:newId"
-              },
-              "part": "items"
-            }
-          ],
-          "responds": {
-            "result": "created",
-            "todo": {
-              "$ref": "calculation:createdTodo"
+  "components": {
+    "ids": {
+      "external": {
+        "commands": {},
+        "queries": {
+          "NewId": {
+            "mayFail": true,
+            "params": {},
+            "promise": "fresh",
+            "result": {
+              "atom": "TodoId"
             }
           }
         }
       }
     },
-    {
-      "calls": {
-        "items.Complete": {
-          "at": {
-            "$ref": "input:id"
-          },
-          "command": "Complete",
-          "input": {},
-          "part": "items"
+    "store": {
+      "calcs": {
+        "kept": {
+          "is": [
+            "state",
+            "entries"
+          ],
+          "params": {},
+          "result": {
+            "list": {
+              "record": {
+                "key": "string",
+                "value": "json"
+              }
+            }
+          }
         }
       },
-      "description": "The item with the identifier is asked to complete, and the answer is what the item answered. An unknown identifier is not found, and nothing changes.",
-      "from": [
-        "READY"
-      ],
-      "name": "Complete",
-      "onlyIf": [],
-      "when": {
-        "There is no item with the identifier to complete.": {
-          "responds": "not-found"
-        },
-        "otherwise": {
-          "responds": {
-            "$ref": "call",
-            "path": [
-              "items.Complete"
+      "commands": {
+        "Delete": {
+          "events": [
+            "Delete.otherwise",
+            "Delete.case1"
+          ],
+          "output": {
+            "enum": [
+              "deleted",
+              "not-found"
             ]
-          }
-        }
-      }
-    },
-    {
-      "from": [
-        "READY"
-      ],
-      "name": "List",
-      "onlyIf": [],
-      "when": {
-        "otherwise": {
-          "does": "The answer is the items in the order they were added, filtered as asked, each with its identifier, its title and whether it is done. Nothing changes.",
-          "responds": {
-            "$ref": "calculation:listedTodos"
-          }
-        }
-      }
-    },
-    {
-      "description": "The item is removed. An unknown identifier is refused as not found, and nothing changes.",
-      "from": [
-        "READY"
-      ],
-      "name": "Remove",
-      "onlyIf": [],
-      "when": {
-        "There is no item with the identifier to remove.": {
-          "responds": "not-found"
-        },
-        "otherwise": {
-          "removes": [
-            {
-              "key": {
-                "$ref": "input:id"
-              },
-              "part": "items"
-            }
-          ],
-          "responds": "removed"
-        }
-      }
-    }
-  ],
-  "conditions": {
-    "(not \"The title is empty, or made only of whitespace, or has more characters than the limit.\" and query \"newId\" failed)": {
-      "all": [
-        "not \"The title is empty, or made only of whitespace, or has more characters than the limit.\"",
-        "query \"newId\" failed"
-      ]
-    },
-    "not \"The title is empty, or made only of whitespace, or has more characters than the limit.\"": {
-      "not": "The title is empty, or made only of whitespace, or has more characters than the limit."
-    },
-    "query \"newId\" failed": {
-      "failed": "newId"
-    }
-  },
-  "decisions": {
-    "limits": {
-      "rows": {
-        "otherwise": {
-          "maxTitleLength": 100
-        }
-      }
-    }
-  },
-  "descriptions": {
-    "component": "A to-do list behind an HTTP API. Items are added, completed, removed and listed. Each item is a to-do item of its own, with an identifier given by the list and a title; whether it is done is the item's state. The list survives a restart: after it, it has the same items, in the same order, each open or done as before.",
-    "queries.newId": "A fresh identifier for a new item. The source of identifiers can be unavailable."
-  },
-  "irVersion": 7,
-  "model": {
-    "calculations": {
-      "createdTodo": {
-        "description": "The new item: the fresh identifier, the title exactly as given, and not done.",
-        "output": {
-          "record": {
-            "done": "boolean",
-            "id": "string",
-            "title": "string"
-          }
-        }
-      },
-      "listedTodos": {
-        "description": "The items in the order they were added, keeping all of them, only the open ones or only the done ones as asked, each with its identifier, its title and whether it is done.",
-        "output": {
-          "list": {
-            "record": {
-              "done": "boolean",
-              "id": "string",
-              "title": "string"
-            }
-          }
-        }
-      }
-    },
-    "commands": {
-      "Add": {
-        "title": "string"
-      },
-      "Complete": {
-        "id": {
-          "among": {
-            "data": "items"
           },
-          "type": "string"
+          "params": {
+            "key": "string"
+          }
+        },
+        "Put": {
+          "events": [
+            "Put.otherwise"
+          ],
+          "params": {
+            "data": "json",
+            "key": "string"
+          }
         }
       },
-      "List": {
-        "only": [
-          "all",
-          "open",
-          "done"
+      "durable": true,
+      "events": {
+        "Delete.case1": {
+          "assign": {
+            "entries": [
+              "filter",
+              [
+                "state",
+                "entries"
+              ],
+              [
+                "e"
+              ],
+              [
+                "not",
+                [
+                  "=",
+                  [
+                    "field",
+                    [
+                      "var",
+                      "e"
+                    ],
+                    "key"
+                  ],
+                  [
+                    "var",
+                    "key"
+                  ]
+                ]
+              ]
+            ]
+          },
+          "calls": [],
+          "command": "Delete",
+          "guard": [
+            "some",
+            [
+              "state",
+              "entries"
+            ],
+            [
+              "e"
+            ],
+            [
+              "=",
+              [
+                "field",
+                [
+                  "var",
+                  "e"
+                ],
+                "key"
+              ],
+              [
+                "var",
+                "key"
+              ]
+            ]
+          ],
+          "output": [
+            "lit",
+            "deleted"
+          ]
+        },
+        "Delete.otherwise": {
+          "assign": {},
+          "calls": [],
+          "command": "Delete",
+          "guard": [
+            "not",
+            [
+              "some",
+              [
+                "state",
+                "entries"
+              ],
+              [
+                "e"
+              ],
+              [
+                "=",
+                [
+                  "field",
+                  [
+                    "var",
+                    "e"
+                  ],
+                  "key"
+                ],
+                [
+                  "var",
+                  "key"
+                ]
+              ]
+            ]
+          ],
+          "output": [
+            "lit",
+            "not-found"
+          ]
+        },
+        "Put.otherwise": {
+          "assign": {
+            "entries": [
+              "ite",
+              [
+                "some",
+                [
+                  "state",
+                  "entries"
+                ],
+                [
+                  "e"
+                ],
+                [
+                  "=",
+                  [
+                    "field",
+                    [
+                      "var",
+                      "e"
+                    ],
+                    "key"
+                  ],
+                  [
+                    "var",
+                    "key"
+                  ]
+                ]
+              ],
+              [
+                "map",
+                [
+                  "state",
+                  "entries"
+                ],
+                [
+                  "e"
+                ],
+                [
+                  "ite",
+                  [
+                    "=",
+                    [
+                      "field",
+                      [
+                        "var",
+                        "e"
+                      ],
+                      "key"
+                    ],
+                    [
+                      "var",
+                      "key"
+                    ]
+                  ],
+                  [
+                    "with",
+                    [
+                      "var",
+                      "e"
+                    ],
+                    {
+                      "value": [
+                        "var",
+                        "data"
+                      ]
+                    }
+                  ],
+                  [
+                    "var",
+                    "e"
+                  ]
+                ]
+              ],
+              [
+                "concat",
+                [
+                  "state",
+                  "entries"
+                ],
+                [
+                  "list",
+                  [
+                    "record",
+                    {
+                      "key": [
+                        "var",
+                        "key"
+                      ],
+                      "value": [
+                        "var",
+                        "data"
+                      ]
+                    }
+                  ]
+                ]
+              ]
+            ]
+          },
+          "calls": [],
+          "command": "Put",
+          "guard": true
+        }
+      },
+      "init": {
+        "entries": [
+          "list"
         ]
       },
-      "Remove": {
-        "id": {
-          "among": {
-            "data": "items"
-          },
-          "type": "string"
-        }
-      }
-    },
-    "data": {},
-    "durable": {
-      "store": "store"
-    },
-    "effects": {},
-    "init": "READY",
-    "outputs": {
-      "Add": {
-        "optional": [
-          "todo"
-        ],
-        "record": {
-          "result": [
-            "created",
-            "invalid",
-            "unavailable"
+      "properties": {
+        "eachKeyKeptOnce": {
+          "is": [
+            "always",
+            [
+              "every",
+              [
+                "state",
+                "entries"
+              ],
+              [
+                "e"
+              ],
+              [
+                "=",
+                [
+                  "len",
+                  [
+                    "filter",
+                    [
+                      "state",
+                      "entries"
+                    ],
+                    [
+                      "f"
+                    ],
+                    [
+                      "=",
+                      [
+                        "field",
+                        [
+                          "var",
+                          "f"
+                        ],
+                        "key"
+                      ],
+                      [
+                        "field",
+                        [
+                          "var",
+                          "e"
+                        ],
+                        "key"
+                      ]
+                    ]
+                  ]
+                ],
+                1
+              ]
+            ]
           ],
-          "todo": {
-            "record": {
-              "done": "boolean",
-              "id": "string",
-              "title": "string"
+          "kind": "invariant"
+        }
+      },
+      "queries": {
+        "Entries": {
+          "is": [
+            "calc",
+            "kept",
+            {}
+          ],
+          "params": {},
+          "result": {
+            "list": {
+              "record": {
+                "key": "string",
+                "value": "json"
+              }
             }
           }
         }
       },
-      "Complete": [
-        "completed",
-        "not-found",
-        "already-done"
-      ],
-      "List": {
-        "list": {
-          "record": {
-            "done": "boolean",
-            "id": "string",
-            "title": "string"
+      "state": {
+        "entries": {
+          "list": {
+            "record": {
+              "key": "string",
+              "value": "json"
+            }
+          }
+        }
+      }
+    },
+    "todos": {
+      "calcs": {
+        "listed": {
+          "is": [
+            "ite",
+            [
+              "=",
+              [
+                "var",
+                "only"
+              ],
+              [
+                "lit",
+                "open"
+              ]
+            ],
+            [
+              "filter",
+              [
+                "map",
+                [
+                  "ask",
+                  "store",
+                  "Entries",
+                  {}
+                ],
+                [
+                  "e"
+                ],
+                [
+                  "field",
+                  [
+                    "var",
+                    "e"
+                  ],
+                  "value"
+                ]
+              ],
+              [
+                "t"
+              ],
+              [
+                "not",
+                [
+                  "field",
+                  [
+                    "var",
+                    "t"
+                  ],
+                  "done"
+                ]
+              ]
+            ],
+            [
+              "ite",
+              [
+                "=",
+                [
+                  "var",
+                  "only"
+                ],
+                [
+                  "lit",
+                  "done"
+                ]
+              ],
+              [
+                "filter",
+                [
+                  "map",
+                  [
+                    "ask",
+                    "store",
+                    "Entries",
+                    {}
+                  ],
+                  [
+                    "e"
+                  ],
+                  [
+                    "field",
+                    [
+                      "var",
+                      "e"
+                    ],
+                    "value"
+                  ]
+                ],
+                [
+                  "t"
+                ],
+                [
+                  "field",
+                  [
+                    "var",
+                    "t"
+                  ],
+                  "done"
+                ]
+              ],
+              [
+                "map",
+                [
+                  "ask",
+                  "store",
+                  "Entries",
+                  {}
+                ],
+                [
+                  "e"
+                ],
+                [
+                  "field",
+                  [
+                    "var",
+                    "e"
+                  ],
+                  "value"
+                ]
+              ]
+            ]
+          ],
+          "params": {
+            "only": {
+              "enum": [
+                "all",
+                "open",
+                "done"
+              ]
+            }
+          },
+          "result": {
+            "list": {
+              "record": {
+                "done": "bool",
+                "id": {
+                  "atom": "TodoId"
+                },
+                "title": "string"
+              }
+            }
           }
         }
       },
-      "Remove": [
-        "removed",
-        "not-found"
-      ]
-    },
-    "parts": {
-      "items": {
-        "by": "id",
-        "commands": {
-          "Complete": {}
+      "commands": {
+        "Add": {
+          "events": [
+            "Add.case1",
+            "Add.case2",
+            "Add.otherwise"
+          ],
+          "output": {
+            "record": {
+              "result": {
+                "enum": [
+                  "created",
+                  "invalid",
+                  "unavailable"
+                ]
+              },
+              "todo": {
+                "optional": {
+                  "record": {
+                    "done": "bool",
+                    "id": {
+                      "atom": "TodoId"
+                    },
+                    "title": "string"
+                  }
+                }
+              }
+            }
+          },
+          "params": {
+            "title": "string"
+          }
         },
-        "component": "todo-item",
-        "effects": {},
-        "outputs": {
-          "Complete": [
-            "completed",
+        "Complete": {
+          "events": [
+            "Complete.otherwise",
+            "Complete.case1",
+            "Complete.case2"
+          ],
+          "output": {
+            "enum": [
+              "completed",
+              "not-found",
+              "already-done"
+            ]
+          },
+          "params": {
+            "id": {
+              "atom": "TodoId"
+            }
+          }
+        },
+        "Remove": {
+          "events": [
+            "Remove.case1",
+            "Remove.otherwise"
+          ],
+          "output": {
+            "enum": [
+              "removed",
+              "not-found"
+            ]
+          },
+          "params": {
+            "id": {
+              "atom": "TodoId"
+            }
+          }
+        }
+      },
+      "contains": [
+        "store"
+      ],
+      "events": {
+        "Add.case1": {
+          "assign": {},
+          "calls": [],
+          "command": "Add",
+          "guard": [
+            "or",
+            [
+              "=",
+              [
+                "strlen",
+                [
+                  "trim",
+                  [
+                    "var",
+                    "title"
+                  ]
+                ]
+              ],
+              0
+            ],
+            [
+              ">",
+              [
+                "strlen",
+                [
+                  "var",
+                  "title"
+                ]
+              ],
+              100
+            ]
+          ],
+          "output": [
+            "record",
+            {
+              "result": [
+                "lit",
+                "invalid"
+              ],
+              "todo": null
+            }
+          ]
+        },
+        "Add.case2": {
+          "assign": {},
+          "calls": [],
+          "command": "Add",
+          "guard": [
+            "and",
+            [
+              "not",
+              [
+                "or",
+                [
+                  "=",
+                  [
+                    "strlen",
+                    [
+                      "trim",
+                      [
+                        "var",
+                        "title"
+                      ]
+                    ]
+                  ],
+                  0
+                ],
+                [
+                  ">",
+                  [
+                    "strlen",
+                    [
+                      "var",
+                      "title"
+                    ]
+                  ],
+                  100
+                ]
+              ]
+            ],
+            [
+              "failed",
+              [
+                "ask",
+                "ids",
+                "NewId",
+                {}
+              ]
+            ]
+          ],
+          "output": [
+            "record",
+            {
+              "result": [
+                "lit",
+                "unavailable"
+              ],
+              "todo": null
+            }
+          ]
+        },
+        "Add.otherwise": {
+          "assign": {},
+          "calls": [
+            {
+              "args": {
+                "data": [
+                  "record",
+                  {
+                    "done": false,
+                    "id": [
+                      "ask",
+                      "ids",
+                      "NewId",
+                      {}
+                    ],
+                    "title": [
+                      "var",
+                      "title"
+                    ]
+                  }
+                ],
+                "key": [
+                  "str",
+                  [
+                    "ask",
+                    "ids",
+                    "NewId",
+                    {}
+                  ]
+                ]
+              },
+              "command": "Put",
+              "component": "store"
+            }
+          ],
+          "command": "Add",
+          "guard": [
+            "and",
+            [
+              "not",
+              [
+                "or",
+                [
+                  "=",
+                  [
+                    "strlen",
+                    [
+                      "trim",
+                      [
+                        "var",
+                        "title"
+                      ]
+                    ]
+                  ],
+                  0
+                ],
+                [
+                  ">",
+                  [
+                    "strlen",
+                    [
+                      "var",
+                      "title"
+                    ]
+                  ],
+                  100
+                ]
+              ]
+            ],
+            [
+              "not",
+              [
+                "failed",
+                [
+                  "ask",
+                  "ids",
+                  "NewId",
+                  {}
+                ]
+              ]
+            ]
+          ],
+          "output": [
+            "record",
+            {
+              "result": [
+                "lit",
+                "created"
+              ],
+              "todo": [
+                "record",
+                {
+                  "done": false,
+                  "id": [
+                    "ask",
+                    "ids",
+                    "NewId",
+                    {}
+                  ],
+                  "title": [
+                    "var",
+                    "title"
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "Complete.case1": {
+          "assign": {},
+          "calls": [],
+          "command": "Complete",
+          "guard": [
+            "and",
+            [
+              "some",
+              [
+                "ask",
+                "store",
+                "Entries",
+                {}
+              ],
+              [
+                "e"
+              ],
+              [
+                "=",
+                [
+                  "field",
+                  [
+                    "var",
+                    "e"
+                  ],
+                  "key"
+                ],
+                [
+                  "str",
+                  [
+                    "var",
+                    "id"
+                  ]
+                ]
+              ]
+            ],
+            [
+              "field",
+              [
+                "field",
+                [
+                  "nonNull",
+                  [
+                    "find",
+                    [
+                      "ask",
+                      "store",
+                      "Entries",
+                      {}
+                    ],
+                    [
+                      "e"
+                    ],
+                    [
+                      "=",
+                      [
+                        "field",
+                        [
+                          "var",
+                          "e"
+                        ],
+                        "key"
+                      ],
+                      [
+                        "str",
+                        [
+                          "var",
+                          "id"
+                        ]
+                      ]
+                    ]
+                  ]
+                ],
+                "value"
+              ],
+              "done"
+            ]
+          ],
+          "output": [
+            "lit",
             "already-done"
           ]
         },
-        "queries": {}
-      }
-    },
-    "queries": {
-      "newId": {
-        "input": {},
-        "mayFail": true,
-        "output": "string",
-        "promise": "fresh"
-      }
-    },
-    "states": [
-      "READY"
+        "Complete.case2": {
+          "assign": {},
+          "calls": [
+            {
+              "args": {
+                "data": [
+                  "with",
+                  [
+                    "field",
+                    [
+                      "nonNull",
+                      [
+                        "find",
+                        [
+                          "ask",
+                          "store",
+                          "Entries",
+                          {}
+                        ],
+                        [
+                          "e"
+                        ],
+                        [
+                          "=",
+                          [
+                            "field",
+                            [
+                              "var",
+                              "e"
+                            ],
+                            "key"
+                          ],
+                          [
+                            "str",
+                            [
+                              "var",
+                              "id"
+                            ]
+                          ]
+                        ]
+                      ]
+                    ],
+                    "value"
+                  ],
+                  {
+                    "done": true
+                  }
+                ],
+                "key": [
+                  "str",
+                  [
+                    "var",
+                    "id"
+                  ]
+                ]
+              },
+              "command": "Put",
+              "component": "store"
+            }
+          ],
+          "command": "Complete",
+          "guard": [
+            "and",
+            [
+              "some",
+              [
+                "ask",
+                "store",
+                "Entries",
+                {}
+              ],
+              [
+                "e"
+              ],
+              [
+                "=",
+                [
+                  "field",
+                  [
+                    "var",
+                    "e"
+                  ],
+                  "key"
+                ],
+                [
+                  "str",
+                  [
+                    "var",
+                    "id"
+                  ]
+                ]
+              ]
+            ],
+            [
+              "not",
+              [
+                "field",
+                [
+                  "field",
+                  [
+                    "nonNull",
+                    [
+                      "find",
+                      [
+                        "ask",
+                        "store",
+                        "Entries",
+                        {}
+                      ],
+                      [
+                        "e"
+                      ],
+                      [
+                        "=",
+                        [
+                          "field",
+                          [
+                            "var",
+                            "e"
+                          ],
+                          "key"
+                        ],
+                        [
+                          "str",
+                          [
+                            "var",
+                            "id"
+                          ]
+                        ]
+                      ]
+                    ]
+                  ],
+                  "value"
+                ],
+                "done"
+              ]
+            ]
+          ],
+          "output": [
+            "lit",
+            "completed"
+          ]
+        },
+        "Complete.otherwise": {
+          "assign": {},
+          "calls": [],
+          "command": "Complete",
+          "guard": [
+            "not",
+            [
+              "some",
+              [
+                "ask",
+                "store",
+                "Entries",
+                {}
+              ],
+              [
+                "e"
+              ],
+              [
+                "=",
+                [
+                  "field",
+                  [
+                    "var",
+                    "e"
+                  ],
+                  "key"
+                ],
+                [
+                  "str",
+                  [
+                    "var",
+                    "id"
+                  ]
+                ]
+              ]
+            ]
+          ],
+          "output": [
+            "lit",
+            "not-found"
+          ]
+        },
+        "Remove.case1": {
+          "assign": {},
+          "calls": [
+            {
+              "args": {
+                "key": [
+                  "str",
+                  [
+                    "var",
+                    "id"
+                  ]
+                ]
+              },
+              "command": "Delete",
+              "component": "store"
+            }
+          ],
+          "command": "Remove",
+          "guard": [
+            "=",
+            [
+              "outputOf",
+              "store",
+              "Delete",
+              {
+                "key": [
+                  "str",
+                  [
+                    "var",
+                    "id"
+                  ]
+                ]
+              }
+            ],
+            [
+              "lit",
+              "deleted"
+            ]
+          ],
+          "output": [
+            "lit",
+            "removed"
+          ]
+        },
+        "Remove.otherwise": {
+          "assign": {},
+          "calls": [
+            {
+              "args": {
+                "key": [
+                  "str",
+                  [
+                    "var",
+                    "id"
+                  ]
+                ]
+              },
+              "command": "Delete",
+              "component": "store"
+            }
+          ],
+          "command": "Remove",
+          "guard": [
+            "not",
+            [
+              "=",
+              [
+                "outputOf",
+                "store",
+                "Delete",
+                {
+                  "key": [
+                    "str",
+                    [
+                      "var",
+                      "id"
+                    ]
+                  ]
+                }
+              ],
+              [
+                "lit",
+                "deleted"
+              ]
+            ]
+          ],
+          "output": [
+            "lit",
+            "not-found"
+          ]
+        }
+      },
+      "init": {},
+      "queries": {
+        "List": {
+          "is": [
+            "calc",
+            "listed",
+            {
+              "only": [
+                "var",
+                "only"
+              ]
+            }
+          ],
+          "params": {
+            "only": {
+              "enum": [
+                "all",
+                "open",
+                "done"
+              ]
+            }
+          },
+          "result": {
+            "list": {
+              "record": {
+                "done": "bool",
+                "id": {
+                  "atom": "TodoId"
+                },
+                "title": "string"
+              }
+            }
+          }
+        }
+      },
+      "relies": [
+        "ids"
+      ],
+      "state": {}
+    }
+  },
+  "entries": {
+    "commands": [
+      "todos.Add",
+      "todos.Complete",
+      "todos.Remove"
+    ],
+    "queries": [
+      "todos.List",
+      "store.Entries"
+    ]
+  },
+  "irVersion": 8,
+  "notes": {
+    "ids": "The source of identifiers for new items. It can be unavailable.",
+    "store": "Keeps JSON values by key. What it keeps survives a restart.",
+    "store.calcs.kept": "Every key with its value, in the order the keys were first put.",
+    "store.does.delete": "The key and its value are no longer kept, and the answer is deleted. A key that is not kept is not found, and nothing changes.",
+    "store.does.put": "The value (any JSON value, null included) is kept under the key. A key that is already kept keeps its place and gets the new value; a new key goes after the others. A key that was deleted is new when it is put again. Keys are compared exactly, as strings.",
+    "todos": "A to-do list, kept in ${Store}: it survives a restart (after it, it has the same items, in the same order, each open or done as before). Items are added, completed, removed and listed. Each item has an identifier given by the list, a title, and whether it is done.",
+    "todos.calcs.listed": "The items in the order they were added: all of them, only the open ones, or only the done ones, as asked.",
+    "todos.does.add": "A title that is empty or made only of whitespace, or that has more than 100 characters (a title of exactly 100 is fine), is refused as invalid, with no item. Otherwise a new item with a fresh identifier and the given title, stored exactly as given (not trimmed), goes after the others, and the answer is created, with the item (not done). When no identifier can be had because the source of identifiers is unavailable, a title that is not invalid is refused as unavailable, with no item.",
+    "todos.does.complete": "An open item becomes done, and the answer is completed. An item that is already done stays done, and the answer is already-done. An unknown identifier is not found, and nothing changes.",
+    "todos.does.remove": "The item is removed, and the answer is removed. An unknown identifier is not found, and nothing changes."
+  },
+  "root": "todos",
+  "sorts": [
+    "TodoId"
+  ],
+  "trace": {
+    "store.does.delete": [
+      "Store.commands.Delete"
+    ],
+    "store.does.put": [
+      "Store.commands.Put"
+    ],
+    "todos.does.add": [
+      "Todos.commands.Add"
+    ],
+    "todos.does.complete": [
+      "Todos.commands.Complete"
+    ],
+    "todos.does.remove": [
+      "Todos.commands.Remove"
     ]
   }
 }

@@ -1,147 +1,132 @@
-import { libraryLoanPolicy } from "./policy.ts";
-import type { BorrowOutcome, ExtendOutcome } from "./outcome.ts";
-import type { LoanPolicy } from "./policy.ts";
-import type { LoanDependencies } from "./ports.ts";
-import {
-  daysUntilDueAfterDaysPass,
-  daysUntilDueAfterExtension,
-  holdsMaxBooks,
-  lateFee,
-  stateAfterDaysPass,
-} from "./rules.ts";
-import type { LoanState } from "./state.ts";
-
 /**
- * The loan of one book to one library member (the specification's component).
+ * One book's loan (the specification's root component `loan`).
  *
- * A loan has no clock: time advances only when `daysPass` is called. The four methods `borrow`,
- * `daysPass`, `extend` and `returnBook` are the specification's commands; each runs synchronously, and
- * any question to or call on a dependency happens during that call, effects in the order the
- * specification lists them. `borrow` and `extend` return the command's answer; the other two return
- * nothing. The current state is read through `state`, and the remembered data through `daysUntilDue`.
- *
- * A newly constructed loan is in the specification's initial state and remembers nothing. Constructing
- * a loan asks and tells the dependencies nothing.
- *
- * Each command is meant to be called only in the states named in its description; what it does in any
- * other state is not defined.
+ * Each instance is kept in memory only and starts in the state of `initialLoanState()` (spec `init`).
+ * Days advance only through `daysPass`.
  */
+import type { LibraryServices } from "./library.ts";
+import type { LoanState, LoanStatus } from "./loan-state.ts";
+import { initialLoanState } from "./loan-state.ts";
+import type { LoanPolicy } from "./policy.ts";
+import { libraryPolicy } from "./policy.ts";
+import {
+  afterDaysPass,
+  canGiveBack,
+  extendedState,
+  lateFeeOnReturn,
+  lentState,
+  mustRefuseBorrow,
+  mustRefuseExtension,
+  returnedState,
+} from "./loan-rules.ts";
+
+/** The answer of `Loan.borrow` (output of spec command `Borrow`; same field names). */
+export interface BorrowResult {
+  /** `"lent"` or `"refused"`. */
+  readonly result: "lent" | "refused";
+  /** A number of days, or `null`. */
+  readonly dueInDays: number | null;
+}
+
+/** The answer of `Loan.extend` (output of spec command `Extend`). */
+export type ExtendResult = "extended" | "refused";
+
+/** The answer of `Loan.giveBack` (output of spec command `Return`). */
+export type GiveBackResult = "returned" | "refused";
+
 export class Loan {
-  private readonly dependencies: LoanDependencies;
-  private readonly policy: LoanPolicy;
-  private currentState: LoanState;
-  private remainingDays: number | undefined;
+  readonly #library: LibraryServices;
+  #state!: LoanState;
 
   /**
-   * @param dependencies The member's account, the reservation desk, the member notifier and billing
-   *   that this loan asks and tells. See `LoanDependencies`.
+   * @param library the member account, reservations and billing (spec `loan-world`).
+   *   They are asked and told only during the commands below, never in the constructor.
    */
-  constructor(dependencies: LoanDependencies) {
-    this.dependencies = dependencies;
-    this.policy = libraryLoanPolicy();
-    this.currentState = "AVAILABLE";
-    this.remainingDays = undefined;
+  constructor(library: LibraryServices) {
+    this.#library = library;
+    this.#state = initialLoanState();
   }
 
-  /** The current state of the loan, under the specification's state names. See `LoanState`. */
+  /** The current state (spec fields `status` and `daysUntilDue`). Reading it changes nothing. */
   get state(): LoanState {
-    return this.currentState;
+    return this.#state;
+  }
+
+  /** The current spec field `status`; same as `state.status`. */
+  get status(): LoanStatus {
+    return this.#state.status;
+  }
+
+  /** The current spec field `daysUntilDue`; same as `state.daysUntilDue`. */
+  get daysUntilDue(): number {
+    return this.#state.daysUntilDue;
   }
 
   /**
-   * The remembered number of days until the book is due (the specification's data field
-   * `daysUntilDue`), a whole number. `undefined` as long as nothing has been remembered, i.e. before
-   * the book is first borrowed. The value is not cleared when the book is returned.
+   * Performs spec command `Borrow` (no parameters) and returns its output.
+   * May ask `member.booksOnLoan()` and `reservations.isReservedBySomeoneElse()`;
+   * may tell `member.sendDueNotice(...)`.
    */
-  get daysUntilDue(): number | undefined {
-    return this.remainingDays;
-  }
-
-  /**
-   * The specification command `Borrow` (no input): the member borrows the book.
-   * For a loan in state `"AVAILABLE"`. A request that is refused changes nothing and is not an error.
-   *
-   * May ask `MemberAccount.booksOnLoan` and `ReservationDesk.isReservedBySomeoneElse` (either may be
-   * skipped when its answer cannot matter); may call `MemberNotifier.notifyDueDate`.
-   *
-   * @returns The command's answer: whether the book was lent or the borrowing refused, and, when lent,
-   *   in how many days the book is due. See `BorrowOutcome`.
-   */
-  borrow(): BorrowOutcome {
-    const { memberAccount, reservationDesk, memberNotifier } = this.dependencies;
-    if (holdsMaxBooks(memberAccount.booksOnLoan(), this.policy) || reservationDesk.isReservedBySomeoneElse()) {
+  borrow(): BorrowResult {
+    const policy = this.#policy();
+    const booksOnLoan = this.#library.member.booksOnLoan();
+    const reserved = this.#library.reservations.isReservedBySomeoneElse();
+    if (mustRefuseBorrow(booksOnLoan, reserved, policy)) {
       return { result: "refused", dueInDays: null };
     }
-    const daysUntilDue = this.policy.loanDays;
-    this.currentState = "ON_LOAN";
-    this.remainingDays = daysUntilDue;
-    memberNotifier.notifyDueDate(daysUntilDue);
-    return { result: "lent", dueInDays: daysUntilDue };
+    this.#state = lentState(policy);
+    this.#library.member.sendDueNotice(this.#state.daysUntilDue);
+    return { result: "lent", dueInDays: this.#state.daysUntilDue };
   }
 
   /**
-   * The specification command `DayPasses`: the given number of days goes by.
-   * For a loan in state `"ON_LOAN"` or `"OVERDUE"`.
-   *
-   * Asks nothing; may call `Billing.chargeReplacement`.
-   *
-   * @param days How many days pass, a whole number of at least one (the command's `days` input).
+   * Performs spec command `DayPasses`; `days` is its parameter of the same name. Answers nothing.
+   * May tell `billing.chargeReplacement()`.
    */
   daysPass(days: number): void {
-    const daysUntilDue = daysUntilDueAfterDaysPass(this.lentDaysUntilDue(), days);
-    const after = stateAfterDaysPass(this.currentState, daysUntilDue, this.policy);
-    this.currentState = after;
-    this.remainingDays = daysUntilDue;
-    if (after === "LOST") {
-      this.dependencies.billing.chargeReplacement();
+    const outcome = afterDaysPass(this.#state, days, this.#policy());
+    this.#state = outcome.state;
+    if (outcome.chargeReplacement) {
+      this.#library.billing.chargeReplacement();
     }
   }
 
   /**
-   * The specification command `Extend` (no input): the member asks for more time.
-   * For a loan in state `"ON_LOAN"`. A request that is refused changes nothing and is not an error.
-   *
-   * Asks `ReservationDesk.isReservedBySomeoneElse`; may call `MemberNotifier.notifyDueDate`.
-   *
-   * @returns The command's answer: whether the loan was extended or the extension refused. See
-   *   `ExtendOutcome`.
+   * Performs spec command `Extend` (no parameters) and returns its output.
+   * May ask `reservations.isReservedBySomeoneElse()`; may tell `member.sendDueNotice(...)`.
    */
-  extend(): ExtendOutcome {
-    const { reservationDesk, memberNotifier } = this.dependencies;
-    if (reservationDesk.isReservedBySomeoneElse()) {
+  extend(): ExtendResult {
+    if (mustRefuseExtension(this.#library.reservations.isReservedBySomeoneElse())) {
       return "refused";
     }
-    const daysUntilDue = daysUntilDueAfterExtension(this.lentDaysUntilDue(), this.policy);
-    this.remainingDays = daysUntilDue;
-    memberNotifier.notifyDueDate(daysUntilDue);
+    this.#state = extendedState(this.#state, this.#policy());
+    this.#library.member.sendDueNotice(this.#state.daysUntilDue);
     return "extended";
   }
 
   /**
-   * The specification command `Return` (no input): the member brings the book back.
-   * For a loan in state `"ON_LOAN"` or `"OVERDUE"`.
-   *
-   * Asks `ReservationDesk.isReservedBySomeoneElse`; may call `Billing.chargeLateFee` and
-   * `ReservationDesk.notifyNextMember`, in that order.
+   * Performs spec command `Return` (no parameters) and returns its output.
+   * May tell `billing.chargeLateFee(...)`; may ask `reservations.isReservedBySomeoneElse()` and
+   * tell `reservations.notifyNextMember()`.
    */
-  returnBook(): void {
-    const { reservationDesk, billing } = this.dependencies;
-    const wasOverdue = this.currentState === "OVERDUE";
-    const daysUntilDue = this.lentDaysUntilDue();
-    this.currentState = "AVAILABLE";
-    if (wasOverdue) {
-      billing.chargeLateFee(lateFee(daysUntilDue, this.policy));
+  giveBack(): GiveBackResult {
+    const before = this.#state;
+    if (!canGiveBack(before)) {
+      return "refused";
     }
-    if (reservationDesk.isReservedBySomeoneElse()) {
-      reservationDesk.notifyNextMember();
+    const fee = lateFeeOnReturn(before, this.#policy());
+    this.#state = returnedState(before);
+    if (fee !== null) {
+      this.#library.billing.chargeLateFee(fee);
     }
+    if (this.#library.reservations.isReservedBySomeoneElse()) {
+      this.#library.reservations.notifyNextMember();
+    }
+    return "returned";
   }
 
-  /** The remembered days until due of a book that is lent out; it is always known in those states. */
-  private lentDaysUntilDue(): number {
-    if (this.remainingDays === undefined) {
-      throw new Error(`no due date is remembered for a loan in state ${this.currentState}`);
-    }
-    return this.remainingDays;
+  /** The policy this loan applies (spec decision table `policy`). */
+  #policy(): LoanPolicy {
+    return libraryPolicy();
   }
 }

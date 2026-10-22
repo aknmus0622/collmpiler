@@ -1,248 +1,802 @@
 {
-  "behaviors": [
-    {
-      "from": [
-        "READY"
-      ],
-      "name": "ContractSections",
-      "onlyIf": [],
-      "when": {
-        "otherwise": {
-          "does": "Which sections the contract includes: what commands answer with when some command does (outputs above zero), the routes when some command has one, the note about the dependencies of contained components when there are parts, and the storage and restart when the system keeps something across a restart.",
-          "responds": {
-            "commandOutput": {
-              "$ref": "calculation:hasCommandOutput"
-            },
-            "partsNote": {
-              "$ref": "calculation:hasParts"
-            },
-            "restarts": {
-              "$ref": "input:restarts"
-            },
-            "routes": {
-              "$ref": "calculation:hasRoutes"
-            }
-          }
-        }
-      }
-    },
-    {
-      "from": [
-        "READY"
-      ],
-      "name": "QueryNotes",
-      "onlyIf": [],
-      "when": {
-        "otherwise": {
-          "does": "The notes a query carries in the contract, in this order: its promise (fresh or increasing), if any, then may-fail if it can fail.",
-          "responds": {
-            "$ref": "calculation:queryNotes"
-          }
-        }
-      }
-    },
-    {
-      "from": [
-        "READY"
-      ],
-      "name": "RequestSections",
-      "onlyIf": [],
-      "when": {
-        "otherwise": {
-          "does": "Which sections a request to an agent includes. Feedback: none without any; on attempt 1 it is about the current code (graded before any session); on a later attempt, about the previous attempt. The other components of the same system, and the components this one contains, are listed only outside the wiring phase, and only when there are some.",
-          "responds": {
-            "contained": {
-              "$ref": "calculation:listsContained"
-            },
-            "feedback": {
-              "$ref": "calculation:feedback"
-            },
-            "others": {
-              "$ref": "calculation:listsOthers"
-            }
-          }
-        }
-      }
-    },
-    {
-      "from": [
-        "READY"
-      ],
-      "name": "TypeText",
-      "onlyIf": [],
-      "when": {
-        "otherwise": {
-          "does": "How a type is written in TypeScript in the contract. The texts of the types inside it are given already written (`inner` for an optional value or a list, `entries` for the fields of a record or the variants of a oneOf, `members` for the members of an enumeration, each already written as a literal). Any value: `null | boolean | number | string | unknown[] | { [field: string]: unknown }`. A oneOf: each variant as `{ name: text }`, the variants in the order of their names, joined by ` | `; `never` when there is none. An optional value: the inner text followed by ` | null`. A list: the inner text followed by `[]`, in parentheses first when the inner text contains a space or a `|` and does not start with `{`. A record: `{ ` and the fields in the order of their names, each as `name: text` (followed by ` | null` when it is optional), joined by `; `, and ` }`; `{}` when there is no field. An enumeration: the members joined by ` | `; `never` when there is none. A string: `string`. A number (integer or not): `number`. Any other primitive: its name.",
-          "responds": {
-            "$ref": "calculation:typeText"
-          }
-        }
-      }
-    }
-  ],
-  "decisions": {},
-  "descriptions": {
-    "component": "Decides what the texts given to agents are made of: how types are written in the contract, which notes and sections appear."
-  },
-  "irVersion": 7,
-  "model": {
-    "calculations": {
-      "feedback": {
-        "description": "none without feedback; current-code with feedback on attempt 1; previous-attempt with feedback on a later attempt",
-        "output": [
-          "none",
-          "current-code",
-          "previous-attempt"
-        ]
-      },
-      "hasCommandOutput": {
-        "description": "Whether some command answers with something (outputs above zero)",
-        "output": "boolean"
-      },
-      "hasParts": {
-        "description": "Whether there are parts (parts above zero)",
-        "output": "boolean"
-      },
-      "hasRoutes": {
-        "description": "Whether some command has a route (routes above zero)",
-        "output": "boolean"
-      },
-      "listsContained": {
-        "description": "Whether the phase is not wiring and there are contained components (partFiles above zero)",
-        "output": "boolean"
-      },
-      "listsOthers": {
-        "description": "Whether the phase is not wiring and there are other components (others above zero)",
-        "output": "boolean"
-      },
-      "queryNotes": {
-        "description": "The promise (fresh or increasing) when there is one, then may-fail when the query can fail",
-        "output": {
-          "list": [
-            "fresh",
-            "increasing",
-            "may-fail"
-          ]
-        }
-      },
-      "typeText": {
-        "description": "How the type is written in TypeScript, by kind: the fixed text for any value; the variants (each `{ name: text }`, in the order of their names) joined by ` | `, or `never`, for a oneOf; the inner text and ` | null` for an optional value; the inner text (in parentheses when it contains a space or a `|` and does not start with `{`) and `[]` for a list; `{ `, the fields in the order of their names as `name: text` (and ` | null` when optional) joined by `; `, and ` }`, or `{}`, for a record; the members joined by ` | `, or `never`, for an enumeration; `string`; `number`; the name for any other primitive",
-        "output": "string"
-      }
-    },
-    "commands": {
-      "ContractSections": {
-        "outputs": {
-          "max": 100,
-          "min": 0,
-          "type": "integer"
-        },
-        "parts": {
-          "max": 100,
-          "min": 0,
-          "type": "integer"
-        },
-        "restarts": "boolean",
-        "routes": {
-          "max": 100,
-          "min": 0,
-          "type": "integer"
-        }
-      },
-      "QueryNotes": {
-        "mayFail": "boolean",
-        "promise": [
-          "none",
-          "fresh",
-          "increasing"
-        ]
-      },
-      "RequestSections": {
-        "attempt": {
-          "max": 10,
-          "min": 1,
-          "type": "integer"
-        },
-        "hasFeedback": "boolean",
-        "others": {
-          "max": 100,
-          "min": 0,
-          "type": "integer"
-        },
-        "partFiles": {
-          "max": 100,
-          "min": 0,
-          "type": "integer"
-        },
-        "phase": [
-          "design",
-          "wiring",
-          "implementation"
-        ]
-      },
-      "TypeText": {
-        "entries": {
-          "list": {
-            "record": {
-              "name": "string",
-              "optional": "boolean",
-              "text": "string"
-            }
-          }
-        },
-        "inner": "string",
-        "kind": [
-          "value",
-          "one-of",
-          "optional",
-          "list",
-          "record",
-          "enum",
-          "string",
-          "number",
-          "primitive"
-        ],
-        "members": {
-          "list": "string"
-        },
-        "name": "string"
-      }
-    },
-    "data": {},
-    "effects": {},
-    "init": "READY",
-    "outputs": {
-      "ContractSections": {
-        "record": {
-          "commandOutput": "boolean",
-          "partsNote": "boolean",
-          "restarts": "boolean",
-          "routes": "boolean"
-        }
-      },
-      "QueryNotes": {
-        "list": [
-          "fresh",
-          "increasing",
-          "may-fail"
-        ]
-      },
-      "RequestSections": {
-        "record": {
-          "contained": "boolean",
-          "feedback": [
-            "none",
-            "current-code",
-            "previous-attempt"
+  "components": {
+    "text-plan": {
+      "calcs": {
+        "notes": {
+          "is": [
+            "ite",
+            [
+              "=",
+              [
+                "var",
+                "promise"
+              ],
+              [
+                "lit",
+                "fresh"
+              ]
+            ],
+            [
+              "ite",
+              [
+                "var",
+                "mayFail"
+              ],
+              [
+                "list",
+                [
+                  "lit",
+                  "fresh"
+                ],
+                [
+                  "lit",
+                  "may-fail"
+                ]
+              ],
+              [
+                "list",
+                [
+                  "lit",
+                  "fresh"
+                ]
+              ]
+            ],
+            [
+              "ite",
+              [
+                "=",
+                [
+                  "var",
+                  "promise"
+                ],
+                [
+                  "lit",
+                  "increasing"
+                ]
+              ],
+              [
+                "ite",
+                [
+                  "var",
+                  "mayFail"
+                ],
+                [
+                  "list",
+                  [
+                    "lit",
+                    "increasing"
+                  ],
+                  [
+                    "lit",
+                    "may-fail"
+                  ]
+                ],
+                [
+                  "list",
+                  [
+                    "lit",
+                    "increasing"
+                  ]
+                ]
+              ],
+              [
+                "ite",
+                [
+                  "var",
+                  "mayFail"
+                ],
+                [
+                  "list",
+                  [
+                    "lit",
+                    "may-fail"
+                  ]
+                ],
+                [
+                  "list"
+                ]
+              ]
+            ]
           ],
-          "others": "boolean"
+          "params": {
+            "mayFail": "bool",
+            "promise": {
+              "enum": [
+                "none",
+                "fresh",
+                "increasing"
+              ]
+            }
+          },
+          "result": {
+            "list": {
+              "enum": [
+                "fresh",
+                "increasing",
+                "may-fail"
+              ]
+            }
+          }
+        },
+        "sections": {
+          "is": [
+            "record",
+            {
+              "commandOutput": [
+                ">",
+                [
+                  "var",
+                  "answering"
+                ],
+                0
+              ],
+              "json": [
+                "var",
+                "json"
+              ],
+              "queries": [
+                ">",
+                [
+                  "var",
+                  "queries"
+                ],
+                0
+              ],
+              "restarts": [
+                "var",
+                "restarts"
+              ],
+              "routes": [
+                ">",
+                [
+                  "var",
+                  "routes"
+                ],
+                0
+              ],
+              "sorts": [
+                ">",
+                [
+                  "var",
+                  "sorts"
+                ],
+                0
+              ]
+            }
+          ],
+          "params": {
+            "answering": "int",
+            "json": "bool",
+            "queries": "int",
+            "restarts": "bool",
+            "routes": "int",
+            "sorts": "int"
+          },
+          "result": {
+            "record": {
+              "commandOutput": "bool",
+              "json": "bool",
+              "queries": "bool",
+              "restarts": "bool",
+              "routes": "bool",
+              "sorts": "bool"
+            }
+          }
+        },
+        "typeText": {
+          "is": [
+            "ite",
+            [
+              "=",
+              [
+                "var",
+                "kind"
+              ],
+              [
+                "lit",
+                "int"
+              ]
+            ],
+            [
+              "lit",
+              "number"
+            ],
+            [
+              "ite",
+              [
+                "=",
+                [
+                  "var",
+                  "kind"
+                ],
+                [
+                  "lit",
+                  "string"
+                ]
+              ],
+              [
+                "lit",
+                "string"
+              ],
+              [
+                "ite",
+                [
+                  "=",
+                  [
+                    "var",
+                    "kind"
+                  ],
+                  [
+                    "lit",
+                    "bool"
+                  ]
+                ],
+                [
+                  "lit",
+                  "boolean"
+                ],
+                [
+                  "ite",
+                  [
+                    "=",
+                    [
+                      "var",
+                      "kind"
+                    ],
+                    [
+                      "lit",
+                      "json"
+                    ]
+                  ],
+                  [
+                    "lit",
+                    "Json"
+                  ],
+                  [
+                    "ite",
+                    [
+                      "and",
+                      [
+                        "=",
+                        [
+                          "var",
+                          "kind"
+                        ],
+                        [
+                          "lit",
+                          "enum"
+                        ]
+                      ],
+                      [
+                        "=",
+                        [
+                          "len",
+                          [
+                            "var",
+                            "members"
+                          ]
+                        ],
+                        0
+                      ]
+                    ],
+                    [
+                      "lit",
+                      "never"
+                    ],
+                    [
+                      "ite",
+                      [
+                        "=",
+                        [
+                          "var",
+                          "kind"
+                        ],
+                        [
+                          "lit",
+                          "enum"
+                        ]
+                      ],
+                      [
+                        "join",
+                        [
+                          "var",
+                          "members"
+                        ],
+                        [
+                          "lit",
+                          " | "
+                        ]
+                      ],
+                      [
+                        "ite",
+                        [
+                          "=",
+                          [
+                            "var",
+                            "kind"
+                          ],
+                          [
+                            "lit",
+                            "atom"
+                          ]
+                        ],
+                        [
+                          "var",
+                          "name"
+                        ],
+                        [
+                          "ite",
+                          [
+                            "=",
+                            [
+                              "var",
+                              "kind"
+                            ],
+                            [
+                              "lit",
+                              "optional"
+                            ]
+                          ],
+                          [
+                            "concat",
+                            [
+                              "var",
+                              "inner"
+                            ],
+                            [
+                              "lit",
+                              " | null"
+                            ]
+                          ],
+                          [
+                            "ite",
+                            [
+                              "or",
+                              [
+                                "=",
+                                [
+                                  "var",
+                                  "kind"
+                                ],
+                                [
+                                  "lit",
+                                  "list"
+                                ]
+                              ],
+                              [
+                                "=",
+                                [
+                                  "var",
+                                  "kind"
+                                ],
+                                [
+                                  "lit",
+                                  "set"
+                                ]
+                              ]
+                            ],
+                            [
+                              "ite",
+                              [
+                                "and",
+                                [
+                                  "or",
+                                  [
+                                    "substr",
+                                    [
+                                      "var",
+                                      "inner"
+                                    ],
+                                    [
+                                      "lit",
+                                      "|"
+                                    ]
+                                  ],
+                                  [
+                                    "substr",
+                                    [
+                                      "var",
+                                      "inner"
+                                    ],
+                                    [
+                                      "lit",
+                                      "&"
+                                    ]
+                                  ]
+                                ],
+                                [
+                                  "not",
+                                  [
+                                    "startsWith",
+                                    [
+                                      "var",
+                                      "inner"
+                                    ],
+                                    [
+                                      "lit",
+                                      "{"
+                                    ]
+                                  ]
+                                ]
+                              ],
+                              [
+                                "concat",
+                                [
+                                  "lit",
+                                  "("
+                                ],
+                                [
+                                  "var",
+                                  "inner"
+                                ],
+                                [
+                                  "lit",
+                                  ")[]"
+                                ]
+                              ],
+                              [
+                                "concat",
+                                [
+                                  "var",
+                                  "inner"
+                                ],
+                                [
+                                  "lit",
+                                  "[]"
+                                ]
+                              ]
+                            ],
+                            [
+                              "ite",
+                              [
+                                "=",
+                                [
+                                  "var",
+                                  "kind"
+                                ],
+                                [
+                                  "lit",
+                                  "map"
+                                ]
+                              ],
+                              [
+                                "concat",
+                                [
+                                  "lit",
+                                  "{ key: "
+                                ],
+                                [
+                                  "var",
+                                  "key"
+                                ],
+                                [
+                                  "lit",
+                                  "; value: "
+                                ],
+                                [
+                                  "var",
+                                  "inner"
+                                ],
+                                [
+                                  "lit",
+                                  " }[]"
+                                ]
+                              ],
+                              [
+                                "ite",
+                                [
+                                  "=",
+                                  [
+                                    "len",
+                                    [
+                                      "var",
+                                      "entries"
+                                    ]
+                                  ],
+                                  0
+                                ],
+                                [
+                                  "lit",
+                                  "Record<string, never>"
+                                ],
+                                [
+                                  "concat",
+                                  [
+                                    "lit",
+                                    "{ "
+                                  ],
+                                  [
+                                    "join",
+                                    [
+                                      "map",
+                                      [
+                                        "var",
+                                        "entries"
+                                      ],
+                                      [
+                                        "e"
+                                      ],
+                                      [
+                                        "concat",
+                                        [
+                                          "ite",
+                                          [
+                                            "field",
+                                            [
+                                              "var",
+                                              "e"
+                                            ],
+                                            "plain"
+                                          ],
+                                          [
+                                            "field",
+                                            [
+                                              "var",
+                                              "e"
+                                            ],
+                                            "name"
+                                          ],
+                                          [
+                                            "concat",
+                                            [
+                                              "lit",
+                                              "\""
+                                            ],
+                                            [
+                                              "field",
+                                              [
+                                                "var",
+                                                "e"
+                                              ],
+                                              "name"
+                                            ],
+                                            [
+                                              "lit",
+                                              "\""
+                                            ]
+                                          ]
+                                        ],
+                                        [
+                                          "lit",
+                                          ": "
+                                        ],
+                                        [
+                                          "field",
+                                          [
+                                            "var",
+                                            "e"
+                                          ],
+                                          "text"
+                                        ]
+                                      ]
+                                    ],
+                                    [
+                                      "lit",
+                                      "; "
+                                    ]
+                                  ],
+                                  [
+                                    "lit",
+                                    " }"
+                                  ]
+                                ]
+                              ]
+                            ]
+                          ]
+                        ]
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ],
+          "params": {
+            "entries": {
+              "list": {
+                "record": {
+                  "name": "string",
+                  "plain": "bool",
+                  "text": "string"
+                }
+              }
+            },
+            "inner": "string",
+            "key": "string",
+            "kind": {
+              "enum": [
+                "int",
+                "string",
+                "bool",
+                "json",
+                "enum",
+                "atom",
+                "optional",
+                "list",
+                "set",
+                "map",
+                "record"
+              ]
+            },
+            "members": {
+              "list": "string"
+            },
+            "name": "string"
+          },
+          "result": "string"
         }
       },
-      "TypeText": "string"
-    },
-    "queries": {},
-    "states": [
-      "READY"
+      "init": {},
+      "queries": {
+        "Notes": {
+          "is": [
+            "calc",
+            "notes",
+            {
+              "mayFail": [
+                "var",
+                "mayFail"
+              ],
+              "promise": [
+                "var",
+                "promise"
+              ]
+            }
+          ],
+          "params": {
+            "mayFail": "bool",
+            "promise": {
+              "enum": [
+                "none",
+                "fresh",
+                "increasing"
+              ]
+            }
+          },
+          "result": {
+            "list": {
+              "enum": [
+                "fresh",
+                "increasing",
+                "may-fail"
+              ]
+            }
+          }
+        },
+        "Sections": {
+          "is": [
+            "calc",
+            "sections",
+            {
+              "answering": [
+                "var",
+                "answering"
+              ],
+              "json": [
+                "var",
+                "json"
+              ],
+              "queries": [
+                "var",
+                "queries"
+              ],
+              "restarts": [
+                "var",
+                "restarts"
+              ],
+              "routes": [
+                "var",
+                "routes"
+              ],
+              "sorts": [
+                "var",
+                "sorts"
+              ]
+            }
+          ],
+          "params": {
+            "answering": "int",
+            "json": "bool",
+            "queries": "int",
+            "restarts": "bool",
+            "routes": "int",
+            "sorts": "int"
+          },
+          "result": {
+            "record": {
+              "commandOutput": "bool",
+              "json": "bool",
+              "queries": "bool",
+              "restarts": "bool",
+              "routes": "bool",
+              "sorts": "bool"
+            }
+          }
+        },
+        "TypeText": {
+          "is": [
+            "calc",
+            "typeText",
+            {
+              "entries": [
+                "var",
+                "entries"
+              ],
+              "inner": [
+                "var",
+                "inner"
+              ],
+              "key": [
+                "var",
+                "key"
+              ],
+              "kind": [
+                "var",
+                "kind"
+              ],
+              "members": [
+                "var",
+                "members"
+              ],
+              "name": [
+                "var",
+                "name"
+              ]
+            }
+          ],
+          "params": {
+            "entries": {
+              "list": {
+                "record": {
+                  "name": "string",
+                  "plain": "bool",
+                  "text": "string"
+                }
+              }
+            },
+            "inner": "string",
+            "key": "string",
+            "kind": {
+              "enum": [
+                "int",
+                "string",
+                "bool",
+                "json",
+                "enum",
+                "atom",
+                "optional",
+                "list",
+                "set",
+                "map",
+                "record"
+              ]
+            },
+            "members": {
+              "list": "string"
+            },
+            "name": "string"
+          },
+          "result": "string"
+        }
+      },
+      "state": {}
+    }
+  },
+  "entries": {
+    "commands": [],
+    "queries": [
+      "text-plan.Notes",
+      "text-plan.Sections",
+      "text-plan.TypeText"
     ]
-  }
+  },
+  "irVersion": 8,
+  "notes": {
+    "text-plan": "Decides how types are written in the adapter contract, which notes a query carries, and which sections the contract has.",
+    "text-plan.calcs.notes": "The notes a query of the outside world carries: its promise if it has one, then may-fail if it may fail.",
+    "text-plan.calcs.sections": "Which sections the contract has, from how many commands answer, how many queries and routes there are, whether the system restarts, how many sorts of atoms there are, and whether JSON values appear: the answers of commands when some command answers; queries when there is one; routes when there is one; restarts when the system restarts; the sorts when there is one; the JSON type when JSON values appear.",
+    "text-plan.calcs.typeText": "How one type is written, given what is inside it already written. An integer is number, a string string, a boolean boolean, JSON is Json. An enumeration is all its members (however many there are) joined by \" | \" (never when it has none). An atom is the name of its sort. An optional value is what is inside, followed by \" | null\". A list and a set are what is inside followed by \"[]\"; what is inside is put in parentheses when it contains \"|\" or \"&\" and does not start with \"{\". A map is \"{ key: K; value: V }[]\" with the key (key) and the value (inner). A record is \"{ \", its fields as \"name: text\" (all of them, however many there are) joined by \"; \", then \" }\" (a name that is not plain is written as a JSON string), or Record<string, never> when it has no field."
+  },
+  "root": "text-plan",
+  "sorts": []
 }

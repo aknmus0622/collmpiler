@@ -9,8 +9,8 @@ import { TS_FILES, generateAdapterSkeleton, generateContract, generateVerify } f
 import { dirFrom, importPath, isSource, label, sourceFiles } from "./layout.ts";
 import type { Workspace } from "./layout.ts";
 import { builtinMutation } from "./mutation.ts";
-import { RESULT_PREFIX } from "./runtime.ts";
-import type { PbtResult } from "./runtime.ts";
+import { RESULT_PREFIX } from "./v1/runtime.ts";
+import type { PbtResult8 as PbtResult } from "./v1/pbt.ts";
 import { tscStaticCheck } from "./static-check.ts";
 import { scan } from "./scan.ts";
 import type { Target, Usage } from "./target.ts";
@@ -150,15 +150,6 @@ export const typescriptTarget: Target = {
   Their type definitions are in \`node_modules/@types/node\`; do not declare them yourself.`,
     skeletonBody: `throw new Error("${NOT_IMPLEMENTED}");`,
     adapterGuide: `- \`setupIsolation(ports)\`: build a fresh production system in its initial state, giving it dependencies that
-  forward to \`ports\`. Where the production code expects a value in a different form than \`ports\` provides (a
-  date instead of a flag, a differently named result), translate here.
-- \`executeCommand(command)\`: call the production code for that command with its input.
-- \`getCurrentState()\`: return the current state as one of the \`StateName\` values, translating if the
-  production code names its states differently.
-- \`teardownIsolation()\`: discard the system.
-- \`restartSystem()\` (only if the contract has it): stop the production system and start a new instance on the
-  same \`ports.storage\`, connected to the same \`ports\`. Keep nothing from the old instance.`,
-    adapterGuide8: `- \`setupIsolation(ports)\`: build a fresh production system in its initial state, giving it dependencies that
   forward to \`ports\`. Where the production code expects a value in a different form than \`ports\` provides (a
   date instead of a number, a differently named result), translate here.
 - \`executeCommand(command)\`: call the production code for that command with its input, and return what it

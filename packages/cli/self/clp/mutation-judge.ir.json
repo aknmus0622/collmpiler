@@ -1,194 +1,392 @@
 {
-  "behaviors": [
-    {
-      "from": [
-        "VALUES"
-      ],
-      "name": "BeginValue",
-      "onlyIf": [],
-      "when": {
-        "otherwise": {
-          "does": "A decision-table value is judged next: whether it is a number, and whether it appears in the adapter as a number. None of its sites has been given yet.",
-          "goTo": "IN_VALUE",
-          "set": {
+  "components": {
+    "mutation-judge": {
+      "commands": {
+        "BeginValue": {
+          "events": [
+            "BeginValue.otherwise"
+          ],
+          "params": {
+            "inAdapter": "bool",
+            "numeric": "bool"
+          },
+          "requires": [
+            "=",
+            [
+              "state",
+              "phase"
+            ],
+            [
+              "lit",
+              "VALUES"
+            ]
+          ]
+        },
+        "EndValue": {
+          "events": [
+            "EndValue.otherwise"
+          ],
+          "params": {},
+          "requires": [
+            "=",
+            [
+              "state",
+              "phase"
+            ],
+            [
+              "lit",
+              "IN_VALUE"
+            ]
+          ]
+        },
+        "Finish": {
+          "events": [
+            "Finish.otherwise"
+          ],
+          "params": {
+            "shared": "bool"
+          },
+          "requires": [
+            "or",
+            [
+              "=",
+              [
+                "state",
+                "phase"
+              ],
+              [
+                "lit",
+                "VALUES"
+              ]
+            ],
+            [
+              "=",
+              [
+                "state",
+                "phase"
+              ],
+              [
+                "lit",
+                "MUTANTS"
+              ]
+            ]
+          ]
+        },
+        "Mutant": {
+          "events": [
+            "Mutant.otherwise"
+          ],
+          "params": {
+            "killed": "bool"
+          },
+          "requires": [
+            "or",
+            [
+              "=",
+              [
+                "state",
+                "phase"
+              ],
+              [
+                "lit",
+                "VALUES"
+              ]
+            ],
+            [
+              "=",
+              [
+                "state",
+                "phase"
+              ],
+              [
+                "lit",
+                "MUTANTS"
+              ]
+            ]
+          ]
+        },
+        "Site": {
+          "events": [
+            "Site.otherwise"
+          ],
+          "params": {
+            "killed": "bool"
+          },
+          "requires": [
+            "=",
+            [
+              "state",
+              "phase"
+            ],
+            [
+              "lit",
+              "IN_VALUE"
+            ]
+          ]
+        }
+      },
+      "events": {
+        "BeginValue.otherwise": {
+          "assign": {
+            "phase": [
+              "lit",
+              "IN_VALUE"
+            ],
             "sawSite": false,
             "siteKilled": false,
-            "valueInAdapter": {
-              "$ref": "calculation:valueInAdapterNow"
-            }
-          }
-        }
-      }
-    },
-    {
-      "from": [
-        "IN_VALUE"
-      ],
-      "name": "EndValue",
-      "onlyIf": [],
-      "when": {
-        "otherwise": {
-          "does": "The value's sites are over. If it had a site, a value is located in production code (for the rest of the judgement), and if none of its sites was killed, it survived. If it had no site, and it is a number that appears in the adapter, it is in the adapter.",
-          "emits": [
+            "valueInAdapter": [
+              "and",
+              [
+                "var",
+                "numeric"
+              ],
+              [
+                "var",
+                "inAdapter"
+              ]
+            ]
+          },
+          "calls": [],
+          "command": "BeginValue",
+          "guard": true
+        },
+        "EndValue.otherwise": {
+          "assign": {
+            "located": [
+              "ite",
+              [
+                "state",
+                "sawSite"
+              ],
+              true,
+              [
+                "state",
+                "located"
+              ]
+            ],
+            "phase": [
+              "lit",
+              "VALUES"
+            ]
+          },
+          "calls": [
             {
-              "effect": "Survived",
-              "input": {},
-              "onlyWhen": "The value had a site, and none of its sites was killed"
+              "args": {},
+              "command": "Survived",
+              "component": "verdict",
+              "when": [
+                "and",
+                [
+                  "state",
+                  "sawSite"
+                ],
+                [
+                  "not",
+                  [
+                    "state",
+                    "siteKilled"
+                  ]
+                ]
+              ]
             },
             {
-              "effect": "InAdapter",
-              "input": {},
-              "onlyWhen": "The value had no site, and it is a number that appears in the adapter"
+              "args": {},
+              "command": "InAdapter",
+              "component": "verdict",
+              "when": [
+                "and",
+                [
+                  "not",
+                  [
+                    "state",
+                    "sawSite"
+                  ]
+                ],
+                [
+                  "state",
+                  "valueInAdapter"
+                ]
+              ]
             }
           ],
-          "goTo": "VALUES",
-          "set": {
-            "located": {
-              "$ref": "calculation:locatedNow"
-            }
-          }
-        }
-      }
-    },
-    {
-      "from": [
-        "VALUES",
-        "MUTANTS"
-      ],
-      "name": "Finish",
-      "onlyIf": [],
-      "when": {
-        "otherwise": {
-          "does": "The judgement is over. If no value was located in production code, no mutant was killed, and the production code is not shared with other components in a way that could not be narrowed (shared), the mutation is ineffective.",
-          "emits": [
+          "command": "EndValue",
+          "guard": true
+        },
+        "Finish.otherwise": {
+          "assign": {
+            "phase": [
+              "lit",
+              "DONE"
+            ]
+          },
+          "calls": [
             {
-              "effect": "Ineffective",
-              "input": {},
-              "onlyWhen": "No value was located in production code, no mutant was killed, and the production code is not shared with other components in a way that could not be narrowed"
+              "args": {},
+              "command": "Ineffective",
+              "component": "verdict",
+              "when": [
+                "and",
+                [
+                  "and",
+                  [
+                    "not",
+                    [
+                      "state",
+                      "located"
+                    ]
+                  ],
+                  [
+                    "not",
+                    [
+                      "state",
+                      "anyKilled"
+                    ]
+                  ]
+                ],
+                [
+                  "not",
+                  [
+                    "var",
+                    "shared"
+                  ]
+                ]
+              ]
             }
           ],
-          "goTo": "DONE"
-        }
-      }
-    },
-    {
-      "from": [
-        "VALUES",
-        "MUTANTS"
-      ],
-      "name": "Mutant",
-      "onlyIf": [],
-      "when": {
-        "otherwise": {
-          "does": "A mutant (every one, the sites of values included) and whether it was killed.",
-          "goTo": "MUTANTS",
-          "set": {
-            "anyKilled": {
-              "$ref": "calculation:anyKilledNow"
-            }
-          }
-        }
-      }
-    },
-    {
-      "description": "A site of the value: a place in production code where the value was changed, and whether that made the tests fail (killed).",
-      "from": [
-        "IN_VALUE"
-      ],
-      "name": "Site",
-      "onlyIf": [],
-      "when": {
-        "Breaking it made the tests fail (killed)": {
-          "set": {
+          "command": "Finish",
+          "guard": true
+        },
+        "Mutant.otherwise": {
+          "assign": {
+            "anyKilled": [
+              "or",
+              [
+                "state",
+                "anyKilled"
+              ],
+              [
+                "var",
+                "killed"
+              ]
+            ],
+            "phase": [
+              "lit",
+              "MUTANTS"
+            ]
+          },
+          "calls": [],
+          "command": "Mutant",
+          "guard": true
+        },
+        "Site.otherwise": {
+          "assign": {
             "sawSite": true,
-            "siteKilled": true
+            "siteKilled": [
+              "or",
+              [
+                "state",
+                "siteKilled"
+              ],
+              [
+                "var",
+                "killed"
+              ]
+            ]
+          },
+          "calls": [],
+          "command": "Site",
+          "guard": true
+        }
+      },
+      "init": {
+        "anyKilled": false,
+        "located": false,
+        "phase": [
+          "lit",
+          "VALUES"
+        ],
+        "sawSite": false,
+        "siteKilled": false,
+        "valueInAdapter": false
+      },
+      "relies": [
+        "verdict"
+      ],
+      "state": {
+        "anyKilled": "bool",
+        "located": "bool",
+        "phase": {
+          "enum": [
+            "VALUES",
+            "IN_VALUE",
+            "MUTANTS",
+            "DONE"
+          ]
+        },
+        "sawSite": "bool",
+        "siteKilled": "bool",
+        "valueInAdapter": "bool"
+      }
+    },
+    "verdict": {
+      "external": {
+        "commands": {
+          "InAdapter": {
+            "params": {}
+          },
+          "Ineffective": {
+            "params": {}
+          },
+          "Survived": {
+            "params": {}
           }
         },
-        "otherwise": {
-          "set": {
-            "sawSite": true
-          }
-        }
+        "queries": {}
       }
     }
-  ],
-  "decisions": {},
-  "descriptions": {
-    "component": "Decides whether a mutation report passes the mutation gate, value by value and as a whole.",
-    "data.anyKilled": "Whether some mutant so far was killed.",
-    "data.located": "Whether some value so far had a site.",
-    "data.sawSite": "Whether the value being judged has a site (a place in production code where it was broken).",
-    "data.siteKilled": "Whether some site of the value being judged was killed (breaking it made the tests fail).",
-    "data.valueInAdapter": "Whether the value being judged is a number that appears in the adapter.",
-    "effects.InAdapter": "The value being judged has no site in production code, but appears in the adapter: the decision was put in the adapter.",
-    "effects.Ineffective": "No decision-table value was found in production code, and no mutant at all was killed: the tested behaviour does not come from production code.",
-    "effects.Survived": "The value being judged has sites, and none was killed: it is not decided by production code.",
-    "states.DONE": "The judgement is over.",
-    "states.IN_VALUE": "The sites of one value are being given.",
-    "states.MUTANTS": "Every mutant is being given.",
-    "states.VALUES": "Values are being judged, one after another."
   },
-  "irVersion": 7,
-  "model": {
-    "calculations": {
-      "anyKilledNow": {
-        "description": "Whether some mutant so far, the one given included, was killed",
-        "output": "boolean"
-      },
-      "locatedNow": {
-        "description": "Whether some value so far, the one whose sites are over included, had a site",
-        "output": "boolean"
-      },
-      "valueInAdapterNow": {
-        "description": "Whether the value given is a number and appears in the adapter",
-        "output": "boolean"
-      }
-    },
-    "commands": {
-      "BeginValue": {
-        "inAdapter": "boolean",
-        "numeric": "boolean"
-      },
-      "EndValue": {},
-      "Finish": {
-        "shared": "boolean"
-      },
-      "Mutant": {
-        "killed": "boolean"
-      },
-      "Site": {
-        "killed": "boolean"
-      }
-    },
-    "data": {
-      "anyKilled": "boolean",
-      "located": "boolean",
-      "sawSite": "boolean",
-      "siteKilled": "boolean",
-      "valueInAdapter": "boolean"
-    },
-    "effects": {
-      "InAdapter": {},
-      "Ineffective": {},
-      "Survived": {}
-    },
-    "final": [
-      "DONE"
+  "entries": {
+    "commands": [
+      "mutation-judge.BeginValue",
+      "mutation-judge.EndValue",
+      "mutation-judge.Finish",
+      "mutation-judge.Mutant",
+      "mutation-judge.Site"
     ],
-    "init": "VALUES",
-    "initial": {
-      "anyKilled": false,
-      "located": false,
-      "sawSite": false,
-      "siteKilled": false,
-      "valueInAdapter": false
-    },
-    "queries": {},
-    "states": [
-      "VALUES",
-      "IN_VALUE",
-      "MUTANTS",
-      "DONE"
+    "queries": []
+  },
+  "irVersion": 8,
+  "notes": {
+    "mutation-judge": "Decides whether a mutation report passes the mutation gate, value by value and as a whole.",
+    "mutation-judge.does.begin": "A decision-table value is judged next: whether it is a number, and whether it appears in the adapter as a number. None of its sites has been given yet.",
+    "mutation-judge.does.end": "The value's sites are over. If it had a site, a value is located in production code (for the rest of the judgement), and if none of its sites was killed, it survived. If it had no site, and it is a number that appears in the adapter, it is in the adapter.",
+    "mutation-judge.does.finish": "The judgement is over. If no value was located in production code, no mutant was killed, and the production code is not shared with other components in a way that could not be narrowed (shared), the mutation is ineffective.",
+    "mutation-judge.does.mutant": "A mutant (every one, the sites of values included) and whether it was killed.",
+    "mutation-judge.does.site": "A site of the value: a place in production code where the value was changed, and whether that made the tests fail (killed).",
+    "mutation-judge.state.anyKilled": "Whether some mutant so far was killed.",
+    "mutation-judge.state.located": "Whether some value so far had a site.",
+    "mutation-judge.state.sawSite": "Whether the value being judged has a site (a place in production code where it was broken).",
+    "mutation-judge.state.siteKilled": "Whether some site of the value being judged was killed (breaking it made the tests fail).",
+    "mutation-judge.state.valueInAdapter": "Whether the value being judged is a number that appears in the adapter.",
+    "verdict": "What the judgement reports."
+  },
+  "root": "mutation-judge",
+  "sorts": [],
+  "trace": {
+    "mutation-judge.does.begin": [
+      "MutationJudge.commands.BeginValue"
+    ],
+    "mutation-judge.does.end": [
+      "MutationJudge.commands.EndValue"
+    ],
+    "mutation-judge.does.finish": [
+      "MutationJudge.commands.Finish"
+    ],
+    "mutation-judge.does.mutant": [
+      "MutationJudge.commands.Mutant"
+    ],
+    "mutation-judge.does.site": [
+      "MutationJudge.commands.Site"
     ]
   }
 }

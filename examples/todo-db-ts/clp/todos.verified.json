@@ -3,15 +3,15 @@
     "todos.component.ts",
     "todos.interpretation.ts"
   ],
-  "specs": "sha256:04ecc77e2b3317e5caa7841cf4b4e7fbfc4fdb9eb33f1b080c242b1f92ea5dd2",
-  "code": "sha256:5a6eb63adc0f8968a684e8bdea9bde96ddd90c6e0d5adf2d8329c16ae269af8b",
+  "specs": "sha256:9bc5e556ce855be718010494c283da2554471391803f51d989cb11b0d4baf5b1",
+  "code": "sha256:d109c7df2840228966fae857523a38c73660b432376d82ed1672bb20b2dac26a",
   "files": [
     "../src/json.ts",
     "../src/store-entries.ts",
     "../src/store.ts",
     "../src/todo-api.ts",
-    "../src/todo-item.ts",
     "../src/todos.ts",
     "todos.adapter.ts"
-  ]
+  ],
+  "gradedBy": "stage1"
 }

@@ -38,97 +38,7 @@ function renderFeedback(feedback: Feedback, current = false): string {
   return `The previous attempt failed the property-based test. Minimal counterexample:\n\n\`\`\`json\n${JSON.stringify(feedback.result, null, 2)}\n\`\`\``;
 }
 
-const IR_GUIDE = `## How to read the IR
-
-The IR describes one component by its boundary.
-
-- \`model.states\` / \`model.init\`: the state names and the starting state.
-- \`model.commands\`: the commands that drive the component from outside, each with the fields of its input.
-- \`model.data\`: what the component remembers between commands. Nothing is set in the initial state, except
-  the fields listed in \`model.initial\` (if present), which start with the value given there; an
-  outcome's \`set\` says which fields it stores, and later commands can depend on them.
-- A component whose only state is \`READY\` has no states of its own: it is always in that one state.
-- \`model.queries\`: what the component asks its environment for (a clock, configuration, the response of an
-  external service, ...), each with the type of its answer (\`output\`) and, if it is a question about
-  something, the fields of that something (\`input\`). The answers can change from one command to the next, so
-  ask when the value is needed and do not cache it. \`promise\` (if present) is something the environment
-  guarantees about the answers: \`fresh\` means it never answers with the same value twice, \`increasing\`
-  that it never answers with less than before. Rely on it; do not implement it. \`mayFail\` (if present) means
-  that asking can fail: the dependency throws instead of answering. What happens then is in the conditions
-  named \`query "<name>" failed\` (\`<name>\` is the query, or the name an \`asks\` gave its answer): catch the
-  failure where the query is asked and do what that case says. Ask only when the answer is needed, in the order
-  the conditions imply; a failure of a query the command did not need to ask must not change its outcome.
-- \`model.effects\`: the side effects the component may perform on its environment, with their payload fields.
-- \`model.parts\` (if present): components this one contains. Each entry names the contained component
-  (\`component\`), the commands you can call on it (\`commands\`, with their input fields, and \`outputs\`, what they
-  answer), and its own dependencies (\`queries\`, \`effects\`). Their production code already exists; use it.
-  Their dependencies come from the same environment as this component's: pass them on to that code. An entry
-  with \`by\` is a component of which there are many, one per key (\`by\` names the key): this component creates
-  them (\`adds\`), removes them (\`removes\`) and executes a command on the one with a given key (\`at\` in \`calls\`).
-- \`model.durable\` (if present): what this component remembers (its state, its data, and everything it
-  contains) survives a restart of the system, as after a crash or a redeployment. Keep it in storage, not only in
-  memory: the production code is given the location of its storage (the path of a database file) by whoever
-  starts it, and must come back with everything it had when started again on the same location. Use Node's
-  \`node:sqlite\` for it, unless \`durable\` names a store component (\`{ "store": "<component>" }\`): then that
-  component's production code already exists and keeps values for you; use it. Components without \`durable\`
-  start over on a restart. A part marked \`durable\` in \`model.parts\` keeps what it has across a restart.
-- \`model.routes\` (if present): how each command reaches the system from outside, as an HTTP method and path
-  (\`"POST /todos"\`, \`"DELETE /todos/:id"\`). The production code serves them over HTTP itself: it includes the
-  HTTP server (Node's \`node:http\`), which can be started with its dependencies on a given port (0 for any free
-  one), tells the port it listens on, can be stopped, and serves each command at its route. A path segment written \`:name\`
-  is the input field \`name\`, the input field \`body\` is the JSON request body, and every other input field is
-  a query-string parameter. A command whose answer has \`status\` (and \`body\`) answers with that response
-  status code (and that JSON response body; \`null\` means no body).
-- Field types: an array lists the allowed values; a string is a primitive type (\`integer\` is a whole number);
-  an object such as \`{"type": "integer", "min": 0, "max": 1000000}\` is a number with constraints (\`around\`
-  lists thresholds the test will probe closely, including the values just below and above them);
-  \`{"type": "string", ...}\` is a string (\`examples\` and \`among\` only say which values the test tries).
-  \`{"list": T}\` is a sequence of \`T\`, compared in order. \`{"record": {...}}\` is a value with those
-  fields; the fields named in its \`optional\` may be \`null\`. \`{"optional": T}\` is a \`T\` or \`null\`.
-- \`model.calculations\`: named computations. \`description\` says in natural language how the value is computed,
-  including rounding; implement exactly what it says. \`output\` is the type of the result.
-- \`model.invariants\`: natural-language properties that always hold for the state and the remembered data.
-  They are not tested directly; treat them as facts you can rely on.
-- **Conditions are written in natural language** everywhere they appear: as the row keys of decision tables, in
-  \`onlyIf\`, as the keys of \`when\`, and as the \`onlyWhen\` of an effect. Decide what each condition means in
-  terms of the remembered data, the query answers, the input of the command, and the current state. The same
-  sentence always means the same thing. Among the conditions of one table (or of one command's \`when\`) at
-  most one holds; \`otherwise\` applies when none does.
-- \`decisions\`: decision tables. \`rows\` maps each condition to the values chosen when it holds. A \`null\`
-  cell means that row gives no value for that column; the value is never needed when that row applies.
-- \`descriptions\` (if present): prose about the component as a whole (\`component\`) and about parts of
-  its vocabulary. It explains the intent; the structured fields are the precise form.
-- \`behaviors\`: what each command does. \`description\` (if present) describes the command in prose.
-  \`from\` lists the states in which the command can be executed, and the conditions in \`onlyIf\` must also
-  hold; behaviour outside them is not tested. \`asks\` (if present) lists what the command asks through a
-  query that takes an input: each entry names the answer, the \`query\`, and the \`input\` to ask it with. Ask
-  with exactly that input; other questions through that query are not part of the specification. You need not
-  ask when the answer cannot matter. \`calls\` (if present) lists, in order, the commands of contained
-  components that the command executes before its case is decided: each entry names the answer, the \`part\`,
-  the \`command\`, and its \`input\`; \`at\` (if present) is the key of the one to execute it on, and if none has that
-  key, nothing happens and the answer is \`null\`. \`when\` maps each condition to what happens when it holds
-  (a command that does not branch has only \`otherwise\`):
-  - \`goTo\`: the resulting state. If it is absent, the state does not change.
-  - \`does\` (if present): what happens, in prose. It explains the intent; the fields below are the precise form.
-  - \`emits\`: the effects to perform, in this order, each with the \`effect\` and its \`input\`. An effect with
-    \`onlyWhen\` is performed only if that holds; \`onlyWhen\` is either a condition sentence or a reference to a
-    boolean value. No \`emits\` means no effect.
-  - \`set\`: the data to remember.
-  - \`adds\` / \`removes\` (if present): create a new one of a contained component listed with \`by\`, with that
-    \`key\` and that starting \`data\` (it starts in its own initial state), or remove the one with that \`key\`.
-  - \`responds\` (if present): what the command answers with, given back to whoever executed it. It is a
-    single value, or one value per field; \`null\` means the command has no value for that field in this
-    case. \`model.outputs\` gives the shape of the answer for each command that has one (\`record\` lists
-    the fields, \`optional\` those that can be \`null\`). A command not listed there answers nothing.
-- Values inside an outcome are constants or references:
-  - \`{"$ref": "input:<field>"}\`, \`{"$ref": "data:<field>"}\`, \`{"$ref": "query:<name>"}\`: that command
-    input, remembered field, or query answer (\`<name>\` is a query without input, or a name given in \`asks\`).
-  - \`{"$ref": "calculation:<name>"}\`: the result of that computation.
-  - \`{"$ref": "decision:<table>.<column>"}\`: the value of that column in the row whose condition holds.
-  - \`{"$was": [<states>]}\`: true if the state before the command was one of those listed.
-  - \`{"$ref": "call:<name>"}\`: the answer of a command listed in \`calls\` (\`call:<name>.<field>\`: one field of it).`;
-
-// 1.0 (IR version 8): the IR is the formal model itself, and the implementer reads its expressions.
+// The IR (version 8) is the formal model itself, and the implementer reads its expressions.
 const IR_GUIDE_8 = (ws: Workspace) => `## How to read the IR
 
 \`${ws.paths.ir}\` is the specification itself, as a formal model; \`${ws.paths.ir.replace(/ir\.json$/, "spec.md")}\` is the same
@@ -178,7 +88,7 @@ ${OPS.map((op) => `- \`${op.name}\`: ${op.meaning}`).join("\n")}`;
 const reserved = (ws: Workspace) =>
   ws.prefix === "" ? "" : `\n- File names starting with \`${ws.prefix}\` are reserved for the test harness. Do not create, edit, or import such files.`;
 
-const design = (target: Target, ws: Workspace, guide: string, incremental: boolean, v8 = false) => `${
+const design = (target: Target, ws: Workspace, guide: string, incremental: boolean) => `${
   incremental
     ? `Production code already exists under \`${label(ws.src)}\`, but it does not yet fit the specification in
 \`${ws.paths.ir}\`: it was written for an earlier version of that specification, or for other components of the
@@ -238,10 +148,10 @@ This is guidance on how to design the code, not something the harness checks.
 
 ${guide.trim()}
 
-${v8 ? IR_GUIDE_8(ws) : IR_GUIDE}
+${IR_GUIDE_8(ws)}
 `;
 
-const wiring = (target: Target, ws: Workspace, incremental: boolean, v8 = false) => `Connect the production code under \`${label(ws.src)}\` to the test harness by filling in
+const wiring = (target: Target, ws: Workspace, incremental: boolean) => `Connect the production code under \`${label(ws.src)}\` to the test harness by filling in
 \`${ws.paths.adapter}\`. The interface to implement, and the stand-ins the harness provides for
 everything the system depends on, are defined in \`${ws.paths.contract}\`.
 
@@ -258,7 +168,7 @@ it: your job is only to connect the two sides.
 
 ## What to write
 
-${v8 ? target.request(ws).adapterGuide8 ?? target.request(ws).adapterGuide : target.request(ws).adapterGuide}
+${target.request(ws).adapterGuide}
 
 ## Rules (checked mechanically)
 
@@ -271,7 +181,7 @@ ${v8 ? target.request(ws).adapterGuide8 ?? target.request(ws).adapterGuide : tar
 - Work only from the files in this directory. Do not read anything outside it.
 `;
 
-const implementation = (target: Target, ws: Workspace, guide: string, incremental: boolean, v8 = false) => `${
+const implementation = (target: Target, ws: Workspace, guide: string, incremental: boolean) => `${
   incremental
     ? `Change the production code under \`${label(ws.src)}\` so that it satisfies the specification in
 \`${ws.paths.ir}\`. The code was written before the specification took its current form. Its design and signatures
@@ -307,25 +217,16 @@ This is guidance on how to design the code, not something the harness checks.
 
 ${guide.trim()}
 
-${v8 ? IR_GUIDE_8(ws) : IR_GUIDE}
+${IR_GUIDE_8(ws)}
 
 ## How your work is tested
 
-${
-  v8
-    ? `The harness runs many randomly generated trials. One trial builds a fresh system and executes a sequence of
+The harness runs many randomly generated trials. One trial builds a fresh system and executes a sequence of
 commands and queries on it. During each one the outside world answers with values the harness chooses. After
 each one, what the system answered and what it did to the outside world (in order) must match the specification
 exactly. If they do not, you will be asked again with a minimal counterexample: the shortest sequence that shows
 the difference, each step with the answers the outside world gave and the events of the specification that
-happened.`
-    : `The harness runs many randomly generated trials. One trial builds a fresh system and executes a sequence of
-several commands on it. Before each command the harness chooses new query answers. After each command, the
-current state and the effects the system performed during that command (including their order) must match the
-specification exactly. If they do not, you will be asked again with a minimal counterexample: the shortest
-sequence of commands that shows the difference. In a counterexample, \`data\` is what the component should be
-remembering before that command, and \`case\` is the condition that holds.`
-}
+happened.
 `;
 
 const TITLES: Record<Phase, string> = {
@@ -370,19 +271,18 @@ export function renderRequest(
   // incremental: すでにある本番コードを、仕様の変更に合わせて直す。
   // others: 同じ本番コードを共有する、ほかのコンポーネントの IR の場所
   // partFiles: 含む部品のコード（使うだけで、書き換えない）
-  options: { incremental?: boolean; others?: string[]; partFiles?: string[]; irVersion?: number } = {},
+  options: { incremental?: boolean; others?: string[]; partFiles?: string[] } = {},
   // Stage 1 が下した、節の判断（無ければ Stage 0）
   decided?: RequestSections,
 ): string {
   const incremental = options.incremental ?? false;
   const sections = decided ?? requestSectionsStage0({ phase, attempt, hasFeedback: feedback !== undefined, others: (options.others ?? []).length, partFiles: (options.partFiles ?? []).length });
-  const v8 = options.irVersion === 8;
   const body =
     phase === "design"
-      ? design(target, ws, guide, incremental, v8)
+      ? design(target, ws, guide, incremental)
       : phase === "wiring"
-        ? wiring(target, ws, incremental, v8)
-        : implementation(target, ws, guide, incremental, v8);
+        ? wiring(target, ws, incremental)
+        : implementation(target, ws, guide, incremental);
   // 1回目の依頼に載るのは、エージェントを呼ぶ前に、いまのコードを採点した結果
   const previous =
     sections.feedback === "none" || !feedback
@@ -401,6 +301,6 @@ export function renderRequest(
   const contained =
     !sections.contained
       ? ""
-      : `\n## Components this one contains\n\nThe specification lists in \`${v8 ? "contains" : "model.parts"}\` the components this one contains. Their production code already exists and has been verified on its own. Use it as it is, through its exported API; read it to learn that API:\n\n${partFiles.map((path) => `- \`${path}\``).join("\n")}\n\nDo not change these files: a change is undone and the attempt is rejected. Your code is what connects the outside (\`${v8 ? "routes" : "model.routes"}\`, if present) to them.\n`;
+      : `\n## Components this one contains\n\nThe specification lists in \`contains\` the components this one contains. Their production code already exists and has been verified on its own. Use it as it is, through its exported API; read it to learn that API:\n\n${partFiles.map((path) => `- \`${path}\``).join("\n")}\n\nDo not change these files: a change is undone and the attempt is rejected. Your code is what connects the outside (\`routes\`, if present) to them.\n`;
   return `# ${TITLES[phase]} (attempt ${attempt})\n\n${body}${system}${contained}${renderAssets(assets)}${previous}`;
 }

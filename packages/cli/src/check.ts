@@ -1,8 +1,8 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, posix, relative, resolve, sep } from "node:path";
-import { stableStringify } from "./extract.ts";
+import { stableStringify } from "./generate.ts";
 import { generateContract, generateVerify } from "./generate.ts";
-import type { AnyIr as Ir } from "./generate.ts";
+import type { Ir } from "./generate.ts";
 import { dirFrom, importPath, isSource, label, sourceFiles, testsDirOf } from "./layout.ts";
 import type { Workspace } from "./layout.ts";
 import { importsOf, scan } from "./scan.ts";

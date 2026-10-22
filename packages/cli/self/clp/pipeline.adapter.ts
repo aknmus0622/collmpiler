@@ -1,50 +1,54 @@
-import type { TargetSystemAdapter } from "./pipeline.adapter.contract.ts";
-import { Pipeline } from "../src/pipeline.ts";
+import type { Ports, TargetSystemAdapter } from "./pipeline.adapter.contract.ts";
+import { Pipeline, type OutputDirectory, type PipelineDriver } from "../src/pipeline.ts";
 
 // Import the production code from ../src/ and forward each call to it. No business logic here.
+
 let pipeline: Pipeline | undefined;
 
-function current(): Pipeline {
+function system(): Pipeline {
   if (!pipeline) throw new Error("adapter: setupIsolation was not called");
   return pipeline;
 }
 
+function outputDirectory(ports: Ports): OutputDirectory {
+  return {
+    hasProductionCode: () => ports.output.HasProductionCode(),
+    boundaryChanged: () => ports.output.BoundaryChanged(),
+    hasAdapter: () => ports.output.HasAdapter(),
+  };
+}
+
+function pipelineDriver(ports: Ports): PipelineDriver {
+  return {
+    startSession: (round, attempt, phase) => ports["pipeline-driver"].StartSession({ attempt, phase, round }),
+    gradeCurrentCode: (round) => ports["pipeline-driver"].GradeCurrentCode({ round }),
+    discardCode: () => ports["pipeline-driver"].DiscardCode({}),
+  };
+}
+
 export const adapter: TargetSystemAdapter = {
   async setupIsolation(ports) {
-    pipeline = new Pipeline(
-      {
-        hasProductionCode: () => ports.queries.hasProductionCode(),
-        boundaryChanged: () => ports.queries.boundaryChanged(),
-        hasAdapter: () => ports.queries.hasAdapter(),
-      },
-      {
-        startSession: (start) =>
-          ports.effects.StartSession({ attempt: start.attempt, phase: start.phase, round: start.round }),
-        gradeCurrentCode: (round) => ports.effects.GradeCurrentCode({ round }),
-        discardCode: () => ports.effects.DiscardCode({}),
-      },
-    );
+    pipeline = new Pipeline(outputDirectory(ports), pipelineDriver(ports));
   },
   async teardownIsolation() {
     pipeline = undefined;
   },
   async executeCommand(command) {
-    const p = current();
     switch (command.name) {
       case "Start":
-        p.start({ attemptsPerPhase: command.input.attemptsPerPhase, rounds: command.input.rounds });
+        system().start({ attemptsPerPhase: command.input.attemptsPerPhase, rounds: command.input.rounds });
         return;
       case "DesignChecked":
-        p.designChecked(command.input.passed);
+        system().designChecked(command.input.passed);
         return;
       case "WiringChecked":
-        p.wiringChecked(command.input.passed);
+        system().wiringChecked(command.input.passed);
         return;
       case "ImplementationChecked":
-        p.implementationChecked(command.input.passed);
+        system().implementationChecked(command.input.passed);
         return;
       case "CurrentCodeGraded":
-        p.currentCodeGraded(command.input.passed);
+        system().currentCodeGraded(command.input.passed);
         return;
       default: {
         const unknown: never = command;
@@ -52,7 +56,14 @@ export const adapter: TargetSystemAdapter = {
       }
     }
   },
-  async getCurrentState() {
-    return current().state;
+  async executeQuery(query) {
+    switch (query.name) {
+      case "Status":
+        return system().status();
+      default: {
+        const unknown: never = query.name;
+        throw new Error(`adapter: unknown query ${JSON.stringify(unknown)}`);
+      }
+    }
   },
 };

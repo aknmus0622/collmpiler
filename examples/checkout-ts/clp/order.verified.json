@@ -3,14 +3,15 @@
     "order.component.ts",
     "order.interpretation.ts"
   ],
-  "specs": "sha256:f3407d477ba963efa9227bbdbd253d6140418435af541a73fe2e9f76b8e6772c",
-  "code": "sha256:1144b91f42e1b9249adad2b4a50c844374c2a6824d4f424fdf860a06feccf66f",
+  "specs": "sha256:e4c76a1cfc17a24c17a7f146390d3dbea1b0d78725975d7d05b79ce36ace55bf",
+  "code": "sha256:26b15eaef05635e2147c9ef03982d72592f1213f3c5dbdffad8a9bb8998ea83f",
   "files": [
+    "../src/dependencies.ts",
     "../src/index.ts",
     "../src/order.ts",
-    "../src/policy.ts",
-    "../src/ports.ts",
+    "../src/rules.ts",
     "../src/types.ts",
     "order.adapter.ts"
-  ]
+  ],
+  "gradedBy": "stage1"
 }

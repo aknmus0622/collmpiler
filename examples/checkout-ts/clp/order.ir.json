@@ -1,254 +1,789 @@
 {
-  "behaviors": [
-    {
-      "description": "A pending or paid order can be cancelled. If the order had been paid, a refund is issued.",
-      "from": [
-        "PENDING",
-        "PAID"
-      ],
-      "name": "Cancel",
-      "onlyIf": [],
-      "when": {
-        "otherwise": {
-          "emits": [
-            {
-              "effect": "Refund",
-              "input": {},
-              "onlyWhen": {
-                "$was": [
-                  "PAID"
-                ]
-              }
-            }
-          ],
-          "goTo": "CANCELLED"
+  "components": {
+    "calendar": {
+      "external": {
+        "commands": {},
+        "queries": {
+          "IsMonthEnd": {
+            "params": {},
+            "result": "bool"
+          }
         }
       }
     },
-    {
-      "from": [
-        "PENDING"
-      ],
-      "name": "Checkout",
-      "onlyIf": [
-        "The external payment module is active"
-      ],
-      "when": {
-        "The payment succeeded": {
-          "does": "A receipt is sent with the campaign's discount percent and the amount charged. Then a coupon is issued if the campaign grants one.",
-          "emits": [
-            {
-              "effect": "SendReceipt",
-              "input": {
-                "amount": {
-                  "$ref": "calculation:amountCharged"
-                },
-                "discountPercent": {
-                  "$ref": "decision:campaign.discountPercent"
-                }
+    "customer": {
+      "external": {
+        "commands": {
+          "Coupon": {
+            "params": {
+              "type": {
+                "enum": [
+                  "Premium",
+                  "Standard"
+                ]
               }
+            }
+          },
+          "OrderConfirmation": {
+            "params": {}
+          },
+          "PaymentFailure": {
+            "params": {}
+          },
+          "Receipt": {
+            "params": {
+              "amount": "int",
+              "discountPercent": "int"
+            }
+          },
+          "ShippingNotice": {
+            "params": {
+              "priority": "bool"
+            }
+          }
+        },
+        "queries": {}
+      }
+    },
+    "order": {
+      "commands": {
+        "Cancel": {
+          "events": [
+            "Cancel.case1",
+            "Cancel.case2",
+            "Cancel.otherwise"
+          ],
+          "output": {
+            "enum": [
+              "cancelled",
+              "not-cancellable"
+            ]
+          },
+          "params": {}
+        },
+        "Checkout": {
+          "events": [
+            "Checkout.paid",
+            "Checkout.otherwise"
+          ],
+          "params": {},
+          "requires": [
+            "and",
+            [
+              "=",
+              [
+                "state",
+                "status"
+              ],
+              [
+                "lit",
+                "PENDING"
+              ]
+            ],
+            [
+              "cond",
+              "paymentModuleActive",
+              {}
+            ]
+          ]
+        },
+        "PlaceOrder": {
+          "events": [
+            "PlaceOrder.otherwise"
+          ],
+          "params": {
+            "customerRank": {
+              "enum": [
+                "Gold",
+                "Silver",
+                "Bronze"
+              ]
             },
-            {
-              "effect": "IssueCoupon",
-              "input": {
-                "type": {
-                  "$ref": "decision:campaign.coupon"
+            "listPrice": "int"
+          },
+          "requires": [
+            "and",
+            [
+              "and",
+              [
+                "=",
+                [
+                  "state",
+                  "status"
+                ],
+                [
+                  "lit",
+                  "DRAFT"
+                ]
+              ],
+              [
+                ">=",
+                [
+                  "var",
+                  "listPrice"
+                ],
+                0
+              ]
+            ],
+            [
+              "<=",
+              [
+                "var",
+                "listPrice"
+              ],
+              1000000
+            ]
+          ]
+        },
+        "Ship": {
+          "events": [
+            "Ship.otherwise"
+          ],
+          "params": {},
+          "requires": [
+            "=",
+            [
+              "state",
+              "status"
+            ],
+            [
+              "lit",
+              "PAID"
+            ]
+          ]
+        }
+      },
+      "conditions": {
+        "paid": {
+          "is": [
+            "=",
+            [
+              "ask",
+              "payment",
+              "Result",
+              {}
+            ],
+            [
+              "lit",
+              "succeeded"
+            ]
+          ],
+          "params": {}
+        },
+        "paymentModuleActive": {
+          "is": [
+            "ask",
+            "payment",
+            "Active",
+            {}
+          ],
+          "params": {}
+        }
+      },
+      "decisions": {
+        "campaign": {
+          "params": {},
+          "result": {
+            "record": {
+              "coupon": {
+                "optional": {
+                  "enum": [
+                    "Premium"
+                  ]
                 }
               },
-              "onlyWhen": {
-                "$ref": "decision:campaign.grantsCoupon"
-              }
+              "discountPercent": "int",
+              "grantsCoupon": "bool"
+            }
+          },
+          "rows": [
+            {
+              "then": {
+                "coupon": [
+                  "lit",
+                  "Premium"
+                ],
+                "discountPercent": 20,
+                "grantsCoupon": true
+              },
+              "when": [
+                "and",
+                [
+                  "=",
+                  [
+                    "state",
+                    "rank"
+                  ],
+                  [
+                    "lit",
+                    "Gold"
+                  ]
+                ],
+                [
+                  "ask",
+                  "calendar",
+                  "IsMonthEnd",
+                  {}
+                ]
+              ]
+            },
+            {
+              "then": {
+                "coupon": null,
+                "discountPercent": 5,
+                "grantsCoupon": false
+              },
+              "when": [
+                "=",
+                [
+                  "state",
+                  "rank"
+                ],
+                [
+                  "lit",
+                  "Silver"
+                ]
+              ]
+            },
+            {
+              "then": {
+                "coupon": null,
+                "discountPercent": 0,
+                "grantsCoupon": false
+              },
+              "when": true
+            }
+          ]
+        },
+        "shipping": {
+          "params": {},
+          "result": {
+            "record": {
+              "priority": "bool"
+            }
+          },
+          "rows": [
+            {
+              "then": {
+                "priority": true
+              },
+              "when": [
+                "or",
+                [
+                  "=",
+                  [
+                    "state",
+                    "rank"
+                  ],
+                  [
+                    "lit",
+                    "Gold"
+                  ]
+                ],
+                [
+                  ">=",
+                  [
+                    "state",
+                    "price"
+                  ],
+                  10000
+                ]
+              ]
+            },
+            {
+              "then": {
+                "priority": false
+              },
+              "when": true
+            }
+          ]
+        }
+      },
+      "events": {
+        "Cancel.case1": {
+          "assign": {
+            "status": [
+              "lit",
+              "CANCELLED"
+            ]
+          },
+          "calls": [
+            {
+              "args": {
+                "amount": [
+                  "state",
+                  "amountPaid"
+                ]
+              },
+              "command": "Refund",
+              "component": "refunds"
             }
           ],
-          "goTo": "PAID"
+          "command": "Cancel",
+          "guard": [
+            "=",
+            [
+              "state",
+              "status"
+            ],
+            [
+              "lit",
+              "PAID"
+            ]
+          ],
+          "output": [
+            "lit",
+            "cancelled"
+          ]
         },
-        "otherwise": {
-          "does": "The customer is notified of the payment failure.",
-          "emits": [
+        "Cancel.case2": {
+          "assign": {
+            "status": [
+              "lit",
+              "CANCELLED"
+            ]
+          },
+          "calls": [],
+          "command": "Cancel",
+          "guard": [
+            "and",
+            [
+              "not",
+              [
+                "=",
+                [
+                  "state",
+                  "status"
+                ],
+                [
+                  "lit",
+                  "PAID"
+                ]
+              ]
+            ],
+            [
+              "=",
+              [
+                "state",
+                "status"
+              ],
+              [
+                "lit",
+                "PENDING"
+              ]
+            ]
+          ],
+          "output": [
+            "lit",
+            "cancelled"
+          ]
+        },
+        "Cancel.otherwise": {
+          "assign": {},
+          "calls": [],
+          "command": "Cancel",
+          "guard": [
+            "and",
+            [
+              "not",
+              [
+                "=",
+                [
+                  "state",
+                  "status"
+                ],
+                [
+                  "lit",
+                  "PAID"
+                ]
+              ]
+            ],
+            [
+              "not",
+              [
+                "=",
+                [
+                  "state",
+                  "status"
+                ],
+                [
+                  "lit",
+                  "PENDING"
+                ]
+              ]
+            ]
+          ],
+          "output": [
+            "lit",
+            "not-cancellable"
+          ]
+        },
+        "Checkout.otherwise": {
+          "assign": {},
+          "calls": [
             {
-              "effect": "NotifyPaymentFailure",
-              "input": {}
+              "args": {},
+              "command": "PaymentFailure",
+              "component": "customer"
             }
+          ],
+          "command": "Checkout",
+          "guard": [
+            "not",
+            [
+              "cond",
+              "paid",
+              {}
+            ]
+          ]
+        },
+        "Checkout.paid": {
+          "assign": {
+            "amountPaid": [
+              "div",
+              [
+                "*",
+                [
+                  "state",
+                  "price"
+                ],
+                [
+                  "-",
+                  100,
+                  [
+                    "field",
+                    [
+                      "decide",
+                      "campaign",
+                      {}
+                    ],
+                    "discountPercent"
+                  ]
+                ]
+              ],
+              100
+            ],
+            "status": [
+              "lit",
+              "PAID"
+            ]
+          },
+          "calls": [
+            {
+              "args": {
+                "amount": [
+                  "div",
+                  [
+                    "*",
+                    [
+                      "state",
+                      "price"
+                    ],
+                    [
+                      "-",
+                      100,
+                      [
+                        "field",
+                        [
+                          "decide",
+                          "campaign",
+                          {}
+                        ],
+                        "discountPercent"
+                      ]
+                    ]
+                  ],
+                  100
+                ],
+                "discountPercent": [
+                  "field",
+                  [
+                    "decide",
+                    "campaign",
+                    {}
+                  ],
+                  "discountPercent"
+                ]
+              },
+              "command": "Receipt",
+              "component": "customer"
+            },
+            {
+              "args": {
+                "type": [
+                  "nonNull",
+                  [
+                    "field",
+                    [
+                      "decide",
+                      "campaign",
+                      {}
+                    ],
+                    "coupon"
+                  ]
+                ]
+              },
+              "command": "Coupon",
+              "component": "customer",
+              "when": [
+                "and",
+                [
+                  "field",
+                  [
+                    "decide",
+                    "campaign",
+                    {}
+                  ],
+                  "grantsCoupon"
+                ],
+                [
+                  "not",
+                  [
+                    "=",
+                    [
+                      "field",
+                      [
+                        "decide",
+                        "campaign",
+                        {}
+                      ],
+                      "coupon"
+                    ],
+                    null
+                  ]
+                ]
+              ]
+            }
+          ],
+          "command": "Checkout",
+          "guard": [
+            "cond",
+            "paid",
+            {}
+          ]
+        },
+        "PlaceOrder.otherwise": {
+          "assign": {
+            "price": [
+              "var",
+              "listPrice"
+            ],
+            "rank": [
+              "var",
+              "customerRank"
+            ],
+            "status": [
+              "lit",
+              "PENDING"
+            ]
+          },
+          "calls": [
+            {
+              "args": {},
+              "command": "OrderConfirmation",
+              "component": "customer"
+            }
+          ],
+          "command": "PlaceOrder",
+          "guard": true
+        },
+        "Ship.otherwise": {
+          "assign": {
+            "status": [
+              "lit",
+              "SHIPPED"
+            ]
+          },
+          "calls": [
+            {
+              "args": {
+                "priority": [
+                  "field",
+                  [
+                    "decide",
+                    "shipping",
+                    {}
+                  ],
+                  "priority"
+                ]
+              },
+              "command": "ShippingNotice",
+              "component": "customer"
+            }
+          ],
+          "command": "Ship",
+          "guard": true
+        }
+      },
+      "init": {
+        "amountPaid": 0,
+        "price": 0,
+        "rank": null,
+        "status": [
+          "lit",
+          "DRAFT"
+        ]
+      },
+      "properties": {
+        "pastDraftHasRankAndPrice": {
+          "is": [
+            "always",
+            [
+              "or",
+              [
+                "=",
+                [
+                  "state",
+                  "status"
+                ],
+                [
+                  "lit",
+                  "DRAFT"
+                ]
+              ],
+              [
+                "not",
+                [
+                  "=",
+                  [
+                    "state",
+                    "rank"
+                  ],
+                  null
+                ]
+              ]
+            ]
+          ],
+          "kind": "invariant"
+        }
+      },
+      "queries": {
+        "Status": {
+          "is": [
+            "state",
+            "status"
+          ],
+          "params": {},
+          "result": {
+            "enum": [
+              "DRAFT",
+              "PENDING",
+              "PAID",
+              "SHIPPED",
+              "CANCELLED"
+            ]
+          }
+        }
+      },
+      "relies": [
+        "calendar",
+        "customer",
+        "payment",
+        "refunds"
+      ],
+      "state": {
+        "amountPaid": "int",
+        "price": "int",
+        "rank": {
+          "optional": {
+            "enum": [
+              "Gold",
+              "Silver",
+              "Bronze"
+            ]
+          }
+        },
+        "status": {
+          "enum": [
+            "DRAFT",
+            "PENDING",
+            "PAID",
+            "SHIPPED",
+            "CANCELLED"
           ]
         }
       }
     },
-    {
-      "from": [
-        "DRAFT"
-      ],
-      "name": "PlaceOrder",
-      "onlyIf": [],
-      "when": {
-        "otherwise": {
-          "does": "The order remembers the customer's rank and the list price. An order confirmation is sent.",
-          "emits": [
-            {
-              "effect": "SendOrderConfirmation",
-              "input": {}
-            }
-          ],
-          "goTo": "PENDING",
-          "set": {
-            "price": {
-              "$ref": "input:listPrice"
-            },
-            "rank": {
-              "$ref": "input:customerRank"
+    "payment": {
+      "external": {
+        "commands": {},
+        "queries": {
+          "Active": {
+            "params": {},
+            "result": "bool"
+          },
+          "Result": {
+            "params": {},
+            "result": {
+              "enum": [
+                "succeeded",
+                "failed"
+              ]
             }
           }
         }
       }
     },
-    {
-      "from": [
-        "PAID"
-      ],
-      "name": "Ship",
-      "onlyIf": [],
-      "when": {
-        "otherwise": {
-          "does": "The order becomes shipped. A shipping notice is sent, with priority as the shipping decision says.",
-          "emits": [
-            {
-              "effect": "SendShippingNotice",
-              "input": {
-                "priority": {
-                  "$ref": "decision:shipping.priority"
-                }
-              }
+    "refunds": {
+      "external": {
+        "commands": {
+          "Refund": {
+            "params": {
+              "amount": "int"
             }
-          ],
-          "goTo": "SHIPPED"
-        }
-      }
-    }
-  ],
-  "decisions": {
-    "campaign": {
-      "rows": {
-        "The customer is a Gold member and it is month-end": {
-          "coupon": "Premium",
-          "discountPercent": 20,
-          "grantsCoupon": true
+          }
         },
-        "The customer is a Silver member": {
-          "coupon": null,
-          "discountPercent": 5,
-          "grantsCoupon": false
-        },
-        "otherwise": {
-          "coupon": null,
-          "discountPercent": 0,
-          "grantsCoupon": false
-        }
-      }
-    },
-    "shipping": {
-      "rows": {
-        "The customer is a Gold member, or the order is 10,000 yen or more": {
-          "priority": true
-        },
-        "otherwise": {
-          "priority": false
-        }
+        "queries": {}
       }
     }
   },
-  "descriptions": {
-    "component": "An order: placed by a customer, paid through an external payment module, then shipped or cancelled.",
-    "effects.Refund": "What the customer paid is returned.",
-    "queries.isMonthEnd": "Whether today is the last day of the month.",
-    "queries.paymentResult": "What the payment module answered for this order."
-  },
-  "irVersion": 7,
-  "model": {
-    "calculations": {
-      "amountCharged": {
-        "description": "price × (100 − discount percent) ÷ 100, rounded down to a whole yen",
-        "output": "integer"
-      }
-    },
-    "commands": {
-      "Cancel": {},
-      "Checkout": {},
-      "PlaceOrder": {
-        "customerRank": [
-          "Gold",
-          "Silver",
-          "Bronze"
-        ],
-        "listPrice": {
-          "around": [
-            10000
-          ],
-          "max": 1000000,
-          "min": 0,
-          "type": "integer"
-        }
-      },
-      "Ship": {}
-    },
-    "data": {
-      "price": {
-        "around": [
-          10000
-        ],
-        "max": 1000000,
-        "min": 0,
-        "type": "integer"
-      },
-      "rank": [
-        "Gold",
-        "Silver",
-        "Bronze"
-      ]
-    },
-    "effects": {
-      "IssueCoupon": {
-        "type": [
-          "Premium",
-          "Standard"
-        ]
-      },
-      "NotifyPaymentFailure": {},
-      "Refund": {},
-      "SendOrderConfirmation": {},
-      "SendReceipt": {
-        "amount": "integer",
-        "discountPercent": "integer"
-      },
-      "SendShippingNotice": {
-        "priority": "boolean"
-      }
-    },
-    "init": "DRAFT",
-    "invariants": [
-      "Every order past the draft state has a member rank and a price"
+  "entries": {
+    "commands": [
+      "order.Cancel",
+      "order.Checkout",
+      "order.PlaceOrder",
+      "order.Ship"
     ],
-    "queries": {
-      "isMonthEnd": {
-        "input": {},
-        "output": "boolean"
-      },
-      "paymentModuleActive": {
-        "input": {},
-        "output": "boolean"
-      },
-      "paymentResult": {
-        "input": {},
-        "output": [
-          "succeeded",
-          "failed"
-        ]
-      }
-    },
-    "states": [
-      "DRAFT",
-      "PENDING",
-      "PAID",
-      "SHIPPED",
-      "CANCELLED"
+    "queries": [
+      "order.Status"
+    ]
+  },
+  "irVersion": 8,
+  "notes": {
+    "calendar": "The calendar.",
+    "customer": "Messages sent to the customer.",
+    "order": "An order: placed by a customer, paid through an external payment module, then shipped or cancelled.",
+    "order.commands.Cancel": "A pending or paid order can be cancelled. If the order had been paid, the customer is refunded what they paid.",
+    "order.conditions.paid": "The payment succeeded",
+    "order.conditions.paymentModuleActive": "The external payment module is active",
+    "order.decisions.campaign": "The campaign that applies to the order",
+    "order.decisions.campaign.rows[0]": "The customer is a Gold member and it is month-end",
+    "order.decisions.campaign.rows[1]": "The customer is a Silver member",
+    "order.decisions.shipping": "How the order is shipped",
+    "order.decisions.shipping.rows[0]": "The customer is a Gold member, or the order is 10,000 yen or more",
+    "order.does.failure": "The customer is notified of the payment failure.",
+    "order.does.place": "The order remembers the customer's rank and the list price. An order confirmation is sent.",
+    "order.does.receipt": "A receipt is sent with the campaign's discount percent and the amount charged (price × (100 − discount percent) ÷ 100, rounded down to a whole yen). Then a coupon is issued if the campaign grants one.",
+    "order.does.ship": "The order becomes shipped. A shipping notice is sent, with priority as the shipping decision says.",
+    "order.queries.Status": "The order's current status",
+    "order.rules.pastDraftHasRankAndPrice": "Every order past the draft state has a member rank",
+    "payment": "The external payment module.",
+    "refunds": "Refunds paid back to the customer through the external payment module."
+  },
+  "root": "order",
+  "sorts": [],
+  "trace": {
+    "order.does.failure": [
+      "Order.commands.Checkout"
+    ],
+    "order.does.place": [
+      "Order.commands.PlaceOrder"
+    ],
+    "order.does.receipt": [
+      "Order.commands.Checkout"
+    ],
+    "order.does.ship": [
+      "Order.commands.Ship"
     ]
   }
 }

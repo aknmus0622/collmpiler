@@ -1,298 +1,218 @@
 # Writing specs: the reference
 
-Everything a spec author writes, on one page. The design behind it is in `DSL.md` (Japanese, §16 for the shape
-described here); the layers and the pipeline are in `SPEC.md` (Japanese). All words below are imported from
-`@clp/core`.
+Everything a spec author writes, on one page. The design behind it is in `DSL.md` (Japanese, §17 for the notation
+described here, §17.18 for what the implementation decided); the layers and the pipeline are in `SPEC.md`
+(Japanese). Every word below is imported from `@clp/core`.
+
+A spec is TypeScript that is **read, never run**: `clp` parses it (a subset of TypeScript, see below), type-checks it
+with `tsc`, and turns it into a formal model (the IR, version 8). Expressions in it are the specification itself:
+the expected behaviour during verification is computed by evaluating them, and they are checked with Alloy before
+any agent runs.
 
 ## Files
 
 | File | Who writes it | What it holds |
 | --- | --- | --- |
-| `specs/<name>.decisions.ts` | you | decision tables |
-| `specs/<name>.component.ts` | you | the component (Layer 1) |
+| `specs/<name>.component.ts` | you | Layer 1: components, the outside world, decision tables, types |
 | `specs/<name>.interpretation.draft.ts` | `clp interpret` | the interpretation, until you accept it |
 | `specs/<name>.interpretation.ts` | `clp interpret --accept` | the interpretation in use. Never edit it by hand; make Layer 1 more precise instead |
 
-A component is an exported `service({...})`. Its name is the export name in kebab case (`TodoList` → `todo-list`).
+A component is an exported `service(...)`. Its name is the export name in kebab case (`TodoList` → `todo-list`).
+One interpretation file goes with one Layer 1 file and holds the interpretation of every component in it that
+has prose.
 
-## Three rules
-
-1. **Everything is a node with named children.** A node's kind decides what its children are: either **fields**
-   with fixed names (a command has `input`, `from`, `goTo`, `cases`, ...), or **entries** with names you choose.
-2. **A name is born only as a key of a group declaration** (`states({...})`, `data({...})`, `commands({...})`, ...).
-   Every other `{ ... }` holds fields. `[ ... ]` is a list of things that carry their own name
-   (`[State.A, State.B]`, `[If.paid.then({...}), otherwise]`).
-3. **A plain value is shorthand for what its place expects.** `"..."` is a sentence in `description` and a type in
-   `data({ price: "integer" })`; `State.DRAFT` alone in `from` is `[State.DRAFT]`; `otherwise` alone is a case where
-   nothing happens. A `{ ... }` in a type's place is never a type: write `record({...})` or `integer({...})`.
-
-## Handles: nothing is referred to by a string
-
-Declare the vocabulary first, as groups, and refer to it through the **handles** a group gives. A typo is then a
-type error, and the interpretation imports the same handles, so **export every group**.
+## A component
 
 ```ts
-export const State = states({ DRAFT: "Before the order is placed.", PAID: { description: "Paid.", final: true } });   // or states(["DRAFT", "PAID"])
-export const If = conditions({ paid: "The payment succeeded" });   // condition sentences
-export const Data = data({ price: Yen });
-export const Query = queries({ isMonthEnd: "boolean" });
-export const Effect = effects({ SendReceipt: input({ amount: "integer" }), Refund: "What the customer paid is returned." });
-export const Calc = calculations({ charged: { description: "...", output: "integer" } });
-export const Inv = invariants({ priced: "Every order past the draft state has a price" });
-export const Type = types({ Todo: record({ id: "string", title: "string" }) });   // types shared by several places
-export const PlaceInput = input({ listPrice: Yen });               // a command's input
-export const Decision = decisions({ campaign: [If.gold.then({ discountPercent: 20 }), otherwise({ discountPercent: 0 })] });
-export const Command = commands({ ... });                           // the commands (below)
-```
+import { answer, decisions, does, example, expect, external, is, Map, otherwise, service } from "@clp/core";
+import type { Id, Int } from "@clp/core";
 
-| Handle | Used as |
-| --- | --- |
-| `State.PAID` | a state: `from`, `goTo`, `was(...)`, `init` |
-| `If.paid` | a condition: `If.paid.then({...})` is the case where it holds (in `cases`, and as a decision-table row); also `onlyIf`, `.onlyWhen(...)` |
-| `Data.price` | remembered data, as a value; `Data.price.set(value)` stores one (in `set: [...]`) |
-| `Query.isMonthEnd` | the answer of a query without input |
-| `Query.newId.failed` | the condition "asking it failed", for a query declared `mayFail: true` (an asked one: the asked node's `.failed`); its meaning is automatic |
-| `Query.declared({ name: "PAID" }).as("found")` | asks a query that takes an input (in `asks: [...]`); its `.answer` is the value |
-| `Effect.SendReceipt({ amount: ... })` | performs an effect, in `emits: [...]` (`Effect.Refund()` when it carries nothing); `.onlyWhen(handle)` performs it only sometimes |
-| `Calc.charged` | a calculation's result |
-| `Decision.campaign.discountPercent` | a decision table's column, in the row that holds |
-| `PlaceInput.listPrice` | a field of the command's input; a field of a `record` field continues: `PostInput.body.title` |
-| `Type.Todo` | a shared type |
-| `Command.Checkout` | a command; the interpretation adds to it with `Command.Checkout.with({...})` |
-| `Part.todos.Add({ title: ... })` | executes a command of a contained component (in `calls: [...]`, see Parts); its `.answer` is what it answered |
+export type MemberId = Id<"member number">;   // an identifier: an opaque value of its own sort
+export type BookId = Id<"book number">;
 
-## The component
-
-```ts
-export const Order = service({
-  description: "...",                     // the component as a whole
-  init: State.DRAFT,                      // leave out states and init for a stateless component
-  uses: [State, Data, Query, Effect, Decision, If, Calc, Inv, Command],   // its vocabulary, in any order
-  assets: [file("docs/style.md")],        // advice for the implementing agent; not part of the meaning
-  durable: true,                          // what it remembers survives a restart (or durable: Store, below)
+// The outside world: no contents, only promises. Its stand-in during verification keeps them.
+export const Clock = external("Today's date, as days since 1970-01-01", {
+  queries: { Today: (): Int => answer({ increasing: true }) },
 });
-```
 
-Every group may be left out of `uses`, and every group except `decisions`, `invariants` and `types` may be given as
-a whole sentence (`queries("How many books the member holds, and whether the book is reserved.")`).
+// A component given only as a sentence: every heading is left to the interpretation
+export const Fines = service("Late fees: 10 yen per day late, per member. Paying sets it to 0.");
 
-| Group | An entry is | Example |
-| --- | --- | --- |
-| `data` | its type, or `{ type, initially, description }` | `price: Yen`, `items: { type: list(Type.Todo), initially: [] }` |
-| `queries` | its answer's type, or `{ output, input, description, fresh, increasing, mayFail }` | `isMonthEnd: "boolean"`, `newId: { output: "string", fresh: true, mayFail: true }` |
-| `effects` | `input({...})` for what it carries, a sentence, or `{ input, description }` | `SendReceipt: input({ amount: "integer" })` |
-| `calculations` | `{ description: "<how it is computed>", output: type }` | `fee: { description: "days late × 100, at most 1000", output: "integer" }` |
-| `commands` | a sentence, or the fields below | |
+export const Policy = decisions("The loan policy", (member: MemberId) => [
+  [is.extended("An extended member", Members.IsExtended(member)), { maxBooks: 3, loanDays: 28 }],
+  [otherwise, { maxBooks: 2, loanDays: 14 }],
+]);
 
-## Commands
-
-```ts
-export const Command = commands({
-  Cancel: "A pending or paid order can be cancelled.",                      // prose
-  Ship: { from: State.PAID, goTo: State.SHIPPED },                          // structure
-  Pay: { from: State.PENDING, does: "The payment is taken." },              // both
-  Checkout: {
-    input: CheckoutInput,
-    from: State.PENDING,
-    onlyIf: If.moduleActive,
-    output: ["paid", "failed"],
-    cases: [If.paid.then({ goTo: State.PAID, responds: "paid" }), otherwise({ responds: "failed" })],
+export const Library = service("The library. It lends books, takes them back and charges late fees.", {
+  state: {
+    lentTo: Map<BookId, MemberId>(),
+    dueOf: "When each lent book is due",            // prose: the interpretation decides its type
+  },
+  commands: {
+    Borrow(member: MemberId, book: BookId) {
+      if (is.unpaid("The member owes a late fee", Fines.Owed(member) > 0)) return "unpaid";
+      if (is.onLoan("The book is on loan")) return "on-loan";   // a sentence only: the interpretation fills it
+      this.lentTo.set(book, member);
+      does.rememberDue("The due date is remembered");
+      return "lent";
+    },
+    Return: "The book comes back. A late return is charged the late fee.",
+  },
+  queries: { LoansOf: "The books the member has" },
+  rules: { dueForEveryLoan: "Every lent book has a due date" },
+  examples: {
+    unpaidRefused: example("A member who owes cannot borrow", () => {
+      Fines.Charge("M001", 3);
+      expect(Library.Borrow("M001", "B1")).toBe("unpaid");
+    }),
   },
 });
 ```
 
-Write as structure only what you want to pin down; the interpretation fills in the rest and can never override
-what you wrote. A list of cases is a value, so a shared fragment is a variable:
-`const refused = [If.refused.then({ responds: "refused" }), otherwise({ responds: "done" })]`, then `cases: refused`.
+- **The description is the first argument**: `service("sentence")`, `service("sentence", { ... })`. A component
+  embedded in a description as `` `${Policy}` `` must be used by the interpretation.
+- **Headings separate kinds; the names under them share one namespace.** `state` (what it remembers),
+  `commands` (what changes it; methods), `queries` (what reads it; methods, never writes), `rules` (properties),
+  `examples`, and `conditions` / `calcs` / `does` (the content of fragments, see below). Under any heading an entry
+  may be a sentence: `Return: "..."`.
+- **Settings** (not headings): `durable: true` (what it remembers survives a restart), `routes` (how each command
+  reaches it over HTTP: `{ Borrow: "POST /loans" }`), `assets` (`[file("docs/style.md"), dir("docs"), text("...")]`,
+  each with an optional `{ phases }`; attached to the agent's requests, never part of the spec's meaning).
+- **State** is declared with its type first: `Map<K, V>()` (each key at most one value), `Set<T>()`, `List<T>()`
+  (only when order matters), `init<T>(value)` for a single value. Read and written with `this.`.
+- **Commands and queries are methods with typed parameters**; the parameter names are the input names. What a
+  command `return`s is its answer (`return "unpaid";`). Either every path returns or none does. The answer type is
+  inferred, or declared: `Borrow(...): { result: "lent" | "refused"; dueInDays: Int | null }`.
+- **Calling a component is using it.** `Fines.Owed(member)` (a query), `Fines.Charge(m, 3);` (a command). A
+  component that is called and not placed anywhere else is part of the caller (its state is the caller's, and
+  verification runs its spec together with the caller's). The outside world (`external`) is always outside.
+- **The outside world**: `external("what it is", { queries: { ... }, commands: { Notify(member: MemberId) {} } })`.
+  A query is an arrow with its return type and `answer({ ... })`: `fresh` (never the same value twice: an
+  identifier), `increasing` (never less than before: a clock), `mayFail` (it can be unavailable; the spec says what
+  happens with `failed(Ids.NewId())`). A command on the outside world is an effect: recorded, in order, and compared.
 
-| Field | Meaning |
-| --- | --- |
-| `description` | the command, in prose |
-| `input` | an input handle: what the command takes |
-| `output` | what the command answers with. Every case must then `responds` |
-| `from` | the states it can be executed in (all, if absent) |
-| `onlyIf` | a precondition. **Outside it, nothing is tested.** Use it only for what cannot happen; a refusal is a case |
-| `asks` | queries that take an input: `[Query.q({ field: value }).as("answer")]`; the answer is read as `answer` |
-| `calls` | commands of contained components (see Parts) |
-| `cases` | `[If.x.then({...}), ..., otherwise]`. At most one case holds at a time; `otherwise` is required |
-| `route` | how the command reaches the system over HTTP (see Parts) |
+## Fragments: prose inside code
 
-What happens: fields of a command, or of a case (`If.x.then({...})`, `otherwise({...})`):
+Inside a body, a sentence can stand where an expression or a statement goes. Give it a name:
 
-| Field | Meaning |
-| --- | --- |
-| `goTo` | the resulting state. **Absent: the state stays** |
-| `set` | the data to remember: `[Data.field.set(value), ...]` |
-| `emits` | the effects, in order: `[Effect.Name({ field: value }), Effect.Other().onlyWhen(handle)]`. `.onlyWhen` (a condition or a boolean handle) is not exclusive like a case |
-| `responds` | the answer: a value, or `{ field: value }` |
-| `does` | what happens, in prose |
-| `nothing: true` | nothing happens, said explicitly. Where prose says something happens, the merged spec must have a structural outcome or this |
+| Fragment | Where | Filled by the interpretation under |
+| --- | --- | --- |
+| `is.onLoan("The book is on loan")` | a condition | `conditions: { onLoan(member, book) { return ...; } }` |
+| `is.unpaid("...", Fines.Owed(member) > 0)` | a condition, with its expression | (nothing: it is already code) |
+| `does.rememberDue("...")` | a statement | `does: { rememberDue(member, book) { ... } }` |
+| `return does.lend("...")` | a statement that also answers | `does: { lend() { ...; return { ... }; } }` |
+| `value.lateFee("...")` | a value | `calcs: { lateFee(...) { return ...; } }` |
+
+The parameters of a fill are the names of the place the fragment is written in (same names). A fragment written
+in a decision table, `condition(...)` or `calc(...)` is evaluated where it is called: there `this` is the caller's
+state.
+
+## Bodies: a subset of TypeScript
+
+Bodies are read as expressions, so only this subset is allowed (anything else is an error with its position):
+
+- `if` / `else` / `return` (cases are taken from the top: the first `if` that holds decides), `const` (once),
+  comparisons (`===`, `!==`, `<` ...), `+ - * %`, `Math.floor(a / b)` (integer division), `Math.min/max/abs`,
+  `&& || !`, `??`, `c ? a : b`, template strings, `[...list, item]`, `{ ...record, field: value }`.
+- On values: Map `has get set delete keys values size some every count filter sum`; Set `has add delete size some
+  every count filter map sum`; list `length includes some every filter map find join` and `[...a, ...b]`; string
+  `length trim toLowerCase toUpperCase startsWith endsWith includes`. A string's `length` counts characters
+  (Unicode code points).
+- `requires(condition)` as the first statement puts inputs outside the specification: they are never tested and
+  production code need not handle them. A rule the system must enforce is an answer (`return "limit";`), not a
+  `requires`: written as `requires`, the check in production code is dead as far as the tests can tell, and the
+  mutation gate pushes it out.
+- `null` is narrowed as TypeScript does (`if (x !== null) ...`) or asserted with `x!` (null there is a spec error).
+  `as` reads a JSON value as a type (`entry.value as Todo`) or a string as an identifier (`key as TodoId`).
+- Not allowed: loops (use `some` / `every` / `count` / `filter`), `let`, exceptions, `switch`, functions of your own,
+  regular expressions, `/` without `Math.floor`, `undefined`, and reading a state field after writing it in the same
+  body (every expression reads the state **before** the step).
 
 ## Types
 
-| Type | Meaning |
-| --- | --- |
-| `"boolean"`, `"integer"`, `"number"`, `"string"` | plain values. Money is an `"integer"`; say the rounding in the sentence |
-| `["a", "b"]` | one of these strings. Pulled out into a variable, write `as const` |
-| `integer({ min, max, around })`, `number({ ... })` | a number in a range. `around` adds thresholds to try |
-| `string({ examples: [...] })` | a string, with examples to try (an e-mail address, ...) |
-| `among(Data.items, "id")` | a string usually picked from the `id`s of the remembered list `items` (`among(Data.items, "id", "integer")` for numbers) |
-| `hints: { field: among(...) }` | on a command: generation advice (`among`, `examples`, `around`) for an input field written elsewhere, with the same type. The interpretation may add it, so Layer 1 need not declare the remembered data just to name it |
-| `record({ field: type })` | a value with fields |
-| `list(type)` | a sequence, compared in order |
-| `optional(type)` | a value or `null`. In a `record`, a field that is sometimes absent |
-
-How a list or record *changes* is not structure: describe the new value as a calculation and store it
-(`set: [Data.items.set(Calc.itemsWithNew)]`).
+TypeScript types: `Int` (every number is an integer — money in whole yen, rounding spelled out), `string`,
+`boolean`, unions of string or number literals (`"lent" | "refused"`, `201 | 422`), identifiers
+(`type MemberId = Id<"member number">`), object types (records), `T[]`, `T | null`, `Json` (any JSON value),
+and in state `SpecMap<K, V>` / `SpecSet<T>`.
 
 ## Decision tables
 
 ```ts
-export const CampaignIf = conditions({ gold: "The customer is a Gold member" });
-export const Decision = decisions({
-  campaign: [
-    CampaignIf.gold.then({ discountPercent: 20, coupon: "Premium" }),
-    otherwise({ discountPercent: 0, coupon: null }),     // null: this row has no value for the column
-  ],
-});
+export const Campaign = decisions("The campaign that applies", () => [
+  [is.goldAtMonthEnd("A Gold member at month-end"), { discountPercent: 20, coupon: "Premium" }],
+  [is.silver("A Silver member"), { discountPercent: 5, coupon: null }],
+  [otherwise, { discountPercent: 0, coupon: null }],
+]);
+// used like a function: Campaign().discountPercent
 ```
 
-`otherwise` is required, every row has the same columns, a column holds one kind of value, and a cell a row does
-not use is `null` — never a filler. Numbers that are rules (limits, days, fees) belong here: changing a value does
-not require interpreting again. A table is named by its key (`campaign`) and listed in `uses` through its group.
+Rows are a condition and constants; the first row whose condition holds is chosen; the last is `otherwise`.
+`null` means the row gives no value for that column (reading it there is a spec error) — never a filler: a value
+that changes nothing is rejected before any agent runs. The constants reach the IR without passing through the
+interpretation, so changing one needs no new interpretation.
 
-## Parts: components inside a component
+## Rules and examples
 
-A component can contain other components and execute their commands. Declare them with `parts`, list them in
-`uses`, and call their commands from a command, before its cases:
-
-```ts
-export const Part = parts({ todos: Todos });          // Todos is an exported service with its own interpretation
-export const Command = commands({
-  PostTodos: {
-    route: "POST /todos",                              // how the command reaches the system (part of the contract)
-    input: PostTodosInput,
-    calls: [Part.todos.Add({ title: PostTodosInput.body.title })],
-    output: record({ status: integer({ min: 200, max: 599 }), body: optional(Type.Todo) }),
-    does: "Created: 201, with the new item. Invalid: 422, with no body.",
-  },
-});
-export const TodoApi = service({ uses: [Part, Command] });
-```
-
-The expected outcome comes from running both specifications together. What is observed is the outer
-component's answer and every effect on the outside world, the contained component's included (named
-`todos.<Effect>`); the contained component's state is not. Its dependencies appear in the outer contract as
-`todos.<name>`. Meaning functions read an answer as `state.todos.Add`. Use `.as("name")` to call the same command
-twice. `among(Data.items, "id")` may name data the contained component remembers.
-
-`parts({ items: many(TodoItem, by("id")) })` contains one component per key: `Part.items.at(key).Complete()`
-executes a command on the one with that key (none: nothing happens, and the answer is `null`);
-`Part.items.add(key, { title })` and `Part.items.remove(key)` (in `adds: [...]` / `removes: [...]`) create and remove
-one. Functions read `state.items`, the existing ones in the order they were created; `among(Part.items)` picks a key.
-
-A component with parts is reconciled after them; its agent sees its own IR and the contained components'
-production code (not their IR), may not change that code, and its mutations stay in its own code. It is
-verified with fewer runs by default (500).
-
-With `route: "METHOD /path"` on its commands, the component is reached over HTTP: a path segment `:name` is the
-input field `name`, the input field `body` is the JSON body, every other field is a query parameter, and the
-answer's `status` and `body` are the response. A path field is never given `"."` or `".."`: HTTP cannot carry
-them in a path (URL normalization turns `/todos/./complete` into `/todos/complete`, encoded or not), so such a
-request is outside the specification, like a situation excluded by `onlyIf`.
+`rules` are properties of the spec, checked on the spec (by Alloy and by running it), never on an implementation:
+`always(() => condition)` (an invariant), and `eventually`, `after`, `once`, `historically`, `until`,
+`always.on.Return((book) => after(() => !this.lentTo.has(book)))` ("whenever Return happens").
+`examples` are the author's expectations: a sequence of calls with `expect(...).toBe(...)`; they are run before any
+agent and replayed first during verification.
 
 ## The interpretation
 
-`interpretation(Order, [ ... ])` lists what is added, each element named by itself and matched by that name with
-Layer 1: groups it declares (`Data`, `Calc`, ...), `Command.Checkout.with({ ... })` (fields added to a command, or
-to its cases by condition), `Order.with({ init: State.DRAFT })`, and meanings. A command or case it does not
-mention gains nothing. It is derived by `clp interpret`, never written by hand.
-
-### Values
-
-A value is a constant or a handle: an input field, data, a query answer, a decision-table column, a calculation, or
-`was(State.A, ...)` (whether the state before the command was one of these). A query is asked only with
-constants, input fields and data.
-
-### Meanings
-
-A meaning is a function attached to a handle: `If.paid.means((state) => ...)`, `Calc.charged.means(...)`,
-`Inv.priced.means(...)`. Inside one, `Decision.campaign.of(state)` is the row that holds and
-`Calc.charged.of(state)` another calculation's result.
-
-Conditions and calculations see, under one name each: `status`, the remembered data, the answers of queries without
-input, the command's input, and the names given to asked answers. These names must not collide.
-
-## Your own words
-
-`kind(name, { fields, expand })` defines a word of your own: its fields, and how it expands into the words above.
-The expansion runs when the spec is loaded; the IR and the tests see only its result, and it must give the same
-result every time.
+Written in the same notation, by `clp interpret`, for one component:
 
 ```ts
-const toggle = kind("toggle", { fields: { to: "state" }, expand: ({ to }) => ({ goTo: to, does: "It toggles." }) });
-export const Command = commands({ Flip: toggle({ to: State.ON }) });
+export const LibraryInterpretation = interpretation(Library, {
+  state: { dueOf: Map<BookId, Int>() },
+  conditions: { onLoan(member: MemberId, book: BookId) { return this.lentTo.has(book); } },
+  does: { rememberDue(member: MemberId, book: BookId) { this.dueOf.set(book, Clock.Today() + Policy(member).loanDays); } },
+  commands: { Return(book: BookId) { /* ... */ return "returned"; } },
+});
 ```
+
+It **fills, never overrides**: under the same heading as Layer 1 it gives the content of each name Layer 1 left as
+prose. Writing again what Layer 1 wrote as code is an error, and so is a name under another heading. It may
+declare an `external` the prose implies (someone who is told or charged). Its first lines record the hash of the
+Layer 1 it was derived from; when Layer 1 changes, it is stale and nothing runs until it is derived again (or, if
+only the wording changed, accepted again). Decision-table cells are not part of the hash.
+
+Questions the interpreting LLM could not settle are `// REVIEW:` lines; places where a second, independent
+interpretation behaves differently are `// REVIEW(clp):` lines. Both block `--accept` until you make Layer 1 more
+precise and interpret again, or confirm the reading by changing `REVIEW` to `REVIEWED` (kept as the record).
 
 ## After a change
 
-| You changed | Then |
-| --- | --- |
-| a value in a decision table | nothing; run `clp apply` |
-| the wording of a sentence, meaning the same | `clp interpret --accept` (checks, then re-stamps) |
-| anything else in Layer 1 | `clp interpret` (only what changed is redone), read the report, `--accept`, then `clp apply` |
-
-`--accept` refuses a draft that still has a question (`// REVIEW:`, left by the interpreting agent) or a
-disagreement between two readings (`// REVIEW(clp):`, written by `clp`). Resolve each by making Layer 1 more
-precise and running `clp interpret` again, or, if the draft's reading is what you meant, by changing that
-line's `REVIEW` to `REVIEWED` (it stays as the record of what you confirmed).
-
-To look at the design before anything else is written, run `clp apply --stop-after design`: it stops once
-the skeleton passes. Read it (and edit it if you like), then run `clp apply` again; it continues with the
-wiring.
+Run `clp interpret` (the interpretation of every changed component is updated from the current one), accept, then
+`clp apply`. Which steps run is decided from what changed: a changed boundary (commands, queries, their inputs and
+answers, the outside world, routes, restarts) runs design, wiring and implementation; anything else is graded as it
+is and, if it fails, implemented again.
 
 ## Restarts and failing dependencies
 
-**`durable`**: what a component remembers (its state, its data, everything it contains) survives a restart.
-Verification then restarts the system at random points in a trial (the contract gains `restartSystem()` and
-`ports.storage`, a fresh database file per trial): a durable component keeps everything, the others start over.
-An implementation that keeps things only in memory fails there. `durable: true` leaves how to keep them to the
-implementing agent (Node's `node:sqlite`, which production code may import). `durable: Store` names a store
-component (an exported service, itself `durable: true`) whose production code the agent uses, like a part's: it
-is reconciled first, its code may not be changed and is not mutated, and its spec is not run in this component's
-verification. Write where the data lives (a file path) only in the composition root, never in the spec.
-
-**`mayFail: true`** on a query: the dependency can fail. The test stand-in then sometimes throws instead of
-answering (one ask in four), and the spec says what happens with the condition `Query.newId.failed`:
-
-```ts
-export const When = conditions({ idFailed: all(not(If.invalidTitle), Query.newId.failed) });
-cases: [If.invalidTitle.then({ responds: { status: 422 } }), When.idFailed.then({ responds: { status: 503 } }), otherwise({ ... })]
-```
-
-There is no priority for failures: conditions stay exclusive, so whether an invalid title is refused before or
-after an identifier is asked for is something the spec says (forgetting `not(If.invalidTitle)` is a condition
-conflict, found before any agent runs). Reading the answer of a failed query is a spec error.
+- `durable: true`: verification restarts the system between steps (one in six). The adapter gets `ports.storage`
+  (a fresh file path per trial) and must implement `restartSystem()` on the same storage. A component that contains
+  a durable one is restarted too.
+- `mayFail: true` on a query of the outside world: its stand-in throws on one ask in four. The spec says what
+  happens with `failed(answer)`; reading a failed answer is a spec error. `failed` on a query that cannot fail is an
+  error.
 
 ## What `clp compile` reports
 
-Every message is `severity[code] where: message`. Errors stop `clp apply` before any agent runs.
+Every diagnostic is `severity[code] where: message`. The common ones:
 
-| Code | Severity | Means |
-| --- | --- | --- |
-| `unknown-field` | error | a field the node's kind does not have; with the file and line |
-| `misplaced`, `too-many`, `duplicate`, `unknown` | error | something placed where it does not belong, twice, or under the same name |
-| `not-yet` | error | a word that is designed but not implemented yet |
-| `unbound-specification`, `stale-interpretation`, `unreviewed-interpretation` | error | no interpretation, Layer 1 changed after it was derived, or an accepted interpretation with an open `// REVIEW:` |
-| `bad-interpretation` | error | the interpretation overrides Layer 1 (reported with the path, `commands.Checkout.cases.paid.goTo: ...`) |
-| `incomplete` | error | something left unwritten after merging, with its path: a type, `init`, a group given as prose that got no entries, `otherwise`, a meaning function, or prose that says something happens with no structure for it (write `nothing: true` if nothing does) |
-| `dead-end-state` | error | with final states declared (`final: true`), a state that is not final but that no command leaves |
-| `name-collision`, `unknown-state`, `bad-decision`, `bad-type` | error | names that collide, an initial state that is not a state, a table without `otherwise` or with mixed kinds in a column, an impossible range or an empty enumeration |
-| `unknown-effect`, `missing-field`, `bad-value`, `bad-response`, `missing-response`, `bad-promise` | error | references and values that do not fit what is declared |
-| `bad-failure` | error | `.failed` on a query that is not `mayFail`, or on a query with an input that was not asked |
-| `unreachable-state`, `unreachable-command` | error | no command leads there |
-| `unused-effect`, `unset-data`, `unasked-query` | warning | declared, never used (an error for what the interpretation added, when `clp interpret` checks a draft) |
-| `spec-check` | error | running the spec alone: two conditions held at once, an invariant broke, a value did not fit, a meaning function read a name the spec does not have |
-| `unobservable-value` | error / warning | a decision-table value that changes nothing the tests can see (an unused column, a filler, a limit written as `onlyIf`, a threshold out of reach) |
-| `unreached-case` | warning | a case that never held when the spec was run |
-| `type-error` | error | the spec files do not type-check |
+| Code | Meaning |
+| --- | --- |
+| `syntax` | outside the subset, with its position |
+| `type-mismatch`, `unknown-name` | a value of the wrong type, a name the spec does not have |
+| `prose-left` | a sentence without content: interpret, or write it as code |
+| `prose-in-expression` | a bare sentence where an expression is required: make it `is.name("...")` |
+| `overwrite`, `wrong-heading` | the interpretation rewrites Layer 1, or fills a name under another heading |
+| `read-after-write` | a state field read after it is written in the same body |
+| `unbound-specification`, `stale-interpretation`, `unreviewed-interpretation` | no interpretation, one derived from another Layer 1, one with open review marks |
+| `spec-check` | running the spec alone failed (a property broken, a missing map key, no case applies); with the steps |
+| `unobservable-value` | a constant whose change shows nowhere: an unused column, a filler, an unreachable threshold |
+| `bad-failure`, `bad-promise` | `failed` on a query that cannot fail; a promise that cannot hold |
+| warning `out-of-range` | Alloy cannot check this component (numbers too large, lists, JSON ...); PBT still does |
+| warning `unused` | an outside-world port nobody uses |

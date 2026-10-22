@@ -8,6 +8,8 @@ import { harness, repoRoot, specsDir } from "./support.ts";
 // clp コマンド: サブコマンドの振り分け、使い方の表示、終了コード
 
 const { tmpRoot } = harness("cli");
+// the example (1.0): the specs and what was made from them
+const EXAMPLE = "examples/checkout-ts";
 const clp = (args: string[], options: { cwd?: string; env?: NodeJS.ProcessEnv } = {}) =>
   spawnSync(process.execPath, [join(repoRoot, "packages/cli/bin/clp.ts"), ...args], { encoding: "utf8", cwd: options.cwd ?? repoRoot, env: { ...process.env, ...options.env } });
 
@@ -45,20 +47,20 @@ test("clp: 引数の誤りは、何が違うかと使い方を伝えて、終了
 });
 
 test("clp compile: IR を標準出力に出す。呼び出した場所からの相対パスで読む", () => {
-  const fromRoot = clp(["compile", "examples/checkout-ts/specs"]);
-  assert.equal(fromRoot.status, 0);
-  assert.equal(JSON.parse(fromRoot.stdout).irVersion, 7);
+  const fromRoot = clp(["compile", `${EXAMPLE}/specs`]);
+  assert.equal(fromRoot.status, 0, fromRoot.stderr);
+  assert.equal(JSON.parse(fromRoot.stdout).irVersion, 8);
   // 別のディレクトリから呼んでも、同じ IR になる
   // 仕様のあるディレクトリ（プロジェクト）から呼べば、既定の specs が使われる
-  const fromExample = clp(["compile"], { cwd: join(repoRoot, "examples/checkout-ts") });
+  const fromExample = clp(["compile"], { cwd: join(repoRoot, EXAMPLE) });
   assert.equal(fromExample.stdout, fromRoot.stdout);
-  assert.equal(clp(["compile", "specs"], { cwd: join(repoRoot, "examples/checkout-ts") }).stdout, fromRoot.stdout);
+  assert.equal(clp(["compile", "specs"], { cwd: join(repoRoot, EXAMPLE) }).stdout, fromRoot.stdout);
 });
 
 test("clp verify: すでにある本番コードを検証する。何も書き換えない。コンポーネントを選べる", () => {
-  const passed = clp(["verify", "--specs", "examples/checkout-ts/specs", "--out", "examples/checkout-ts", "--runs", "50", "--seed", "7"]);
-  assert.equal(passed.status, 0);
-  assert.match(passed.stdout, /CLP_RESULT \{"status":"pass","seed":7,"numRuns":50\}/);
+  const passed = clp(["verify", "--specs", `${EXAMPLE}/specs`, "--out", EXAMPLE, "--runs", "50", "--seed", "7"]);
+  assert.equal(passed.status, 0, passed.stdout + passed.stderr);
+  assert.match(passed.stdout, /CLP_RESULT \{"status":"pass","seed":7,"numRuns":50/);
 
   // フレームワーク自身の仕様: コンポーネントごとに実行する
   const self = ["verify", "--specs", "packages/cli/self/specs", "--out", "packages/cli/self", "--runs", "20"];
@@ -74,7 +76,7 @@ test("clp verify: すでにある本番コードを検証する。何も書き�
   assert.equal(empty.status, 1);
   assert.match(empty.stderr, /テストの入口 \(clp\/order\.verify\.ts\) がありません。先に clp apply を実行してください/);
   // 仕様の無い場所で呼んだ
-  const nowhere = clp(["verify", "--out", "examples/checkout-ts"]);
+  const nowhere = clp(["verify", "--out", "examples/checkout-ts/src"]);
   assert.equal(nowhere.status, 1);
   assert.match(nowhere.stderr, /仕様のディレクトリがありません: [\s\S]*specs[\s\S]*--specs/);
 });
@@ -82,8 +84,8 @@ test("clp verify: すでにある本番コードを検証する。何も書き�
 test("clp apply: エージェントを指定しなくても、検証とテスト側の生成はできる。エージェントが要る場面では、そう伝えて止まる", () => {
   // すでに一致している出力先（写し）: 採点だけで終わる
   const out = mkdtempSync(join(tmpRoot, "out-"));
-  cpSync(join(repoRoot, "examples/checkout-ts/src"), join(out, "src"), { recursive: true });
-  cpSync(join(repoRoot, "examples/checkout-ts/clp"), join(out, "clp"), { recursive: true });
+  cpSync(join(repoRoot, EXAMPLE, "src"), join(out, "src"), { recursive: true });
+  cpSync(join(repoRoot, EXAMPLE, "clp"), join(out, "clp"), { recursive: true });
   const settled = clp(["apply", "--out", out, "--specs", specsDir, "--mutation", "off"]);
   assert.equal(settled.status, 0, settled.stderr);
   assert.match(settled.stderr, /verify: pass \(nothing to implement\)/);

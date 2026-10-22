@@ -1,38 +1,41 @@
 import type { TargetSystemAdapter } from "./todos.adapter.contract.ts";
-import { TodoList } from "../src/index.ts";
-import type { IdSource } from "../src/index.ts";
-
-let list: TodoList | undefined;
-
-function system(): TodoList {
-  if (!list) throw new Error("adapter: setupIsolation was not called");
-  return list;
-}
+import type { IdSource } from "../src/id-source.ts";
+import { TodoList } from "../src/todo-list.ts";
 
 // Import the production code from ../src/ and forward each call to it. No business logic here.
+let system: TodoList | null = null;
+
+function current(): TodoList {
+  if (system === null) throw new Error("adapter: setupIsolation was not called");
+  return system;
+}
+
 export const adapter: TargetSystemAdapter = {
   async setupIsolation(ports) {
-    const ids: IdSource = { nextId: () => ports.queries.newId() };
-    list = new TodoList(ids);
+    const ids: IdSource = { newId: () => ports.ids.NewId() };
+    system = new TodoList(ids);
   },
   async teardownIsolation() {
-    list = undefined;
+    system = null;
   },
   async executeCommand(command) {
     switch (command.name) {
       case "Add":
-        return system().add(command.input.title);
+        return current().add(command.input.title);
       case "Complete":
-        return system().complete(command.input.id);
-      case "List":
-        return system().list(command.input.only);
+        return current().complete(command.input.id);
       case "Remove":
-        return system().remove(command.input.id);
+        return current().remove(command.input.id);
+      default:
+        throw new Error(`adapter: unknown command ${(command as { name: string }).name}`);
     }
   },
-  async getCurrentState() {
-    // The production list has no states of its own; it is always in the specification's READY state.
-    system();
-    return "READY";
+  async executeQuery(query) {
+    switch (query.name) {
+      case "List":
+        return current().list(query.input.only);
+      default:
+        throw new Error(`adapter: unknown query ${(query as { name: string }).name}`);
+    }
   },
 };

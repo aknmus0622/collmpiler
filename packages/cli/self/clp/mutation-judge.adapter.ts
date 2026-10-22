@@ -1,51 +1,46 @@
-import type { Ports, StateName, TargetSystemAdapter } from "./mutation-judge.adapter.contract.ts";
-import { MutationJudge, type MutationJudgeListener } from "../src/mutation-judge.ts";
+import type { Ports, TargetSystemAdapter } from "./mutation-judge.adapter.contract.ts";
+import { MutationJudge, type MutationVerdictSink } from "../src/mutation-judge.ts";
 
 // Import the production code from ../src/ and forward each call to it. No business logic here.
 let judge: MutationJudge | undefined;
 
-function listenerFor(ports: Ports): MutationJudgeListener {
+function verdictFor(ports: Ports): MutationVerdictSink {
   return {
-    survived: () => ports.effects.Survived({}),
-    inAdapter: () => ports.effects.InAdapter({}),
-    ineffective: () => ports.effects.Ineffective({}),
+    inAdapter: () => ports.verdict.InAdapter({}),
+    ineffective: () => ports.verdict.Ineffective({}),
+    survived: () => ports.verdict.Survived({}),
   };
 }
 
-function current(): MutationJudge {
-  if (!judge) throw new Error("setupIsolation has not been called");
+function system(): MutationJudge {
+  if (!judge) throw new Error("setupIsolation was not called");
   return judge;
 }
 
 export const adapter: TargetSystemAdapter = {
   async setupIsolation(ports) {
-    judge = new MutationJudge(listenerFor(ports));
+    judge = new MutationJudge(verdictFor(ports));
   },
   async teardownIsolation() {
     judge = undefined;
   },
   async executeCommand(command) {
-    const j = current();
     switch (command.name) {
       case "BeginValue":
-        j.beginValue({ numeric: command.input.numeric, inAdapter: command.input.inAdapter });
-        return;
-      case "Site":
-        j.site(command.input.killed);
+        system().beginValue({ numeric: command.input.numeric, inAdapter: command.input.inAdapter });
         return;
       case "EndValue":
-        j.endValue();
-        return;
-      case "Mutant":
-        j.mutant(command.input.killed);
+        system().endValue();
         return;
       case "Finish":
-        j.finish(command.input.shared);
+        system().finish(command.input.shared);
+        return;
+      case "Mutant":
+        system().mutant(command.input.killed);
+        return;
+      case "Site":
+        system().site(command.input.killed);
         return;
     }
-  },
-  async getCurrentState(): Promise<StateName> {
-    // Production state names are identical to the spec's.
-    return current().state;
   },
 };

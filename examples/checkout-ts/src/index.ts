@@ -1,19 +1,20 @@
+/** Public entry point of the order component. */
+
 export { Order } from "./order.ts";
-export { amountCharged, decideCampaign, isMonthEnd, isPriorityShipping } from "./policy.ts";
+export { decideCampaign, chargedAmount, couponToIssue, decideShipping } from "./rules.ts";
 export type {
   Calendar,
-  CouponIssuer,
+  PaymentModule,
   CustomerNotifier,
+  RefundService,
   OrderDependencies,
-  PaymentGateway,
-} from "./ports.ts";
+} from "./dependencies.ts";
 export type {
-  CalendarDate,
-  CampaignTerms,
-  CouponType,
-  MemberRank,
   OrderStatus,
+  CustomerRank,
+  CouponType,
   PaymentResult,
-  PlaceOrderRequest,
-  Receipt,
+  CancelOutcome,
+  Campaign,
+  ShippingPlan,
 } from "./types.ts";

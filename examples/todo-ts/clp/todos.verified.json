@@ -3,19 +3,17 @@
     "todos.component.ts",
     "todos.interpretation.ts"
   ],
-  "specs": "sha256:eb72cd3ad8a6f9543e3d783ccfb346197ec7354657ee9b6909328c6bb8513d3b",
-  "code": "sha256:c93dd8a92206e44e78ce0d41efecb96147cbeceed13ae1f97cea3b3549c94595",
+  "specs": "sha256:91ef5df2961712f878d77dd20237ce78eb44b18a503e18223f2b4ea51769ad42",
+  "code": "sha256:daeba8f95bca803a19505fcf1912ce32e6ce30b19c8f6eb513a951d95f5b9712",
   "files": [
-    "../src/apiResponses.ts",
-    "../src/httpServer.ts",
-    "../src/idSource.ts",
-    "../src/index.ts",
-    "../src/nodeHttp.d.ts",
-    "../src/rules.ts",
-    "../src/todoApi.ts",
-    "../src/todoItem.ts",
-    "../src/todoList.ts",
-    "../src/types.ts",
+    "../src/id-source.ts",
+    "../src/todo-api-responses.ts",
+    "../src/todo-api.ts",
+    "../src/todo-list.ts",
+    "../src/todo-rules.ts",
+    "../src/todo-server.ts",
+    "../src/todo.ts",
     "todos.adapter.ts"
-  ]
+  ],
+  "gradedBy": "stage1"
 }

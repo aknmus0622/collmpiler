@@ -3,13 +3,11 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { checkWorkspace } from "../src/check.ts";
-import { extract, stableStringify } from "../src/extract.ts";
 import { scrubEnv } from "../src/gates.ts";
 import { generateAdapterSkeleton, generateContract, generateVerify } from "../src/generate.ts";
 import type { Ir } from "../src/generate.ts";
 import { DEFAULT_GUIDE } from "../src/guide.ts";
 import { resolveLayout, workspaceOf } from "../src/layout.ts";
-import { loadSpecs } from "../src/loader.ts";
 import { implement } from "../src/loop.ts";
 import type { ImplementOptions } from "../src/loop.ts";
 import { judge } from "../src/mutation.ts";
@@ -19,9 +17,11 @@ import { commandStrategy } from "../src/strategy.ts";
 import { typescriptTarget } from "../src/target-typescript.ts";
 import type { Target } from "../src/target.ts";
 import type { Assignment, ImplementationStrategy } from "../src/strategy.ts";
+import { adapterSkeleton8 } from "../src/v1/generate.ts";
+import { compile } from "../src/v1/load.ts";
 import { write } from "./fixtures/scripted-agent.ts";
 import type { Phase, Place, Step } from "./fixtures/scripted-agent.ts";
-import { defaultWorkspace, harness, of, repoRoot, specsDir, unstamped } from "./support.ts";
+import { defaultWorkspace, harness, of, repoRoot, restamp, specsDir } from "./support.ts";
 
 const { tmpRoot, workdir, scripted, run } = harness("repeat");
 
@@ -38,7 +38,7 @@ test("繰り返し: 何も変わっていなければ、採点だけして終わ
   await implement({ specs: specsDir, out: first.out, strategy: fresh.strategy, mutation: null, fresh: true });
   assert.deepEqual(fresh.seen.map((s) => s.phase), ["design", "wiring", "implementation"]);
   assert.ok(!("src/order-service.ts" in fresh.seen[0].files));
-  assert.equal(fresh.seen[1].files["clp/order.adapter.ts"], generateAdapterSkeleton(defaultWorkspace(first.out)));
+  assert.equal(fresh.seen[1].files["clp/order.adapter.ts"], adapterSkeleton8(defaultWorkspace(first.out), compile(specsDir, "order").ir!));
 });
 
 // 例の仕様を写して、一部を書き換えた仕様（仕様が変わる前の版として使う）
@@ -47,14 +47,15 @@ function specVariant(file: string, from: string, to: string) {
   for (const name of readdirSync(specsDir)) {
     const text = readFileSync(join(specsDir, name), "utf8");
     if (name === file) assert.ok(text.includes(from), from);
-    writeFileSync(join(dir, name), unstamped(name === file ? text.replace(from, to) : text));
+    writeFileSync(join(dir, name), name === file ? text.replace(from, to) : text);
   }
+  restamp(dir);
   return dir;
 }
 // シルバー会員の割引が 50% だった版（fixture の "buggy" は、この版の正しい実装）
-const silverFifty = () => specVariant("order.decisions.ts", "CampaignIf.customerSilverMember.then({ discountPercent: 5,", "CampaignIf.customerSilverMember.then({ discountPercent: 50,");
+const silverFifty = () => specVariant("order.component.ts", '[is.silver("The customer is a Silver member"), { discountPercent: 5,', '[is.silver("The customer is a Silver member"), { discountPercent: 50,');
 // 使われていない副作用が1つ多かった版（契約が違う）
-const extraEffect = () => specVariant("order.component.ts", "  NotifyPaymentFailure: input({}),", "  NotifyPaymentFailure: input({}),\n  Audit: input({}),");
+const extraEffect = () => specVariant("order.component.ts", "    PaymentFailure() {},", "    PaymentFailure() {},\n    Audit() {},");
 
 test("繰り返し: 仕様の値だけが変わったら、実装の段階だけが動く。最初の依頼に、いまのコードの不一致が載る", async () => {
   const out = workdir();
@@ -74,7 +75,7 @@ test("繰り返し: 仕様の値だけが変わったら、実装の段階だけ
   assert.match(request, /The code was written before the specification took its current form/);
   assert.match(request, /## Where the current code falls short[\s\S]*The current code failed the property-based test[\s\S]*"discountPercent": 50/);
   // 実装の段階が見るものは変わらない（アダプターとテストの口は見えない）
-  assert.deepEqual(Object.keys(seen[0].files).sort(), ["clp/REQUEST.md", "clp/order.ir.json", "src/order-service.ts"]);
+  assert.deepEqual(Object.keys(seen[0].files).sort(), ["clp/REQUEST.md", "clp/order.ir.json", "clp/order.spec.md", "src/order-service.ts"]);
   assert.match(seen[0].files["src/order-service.ts"], /percent = 50/);
 });
 

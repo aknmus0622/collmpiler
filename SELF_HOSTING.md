@@ -639,3 +639,26 @@ Stage 0 と1手ごとに一致を求めている。意味の関数を実行す�
 残っている手書きの「判断」は、Stage 0 だけ。それ以外の手書きは、事実を集めて渡す糊と入出力で、判断を持たない（§4.2 の線引き）。
 次に小さくできるのは、Stage 0 そのものを小さくすること（Bootstrappable builds の起点を小さくする方向）だが、Stage 0 は Stage 1 を
 確かめる別系統の実装（Diverse Double-Compiling）でもあるので、0.3 では減らさない。
+
+## 14. 1.0: 自身の部品を 1.0 の書き方で作り直す（2026-10-22）
+
+0.3 の書き方を消すにあたって、フレームワーク自身の部品 19 個を 1.0 の書き方で書き直し（`packages/cli/self/`）、0.3 の部品は消した。
+
+- **何が変わったか。** 0.3 の部品のうち、0.3 の読み取りにしか無い判断（木の検査、葉の検査、グラフの検査、名前の参照、値の置き場所、値の
+  書き方）は、1.0 の読み取りがその判断を持たないので無くなった。代わりに、1.0 の読み取りと検査の判断を新しい部品にした
+  （`overlay-check`、`fill-check`、`syntax-check`、`type-check`、`fit-check`、`sentence-trace`、`checker-verdict`、`usage-check`）。正解の判断
+  （`step-choice`、`outcome-apply`、`promise-keeper`、`input-candidates`、`observation-compare`）、門の判定（`gate-rules`、`mutation-judge`、
+  `mutation-verdict`）、契約の文面（`text-plan`）、裏返した手続き（`pipeline`、`interpret-flow`）は、1.0 の書き方で書き直した。依頼文の節の
+  判断は、1.0 では Stage 0 だけが決める。
+- **読み取りと正解は Stage 0 で決め、問いを記録して Stage 1 に突き合わせる。** 1.0 の読み取りと PBT は同期的に動くので、Stage 0 で
+  決めながら問いと答えを記録し (`v1/decide.ts`)、試行の結果を数える前に、同じ問いを Stage 1 に尋ねる。食い違えば
+  `FrameworkError`（R4）。裏返した手続きは、0.3 と同じく Stage 1 がじかに進める。
+- **コードを作る前に、仕様を Stage 0 と突き合わせる。** `clp __agreement` が、自身の部品の仕様そのもの（仕様をそのまま実行する
+  アダプター、`v1/spec-adapter.ts`）を、多くの生成した問いで Stage 0 と比べる。解釈の疑問点と 2 つの解釈の食い違いは、Stage 0 と一致
+  する読み方を正しいとして確かめた。ただし一致は生成した問いの範囲でだけ言える: `text-plan` の解釈は「並びを任意の長さでつなぐ
+  書き方が無い」と疑問を残していたのに、問いが3個までの並びしか作らなかったので見逃し、9 個目からを落とすコードが一度作られた。
+  書き方に `join` を足し、Layer 1 を詳しくして導き直した。
+- **R3 の事例は 1.0 の形。** `self/cases/<部品>.json` は `{ irVersion: 8, cases: [{ variant?, input }] }`（`v1/agreement.ts` の問いの種類と
+  入力）。期待は Stage 0 が決める。
+- **3 つの固定点の検査** (`stage.test.ts`): 事例と生成した問いで Stage 1 が Stage 0 と一致し、パイプラインと `clp interpret` の進め方が
+  両方で同じに動く。`clp compile` の出力が両方で同じ。Stage 1 の上で、自身の部品の写しを採点し直して合格し、テスト側を同じに作る。

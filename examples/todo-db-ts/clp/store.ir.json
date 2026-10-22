@@ -1,133 +1,368 @@
 {
-  "behaviors": [
-    {
-      "description": "The key and its value are no longer kept, and the answer is deleted. A key that is not kept is not found, and nothing changes.",
-      "from": [
-        "READY"
-      ],
-      "name": "Delete",
-      "onlyIf": [],
-      "when": {
-        "No entry is kept under the key (compared exactly, as strings).": {
-          "responds": "not-found"
-        },
-        "otherwise": {
-          "responds": "deleted",
-          "set": {
-            "entries": {
-              "$ref": "calculation:entriesAfterDelete"
+  "components": {
+    "store": {
+      "calcs": {
+        "kept": {
+          "is": [
+            "state",
+            "entries"
+          ],
+          "params": {},
+          "result": {
+            "list": {
+              "record": {
+                "key": "string",
+                "value": "json"
+              }
             }
           }
         }
-      }
-    },
-    {
-      "from": [
-        "READY"
-      ],
-      "name": "Entries",
-      "onlyIf": [],
-      "when": {
-        "otherwise": {
-          "does": "The answer is every key with its value, in the order the keys were first put. Nothing changes.",
-          "responds": {
-            "$ref": "data:entries"
+      },
+      "commands": {
+        "Delete": {
+          "events": [
+            "Delete.otherwise",
+            "Delete.case1"
+          ],
+          "output": {
+            "enum": [
+              "deleted",
+              "not-found"
+            ]
+          },
+          "params": {
+            "key": "string"
+          }
+        },
+        "Put": {
+          "events": [
+            "Put.otherwise"
+          ],
+          "params": {
+            "data": "json",
+            "key": "string"
           }
         }
-      }
-    },
-    {
-      "from": [
-        "READY"
-      ],
-      "name": "Put",
-      "onlyIf": [],
-      "when": {
-        "otherwise": {
-          "does": "The value (any JSON value, null included) is kept under the key. A key that is already kept keeps its place and gets the new value; a new key goes after the others. A key that was deleted is new when it is put again. Keys are compared exactly, as strings.",
-          "set": {
-            "entries": {
-              "$ref": "calculation:entriesAfterPut"
+      },
+      "durable": true,
+      "events": {
+        "Delete.case1": {
+          "assign": {
+            "entries": [
+              "filter",
+              [
+                "state",
+                "entries"
+              ],
+              [
+                "e"
+              ],
+              [
+                "not",
+                [
+                  "=",
+                  [
+                    "field",
+                    [
+                      "var",
+                      "e"
+                    ],
+                    "key"
+                  ],
+                  [
+                    "var",
+                    "key"
+                  ]
+                ]
+              ]
+            ]
+          },
+          "calls": [],
+          "command": "Delete",
+          "guard": [
+            "some",
+            [
+              "state",
+              "entries"
+            ],
+            [
+              "e"
+            ],
+            [
+              "=",
+              [
+                "field",
+                [
+                  "var",
+                  "e"
+                ],
+                "key"
+              ],
+              [
+                "var",
+                "key"
+              ]
+            ]
+          ],
+          "output": [
+            "lit",
+            "deleted"
+          ]
+        },
+        "Delete.otherwise": {
+          "assign": {},
+          "calls": [],
+          "command": "Delete",
+          "guard": [
+            "not",
+            [
+              "some",
+              [
+                "state",
+                "entries"
+              ],
+              [
+                "e"
+              ],
+              [
+                "=",
+                [
+                  "field",
+                  [
+                    "var",
+                    "e"
+                  ],
+                  "key"
+                ],
+                [
+                  "var",
+                  "key"
+                ]
+              ]
+            ]
+          ],
+          "output": [
+            "lit",
+            "not-found"
+          ]
+        },
+        "Put.otherwise": {
+          "assign": {
+            "entries": [
+              "ite",
+              [
+                "some",
+                [
+                  "state",
+                  "entries"
+                ],
+                [
+                  "e"
+                ],
+                [
+                  "=",
+                  [
+                    "field",
+                    [
+                      "var",
+                      "e"
+                    ],
+                    "key"
+                  ],
+                  [
+                    "var",
+                    "key"
+                  ]
+                ]
+              ],
+              [
+                "map",
+                [
+                  "state",
+                  "entries"
+                ],
+                [
+                  "e"
+                ],
+                [
+                  "ite",
+                  [
+                    "=",
+                    [
+                      "field",
+                      [
+                        "var",
+                        "e"
+                      ],
+                      "key"
+                    ],
+                    [
+                      "var",
+                      "key"
+                    ]
+                  ],
+                  [
+                    "with",
+                    [
+                      "var",
+                      "e"
+                    ],
+                    {
+                      "value": [
+                        "var",
+                        "data"
+                      ]
+                    }
+                  ],
+                  [
+                    "var",
+                    "e"
+                  ]
+                ]
+              ],
+              [
+                "concat",
+                [
+                  "state",
+                  "entries"
+                ],
+                [
+                  "list",
+                  [
+                    "record",
+                    {
+                      "key": [
+                        "var",
+                        "key"
+                      ],
+                      "value": [
+                        "var",
+                        "data"
+                      ]
+                    }
+                  ]
+                ]
+              ]
+            ]
+          },
+          "calls": [],
+          "command": "Put",
+          "guard": true
+        }
+      },
+      "init": {
+        "entries": [
+          "list"
+        ]
+      },
+      "properties": {
+        "eachKeyKeptOnce": {
+          "is": [
+            "always",
+            [
+              "every",
+              [
+                "state",
+                "entries"
+              ],
+              [
+                "e"
+              ],
+              [
+                "=",
+                [
+                  "len",
+                  [
+                    "filter",
+                    [
+                      "state",
+                      "entries"
+                    ],
+                    [
+                      "f"
+                    ],
+                    [
+                      "=",
+                      [
+                        "field",
+                        [
+                          "var",
+                          "f"
+                        ],
+                        "key"
+                      ],
+                      [
+                        "field",
+                        [
+                          "var",
+                          "e"
+                        ],
+                        "key"
+                      ]
+                    ]
+                  ]
+                ],
+                1
+              ]
+            ]
+          ],
+          "kind": "invariant"
+        }
+      },
+      "queries": {
+        "Entries": {
+          "is": [
+            "calc",
+            "kept",
+            {}
+          ],
+          "params": {},
+          "result": {
+            "list": {
+              "record": {
+                "key": "string",
+                "value": "json"
+              }
+            }
+          }
+        }
+      },
+      "state": {
+        "entries": {
+          "list": {
+            "record": {
+              "key": "string",
+              "value": "json"
             }
           }
         }
       }
     }
-  ],
-  "decisions": {},
-  "descriptions": {
-    "component": "Keeps JSON values by key. What it keeps survives a restart.",
-    "data.entries": "What is kept, in the order the keys were first put."
   },
-  "irVersion": 7,
-  "model": {
-    "calculations": {
-      "entriesAfterDelete": {
-        "description": "The entries without the one kept under the key, the others keeping their order.",
-        "output": {
-          "list": {
-            "record": {
-              "key": "string",
-              "value": "value"
-            }
-          }
-        }
-      },
-      "entriesAfterPut": {
-        "description": "The entries with the value under the key: if the key is already kept, its entry keeps its place and gets the new value; otherwise a new entry with the key and the value goes after the others.",
-        "output": {
-          "list": {
-            "record": {
-              "key": "string",
-              "value": "value"
-            }
-          }
-        }
-      }
-    },
-    "commands": {
-      "Delete": {
-        "key": "string"
-      },
-      "Entries": {},
-      "Put": {
-        "key": "string",
-        "value": "value"
-      }
-    },
-    "data": {
-      "entries": {
-        "list": {
-          "record": {
-            "key": "string",
-            "value": "value"
-          }
-        }
-      }
-    },
-    "durable": true,
-    "effects": {},
-    "init": "READY",
-    "initial": {
-      "entries": []
-    },
-    "outputs": {
-      "Delete": [
-        "deleted",
-        "not-found"
-      ],
-      "Entries": {
-        "list": {
-          "record": {
-            "key": "string",
-            "value": "value"
-          }
-        }
-      }
-    },
-    "queries": {},
-    "states": [
-      "READY"
+  "entries": {
+    "commands": [
+      "store.Delete",
+      "store.Put"
+    ],
+    "queries": [
+      "store.Entries"
+    ]
+  },
+  "irVersion": 8,
+  "notes": {
+    "store": "Keeps JSON values by key. What it keeps survives a restart.",
+    "store.calcs.kept": "Every key with its value, in the order the keys were first put.",
+    "store.does.delete": "The key and its value are no longer kept, and the answer is deleted. A key that is not kept is not found, and nothing changes.",
+    "store.does.put": "The value (any JSON value, null included) is kept under the key. A key that is already kept keeps its place and gets the new value; a new key goes after the others. A key that was deleted is new when it is put again. Keys are compared exactly, as strings."
+  },
+  "root": "store",
+  "sorts": [],
+  "trace": {
+    "store.does.delete": [
+      "Store.commands.Delete"
+    ],
+    "store.does.put": [
+      "Store.commands.Put"
     ]
   }
 }

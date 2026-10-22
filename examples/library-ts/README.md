@@ -2,11 +2,11 @@
 
 The loan of one book at a library. This example was made with `clp` alone, starting from a spec that was rough
 on purpose, to show how a spec becomes precise: not by writing the interpretation, but by reading what `clp
-interpret` reports and making Layer 1 (`specs/loan.component.ts`) say more.
+interpret` reports and making Layer 1 (`specs/loan.component.ts`) say more. It was made twice: first in the 0.3
+notation (the story below), then again in the 1.0 notation.
 
 ```text
-specs/loan.component.ts        Layer 1: written by a person
-specs/loan.decisions.ts        Layer 1: the library's numbers
+specs/loan.component.ts        Layer 1: written by a person (the policy table, the component)
 specs/loan.interpretation.ts   Layer 2: derived by an LLM, accepted by a person
 src/                           production code, written by an agent
 clp/                           the test side, generated
@@ -16,7 +16,37 @@ clp/                           the test side, generated
 pnpm exec clp verify --out .     # run from this directory
 ```
 
-## How the spec got here
+## Again, in the 1.0 notation
+
+Every command below was run from `examples/library-ts`, with
+`--agent 'claude -p "Read clp/REQUEST.md and carry out the request." --permission-mode acceptEdits'`.
+
+1. **A first draft by `clp __migrate`.** The internal command (removed since) turned the 0.3 Layer 1 into a 1.0
+   draft. It was rough: the world around the loan had become part of the description, and `Borrow`'s answer type was
+   wrong. A person finished it: the policy as a decision table, `Borrow` and `Extend` with their answer types and
+   their refusals as code (`return { result: "refused", dueInDays: null }`), the rest as `does.lend("…")`,
+   `does.extend("…")`, `does.daysPass("…")`, and `Return` as a sentence. The world around it stayed prose: what it
+   asks and whom it tells are sentences of the description.
+2. **`clp interpret`: two questions.** *Layer 1 does not say what Return answers* (the agent chose "returned", or
+   "refused" for a lost book), and *"told the new due date" — taken as the number of days until it*. Both went into
+   Layer 1: `Return(): "returned" | "refused"` with its sentence, and "told the number of days until the new due
+   date".
+3. **`clp interpret`, again: the second session could not run.** It was rejected three times for changing the fixed
+   boundary: the world around the loan is declared by the interpretation (`LoanWorld`, an `external`), and the
+   framework did not give the second session the first one's declaration. It does now.
+4. **`clp interpret`, again: one difference, four questions.** The second session did not notify the next member on
+   a return when the book was reserved (it remembered the reservation from `Borrow`). Layer 1 says *"if someone
+   else has reserved the book, the next member waiting is notified"*, so the first reading is the one meant: marked
+   `REVIEWED(clp)`. The questions (no promise on the world's answers; the count at `Borrow` excludes this book; what
+   the due date means while the book is available; a lost book is charged the replacement only) were all readings
+   of the prose, and marked `REVIEWED`.
+5. **`clp apply`: passed.** The design was rejected once (the skeleton quoted a spec sentence); wiring and
+   implementation passed on their first attempt, with 13 of 14 mutants killed.
+
+What changed from 0.3: the refusal no longer needs a case table and `responds(...)`; it is a `return` in the code.
+The world around the loan, never declared by a person, is declared by the interpretation and reviewed like the rest.
+
+## How the spec got here (0.3)
 
 Every command below was run from this directory, with
 `--agent 'claude -p "Read clp/REQUEST.md and carry out the request." --permission-mode acceptEdits'`.

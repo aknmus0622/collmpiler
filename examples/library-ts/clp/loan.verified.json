@@ -3,16 +3,16 @@
     "loan.component.ts",
     "loan.interpretation.ts"
   ],
-  "specs": "sha256:ab8a30c1a0fc44875d7b72ac5cdaaa790564363244a8ff17874cf043a5e946d5",
-  "code": "sha256:10aad5eeec7e86744d3a2bf8211c82213303fb36612a36b6c20c5c850c5addb3",
+  "specs": "sha256:05eb163dcec0c6d4071b1892dfb4acb8bc6e70e37ad9bdf9131fd7348b395a09",
+  "code": "sha256:0aa6009f22a0dc5723c9f441e6aedb0f5bf5eb9c8b5bd97a9c893549cec828f6",
   "files": [
     "../src/index.ts",
+    "../src/library.ts",
+    "../src/loan-rules.ts",
+    "../src/loan-state.ts",
     "../src/loan.ts",
-    "../src/outcome.ts",
     "../src/policy.ts",
-    "../src/ports.ts",
-    "../src/rules.ts",
-    "../src/state.ts",
     "loan.adapter.ts"
-  ]
+  ],
+  "gradedBy": "stage1"
 }

@@ -2,28 +2,21 @@ import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { resolveLayout, sourceFiles, workspaceOf } from "./layout.ts";
 import type { Workspace } from "./layout.ts";
-import { boundaryOf, extract, stableStringify, whereOf } from "./extract.ts";
-import { graphDiagnostics, providedData } from "./graph.ts";
 import { mergeAssets } from "./assets.ts";
 import type { Asset } from "./assets.ts";
-import { entryGate, exitGate, partFilesOf, requestFactsOf, verifyGate } from "./gates.ts";
+import { entryGate, exitGate, partFilesOf, verifyGate } from "./gates.ts";
 import type { Feedback, GateContext, MutationSummary } from "./gates.ts";
-import { requireModel, seedOf } from "./generate.ts";
-import type { AnyIr as Ir, Ir as Ir7 } from "./generate.ts";
-import { isIr8 } from "./generate.ts";
+import { seedOf, stableStringify } from "./generate.ts";
+import type { Ir } from "./generate.ts";
 import { loadProgram } from "./v1/load.ts";
-import { checkSpec, isV1Specs, prepare } from "./v1/prepare.ts";
+import { checkSpec, prepare } from "./v1/prepare.ts";
+import { DRAFT_SUFFIX } from "./v1/read.ts";
 import { boundary8, defaultRuns8 } from "./v1/runtime.ts";
-import { R1_COMPONENTS8, adapterOf as adapterOf8, planContract8, stage0HashOf8 } from "./v1/stage1.ts";
-import type { Adapter8 } from "./v1/pbt.ts";
-import type { Ir8 } from "./v1/ir.ts";
+import { R1_COMPONENTS8, adapterOf, fallback, planContract8, runCases, setGradingByStage0, stage0HashOf8 } from "./v1/stage1.ts";
 import { DEFAULT_GUIDE } from "./guide.ts";
-import { DRAFT_SUFFIX, listComponents, loadSpecs } from "./loader.ts";
 import type { MutationStrategy } from "./mutation.ts";
 import { PHASES } from "./request.ts";
 import type { Phase } from "./request.ts";
-import { DEFAULT_RUNS, defaultRuns, describeUnobservable, observability, selfCheck, unreachedCases } from "./runtime.ts";
-import { R1_COMPONENTS, runCases, graphCheck, loadJudges, mutationVerdict, planContract, requestPlan, setGradingByStage0, stage0HashOf, references, runStage1, stage1Adapter, stage1Unavailable } from "./stage1.ts";
 import type { StaticCheckStrategy } from "./static-check.ts";
 import { clearVerified, writeVerified } from "./verified.ts";
 import type { ImplementationStrategy } from "./strategy.ts";
@@ -109,83 +102,30 @@ export async function implement(options: ImplementOptions) {
   // 仕様にあるコンポーネントをすべて読み、検査する。仕様自身の誤りは、エージェントを呼ぶ前に人に報告する
   const target = options.target ?? typescriptTarget;
   const layout = resolveLayout(options);
-  const v1 = isV1Specs(specsDir);
-  const names = v1 ? loadProgram(specsDir, { drafts }).components : await listComponents(specsDir, { drafts });
-  if (names.length === 0) throw new Error("仕様にコンポーネントがありません（component(...) を export してください）");
+  const names = loadProgram(specsDir, { drafts }).components;
+  if (names.length === 0) throw new Error("仕様にコンポーネントがありません（service(...) を export してください）");
   if (options.component !== undefined && !names.includes(options.component)) {
     throw new Error(`コンポーネント "${options.component}" がありません (あるのは: ${names.join(", ")})`);
   }
   const units: Unit[] = [];
-  if (v1) {
-    // 1.0 の書き方 (DSL.md §17): 読み取り、IR 版 8、仕様だけの実行、具体例
-    for (const name of names) {
-      const prepared = await prepare(specsDir, name, { drafts });
-      const errors = prepared.problems.filter((p) => p.severity === "error");
-      for (const p of prepared.problems.filter((p) => p.severity === "warning")) log(`注意 (${name}): ${p.where}: ${p.message}`);
-      if (errors.length > 0 || !prepared.ir) throw new Error(`仕様 (${name}) にエラーがあります:\n${errors.map((p) => `  ${p.where}: ${p.message}`).join("\n")}`);
-      const checked = await checkSpec(prepared.ir, { runs: options.runs });
-      if (checked.problems.length > 0) throw new Error(`仕様 (${name}) に誤りがあります:\n${checked.problems.map((p) => `  ${p.where}: ${p.message}`).join("\n")}`);
-      for (const warning of checked.warnings) log(`注意 (${name}): ${warning}`);
-      const ir = JSON.parse(stableStringify(prepared.ir)) as Ir;
-      // the contract's text decisions, made beforehand by text-plan (Stage 1) when it can
-      await planContract8(ir as Ir8);
-      units.push({ name, ir, ws: workspaceOf(layout, target.files, name, names), seed: seedOf(ir), assets: prepared.assets, roots: prepared.roots });
-    }
-  }
-  const specs = new Map(v1 ? [] : await Promise.all(names.map(async (name) => [name, await loadSpecs(specsDir, { drafts, component: name, judges: loadJudges })] as const)));
-  // 含む部品が作るときに渡すデータ（覚える (set) コマンドが無くても、設定される）
-  const provided = providedData([...specs.values()]);
-  for (const name of v1 ? [] : names) {
-    const spec = specs.get(name)!;
-    const { ir: extracted, diagnostics } = extract(spec, await references(spec));
-    const errors = diagnostics.filter((d) => d.severity === "error");
-    if (errors.length > 0) {
-      throw new Error(`仕様 (${name}) にエラーがあります:\n${errors.map((d) => `  ${whereOf(d)}${d.message}`).join("\n")}`);
-    }
-    // グラフの検査: たどり着けない状態やコマンドは、仕様の誤り。使われない語彙は、知らせるだけ
-    const structural = graphDiagnostics(spec, provided.get(name), false, await runStage1(graphCheck, { spec, provided: provided.get(name) }));
-    for (const d of structural.filter((entry) => entry.severity === "warning")) log(`注意 (${name}): ${d.message}`);
-    if (structural.some((d) => d.severity === "error")) {
-      throw new Error(`仕様 (${name}) にエラーがあります:\n${structural.filter((d) => d.severity === "error").map((d) => `  ${d.message}`).join("\n")}`);
-    }
-    const ir = JSON.parse(stableStringify(extracted)) as Ir;
-    // 契約の文面の判断を、使える中でいちばん新しい Stage で前もって下す（生成は同期なので、ここで登録しておく）
-    await planContract(ir as Ir7);
-    requireModel(ir as Ir7);
-    const checked = await selfCheck(spec, { seed: 1 });
-    if (!checked.ok) {
-      throw new Error(`仕様 (${name}) に誤りがあります: ${checked.message}\n  再現するコマンド列: ${JSON.stringify(checked.steps)}`);
-    }
-    // 決定表の値が、検証に現れるか。現れない値があると、正しい実装がミューテーションのゲートで差し戻される
-    // （あるいは、その値を使う確認が本番コードから消える）ので、エージェントを呼ぶ前に止める
-    for (const found of await unreachedCases(spec, { seed: seedOf(ir), numRuns: options.runs ?? DEFAULT_RUNS })) {
-      log(`注意 (${name}): ${found.command}.${found.case}: 仕様を実行しても、この場合には一度も当たりませんでした（この場合の結果は検証されません）`);
-    }
-    const unobservable = await observability(spec, { seed: seedOf(ir), numRuns: options.runs ?? DEFAULT_RUNS }, (trials) => runStage1(mutationVerdict, trials));
-    for (const found of unobservable.filter((entry) => entry.severity === "warning")) log(`注意 (${name}): ${describeUnobservable(found)}`);
-    const blocking = unobservable.filter((entry) => entry.severity === "error");
-    if (blocking.length > 0) {
-      throw new Error(`仕様 (${name}) に、検証に現れない値があります:\n${blocking.map((found) => `  ${describeUnobservable(found)}`).join("\n")}`);
-    }
-    units.push({
-      name,
-      ir,
-      ws: workspaceOf(layout, target.files, name, names),
-      seed: seedOf(ir),
-      assets: spec.assets ?? [],
-      roots: [spec.sources?.component?.file, spec.sources?.binding].filter((file): file is string => file !== undefined),
-    });
+  // 読み取り、IR、仕様だけの実行、具体例、仕様のミューテーション。仕様自身の誤りは、エージェントを呼ぶ前に人に報告する
+  for (const name of names) {
+    const prepared = await prepare(specsDir, name, { drafts });
+    const errors = prepared.problems.filter((p) => p.severity === "error");
+    for (const p of prepared.problems.filter((p) => p.severity === "warning")) log(`注意 (${name}): ${p.where}: ${p.message}`);
+    if (errors.length > 0 || !prepared.ir) throw new Error(`仕様 (${name}) にエラーがあります:\n${errors.map((p) => `  ${p.where}: ${p.message}`).join("\n")}`);
+    const checked = await checkSpec(prepared.ir, { runs: options.runs });
+    if (checked.problems.length > 0) throw new Error(`仕様 (${name}) に誤りがあります:\n${checked.problems.map((p) => `  ${p.where}: ${p.message}`).join("\n")}`);
+    for (const warning of checked.warnings) log(`注意 (${name}): ${warning}`);
+    const ir = JSON.parse(stableStringify(prepared.ir)) as Ir;
+    // 契約の文面の判断を、使えれば Stage 1 (text-plan) で前もって下す（生成は同期なので、ここで登録しておく）
+    await planContract8(ir);
+    units.push({ name, ir, ws: workspaceOf(layout, target.files, name, names), seed: seedOf(ir), assets: prepared.assets, roots: prepared.roots });
   }
 
   // 部品を含む部品は、含む部品のあとに一致させる（中の部品の本番コードを使うので）
   // 保存先の部品 (durable: Store。W7) も、含む部品と同じに扱う: 先に一致させ、本番コードは使うだけ
-  const partsOf = (unit: Unit, trail: string[] = []): string[] =>
-    isIr8(unit.ir)
-      ? ((ir) => Object.keys(ir.components).filter((id) => id !== unit.name && !ir.components[id].external && units.some((u) => u.name === id)))(unit.ir)
-      : [...Object.values(unit.ir.model?.parts ?? {}), ...(typeof unit.ir.model?.durable === "object" ? [{ component: unit.ir.model.durable.store }] : [])].flatMap(({ component }) => {
-      const inner = units.find((candidate) => candidate.name === component);
-      return inner && !trail.includes(component) ? [component, ...partsOf(inner, [...trail, component])] : [];
-    });
+  const partsOf = (unit: Unit): string[] => Object.keys(unit.ir.components).filter((id) => id !== unit.name && !unit.ir.components[id].external && units.some((u) => u.name === id));
   const ordered: Unit[] = [];
   const place = (unit: Unit) => {
     if (ordered.includes(unit)) return;
@@ -216,7 +156,7 @@ export async function implement(options: ImplementOptions) {
   // 合格の記録は、これから確かめ直すので、いったん消す（途中で止まったときに、前の記録が残らないように）
   for (const unit of chosen) clearVerified(unit.ws);
   // R1: 採点の部品を作り直す実行では、採点の判断をすべて Stage 0 が下す（採点される側に、採点させない）
-  const gradingByStage0 = chosen.some((unit) => unit.name in (isIr8(unit.ir) ? R1_COMPONENTS8 : R1_COMPONENTS));
+  const gradingByStage0 = chosen.some((unit) => unit.name in R1_COMPONENTS8);
   setGradingByStage0(gradingByStage0);
   try {
   for (const unit of chosen) {
@@ -258,8 +198,7 @@ export async function implement(options: ImplementOptions) {
   // Stage 0 と食い違えば書かない (R3)
   if (status === "pass" && oracle === "reviewed") {
     for (const unit of chosen) {
-      const v1 = isIr8(unit.ir);
-      const r1 = unit.name in (v1 ? R1_COMPONENTS8 : R1_COMPONENTS);
+      const r1 = unit.name in R1_COMPONENTS8;
       if (r1) {
         const cases = runCases(specsDir, unit.ws, unit.name);
         for (const line of cases.unexecuted) log(`注意 (${unit.name}): 事例の集まりで一度も実行されない関数があります。事例を足してください: ${line}`);
@@ -268,14 +207,14 @@ export async function implement(options: ImplementOptions) {
           continue;
         }
       }
-      writeVerified(unit.ws, specsDir, unit.roots, { gradedBy: gradingByStage0 ? "stage0" : "stage1", ...(r1 ? { stage0: v1 ? stage0HashOf8(unit.name) : stage0HashOf(unit.name) } : {}) });
+      writeVerified(unit.ws, specsDir, unit.roots, { gradedBy: gradingByStage0 ? "stage0" : "stage1", ...(r1 ? { stage0: stage0HashOf8(unit.name) } : {}) });
     }
   }
   // seed は、最初のコンポーネントのもの（コンポーネントが1つのときの、従来の形）
   return { status, oracle, attempts, stages, seed: units[0].seed, seeds: Object.fromEntries(units.map((unit) => [unit.name, unit.seed])) };
 }
 
-const runsOf = (ir: Ir) => (isIr8(ir) ? defaultRuns8(ir) : defaultRuns(ir.model));
+const runsOf = (ir: Ir) => defaultRuns8(ir);
 
 // roots: 仕様の起点（Layer 1 と解釈のファイル。合格の記録が、そこからたどったファイルだけをハッシュする）
 type Unit = { name: string; ir: Ir; ws: Workspace; seed: number; assets: Asset[]; roots: string[] };
@@ -333,8 +272,7 @@ async function session(
   log: (line: string) => void,
 ): Promise<Feedback | undefined> {
   const { phase, round, attempt } = at;
-  // 依頼文の節は、使える中でいちばん新しい Stage で決める
-  const sandbox = entryGate(ctx, phase, attempt, previous, await runStage1(requestPlan, requestFactsOf(ctx, phase, attempt, previous)));
+  const sandbox = entryGate(ctx, phase, attempt, previous);
   let feedback: Feedback | undefined;
   let mutation: MutationSummary | undefined;
   let staticCheck: string | undefined;
@@ -376,9 +314,7 @@ async function reconcileStage1(ctx: GateContext, options: ImplementOptions, atte
   // 仕様に無い指定: 始める段階の明示 (--from)、途中で止めること (--stop-after)、仕様が扱う範囲 (1〜3) の外の回数
   const inRange = (limit: number) => Number.isInteger(limit) && limit >= 1 && limit <= 3;
   if (options.from !== undefined || options.stopAfter !== undefined || !inRange(maxAttempts) || !inRange(maxRounds)) return undefined;
-  // 1.0 の仕様は、1.0 で書いたフレームワーク自身の部品 (self1) の状態機械で進める
-  const v1 = isIr8(ctx.ir);
-  const adapter = v1 ? await adapterOf8("pipeline") : await stage1Adapter("pipeline");
+  const adapter = await adapterOf("pipeline");
   if (!adapter) return undefined;
 
   const { ws } = ctx;
@@ -396,14 +332,10 @@ async function reconcileStage1(ctx: GateContext, options: ImplementOptions, atte
       GradeCurrentCode: (payload: { round: number }) => void requested.push({ kind: "grade", ...payload }),
       DiscardCode: () => void requested.push({ kind: "discard" }),
     };
-    await adapter.setupIsolation(
-      v1
-        ? { output: { HasProductionCode: () => facts.hasProductionCode, BoundaryChanged: () => facts.boundaryChanged, HasAdapter: () => facts.hasAdapter }, "pipeline-driver": driver }
-        : { queries: { hasProductionCode: () => facts.hasProductionCode, boundaryChanged: () => facts.boundaryChanged, hasAdapter: () => facts.hasAdapter }, effects: driver },
-    );
+    await adapter.setupIsolation({ output: { HasProductionCode: () => facts.hasProductionCode, BoundaryChanged: () => facts.boundaryChanged, HasAdapter: () => facts.hasAdapter }, "pipeline-driver": driver });
     await adapter.executeCommand({ name: "Start", input: { attemptsPerPhase: maxAttempts, rounds: maxRounds } });
   } catch (error) {
-    stage1Unavailable("pipeline", error);
+    fallback("pipeline", error);
     return undefined;
   }
 
@@ -433,7 +365,7 @@ async function reconcileStage1(ctx: GateContext, options: ImplementOptions, atte
         await adapter.executeCommand({ name: CHECKED[phase], input: { passed: feedback === undefined } });
       }
     }
-    const state = v1 ? await (adapter as Adapter8).executeQuery!({ name: "Status", input: {} }) : await (adapter as { getCurrentState(): Promise<unknown> }).getCurrentState();
+    const state = await adapter.executeQuery!({ name: "Status", input: {} });
     if (state !== "DONE" && state !== "FAILED") throw new Error(`Stage 1 のパイプラインが、途中の状態 (${String(state)}) で止まりました`);
     return state === "DONE";
   } finally {
@@ -504,7 +436,7 @@ function planOf(ctx: GateContext, from: Phase | undefined): { phases: readonly P
   // 契約は境界 (状態・コマンドと入力・問い合わせ・副作用) から決まる。前回の IR の境界と比べる
   // （生成した契約のファイルは、ヘッダーに仕様全体のハッシュを含むので、そのままは比べられない）
   const previous = read(ws.paths.ir);
-  const boundary = (ir: Ir) => (isIr8(ir) ? boundary8(ir) : boundaryOf(ir));
+  const boundary = (ir: Ir) => boundary8(ir);
   if (previous === undefined || boundary(JSON.parse(previous) as Ir) !== boundary(ctx.ir)) {
     return { phases: PHASES, incremental, reason: "the contract changed" };
   }

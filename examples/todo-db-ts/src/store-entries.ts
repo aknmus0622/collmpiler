@@ -1,61 +1,56 @@
-import type { JsonValue } from "./json.ts";
+import type { Json } from "./json.ts";
 
 /**
- * One key with the JSON value kept under it.
- *
- * Corresponds to one element of the specification's `entries` data (`{ key, value }`).
+ * One value kept by the store under its key.
+ * Corresponds to an element of the specification's `store.entries` state.
  */
 export interface StoreEntry {
-  /** The key the value is kept under. */
+  /** The key the value is kept under, compared as an exact string. */
   key: string;
-  /** The value kept under the key; may be `null`. */
-  value: JsonValue;
+  /** The JSON value kept under the key (may be `null`). */
+  value: Json;
 }
 
 /**
- * The answer of {@link Store.delete}:
- * - `"deleted"`: the key was kept and is now removed (specification answer `deleted`);
- * - `"not-found"`: the key was not kept, nothing changed (specification answer `not-found`).
+ * The answer of deleting a key: the specification's `Delete` output.
+ * - `"deleted"`: the key was kept and now is not.
+ * - `"not-found"`: the key was not kept; nothing changed.
  */
-export type DeleteResult = "deleted" | "not-found";
+export type DeleteOutcome = "deleted" | "not-found";
+
+/** The entries after a delete, together with the answer the delete gives. */
+export interface DeleteResult {
+  /** The entries as they are after the delete. */
+  entries: StoreEntry[];
+  /** What the delete answers. */
+  outcome: DeleteOutcome;
+}
 
 /**
- * Pure function: the entries that result from putting `value` under `key` into `entries`.
- * Does not modify `entries`; returns a new list.
+ * Pure form of the specification's `store.Put` command.
  *
- * Corresponds to the specification calculation `entriesAfterPut`.
- *
- * @param entries the entries currently kept, in their kept order
- * @param key the key given to the Put command
- * @param value the value given to the Put command
+ * @param entries the entries kept before the put, in the store's order (not modified)
+ * @param key the key to keep the value under (spec parameter `key`)
+ * @param value the value to keep (spec parameter `data`)
+ * @returns the entries kept after the put, in the store's order
  */
-export function entriesAfterPut(entries: readonly StoreEntry[], key: string, value: JsonValue): StoreEntry[] {
-  if (!hasEntry(entries, key)) {
-    return [...entries, { key, value }];
+export function putEntry(entries: readonly StoreEntry[], key: string, value: Json): StoreEntry[] {
+  if (entries.some((e) => e.key === key)) {
+    return entries.map((e) => (e.key === key ? { ...e, value } : e));
   }
-  return entries.map((entry) => (entry.key === key ? { key: entry.key, value } : entry));
+  return [...entries, { key, value }];
 }
 
 /**
- * Pure function: the entries that result from deleting `key` from `entries`.
- * Does not modify `entries`; returns a new list.
+ * Pure form of the specification's `store.Delete` command.
  *
- * Corresponds to the specification calculation `entriesAfterDelete`.
- *
- * @param entries the entries currently kept, in their kept order
- * @param key the key given to the Delete command
+ * @param entries the entries kept before the delete, in the store's order (not modified)
+ * @param key the key to delete (spec parameter `key`)
+ * @returns the entries kept after the delete and the answer of the delete
  */
-export function entriesAfterDelete(entries: readonly StoreEntry[], key: string): StoreEntry[] {
-  return entries.filter((entry) => entry.key !== key);
-}
-
-/**
- * Pure function: whether `entries` holds an entry under `key`.
- * Used by {@link Store.delete} to choose between the `"deleted"` and `"not-found"` answers.
- *
- * @param entries the entries currently kept
- * @param key the key to look for
- */
-export function hasEntry(entries: readonly StoreEntry[], key: string): boolean {
-  return entries.some((entry) => entry.key === key);
+export function deleteEntry(entries: readonly StoreEntry[], key: string): DeleteResult {
+  if (entries.some((e) => e.key === key)) {
+    return { entries: entries.filter((e) => e.key !== key), outcome: "deleted" };
+  }
+  return { entries: [...entries], outcome: "not-found" };
 }

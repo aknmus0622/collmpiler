@@ -1,8 +1,8 @@
 import type { Violation } from "./check.ts";
-import type { AnyIr as Ir } from "./generate.ts";
+import type { Ir } from "./generate.ts";
 import type { Workspace } from "./layout.ts";
 import type { MutationStrategy } from "./mutation.ts";
-import type { PbtResult } from "./runtime.ts";
+import type { PbtResult8 as PbtResult } from "./v1/pbt.ts";
 import type { StaticCheckStrategy } from "./static-check.ts";
 
 // 対象言語: 本番システムを書く言語に依存する処理を、1つにまとめたもの。
@@ -84,8 +84,6 @@ export interface Target {
     skeletonBody: string;
     // アダプターの各メンバーに何を書くか（箇条書き）
     adapterGuide: string;
-    // 1.0 (IR 版 8) の契約のとき
-    adapterGuide8?: string;
     // アダプターが依存してよいもの（1文）
     adapterImports: string;
     // 公開している名前やシグネチャを変えたときに、差し戻しに現れるエラーの例

@@ -3,7 +3,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import type { Violation } from "./check.ts";
-import { DRAFT_SUFFIX, requireSpecsDir } from "./loader.ts";
+import { DRAFT_SUFFIX, requireSpecsDir } from "./v1/read.ts";
 
 // TypeScript の型チェック。2つの用途がある:
 //   typecheckSpecs … 仕様の検査。仕様は常に TypeScript で書くので、フレームワークに固定で組み込む

@@ -1,415 +1,245 @@
 {
-  "behaviors": [
-    {
-      "from": [
-        "READY"
-      ],
-      "name": "BeginCases",
-      "onlyIf": [],
-      "when": {
-        "otherwise": {
-          "does": "A case is chosen next, from the cases given (Case); none has been given yet.",
-          "set": {
-            "hits": []
+  "components": {
+    "oracle": {
+      "external": {
+        "commands": {},
+        "queries": {
+          "Holds": {
+            "params": {
+              "name": {
+                "atom": "CaseName"
+              }
+            },
+            "result": "bool"
           }
         }
       }
     },
-    {
-      "from": [
-        "READY"
-      ],
-      "name": "BeginStep",
-      "onlyIf": [],
-      "when": {
-        "otherwise": {
-          "does": "A new step, from the given state. No command has been considered yet: the commands that can be executed are forgotten. The cases given so far (Case) are not forgotten; only BeginCases forgets them.",
-          "set": {
-            "enabled": [],
-            "stepState": {
-              "$ref": "input:state"
+    "step-choice": {
+      "calcs": {
+        "decision": {
+          "is": [
+            "ite",
+            [
+              "=",
+              [
+                "len",
+                [
+                  "state",
+                  "hits"
+                ]
+              ],
+              0
+            ],
+            [
+              "record",
+              {
+                "chosen": null,
+                "conflict": [
+                  "list"
+                ],
+                "otherwise": true
+              }
+            ],
+            [
+              "ite",
+              [
+                "=",
+                [
+                  "len",
+                  [
+                    "state",
+                    "hits"
+                  ]
+                ],
+                1
+              ],
+              [
+                "record",
+                {
+                  "chosen": [
+                    "at",
+                    [
+                      "state",
+                      "hits"
+                    ],
+                    0
+                  ],
+                  "conflict": [
+                    "list"
+                  ],
+                  "otherwise": false
+                }
+              ],
+              [
+                "record",
+                {
+                  "chosen": null,
+                  "conflict": [
+                    "state",
+                    "hits"
+                  ],
+                  "otherwise": false
+                }
+              ]
+            ]
+          ],
+          "params": {},
+          "result": {
+            "record": {
+              "chosen": {
+                "optional": {
+                  "atom": "CaseName"
+                }
+              },
+              "conflict": {
+                "list": {
+                  "atom": "CaseName"
+                }
+              },
+              "otherwise": "bool"
             }
           }
-        }
-      }
-    },
-    {
-      "asks": {
-        "caseConditionHolds": {
-          "input": {
-            "condition": {
-              "$ref": "input:name"
-            }
-          },
-          "query": "holds"
         }
       },
-      "description": "A case, named by its condition. The case `otherwise` has no condition and is not asked about; every other case is asked about (whether its condition holds), even when another one already holds.",
-      "from": [
-        "READY"
-      ],
-      "name": "Case",
-      "onlyIf": [],
-      "when": {
-        "The case is not `otherwise`, and its condition holds": {
-          "set": {
-            "hits": {
-              "$ref": "calculation:hitsWithCase"
+      "commands": {
+        "BeginCases": {
+          "events": [
+            "BeginCases.otherwise"
+          ],
+          "params": {}
+        },
+        "Case": {
+          "events": [
+            "Case.otherwise"
+          ],
+          "params": {
+            "name": {
+              "atom": "CaseName"
             }
           }
-        },
-        "otherwise": {}
-      }
-    },
-    {
-      "description": "Which command is executed at this step. When no command is forced: none if no command can be executed; otherwise the one at position `pick` modulo their number, counting from 0 in the order they were added. When a command is forced (another component called it): that command, whether or not it can be executed; but if `strict` is true and it cannot be executed, none is chosen and the call is refused. Refused is false in every other case.",
-      "from": [
-        "READY"
-      ],
-      "name": "Choose",
-      "onlyIf": [],
-      "when": {
-        "A command is forced, `strict` is true, and the forced command cannot be executed at this step": {
-          "responds": {
-            "chosen": null,
-            "refused": true
-          }
-        },
-        "No command is forced, and at least one command can be executed at this step": {
-          "responds": {
-            "chosen": {
-              "$ref": "calculation:pickedCommand"
-            },
-            "refused": false
-          }
-        },
-        "No command is forced, and no command can be executed at this step": {
-          "responds": {
-            "chosen": null,
-            "refused": false
-          }
-        },
-        "otherwise": {
-          "responds": {
-            "chosen": {
-              "$ref": "calculation:forcedCommand"
-            },
-            "refused": false
-          }
-        }
-      }
-    },
-    {
-      "from": [
-        "READY"
-      ],
-      "name": "Consider",
-      "onlyIf": [],
-      "when": {
-        "otherwise": {
-          "does": "A command is considered next. It can be executed in every state when `everywhere` is true (it names no states it is executed from); otherwise only in the states given next (From). The facts about it come in this order: every From, then every PathValue, then every OnlyIf, then Considered.",
-          "set": {
-            "considering": {
-              "$ref": "input:command"
-            },
-            "possible": {
-              "$ref": "input:everywhere"
-            }
-          }
-        }
-      }
-    },
-    {
-      "description": "Every fact about the command being considered has been given. If it can be executed, it is added to the commands that can be executed at this step (each time Considered is given, even for the same command).",
-      "from": [
-        "READY"
-      ],
-      "name": "Considered",
-      "onlyIf": [],
-      "when": {
-        "The command being considered can be executed, as far as the facts given say": {
-          "set": {
-            "enabled": {
-              "$ref": "calculation:enabledWithConsidered"
-            }
-          }
-        },
-        "otherwise": {}
-      }
-    },
-    {
-      "description": "Which case happens. If exactly one case's condition holds, that case; if none holds, `otherwise` (whether or not it was given). If more than one holds, none is chosen and the conflict lists those cases in the order given; otherwise the conflict is empty.",
-      "from": [
-        "READY"
-      ],
-      "name": "DecideCase",
-      "onlyIf": [],
-      "when": {
-        "Exactly one case's condition holds": {
-          "responds": {
-            "chosen": {
-              "$ref": "calculation:onlyHit"
-            },
-            "conflict": []
-          }
-        },
-        "No case's condition holds": {
-          "responds": {
-            "chosen": "otherwise",
-            "conflict": []
-          }
-        },
-        "otherwise": {
-          "responds": {
-            "chosen": null,
-            "conflict": {
-              "$ref": "data:hits"
-            }
-          }
-        }
-      }
-    },
-    {
-      "description": "A state the command being considered can be executed from. If it is the state of this step, the command can be executed (unless a later fact says otherwise).",
-      "from": [
-        "READY"
-      ],
-      "name": "From",
-      "onlyIf": [],
-      "when": {
-        "The state given is the state of this step": {
-          "set": {
-            "possible": true
-          }
-        },
-        "otherwise": {}
-      }
-    },
-    {
-      "asks": {
-        "conditionHolds": {
-          "input": {
-            "condition": {
-              "$ref": "input:condition"
-            }
-          },
-          "query": "holds"
         }
       },
-      "description": "A condition that must hold for the command being considered to be executed. It is asked about (whether it holds) only while the command can still be executed as far as the facts so far say; if it does not hold, the command cannot be executed. Once the command cannot be executed, later conditions are not asked about.",
-      "from": [
-        "READY"
-      ],
-      "name": "OnlyIf",
-      "onlyIf": [],
-      "when": {
-        "The command being considered can still be executed, and the condition does not hold": {
-          "set": {
-            "possible": false
-          }
+      "events": {
+        "BeginCases.otherwise": {
+          "assign": {
+            "hits": [
+              "list"
+            ]
+          },
+          "calls": [],
+          "command": "BeginCases",
+          "guard": true
         },
-        "otherwise": {}
-      }
-    },
-    {
-      "description": "A value the command being considered would put into a path segment of its HTTP route. The values \".\" and \"..\" cannot be sent in a path, so the command cannot be executed with them.",
-      "from": [
-        "READY"
-      ],
-      "name": "PathValue",
-      "onlyIf": [],
-      "when": {
-        "The value is \".\" or \"..\"": {
-          "set": {
-            "possible": false
+        "Case.otherwise": {
+          "assign": {
+            "hits": [
+              "ite",
+              [
+                "ask",
+                "oracle",
+                "Holds",
+                {
+                  "name": [
+                    "var",
+                    "name"
+                  ]
+                }
+              ],
+              [
+                "concat",
+                [
+                  "state",
+                  "hits"
+                ],
+                [
+                  "list",
+                  [
+                    "var",
+                    "name"
+                  ]
+                ]
+              ],
+              [
+                "state",
+                "hits"
+              ]
+            ]
+          },
+          "calls": [],
+          "command": "Case",
+          "guard": true
+        }
+      },
+      "init": {
+        "hits": [
+          "list"
+        ]
+      },
+      "queries": {
+        "Decision": {
+          "is": [
+            "calc",
+            "decision",
+            {}
+          ],
+          "params": {},
+          "result": {
+            "record": {
+              "chosen": {
+                "optional": {
+                  "atom": "CaseName"
+                }
+              },
+              "conflict": {
+                "list": {
+                  "atom": "CaseName"
+                }
+              },
+              "otherwise": "bool"
+            }
           }
-        },
-        "otherwise": {}
+        }
+      },
+      "relies": [
+        "oracle"
+      ],
+      "state": {
+        "hits": {
+          "list": {
+            "atom": "CaseName"
+          }
+        }
       }
     }
-  ],
-  "decisions": {},
-  "descriptions": {
-    "component": "Chooses, for the simulator of a specification, the command executed at a step and the case that happens.",
-    "data.considering": "The command being considered.",
-    "data.enabled": "The commands that can be executed at this step, in the order they were considered.",
-    "data.hits": "The cases whose condition holds, in the order they were given.",
-    "data.possible": "Whether the command being considered can still be executed, as far as the facts given so far say.",
-    "data.stepState": "The state the component is in at this step.",
-    "queries.holds": "Whether the named condition holds in the situation being considered (for the command being considered, or for the case being chosen)."
   },
-  "irVersion": 7,
-  "model": {
-    "calculations": {
-      "enabledWithConsidered": {
-        "description": "The commands that can be executed so far, followed by the command being considered",
-        "output": {
-          "list": "string"
-        }
-      },
-      "forcedCommand": {
-        "description": "The command that is forced",
-        "output": "string"
-      },
-      "hitsWithCase": {
-        "description": "The cases whose condition holds so far, followed by the case just given",
-        "output": {
-          "list": "string"
-        }
-      },
-      "onlyHit": {
-        "description": "The one case whose condition holds",
-        "output": "string"
-      },
-      "pickedCommand": {
-        "description": "The command at position `pick` modulo their number, counting from 0, among the commands that can be executed",
-        "output": "string"
-      }
-    },
-    "commands": {
-      "BeginCases": {},
-      "BeginStep": {
-        "state": {
-          "examples": [
-            "OPEN",
-            "DONE",
-            "Add",
-            "Remove",
-            ""
-          ],
-          "type": "string"
-        }
-      },
-      "Case": {
-        "name": {
-          "examples": [
-            "paid",
-            "late",
-            "otherwise"
-          ],
-          "type": "string"
-        }
-      },
-      "Choose": {
-        "forced": {
-          "optional": {
-            "examples": [
-              "OPEN",
-              "DONE",
-              "Add",
-              "Remove",
-              ""
-            ],
-            "type": "string"
-          }
-        },
-        "pick": {
-          "min": 0,
-          "type": "integer"
-        },
-        "strict": "boolean"
-      },
-      "Consider": {
-        "command": {
-          "examples": [
-            "OPEN",
-            "DONE",
-            "Add",
-            "Remove",
-            ""
-          ],
-          "type": "string"
-        },
-        "everywhere": "boolean"
-      },
-      "Considered": {},
-      "DecideCase": {},
-      "From": {
-        "state": {
-          "examples": [
-            "OPEN",
-            "DONE",
-            "Add",
-            "Remove",
-            ""
-          ],
-          "type": "string"
-        }
-      },
-      "OnlyIf": {
-        "condition": {
-          "examples": [
-            "paid",
-            "late",
-            "otherwise"
-          ],
-          "type": "string"
-        }
-      },
-      "PathValue": {
-        "value": {
-          "examples": [
-            ".",
-            "..",
-            "x",
-            "..."
-          ],
-          "type": "string"
-        }
-      }
-    },
-    "data": {
-      "considering": "string",
-      "enabled": {
-        "list": "string"
-      },
-      "hits": {
-        "list": "string"
-      },
-      "possible": "boolean",
-      "stepState": "string"
-    },
-    "effects": {},
-    "init": "READY",
-    "initial": {
-      "considering": "",
-      "enabled": [],
-      "hits": [],
-      "possible": false,
-      "stepState": ""
-    },
-    "outputs": {
-      "Choose": {
-        "optional": [
-          "chosen"
-        ],
-        "record": {
-          "chosen": "string",
-          "refused": "boolean"
-        }
-      },
-      "DecideCase": {
-        "optional": [
-          "chosen"
-        ],
-        "record": {
-          "chosen": "string",
-          "conflict": {
-            "list": "string"
-          }
-        }
-      }
-    },
-    "queries": {
-      "holds": {
-        "input": {
-          "condition": "string"
-        },
-        "output": "boolean"
-      }
-    },
-    "states": [
-      "READY"
+  "entries": {
+    "commands": [
+      "step-choice.BeginCases",
+      "step-choice.Case"
+    ],
+    "queries": [
+      "step-choice.Decision"
+    ]
+  },
+  "irVersion": 8,
+  "notes": {
+    "oracle": "The oracle, which evaluates a case's condition in the situation being considered.",
+    "step-choice": "Chooses which case of a command happens.",
+    "step-choice.calcs.decision": "Which case happens. If exactly one case's condition holds, that case. If none holds, the otherwise case (chosen is null and otherwise is true). If more than one holds, none is chosen and the conflict lists those cases in the order given; otherwise the conflict is empty.",
+    "step-choice.does.begin": "A case is chosen next. No case has been given yet.",
+    "step-choice.does.case": "A case, named by its condition. It is asked about (whether its condition holds), even when another one already holds."
+  },
+  "root": "step-choice",
+  "sorts": [
+    "CaseName"
+  ],
+  "trace": {
+    "step-choice.does.begin": [
+      "StepChoice.commands.BeginCases"
+    ],
+    "step-choice.does.case": [
+      "StepChoice.commands.Case"
     ]
   }
 }

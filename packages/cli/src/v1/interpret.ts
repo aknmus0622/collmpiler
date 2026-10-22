@@ -230,8 +230,8 @@ function skeleton(target: Target, specsDir: string, pinned?: Map<string, Ir8>): 
   }
   const importLines = [...imports].map(([file, names]) => `import { ${[...names].sort().join(", ")} } from "./${rel(dirname(target.final), file)}";`);
   if (outside.length) blocks.unshift(`// The outside world, as the first interpretation declared it (fixed: keep it as it is)\n${outside.join("\n\n")}`);
-  return `import { after, always, answer, does, external, init, interpretation, is, List, Map, requires, Set, value } from "@clp/core/v1";
-import type { Id, Int, Json, SpecMap, SpecSet } from "@clp/core/v1";
+  return `import { after, always, answer, does, external, init, interpretation, is, List, Map, requires, Set, value } from "@clp/core";
+import type { Id, Int, Json, SpecMap, SpecSet } from "@clp/core";
 ${importLines.join("\n")}
 
 ${blocks.join("\n\n")}

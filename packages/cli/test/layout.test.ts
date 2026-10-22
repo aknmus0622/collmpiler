@@ -3,13 +3,11 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { checkWorkspace } from "../src/check.ts";
-import { extract, stableStringify } from "../src/extract.ts";
 import { scrubEnv } from "../src/gates.ts";
 import { generateAdapterSkeleton, generateContract, generateVerify } from "../src/generate.ts";
 import type { Ir } from "../src/generate.ts";
 import { DEFAULT_GUIDE } from "../src/guide.ts";
 import { resolveLayout, workspaceOf } from "../src/layout.ts";
-import { loadSpecs } from "../src/loader.ts";
 import { implement } from "../src/loop.ts";
 import type { ImplementOptions } from "../src/loop.ts";
 import { judge } from "../src/mutation.ts";
@@ -19,6 +17,8 @@ import { commandStrategy } from "../src/strategy.ts";
 import { typescriptTarget } from "../src/target-typescript.ts";
 import type { Target } from "../src/target.ts";
 import type { Assignment, ImplementationStrategy } from "../src/strategy.ts";
+import { adapterSkeleton8, contract8, stableStringify8 } from "../src/v1/generate.ts";
+import { compile } from "../src/v1/load.ts";
 import { write } from "./fixtures/scripted-agent.ts";
 import type { Phase, Place, Step } from "./fixtures/scripted-agent.ts";
 import { defaultWorkspace, harness, of, repoRoot, specsDir } from "./support.ts";
@@ -36,7 +36,7 @@ test("配置: 本番コードとテスト側を、別々の場所に置ける (s
 
   // 作業場所は、出力先の相対位置をそのまま写す（依頼文だけは常に clp/）
   const keys = (phase: Phase) => Object.keys(of(seen, phase)[0].files).sort();
-  assert.deepEqual(keys("design"), ["clp/REQUEST.md", "test/clp/order.ir.json"]);
+  assert.deepEqual(keys("design"), ["clp/REQUEST.md", "test/clp/order.ir.json", "test/clp/order.spec.md"]);
   assert.deepEqual(keys("wiring"), ["app/src/order-service.ts", "clp/REQUEST.md", "test/clp/order.adapter.contract.ts", "test/clp/order.adapter.ts"]);
   // 依頼文と雛形は、その配置でのパスを案内する
   assert.match(of(seen, "design")[0].files["clp/REQUEST.md"], /specified in `test\/clp\/order\.ir\.json`[\s\S]*skeleton\*\* under `app\/src\/`/);
@@ -47,7 +47,7 @@ test("配置: 本番コードとテスト側を、別々の場所に置ける (s
     assert.ok(existsSync(join(base, file)), file);
   }
   assert.ok(!existsSync(join(base, "clp")));
-  assert.deepEqual(result.attempts.at(-1)?.mutation?.survivors.map((s) => s.file), ["app/src/order-service.ts"]);
+  assert.deepEqual(result.attempts.at(-1)?.mutation?.survivors.map((s) => s.file), ["app/src/order-service.ts", "app/src/order-service.ts"]);
 });
 
 test("配置: 本番コードと同じ場所に並べられる (テスト側は接頭辞で見分ける)", async () => {
@@ -80,7 +80,7 @@ test("配置: 本番コードと同じ場所に並べられる (テスト側は�
   const again = scripted({}, undefined, place);
   assert.equal((await implement({ ...options, strategy: again.strategy, fresh: true })).status, "pass");
   assert.deepEqual(again.seen.map((s) => s.phase), ["design", "wiring", "implementation"]);
-  assert.deepEqual(Object.keys(again.seen[0].files).sort(), ["clp.order.ir.json", "clp/REQUEST.md"]);
+  assert.deepEqual(Object.keys(again.seen[0].files).sort(), ["clp.order.ir.json", "clp.order.spec.md", "clp/REQUEST.md"]);
 });
 
 test("配置: 危ない指定は、始める前に断る", () => {
@@ -103,10 +103,11 @@ test("配置: 危ない指定は、始める前に断る", () => {
 
 async function workspace() {
   const out = workdir();
-  const ir = JSON.parse(stableStringify(extract(await loadSpecs(specsDir)).ir)) as Ir;
+  const ir8 = compile(specsDir, "order").ir!;
+  const ir = ir8 as unknown as Ir;
   mkdirSync(join(out, "clp"), { recursive: true });
-  writeFileSync(join(out, "clp/order.ir.json"), stableStringify(ir));
-  writeFileSync(join(out, "clp/order.adapter.contract.ts"), generateContract(ir));
+  writeFileSync(join(out, "clp/order.ir.json"), stableStringify8(ir8));
+  writeFileSync(join(out, "clp/order.adapter.contract.ts"), contract8(ir8));
   const ws = defaultWorkspace(out);
   writeFileSync(join(out, "clp/order.verify.ts"), generateVerify(ir, ws, specsDir));
   write("wiring", "correct", out);
@@ -124,7 +125,7 @@ test("検査: 正しい実装は違反なし", async () => {
 test("検査: 未実装のスケルトンだけでは本番コードが無いので違反", async () => {
   const { out, rules } = await workspace();
   rmSync(join(out, "src"), { recursive: true });
-  writeFileSync(join(out, "clp/order.adapter.ts"), generateAdapterSkeleton(defaultWorkspace(out)));
+  writeFileSync(join(out, "clp/order.adapter.ts"), adapterSkeleton8(defaultWorkspace(out), compile(specsDir, "order").ir!));
   assert.deepEqual(rules(), ["src:missing-file"]);
 });
 
@@ -181,6 +182,6 @@ test("検査: アダプターの中身は字面では制限しない (判断の�
 
 test("検査: アダプターは仕様や IR を import できない", async () => {
   const { rules, edit } = await workspace();
-  edit("clp/order.adapter.ts", (text) => `import { CampaignRules } from "../../../../../examples/checkout-ts/specs/order.component.ts";\n${text}`);
+  edit("clp/order.adapter.ts", (text) => `import { Campaign } from "../../../../../examples/checkout-ts/specs/order.component.ts";\n${text}`);
   assert.deepEqual(rules(), ["clp/order.adapter.ts:forbidden-import"]);
 });

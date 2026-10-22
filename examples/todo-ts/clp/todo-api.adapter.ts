@@ -1,71 +1,65 @@
-import type { Command, Ports, StateName, TargetSystemAdapter } from "./todo-api.adapter.contract.ts";
-import { routes } from "./todo-api.adapter.contract.ts";
-import { TodoHttpServer } from "../src/httpServer.ts";
-import type { IdSource } from "../src/idSource.ts";
+import type { Command, Ports, Query, TargetSystemAdapter } from "./todo-api.adapter.contract.ts";
+import type { IdSource } from "../src/id-source.ts";
+import { startTodoServer, type RunningTodoServer } from "../src/todo-server.ts";
 
 // Import the production code from ../src/ and forward each call to it. No business logic here.
 
-let server: TodoHttpServer | undefined;
-let baseUrl: string | undefined;
+let server: RunningTodoServer | undefined;
 
-/** Builds the request for `command` from its route: path parameters, query string and JSON body. */
-function toRequest(command: Command): { method: string; url: string; body: string | undefined } {
-  const [method, pathTemplate] = routes[command.name].split(" ");
-  const input = command.input as Record<string, unknown>;
-  const used = new Set<string>();
-  const path = pathTemplate.replace(/:([A-Za-z_][A-Za-z0-9_]*)/g, (_, name: string) => {
-    used.add(name);
-    return encodeURIComponent(String(input[name]));
+/** Sends one HTTP request to the running server and answers `{ status, body }` (`body` is `null` when empty). */
+async function send(method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> {
+  if (server === undefined) throw new Error("adapter: setupIsolation has not been called");
+  const response = await fetch(`http://127.0.0.1:${server.port}${path}`, {
+    method,
+    headers: body === undefined ? undefined : { "content-type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
   });
-  const query = new URLSearchParams();
-  let body: string | undefined;
-  for (const [key, value] of Object.entries(input)) {
-    if (used.has(key)) continue;
-    if (key === "body") body = JSON.stringify(value);
-    else query.append(key, String(value));
-  }
-  const qs = query.toString();
-  return { method, url: `${baseUrl}${path}${qs ? `?${qs}` : ""}`, body };
+  const text = await response.text();
+  return { status: response.status, body: text === "" ? null : JSON.parse(text) };
 }
 
 export const adapter: TargetSystemAdapter = {
   async setupIsolation(ports: Ports) {
-    const ids: IdSource = { nextId: () => ports.queries["todos.newId"]() };
-    const created = new TodoHttpServer({ ids });
-    const port = await created.start(0);
-    server = created;
-    baseUrl = `http://127.0.0.1:${port}`;
+    const ids: IdSource = { newId: () => ports.ids.NewId() };
+    server = await startTodoServer({ ids, port: 0, host: "127.0.0.1" });
   },
 
   async teardownIsolation() {
     const running = server;
     server = undefined;
-    baseUrl = undefined;
-    if (running) await running.stop();
+    if (running !== undefined) await running.stop();
   },
 
-  async executeCommand(command) {
-    if (!baseUrl) throw new Error("adapter: the server is not running");
-    const request = toRequest(command);
-    const response = await fetch(request.url, {
-      method: request.method,
-      headers: request.body !== undefined ? { "Content-Type": "application/json" } : undefined,
-      body: request.body,
-    });
-    const text = await response.text();
-    const body = text.length > 0 ? JSON.parse(text) : null;
+  async executeCommand(command: Command) {
     switch (command.name) {
-      case "PostTodos":
-      case "GetTodos":
-        return { status: response.status, body };
-      case "CompleteTodo":
-      case "DeleteTodo":
-        return { status: response.status };
+      case "PostTodos": {
+        const { status, body } = await send("POST", "/todos", command.input.body);
+        return { status, body };
+      }
+      case "CompleteTodo": {
+        const { status } = await send("POST", `/todos/${encodeURIComponent(command.input.id)}/complete`);
+        return { status };
+      }
+      case "DeleteTodo": {
+        const { status } = await send("DELETE", `/todos/${encodeURIComponent(command.input.id)}`);
+        return { status };
+      }
     }
   },
 
-  async getCurrentState(): Promise<StateName> {
-    // The production code has no states of its own; it is always in the specification state READY.
-    return "READY";
+  async executeQuery(query: Query) {
+    const path = `/todos?only=${encodeURIComponent(query.input.only)}`;
+    switch (query.name) {
+      case "GetTodos": {
+        const { status, body } = await send("GET", path);
+        return { status, body };
+      }
+      case "todos.List": {
+        // The server owns its TodoList and exposes it only through GET /todos, whose body is
+        // what `todos.list(only)` answered, in its order.
+        const { body } = await send("GET", path);
+        return body;
+      }
+    }
   },
 };

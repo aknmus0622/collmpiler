@@ -1,33 +1,26 @@
 /**
- * The lending policy: the numbers that govern a loan. Each field corresponds to the column of the same
- * name in the specification's `policy` decision table.
+ * The numbers a loan works with.
+ * Corresponds to the specification's decision table `policy`; each field has the same name there.
  */
 export interface LoanPolicy {
-  /** How many books a member may hold at once (specification: `policy.maxBooks`). */
+  /** Spec field `maxBooks`: a count of books, used when deciding a borrow request. */
   readonly maxBooks: number;
-  /** The length of a new loan, in days (specification: `policy.loanDays`). */
+  /** Spec field `loanDays`: a number of days, used when a book is lent. */
   readonly loanDays: number;
-  /** How many days one extension adds (specification: `policy.extensionDays`). */
+  /** Spec field `extensionDays`: a number of days, used when a loan is extended. */
   readonly extensionDays: number;
-  /** The number of days used to decide that a book is lost (specification: `policy.lostAfterDays`). */
+  /** Spec field `lostAfterDays`: a number of days, used when days pass. */
   readonly lostAfterDays: number;
-  /** The late fee for one day, in yen (specification: `policy.feePerDay`). */
+  /** Spec field `feePerDay`: an amount in yen, used for the late fee on a return. */
   readonly feePerDay: number;
-  /** The upper limit of a late fee, in yen (specification: `policy.feeCap`). */
+  /** Spec field `feeCap`: an amount in yen, used for the late fee on a return. */
   readonly feeCap: number;
 }
 
 /**
- * Returns the library's lending policy, i.e. the single row of the specification's `policy` decision
- * table. `Loan` uses this policy; callers do not supply one.
+ * The policy in force (the result of the specification's decision table `policy`, which takes no input).
+ * Returns a new record on each call.
  */
-export function libraryLoanPolicy(): LoanPolicy {
-  return {
-    maxBooks: 3,
-    loanDays: 14,
-    extensionDays: 7,
-    lostAfterDays: 30,
-    feePerDay: 100,
-    feeCap: 1000,
-  };
+export function libraryPolicy(): LoanPolicy {
+  return { maxBooks: 3, loanDays: 14, extensionDays: 7, lostAfterDays: 30, feePerDay: 100, feeCap: 1000 };
 }

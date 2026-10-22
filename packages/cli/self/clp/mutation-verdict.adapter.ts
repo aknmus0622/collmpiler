@@ -1,37 +1,43 @@
-import type { StateName, TargetSystemAdapter } from "./mutation-verdict.adapter.contract.ts";
-import { MutationVerdict } from "../src/mutation-verdict.ts";
+import type { Command, Ports, TargetSystemAdapter } from "./mutation-verdict.adapter.contract.ts";
+import { MutationVerdict, type MutationRuns } from "../src/mutation-verdict.ts";
 
 // Import the production code from ../src/ and forward each call to it. No business logic here.
-let system: MutationVerdict | null = null;
+let system: MutationVerdict | undefined;
+
+function runsFor(ports: Ports): MutationRuns {
+  return {
+    runTrials(extra) {
+      ports.runs.RunTrials({ extra });
+    },
+    report(severity, verdict) {
+      ports.runs.Report({ severity, verdict });
+    },
+  };
+}
+
+function current(): MutationVerdict {
+  if (!system) throw new Error("setupIsolation was not called");
+  return system;
+}
 
 export const adapter: TargetSystemAdapter = {
   async setupIsolation(ports) {
-    system = new MutationVerdict({
-      runTrials(extra) {
-        ports.effects.RunTrials({ extra });
-      },
-      report(verdict, severity) {
-        ports.effects.Report({ severity, verdict });
-      },
-    });
+    system = new MutationVerdict(runsFor(ports));
   },
   async teardownIsolation() {
-    system = null;
+    system = undefined;
   },
-  async executeCommand(command) {
+  async executeCommand(command: Command) {
     switch (command.name) {
       case "Begin":
-        system!.begin(command.input.kind);
+        current().begin(command.input.kind);
         return;
       case "Tried":
-        system!.tried({
+        current().tried({
           changed: command.input.changed,
           enablementDiffers: command.input.enablementDiffers,
         });
         return;
     }
-  },
-  async getCurrentState(): Promise<StateName> {
-    return system!.state;
   },
 };

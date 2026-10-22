@@ -1,6 +1,8 @@
+/** Public entry point of the loan component: the `Loan` class, its dependencies and its value types. */
 export { Loan } from "./loan.ts";
-export type { BorrowOutcome, ExtendOutcome } from "./outcome.ts";
-export { libraryLoanPolicy } from "./policy.ts";
+export type { BorrowResult, ExtendResult, GiveBackResult } from "./loan.ts";
+export type { LibraryServices, MemberAccount, Reservations, Billing } from "./library.ts";
+export type { LoanState, LoanStatus } from "./loan-state.ts";
+export { initialLoanState } from "./loan-state.ts";
 export type { LoanPolicy } from "./policy.ts";
-export type { Billing, LoanDependencies, MemberAccount, MemberNotifier, ReservationDesk } from "./ports.ts";
-export type { LoanState } from "./state.ts";
+export { libraryPolicy } from "./policy.ts";

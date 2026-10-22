@@ -1,260 +1,625 @@
 {
-  "behaviors": [
-    {
-      "from": [
-        "READY"
-      ],
-      "name": "BeginFreshNumber",
-      "onlyIf": [],
-      "when": {
-        "otherwise": {
-          "does": "The fresh answer of a query that answers numbers is decided next, for the number drawn. No value answered before has been given yet.",
-          "set": {
-            "freshDrawn": {
-              "$ref": "input:drawn"
+  "components": {
+    "promise-keeper": {
+      "calcs": {
+        "fresh": {
+          "is": [
+            "ite",
+            [
+              "not",
+              [
+                "in",
+                [
+                  "state",
+                  "freshDrawn"
+                ],
+                [
+                  "state",
+                  "used"
+                ]
+              ]
+            ],
+            [
+              "state",
+              "freshDrawn"
+            ],
+            [
+              "state",
+              "freshInstead"
+            ]
+          ],
+          "params": {},
+          "result": "json"
+        },
+        "increasing": {
+          "is": [
+            "ite",
+            [
+              "=",
+              [
+                "var",
+                "previous"
+              ],
+              null
+            ],
+            [
+              "var",
+              "drawn"
+            ],
+            [
+              "ite",
+              [
+                "=",
+                [
+                  "var",
+                  "max"
+                ],
+                null
+              ],
+              [
+                "+",
+                [
+                  "var",
+                  "previous"
+                ],
+                [
+                  "var",
+                  "delta"
+                ]
+              ],
+              [
+                "min",
+                [
+                  "+",
+                  [
+                    "var",
+                    "previous"
+                  ],
+                  [
+                    "var",
+                    "delta"
+                  ]
+                ],
+                [
+                  "var",
+                  "max"
+                ]
+              ]
+            ]
+          ],
+          "params": {
+            "delta": "int",
+            "drawn": "int",
+            "max": {
+              "optional": "int"
             },
-            "used": []
+            "previous": {
+              "optional": "int"
+            }
+          },
+          "result": "int"
+        },
+        "restart": {
+          "is": [
+            "ite",
+            [
+              "var",
+              "durable"
+            ],
+            [
+              "lit",
+              "keep"
+            ],
+            [
+              "lit",
+              "start-again"
+            ]
+          ],
+          "params": {
+            "durable": "bool"
+          },
+          "result": {
+            "enum": [
+              "keep",
+              "start-again"
+            ]
           }
         }
-      }
-    },
-    {
-      "from": [
-        "READY"
-      ],
-      "name": "BeginFreshText",
-      "onlyIf": [],
-      "when": {
-        "otherwise": {
-          "does": "The fresh answer of a query that answers texts is decided next, for the text drawn. No value answered before has been given yet.",
-          "set": {
-            "freshDrawn": {
-              "$ref": "input:drawn"
+      },
+      "commands": {
+        "BeginFreshNumber": {
+          "events": [
+            "BeginFreshNumber.otherwise"
+          ],
+          "params": {
+            "drawn": "int"
+          },
+          "requires": [
+            "and",
+            [
+              ">=",
+              [
+                "var",
+                "drawn"
+              ],
+              0
+            ],
+            [
+              "<=",
+              [
+                "var",
+                "drawn"
+              ],
+              4
+            ]
+          ]
+        },
+        "BeginFreshText": {
+          "events": [
+            "BeginFreshText.otherwise"
+          ],
+          "params": {
+            "drawn": "string"
+          }
+        },
+        "UsedNumber": {
+          "events": [
+            "UsedNumber.otherwise"
+          ],
+          "params": {
+            "answered": "int"
+          },
+          "requires": [
+            "and",
+            [
+              "and",
+              [
+                "not",
+                [
+                  "=",
+                  [
+                    "state",
+                    "freshDrawn"
+                  ],
+                  null
+                ]
+              ],
+              [
+                ">=",
+                [
+                  "var",
+                  "answered"
+                ],
+                0
+              ]
+            ],
+            [
+              "<=",
+              [
+                "var",
+                "answered"
+              ],
+              4
+            ]
+          ]
+        },
+        "UsedText": {
+          "events": [
+            "UsedText.otherwise"
+          ],
+          "params": {
+            "answered": "string"
+          },
+          "requires": [
+            "not",
+            [
+              "=",
+              [
+                "state",
+                "freshDrawn"
+              ],
+              null
+            ]
+          ]
+        }
+      },
+      "events": {
+        "BeginFreshNumber.otherwise": {
+          "assign": {
+            "freshDrawn": [
+              "var",
+              "drawn"
+            ],
+            "freshInstead": null,
+            "freshKind": [
+              "lit",
+              "number"
+            ],
+            "largestUsed": null,
+            "used": [
+              "list"
+            ]
+          },
+          "calls": [],
+          "command": "BeginFreshNumber",
+          "guard": true
+        },
+        "BeginFreshText.otherwise": {
+          "assign": {
+            "freshDrawn": [
+              "var",
+              "drawn"
+            ],
+            "freshInstead": null,
+            "freshKind": [
+              "lit",
+              "text"
+            ],
+            "largestUsed": null,
+            "used": [
+              "list"
+            ]
+          },
+          "calls": [],
+          "command": "BeginFreshText",
+          "guard": true
+        },
+        "UsedNumber.otherwise": {
+          "assign": {
+            "freshInstead": [
+              "ite",
+              [
+                "=",
+                [
+                  "state",
+                  "freshKind"
+                ],
+                [
+                  "lit",
+                  "number"
+                ]
+              ],
+              [
+                "+",
+                [
+                  "ite",
+                  [
+                    "=",
+                    [
+                      "state",
+                      "largestUsed"
+                    ],
+                    null
+                  ],
+                  [
+                    "var",
+                    "answered"
+                  ],
+                  [
+                    "max",
+                    [
+                      "state",
+                      "largestUsed"
+                    ],
+                    [
+                      "var",
+                      "answered"
+                    ]
+                  ]
+                ],
+                1
+              ],
+              [
+                "concat",
+                [
+                  "state",
+                  "freshDrawn"
+                ],
+                [
+                  "lit",
+                  "#"
+                ],
+                [
+                  "str",
+                  [
+                    "+",
+                    [
+                      "len",
+                      [
+                        "state",
+                        "used"
+                      ]
+                    ],
+                    1
+                  ]
+                ]
+              ]
+            ],
+            "largestUsed": [
+              "ite",
+              [
+                "=",
+                [
+                  "state",
+                  "largestUsed"
+                ],
+                null
+              ],
+              [
+                "var",
+                "answered"
+              ],
+              [
+                "max",
+                [
+                  "state",
+                  "largestUsed"
+                ],
+                [
+                  "var",
+                  "answered"
+                ]
+              ]
+            ],
+            "used": [
+              "concat",
+              [
+                "state",
+                "used"
+              ],
+              [
+                "list",
+                [
+                  "var",
+                  "answered"
+                ]
+              ]
+            ]
+          },
+          "calls": [],
+          "command": "UsedNumber",
+          "guard": true
+        },
+        "UsedText.otherwise": {
+          "assign": {
+            "freshInstead": [
+              "ite",
+              [
+                "=",
+                [
+                  "state",
+                  "freshKind"
+                ],
+                [
+                  "lit",
+                  "text"
+                ]
+              ],
+              [
+                "concat",
+                [
+                  "state",
+                  "freshDrawn"
+                ],
+                [
+                  "lit",
+                  "#"
+                ],
+                [
+                  "str",
+                  [
+                    "+",
+                    [
+                      "len",
+                      [
+                        "state",
+                        "used"
+                      ]
+                    ],
+                    1
+                  ]
+                ]
+              ],
+              [
+                "state",
+                "freshInstead"
+              ]
+            ],
+            "used": [
+              "concat",
+              [
+                "state",
+                "used"
+              ],
+              [
+                "list",
+                [
+                  "var",
+                  "answered"
+                ]
+              ]
+            ]
+          },
+          "calls": [],
+          "command": "UsedText",
+          "guard": true
+        }
+      },
+      "init": {
+        "freshDrawn": null,
+        "freshInstead": null,
+        "freshKind": null,
+        "largestUsed": null,
+        "used": [
+          "list"
+        ]
+      },
+      "queries": {
+        "Fresh": {
+          "is": [
+            "calc",
+            "fresh",
+            {}
+          ],
+          "params": {},
+          "result": "json"
+        },
+        "Increasing": {
+          "is": [
+            "calc",
+            "increasing",
+            {
+              "delta": [
+                "var",
+                "delta"
+              ],
+              "drawn": [
+                "var",
+                "drawn"
+              ],
+              "max": [
+                "var",
+                "max"
+              ],
+              "previous": [
+                "var",
+                "previous"
+              ]
+            }
+          ],
+          "params": {
+            "delta": "int",
+            "drawn": "int",
+            "max": {
+              "optional": "int"
             },
-            "used": []
-          }
-        }
-      }
-    },
-    {
-      "description": "The fresh answer: the value drawn, if it is not one of the values answered before (the same number, or the same text). Otherwise, if it is a number, one more than the largest number answered before; if it is a text, the text drawn followed by \"#\" and the number of values answered before (counting every value given, of either kind).",
-      "from": [
-        "READY"
-      ],
-      "name": "Fresh",
-      "onlyIf": [],
-      "when": {
-        "The value drawn for the fresh answer is a number answered before": {
-          "responds": {
-            "$ref": "calculation:oneMoreThanLargest"
-          }
-        },
-        "The value drawn for the fresh answer is not one of the values answered before": {
-          "responds": {
-            "$ref": "data:freshDrawn"
-          }
-        },
-        "otherwise": {
-          "responds": {
-            "$ref": "calculation:drawnNumbered"
-          }
-        }
-      }
-    },
-    {
-      "description": "The answer of a query that promises never to answer less than before. If it has not answered before (`previous` is null), the value drawn. Otherwise the previous answer plus the increment `delta`, but not more than `max` when a maximum is given.",
-      "from": [
-        "READY"
-      ],
-      "name": "Increasing",
-      "onlyIf": [],
-      "when": {
-        "The increasing query has not answered before (`previous` is null)": {
-          "responds": {
-            "$ref": "input:drawn"
-          }
-        },
-        "otherwise": {
-          "responds": {
-            "$ref": "calculation:increasedAnswer"
-          }
-        }
-      }
-    },
-    {
-      "description": "The system restarts. A component that is durable keeps its state and data; any other starts again.",
-      "from": [
-        "READY"
-      ],
-      "name": "Restart",
-      "onlyIf": [],
-      "when": {
-        "The component that restarts is durable": {
-          "responds": "keep"
-        },
-        "otherwise": {
-          "responds": "start-again"
-        }
-      }
-    },
-    {
-      "from": [
-        "READY"
-      ],
-      "name": "UsedNumber",
-      "onlyIf": [],
-      "when": {
-        "otherwise": {
-          "does": "A number the query answered before.",
-          "set": {
-            "used": {
-              "$ref": "calculation:usedWithValue"
+            "previous": {
+              "optional": "int"
             }
+          },
+          "requires": [
+            "and",
+            [
+              "and",
+              [
+                "and",
+                [
+                  ">=",
+                  [
+                    "var",
+                    "drawn"
+                  ],
+                  -1000
+                ],
+                [
+                  "<=",
+                  [
+                    "var",
+                    "drawn"
+                  ],
+                  1000
+                ]
+              ],
+              [
+                ">=",
+                [
+                  "var",
+                  "delta"
+                ],
+                0
+              ]
+            ],
+            [
+              "<=",
+              [
+                "var",
+                "delta"
+              ],
+              100
+            ]
+          ],
+          "result": "int"
+        },
+        "Restart": {
+          "is": [
+            "calc",
+            "restart",
+            {
+              "durable": [
+                "var",
+                "durable"
+              ]
+            }
+          ],
+          "params": {
+            "durable": "bool"
+          },
+          "result": {
+            "enum": [
+              "keep",
+              "start-again"
+            ]
           }
         }
-      }
-    },
-    {
-      "from": [
-        "READY"
-      ],
-      "name": "UsedText",
-      "onlyIf": [],
-      "when": {
-        "otherwise": {
-          "does": "A text the query answered before.",
-          "set": {
-            "used": {
-              "$ref": "calculation:usedWithValue"
-            }
+      },
+      "state": {
+        "freshDrawn": "json",
+        "freshInstead": "json",
+        "freshKind": {
+          "optional": {
+            "enum": [
+              "number",
+              "text"
+            ]
           }
+        },
+        "largestUsed": {
+          "optional": "int"
+        },
+        "used": {
+          "list": "json"
         }
       }
     }
-  ],
-  "decisions": {},
-  "descriptions": {
-    "component": "Turns answers drawn at random into answers that keep a dependency's promises, and decides what survives a restart.",
-    "data.freshDrawn": "The value drawn for the fresh answer being decided (a number or a text).",
-    "data.used": "The values answered before by the query whose fresh answer is being decided, in the order given."
   },
-  "irVersion": 7,
-  "model": {
-    "calculations": {
-      "drawnNumbered": {
-        "description": "The text drawn, followed by \"#\" and the number of values answered before (every value given, of either kind)",
-        "output": "string"
-      },
-      "increasedAnswer": {
-        "description": "The previous answer plus `delta`, but not more than `max` when `max` is not null",
-        "output": {
-          "max": 1100,
-          "min": -1000,
-          "type": "integer"
-        }
-      },
-      "oneMoreThanLargest": {
-        "description": "One more than the largest number among the values answered before",
-        "output": "integer"
-      },
-      "usedWithValue": {
-        "description": "The values answered before given so far, followed by the value just given",
-        "output": {
-          "list": "value"
-        }
-      }
-    },
-    "commands": {
-      "BeginFreshNumber": {
-        "drawn": {
-          "max": 4,
-          "min": 0,
-          "type": "integer"
-        }
-      },
-      "BeginFreshText": {
-        "drawn": {
-          "examples": [
-            "a",
-            "b",
-            "a#1",
-            ""
-          ],
-          "type": "string"
-        }
-      },
-      "Fresh": {},
-      "Increasing": {
-        "delta": {
-          "max": 100,
-          "min": 0,
-          "type": "integer"
-        },
-        "drawn": {
-          "max": 1000,
-          "min": -1000,
-          "type": "integer"
-        },
-        "max": {
-          "optional": {
-            "max": 1000,
-            "min": -1000,
-            "type": "integer"
-          }
-        },
-        "previous": {
-          "optional": {
-            "max": 1000,
-            "min": -1000,
-            "type": "integer"
-          }
-        }
-      },
-      "Restart": {
-        "durable": "boolean"
-      },
-      "UsedNumber": {
-        "value": {
-          "max": 4,
-          "min": 0,
-          "type": "integer"
-        }
-      },
-      "UsedText": {
-        "value": {
-          "examples": [
-            "a",
-            "b",
-            "a#1",
-            ""
-          ],
-          "type": "string"
-        }
-      }
-    },
-    "data": {
-      "freshDrawn": "value",
-      "used": {
-        "list": "value"
-      }
-    },
-    "effects": {},
-    "init": "READY",
-    "initial": {
-      "freshDrawn": null,
-      "used": []
-    },
-    "outputs": {
-      "Fresh": "value",
-      "Increasing": "integer",
-      "Restart": [
-        "keep",
-        "start-again"
-      ]
-    },
-    "queries": {},
-    "states": [
-      "READY"
+  "entries": {
+    "commands": [
+      "promise-keeper.BeginFreshNumber",
+      "promise-keeper.BeginFreshText",
+      "promise-keeper.UsedNumber",
+      "promise-keeper.UsedText"
+    ],
+    "queries": [
+      "promise-keeper.Fresh",
+      "promise-keeper.Increasing",
+      "promise-keeper.Restart"
+    ]
+  },
+  "irVersion": 8,
+  "notes": {
+    "promise-keeper": "Turns answers drawn at random into answers that keep a dependency's promises, and decides what survives a restart.",
+    "promise-keeper.calcs.fresh": "The fresh answer: the value drawn, if it is not one of the values answered before (the same number, or the same text). Otherwise, if it is a number, one more than the largest number answered before; if it is a text, the text drawn followed by \"#\" and the number of values answered before (counting every value given, of either kind).",
+    "promise-keeper.calcs.increasing": "The answer of a query that promises never to answer less than before. If it has not answered before (`previous` is null), the value drawn. Otherwise the previous answer plus the increment `delta`, but not more than `max` when a maximum is given.",
+    "promise-keeper.calcs.restart": "The system restarts. A component that is durable keeps its state and data; any other starts again.",
+    "promise-keeper.does.beginFreshNumber": "The fresh answer of a query that answers numbers is decided next, for the number drawn. No value answered before has been given yet.",
+    "promise-keeper.does.beginFreshText": "The fresh answer of a query that answers texts is decided next, for the text drawn. No value answered before has been given yet.",
+    "promise-keeper.does.usedNumber": "A number the query answered before.",
+    "promise-keeper.does.usedText": "A text the query answered before."
+  },
+  "root": "promise-keeper",
+  "sorts": [],
+  "trace": {
+    "promise-keeper.does.beginFreshNumber": [
+      "PromiseKeeper.commands.BeginFreshNumber"
+    ],
+    "promise-keeper.does.beginFreshText": [
+      "PromiseKeeper.commands.BeginFreshText"
+    ],
+    "promise-keeper.does.usedNumber": [
+      "PromiseKeeper.commands.UsedNumber"
+    ],
+    "promise-keeper.does.usedText": [
+      "PromiseKeeper.commands.UsedText"
     ]
   }
 }

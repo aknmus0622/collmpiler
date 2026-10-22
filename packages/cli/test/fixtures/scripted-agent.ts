@@ -1,8 +1,8 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, posix } from "node:path";
 
-// LLM の代役。決まった成果物を書き出す。ループ (失敗 → 差し戻し → 修正) を LLM なしで再現するためのもの。
-// 段階ごとに書くものが違う:
+// LLM の代役 (1.0 の注文の仕様、examples/checkout-ts/specs)。決まった成果物を書き出す。ループ (失敗 → 差し戻し → 修正) を
+// LLM なしで再現するためのもの。段階ごとに書くものが違う:
 //   design … 骨組み
 //     correct  … 正しい骨組み（中身は "not implemented" を投げる）
 //     broken   … 構文エラー
@@ -30,60 +30,56 @@ export type Step =
   | "mistyped" | "miswired" | "fake" | "touch" | "cheat" | "idle"
   | "buggy" | "norefund" | "boundary" | "rounding";
 
-const wrongDiscount = (step: Step) => step === "buggy";
-const intercepts = (step: Step) => step === "cheat";
-
-const skeleton = `export type Deps = {
+const DEPS = `export type Deps = {
   isMonthEnd(): boolean;
-  paymentModuleActive(): boolean;
+  paymentActive(): boolean;
   charge(): string;
-  send(action: string, payload: object): void;
+  send(message: string, payload: object): void;
+  refund(amount: number): void;
 };
+`;
 
+const skeleton = `${DEPS}
 /** An order. \`status\` is the current state, using the specification's state names. */
 export class OrderService {
   status = "DRAFT";
   rank = "";
   price = 0;
+  paid = 0;
   deps: Deps;
 
   constructor(deps: Deps) {
     this.deps = deps;
   }
 
-  /** The PlaceOrder action. */
+  /** The PlaceOrder command. */
   place(rank: string, price: number) {
     throw new Error("not implemented");
   }
 
-  /** The Checkout action. */
+  /** The Checkout command. */
   checkout() {
     throw new Error("not implemented");
   }
 
-  /** The Ship action. */
+  /** The Ship command. */
   ship() {
     throw new Error("not implemented");
   }
 
-  /** The Cancel action. */
-  cancel() {
+  /** The Cancel command: what it answers. */
+  cancel(): string {
     throw new Error("not implemented");
   }
 }
 `;
 
-const source = (step: Step) => `export type Deps = {
-  isMonthEnd(): boolean;
-  paymentModuleActive(): boolean;
-  charge(): string;
-  send(action: string, payload: object): void;
-};
-
+const source = (step: Step) => `${DEPS}
 export class OrderService {
   status = "DRAFT";
   rank = "";
   price = 0;
+  paid = 0;
   deps: Deps;
 
   constructor(deps: Deps) {
@@ -94,14 +90,14 @@ export class OrderService {
     if (this.status !== "DRAFT") return;
     this.rank = rank;
     this.price = price;
-    this.deps.send("SendOrderConfirmation", {});
+    this.deps.send("OrderConfirmation", {});
     this.status = "PENDING";
   }
 
   checkout() {
-    if (this.status !== "PENDING" || !this.deps.paymentModuleActive()) return;
+    if (this.status !== "PENDING" || !this.deps.paymentActive()) return;
     if (this.deps.charge() !== "succeeded") {
-      this.deps.send("NotifyPaymentFailure", {});
+      this.deps.send("PaymentFailure", {});
       return;
     }
     let percent = 0;
@@ -110,36 +106,40 @@ export class OrderService {
       percent = 20;
       coupon = true;
     } else if (this.rank === "Silver") {
-      percent = ${wrongDiscount(step) ? "50" : "5"};
+      percent = ${step === "buggy" ? "50" : "5"};
     }
     const amount = Math.${step === "rounding" ? "round" : "floor"}((this.price * (100 - percent)) / 100);
-    this.deps.send("SendReceipt", { discountPercent: percent, amount });
-    if (coupon) this.deps.send("IssueCoupon", { type: "Premium" });
+    this.paid = amount;
+    this.deps.send("Receipt", { discountPercent: percent, amount });
+    if (coupon) this.deps.send("Coupon", { type: "Premium" });
     this.status = "PAID";
   }
 
   ship() {
     if (this.status !== "PAID") return;
-    this.deps.send("SendShippingNotice", { priority: this.rank === "Gold" || this.price ${step === "boundary" ? ">" : ">="} 10000 });
+    this.deps.send("ShippingNotice", { priority: this.rank === "Gold" || this.price ${step === "boundary" ? ">" : ">="} 10000 });
     this.status = "SHIPPED";
   }
 
-  cancel() {
-    if (this.status !== "PENDING" && this.status !== "PAID") return;
-${step === "norefund" ? "" : `    if (this.status === "PAID") this.deps.send("Refund", {});\n`}    this.status = "CANCELLED";
+  cancel(): string {
+    if (this.status === "PAID") {
+${step === "norefund" ? "" : "      this.deps.refund(this.paid);\n"}      this.status = "CANCELLED";
+      return "cancelled";
+    }
+    if (this.status === "PENDING") {
+      this.status = "CANCELLED";
+      return "cancelled";
+    }
+    return "not-cancellable";
   }
 }
 `;
 
 // 業務上の判断をアダプター側で行ってしまう例
-const INTERCEPT = `    if (
-      action.name === "Checkout" &&
-      service?.rank === "Silver" &&
-      service.status === "PENDING" &&
-      saved?.queries.paymentModuleActive() &&
-      saved.queries.paymentResult() === "succeeded"
-    ) {
-      saved.effects.SendReceipt({ discountPercent: 5, amount: Math.floor((service.price * 95) / 100) });
+const INTERCEPT = `    if (command.name === "Checkout" && service?.rank === "Silver" && service.status === "PENDING" && saved?.payment.Active() && saved.payment.Result() === "succeeded") {
+      const amount = Math.floor((service.price * 95) / 100);
+      service.paid = amount;
+      saved.customer.Receipt({ discountPercent: 5, amount });
       service.status = "PAID";
       return;
     }
@@ -153,7 +153,7 @@ const relativeImport = (from: string, to: string) => {
   return rel.startsWith(".") ? rel : `./${rel}`;
 };
 
-const adapter = (step: Step, place: Place) => `import type { Ports, StateName, TargetSystemAdapter } from "${relativeImport(place.adapter, place.adapter.replace(/adapter\.ts$/, "adapter.contract.ts"))}";
+const adapter = (step: Step, place: Place) => `import type { Ports, TargetSystemAdapter } from "${relativeImport(place.adapter, place.adapter.replace(/adapter\.ts$/, "adapter.contract.ts"))}";
 ${step === "fake" ? source("correct").replaceAll("export ", "") : `import { OrderService } from "${relativeImport(place.adapter, place.source)}";`}
 
 let service: OrderService | undefined;
@@ -163,23 +163,24 @@ export const adapter: TargetSystemAdapter = {
   async setupIsolation(ports: Ports) {
     saved = ports;
     service = new OrderService({
-      isMonthEnd: () => ports.queries.isMonthEnd(),
-      paymentModuleActive: () => ports.queries.paymentModuleActive(),
-      charge: () => ports.queries.paymentResult(),
-      send: (action, payload) => (ports.effects as Record<string, (payload: never) => void>)[action](payload as never),
+      isMonthEnd: () => ports.calendar.IsMonthEnd(),
+      paymentActive: () => ports.payment.Active(),
+      charge: () => ports.payment.Result(),
+      send: (message, payload) => (ports.customer as Record<string, (payload: never) => void>)[message](payload as never),
+      refund: (amount) => ports.refunds.Refund({ amount }),
     });
   },
   async teardownIsolation() {
     service = undefined;
   },
-  async executeCommand(action) {
-${intercepts(step) ? INTERCEPT : ""}    if (action.name === "PlaceOrder") ${step === "miswired" ? "(service as any).placeOrder" : step === "mistyped" ? "service?.placeOrder" : "service?.place"}(action.input.customerRank, action.input.listPrice);
-    if (action.name === "Checkout") service?.checkout();
-    if (action.name === "Ship") service?.ship();
-    if (action.name === "Cancel") service?.cancel();
+  async executeCommand(command) {
+${step === "cheat" ? INTERCEPT : ""}    if (command.name === "PlaceOrder") ${step === "miswired" ? "(service as any).placeOrder" : step === "mistyped" ? "service?.placeOrder" : "service?.place"}(command.input.customerRank, command.input.listPrice);
+    if (command.name === "Checkout") service?.checkout();
+    if (command.name === "Ship") service?.ship();
+    if (command.name === "Cancel") return service?.cancel() as "cancelled" | "not-cancellable";
   },
-  async getCurrentState() {
-    return (service?.status ?? "DRAFT") as StateName;
+  async executeQuery(query) {
+    return (service?.status ?? "DRAFT") as never;
   },
 };
 `;

@@ -1,46 +1,43 @@
-import type { Ports, StateName, TargetSystemAdapter } from "./store.adapter.contract.ts";
-import { Store, type JsonValue } from "../src/store.ts";
+import type { TargetSystemAdapter, Ports } from "./store.adapter.contract.ts";
+import { Store } from "../src/store.ts";
 
 // Import the production code from ../src/ and forward each call to it. No business logic here.
 let ports: Ports | undefined;
 let store: Store | undefined;
 
-function currentStore(): Store {
-  if (store === undefined) throw new Error("adapter: the system is not set up");
+function current(): Store {
+  if (store === undefined) throw new Error("adapter: no system is set up");
   return store;
 }
 
 export const adapter: TargetSystemAdapter = {
   async setupIsolation(p) {
     ports = p;
-    store = undefined;
     store = Store.open(p.storage);
   },
   async teardownIsolation() {
-    const s = store;
+    const old = store;
     store = undefined;
     ports = undefined;
-    s?.close();
+    old?.close();
   },
   async executeCommand(command) {
-    const s = currentStore();
     switch (command.name) {
       case "Put":
-        s.put(command.input.key, command.input.value as JsonValue);
+        current().put(command.input.key, command.input.data);
         return;
       case "Delete":
-        return s.delete(command.input.key);
-      case "Entries":
-        return s.entries();
+        return current().delete(command.input.key);
     }
   },
-  async getCurrentState(): Promise<StateName> {
-    // The production store has a single state, documented as specification state `READY`.
-    currentStore();
-    return "READY";
+  async executeQuery(query) {
+    switch (query.name) {
+      case "Entries":
+        return current().entries();
+    }
   },
   async restartSystem() {
-    if (ports === undefined) throw new Error("adapter: the system is not set up");
+    if (ports === undefined) throw new Error("adapter: no system is set up");
     const old = store;
     store = undefined;
     old?.close();

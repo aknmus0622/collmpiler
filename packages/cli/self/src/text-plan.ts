@@ -1,227 +1,231 @@
 /**
- * Decides what the texts given to agents are made of: how a type is written
- * in TypeScript in the contract, which notes a query carries, and which
- * sections a contract or a request to an agent includes.
+ * Text plan: decides how types are written in the adapter contract, which
+ * notes a query of the outside world carries, and which sections the
+ * contract has.
  *
- * Corresponds to the specification component "text-plan". The component has
- * no state of its own (it is always in the specification state `READY`) and
- * keeps no data between calls: each specification command is one pure
- * function below. The function takes the command's input fields as a single
- * object (field names identical to the specification's) and returns the
- * command's answer (answer values identical to the specification's). It asks
- * nothing of its environment and performs no effects.
+ * Corresponds to the specification component `text-plan`. It has no state
+ * and no dependencies; each of its queries is implemented here by a pure
+ * function that answers the same result for the same arguments and touches
+ * nothing:
  *
- * Command -> function:
- *   `ContractSections` -> `contractSections`
- *   `QueryNotes`       -> `queryNotes`
- *   `RequestSections`  -> `requestSections`
- *   `TypeText`         -> `typeText`
+ * - `Notes` → {@link queryNotes}
+ * - `Sections` → {@link contractSections}
+ * - `TypeText` → {@link typeText}
  */
 
-import type { Phase } from "./gate-rules.ts";
-
-export type { Phase };
-
-// ---------------------------------------------------------------------------
-// ContractSections
-// ---------------------------------------------------------------------------
-
-/** Input of `ContractSections`: counts and facts about the component the contract is written for. */
-export interface ContractFacts {
-  /** How many commands answer with something (spec `outputs`, 0..100). */
-  outputs: number;
-  /** How many contained components there are (spec `parts`, 0..100). */
-  parts: number;
-  /** Whether the system keeps something across a restart (spec `restarts`). */
-  restarts: boolean;
-  /** How many commands have a route (spec `routes`, 0..100). */
-  routes: number;
-}
-
-/** Answer of `ContractSections`: for each optional section of the contract, whether it is included. */
-export interface ContractSectionsPlan {
-  /** The section on what commands answer with (spec `commandOutput`). */
-  commandOutput: boolean;
-  /** The note about the dependencies of contained components (spec `partsNote`). */
-  partsNote: boolean;
-  /** The section on storage and restart (spec `restarts`). */
-  restarts: boolean;
-  /** The section on routes (spec `routes`). */
-  routes: boolean;
-}
-
-/** Performs `ContractSections`: which optional sections the contract for the given component includes. */
-export function contractSections(facts: ContractFacts): ContractSectionsPlan {
-  return {
-    commandOutput: facts.outputs > 0,
-    partsNote: facts.parts > 0,
-    restarts: facts.restarts,
-    routes: facts.routes > 0,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// QueryNotes
-// ---------------------------------------------------------------------------
-
-/** What the environment guarantees about a query's answers (spec `promise`); `"none"` when nothing. */
+/**
+ * The promise a query of the outside world makes (specification parameter
+ * `promise` of `Notes`).
+ *
+ * - `"none"`: it promises nothing.
+ * - `"fresh"`: it never answers the same value twice.
+ * - `"increasing"`: it never answers less than before.
+ */
 export type QueryPromise = "none" | "fresh" | "increasing";
 
-/** One note a query carries in the contract; values identical to the specification's. */
+/**
+ * One note a query of the outside world carries in the contract (an element
+ * of the specification's result of `Notes`).
+ *
+ * - `"fresh"`, `"increasing"`: the query's promise.
+ * - `"may-fail"`: asking the query can fail.
+ */
 export type QueryNote = "fresh" | "increasing" | "may-fail";
 
-/** Input of `QueryNotes`: facts about one query. */
-export interface QueryFacts {
-  /** Whether asking the query can fail (spec `mayFail`). */
-  mayFail: boolean;
-  /** The query's promise (spec `promise`). */
-  promise: QueryPromise;
-}
-
-/** Performs `QueryNotes`: the notes the given query carries in the contract, in the order they are written. */
-export function queryNotes(query: QueryFacts): QueryNote[] {
+/**
+ * Specification query `text-plan.Notes` (calculation `notes`).
+ *
+ * Asked once for each query of the outside world written in the contract.
+ *
+ * @param promise what the query promises (specification parameter `promise`).
+ * @param mayFail whether asking the query can fail (specification parameter
+ *   `mayFail`).
+ * @returns the notes the query carries, in the order they are written (the
+ *   specification's result; may be empty).
+ */
+export function queryNotes(promise: QueryPromise, mayFail: boolean): QueryNote[] {
   const notes: QueryNote[] = [];
-  if (query.promise !== "none") notes.push(query.promise);
-  if (query.mayFail) notes.push("may-fail");
+  if (promise === "fresh") notes.push("fresh");
+  else if (promise === "increasing") notes.push("increasing");
+  if (mayFail) notes.push("may-fail");
   return notes;
 }
 
-// ---------------------------------------------------------------------------
-// RequestSections
-// ---------------------------------------------------------------------------
+/**
+ * What is counted about a system to decide which sections its contract has
+ * (the parameters of the specification query `Sections`). Each field is the
+ * specification parameter of the same name.
+ */
+export interface ContractFacts {
+  /** How many commands answer something (specification parameter `answering`). */
+  answering: number;
+  /** Whether JSON values appear anywhere in the contract (specification parameter `json`). */
+  json: boolean;
+  /** How many queries there are (specification parameter `queries`). */
+  queries: number;
+  /** Whether the system keeps what it remembers across a restart (specification parameter `restarts`). */
+  restarts: boolean;
+  /** How many HTTP routes there are (specification parameter `routes`). */
+  routes: number;
+  /** How many sorts of atoms (identifiers) there are (specification parameter `sorts`). */
+  sorts: number;
+}
 
 /**
- * Which feedback section a request includes (spec calculation `feedback`):
- *   `"none"`             no feedback section.
- *   `"current-code"`     feedback about the code as it was before any session.
- *   `"previous-attempt"` feedback about the previous attempt.
+ * Which sections the contract has (the specification's result of
+ * `Sections`). Each field is `true` when that section is written.
  */
-export type FeedbackSection = "none" | "current-code" | "previous-attempt";
-
-/** Input of `RequestSections`: facts about the request being written. */
-export interface RequestFacts {
-  /** Which attempt this is, counting from 1 (spec `attempt`, 1..10). */
-  attempt: number;
-  /** Whether there is feedback to give (spec `hasFeedback`). */
-  hasFeedback: boolean;
-  /** How many other components of the same system there are (spec `others`, 0..100). */
-  others: number;
-  /** How many files of contained components there are (spec `partFiles`, 0..100). */
-  partFiles: number;
-  /** The pipeline phase the request is for (spec `phase`). */
-  phase: Phase;
+export interface ContractSections {
+  /** The section on what commands answer (specification field `commandOutput`). */
+  commandOutput: boolean;
+  /** The section defining the JSON type (specification field `json`). */
+  json: boolean;
+  /** The section on queries (specification field `queries`). */
+  queries: boolean;
+  /** The section on restarting the system (specification field `restarts`). */
+  restarts: boolean;
+  /** The section on HTTP routes (specification field `routes`). */
+  routes: boolean;
+  /** The section on sorts of atoms (specification field `sorts`). */
+  sorts: boolean;
 }
 
-/** Answer of `RequestSections`: which optional sections the request includes. */
-export interface RequestSectionsPlan {
-  /** Whether the components this one contains are listed (spec `contained`). */
-  contained: boolean;
-  /** Which feedback section is included (spec `feedback`). */
-  feedback: FeedbackSection;
-  /** Whether the other components of the same system are listed (spec `others`). */
-  others: boolean;
-}
-
-/** The feedback section: none without feedback, about the current code on attempt 1, else about the previous attempt. */
-function feedbackSection(hasFeedback: boolean, attempt: number): FeedbackSection {
-  if (!hasFeedback) return "none";
-  return attempt === 1 ? "current-code" : "previous-attempt";
-}
-
-/** Performs `RequestSections`: which optional sections the given request to an agent includes. */
-export function requestSections(facts: RequestFacts): RequestSectionsPlan {
-  const listing = facts.phase !== "wiring";
+/**
+ * Specification query `text-plan.Sections` (calculation `sections`).
+ *
+ * Asked once per contract, before it is written.
+ *
+ * @param facts what is counted about the system (the specification's
+ *   parameters, as one record).
+ * @returns which sections the contract has.
+ */
+export function contractSections(facts: ContractFacts): ContractSections {
   return {
-    contained: listing && facts.partFiles > 0,
-    feedback: feedbackSection(facts.hasFeedback, facts.attempt),
-    others: listing && facts.others > 0,
+    commandOutput: facts.answering > 0,
+    json: facts.json,
+    queries: facts.queries > 0,
+    restarts: facts.restarts,
+    routes: facts.routes > 0,
+    sorts: facts.sorts > 0,
   };
 }
 
-// ---------------------------------------------------------------------------
-// TypeText
-// ---------------------------------------------------------------------------
+/**
+ * The kind of a type, at its outermost level (specification parameter `kind`
+ * of `TypeText`). Each value is the specification type constructor of the
+ * same name: `"int"`, `"string"`, `"bool"`, `"json"` are plain values;
+ * `"enum"` an enumeration of literals; `"atom"` an opaque identifier of some
+ * sort; `"optional"` a value or null; `"list"`, `"set"`, `"map"`, `"record"`
+ * the composite kinds.
+ */
+export type TypeTextKind =
+  | "int"
+  | "string"
+  | "bool"
+  | "json"
+  | "enum"
+  | "atom"
+  | "optional"
+  | "list"
+  | "set"
+  | "map"
+  | "record";
 
 /**
- * The kind of type to write (spec `kind`):
- *   `"value"`     any JSON value.
- *   `"one-of"`    one of several named variants (variants in `entries`).
- *   `"optional"`  a value or null (inner type in `inner`).
- *   `"list"`      a sequence (element type in `inner`).
- *   `"record"`    a value with fields (fields in `entries`).
- *   `"enum"`      one of fixed literal members (in `members`).
- *   `"string"`, `"number"` those primitives (`"number"` covers integers too).
- *   `"primitive"` any other primitive, named by `name`.
+ * One field of a record type, already written (an element of the
+ * specification parameter `entries` of `TypeText`).
  */
-export type TypeKind = "value" | "one-of" | "optional" | "list" | "record" | "enum" | "string" | "number" | "primitive";
-
-/** One field of a record, or one variant of a oneOf, with its type already written. */
-export interface TypeEntry {
-  /** The field's or variant's name. */
+export interface FieldText {
+  /** The field's name, as in the specification (specification field `name`). */
   name: string;
-  /** Whether the field may be null (meaningful for record fields). */
-  optional: boolean;
-  /** The TypeScript text of its type, already written. */
+  /**
+   * Whether the name can be written as a bare TypeScript identifier
+   * (specification field `plain`).
+   */
+  plain: boolean;
+  /** The field's type, already written (specification field `text`). */
   text: string;
 }
 
 /**
- * Input of `TypeText`: a type to write, with the texts of the types inside it
- * already written. Only the fields relevant to `kind` matter; callers pass
- * empty values (`""`, `[]`) for the others.
+ * One type to write, with everything inside it already written (the
+ * parameters of the specification query `TypeText`). Each field is the
+ * specification parameter of the same name; only the fields that matter for
+ * `kind` are read, the others may be empty.
  */
-export interface TypeTextFacts {
-  /** Fields of a record or variants of a oneOf (spec `entries`), in any order. */
-  entries: TypeEntry[];
-  /** Text of the inner type of an optional value or a list (spec `inner`). */
-  inner: string;
-  /** What kind of type it is (spec `kind`). */
-  kind: TypeKind;
-  /** Members of an enumeration, each already written as a literal (spec `members`). */
+export interface TypeParts {
+  /** The kind of the type (specification parameter `kind`). */
+  kind: TypeTextKind;
+  /**
+   * For an enumeration: its members, each already written as a TypeScript
+   * literal, in order (specification parameter `members`).
+   */
   members: string[];
-  /** Name of the primitive, for kind `"primitive"` (spec `name`). */
+  /** For an atom: the name of its sort (specification parameter `name`). */
   name: string;
+  /**
+   * For an optional value, a list, a set, or a map: the type inside it (for a
+   * map, its value type), already written (specification parameter `inner`).
+   */
+  inner: string;
+  /** For a map: its key type, already written (specification parameter `key`). */
+  key: string;
+  /** For a record: its fields, in order (specification parameter `entries`). */
+  entries: FieldText[];
 }
 
-/** The text written for any JSON value. */
-const ANY_VALUE_TEXT = "null | boolean | number | string | unknown[] | { [field: string]: unknown }";
-
-/** The entries in the order of their names. */
-function byName(entries: TypeEntry[]): TypeEntry[] {
-  return [...entries].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-}
-
-/** Whether a list's element text must be parenthesized before `[]`. */
-function needsParentheses(inner: string): boolean {
-  return (inner.includes(" ") || inner.includes("|")) && !inner.startsWith("{");
-}
-
-/** Performs `TypeText`: the TypeScript text of the given type, as written in the contract. */
-export function typeText(type: TypeTextFacts): string {
-  switch (type.kind) {
-    case "value":
-      return ANY_VALUE_TEXT;
-    case "one-of": {
-      const variants = byName(type.entries).map((entry) => `{ ${entry.name}: ${entry.text} }`);
-      return variants.length === 0 ? "never" : variants.join(" | ");
-    }
-    case "optional":
-      return `${type.inner} | null`;
-    case "list":
-      return `${needsParentheses(type.inner) ? `(${type.inner})` : type.inner}[]`;
-    case "record": {
-      const fields = byName(type.entries).map(
-        (entry) => `${entry.name}: ${entry.text}${entry.optional ? " | null" : ""}`,
-      );
-      return fields.length === 0 ? "{}" : `{ ${fields.join("; ")} }`;
-    }
-    case "enum":
-      return type.members.length === 0 ? "never" : type.members.join(" | ");
+/**
+ * Specification query `text-plan.TypeText` (calculation `typeText`).
+ *
+ * Writes one type as TypeScript text. Asked bottom-up: the parts inside a
+ * type are written first and passed in `parts`.
+ *
+ * @param parts the type's kind and its parts already written.
+ * @returns the TypeScript text of the type.
+ */
+export function typeText(parts: TypeParts): string {
+  switch (parts.kind) {
+    case "int":
+      return "number";
     case "string":
       return "string";
-    case "number":
-      return "number";
-    case "primitive":
-      return type.name;
+    case "bool":
+      return "boolean";
+    case "json":
+      return "Json";
+    case "enum":
+      if (parts.members.length === 0) return "never";
+      return parts.members.join(" | ");
+    case "atom":
+      return parts.name;
+    case "optional":
+      return parts.inner + " | null";
+    case "list":
+    case "set":
+      return elementText(parts.inner) + "[]";
+    case "map":
+      return OBJECT_OPEN + " key: " + parts.key + "; value: " + parts.inner + " " + OBJECT_CLOSE + "[]";
+    case "record":
+      if (parts.entries.length === 0) return "Record<string, never>";
+      return OBJECT_OPEN + " " + parts.entries.map(fieldText).join("; ") + " " + OBJECT_CLOSE;
   }
+}
+
+/** How an object-literal type (a map entry or a record) opens and closes. */
+const OBJECT_OPEN = "{";
+const OBJECT_CLOSE = "}";
+
+/**
+ * The element type of a list or set, parenthesized when `[]` would bind to
+ * only part of it. An object-literal type is already delimited by its braces.
+ */
+function elementText(inner: string): string {
+  const compound = inner.includes("|") || inner.includes("&");
+  return compound && !inner.startsWith(OBJECT_OPEN) ? "(" + inner + ")" : inner;
+}
+
+/** One field of a record as `name: text`, quoting a name that is not plain. */
+function fieldText(entry: FieldText): string {
+  const name = entry.plain ? entry.name : '"' + entry.name + '"';
+  return name + ": " + entry.text;
 }

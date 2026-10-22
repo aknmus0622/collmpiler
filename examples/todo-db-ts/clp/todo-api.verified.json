@@ -3,15 +3,15 @@
     "todo-api.component.ts",
     "todo-api.interpretation.ts"
   ],
-  "specs": "sha256:77aa4935f58dded0bfa99794dab74355ff621cd85efa4983cbf29ee2d1137253",
-  "code": "sha256:16008e8b08b7b9bb7cce63af1c50aa75b5b52a159b879da08ba1d077f21bc543",
+  "specs": "sha256:0d2b01d45d96e24ad76c56272b3efd7d897d8ac77359da760f0914cd81bd911a",
+  "code": "sha256:8d9c991e09c9d84303bc2c7f6a24ec3fed6297711b207ac686d603bd893cb30e",
   "files": [
     "../src/json.ts",
     "../src/store-entries.ts",
     "../src/store.ts",
     "../src/todo-api.ts",
-    "../src/todo-item.ts",
     "../src/todos.ts",
     "todo-api.adapter.ts"
-  ]
+  ],
+  "gradedBy": "stage1"
 }

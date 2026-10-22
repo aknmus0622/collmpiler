@@ -245,7 +245,8 @@ export function stepArbitrary(ir: Ir8, hints: Hints = literalsOf(ir)): fc.Arbitr
     Object.fromEntries(outside.map(({ id, port }) => [id, Object.keys(port.params).length > 0 ? fc.func(arbitraryOf(port.result, hints)) : arbitraryOf(port.result, hints)])),
   );
   const positives = hints.numbers.filter((n) => n > 0 && n <= 100_000);
-  const delta = positives.length ? fc.oneof(fc.nat(3), fc.constantFrom(...positives)) : fc.nat(3);
+  // a number of the spec, or one more: "more than N days" is reached by N + 1, not by N
+  const delta = positives.length ? fc.oneof(fc.nat(3), fc.constantFrom(...positives), fc.constantFrom(...positives.map((n) => n + 1))) : fc.nat(3);
   const deltas = fc.record(Object.fromEntries(outside.filter(({ port }) => port.promise === "increasing").map(({ id }) => [id, delta])));
   const failing = fc.integer({ min: 0, max: 3 }).map((n) => n === 0);
   const failures = fc.record(
@@ -266,12 +267,12 @@ export function stepArbitrary(ir: Ir8, hints: Hints = literalsOf(ir)): fc.Arbitr
 
 export const MAX_STEPS = 8;
 export const sequences = (ir: Ir8) => fc.array(stepArbitrary(ir), { maxLength: MAX_STEPS });
-/** Random sequences, and (one in four) a fixed trace followed by a few random steps: what happens after a state that is hard to reach. */
+/** Random sequences, and (one in two) a fixed trace followed by a few random steps: what happens after a state that is hard to reach. */
 export function sequencesFrom(ir: Ir8, fixed: RawStep[][], step: fc.Arbitrary<RawStep> = stepArbitrary(ir)): fc.Arbitrary<RawStep[]> {
   const random = fc.array(step, { maxLength: MAX_STEPS });
   if (fixed.length === 0) return random;
   const continued = fc.tuple(fc.constantFrom(...fixed), fc.array(step, { minLength: 1, maxLength: 4 })).map(([prefix, rest]) => [...prefix, ...rest]);
-  return fc.oneof({ weight: 3, arbitrary: random }, { weight: 1, arbitrary: continued });
+  return fc.oneof({ weight: 1, arbitrary: random }, { weight: 1, arbitrary: continued });
 }
 
 // --- The outside world during a trial ---

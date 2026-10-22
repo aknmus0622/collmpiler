@@ -1,4 +1,4 @@
-// Stage 1 for 1.0: the framework's own decisions made by code generated from its own specs (packages/cli/self1/specs),
+// Stage 1 for 1.0: the framework's own decisions made by code generated from its own specs (packages/cli/self/specs),
 // used through the generated adapter contracts, never by importing their production code.
 //
 // The reader and the oracle run synchronously, so they decide with Stage 0 and record each question (decide.ts); the
@@ -7,8 +7,13 @@
 // directly, as in 0.3. When generated code cannot be used (no pass record for the specs and code as they are, it does
 // not load, it throws, the question is outside its spec), Stage 0 decides alone and a warning says why.
 
-import { existsSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isSource } from "../layout.ts";
+import type { Workspace } from "../layout.ts";
 import { hashFiles, staleness } from "../verified.ts";
 import { leavesOf } from "../observe.ts";
 import type { Observed } from "../observe.ts";
@@ -21,7 +26,7 @@ import type { NoteId8, Sections8 } from "./generate.ts";
 import type { Ir8 } from "./ir.ts";
 
 /** Where the framework's own components live (specs, generated production code, test side). */
-export const SELF = new URL("../../self1/", import.meta.url);
+export const SELF = new URL("../../self/", import.meta.url);
 const adapterUrl = (component: string) => new URL(`clp/${component}.adapter.ts`, SELF).href;
 
 // --- grading components (SELF_HOSTING.md §10.3) and their Stage 0 files (relative to packages/cli/src) ---
@@ -37,6 +42,8 @@ export const R1_COMPONENTS8: Record<string, readonly string[]> = {
 export const stage0HashOf8 = (component: string) => hashFiles(fileURLToPath(new URL("..", import.meta.url)), R1_COMPONENTS8[component] ?? []);
 const GRADING = "CLP_GRADING_BY_STAGE0";
 export const isGradingByStage0 = () => process.env[GRADING] === "1";
+/** R1: while a grading component is being rebuilt, every grading decision is Stage 0's (also in verification subprocesses). */
+export const setGradingByStage0 = (on: boolean) => void (on ? (process.env[GRADING] = "1") : delete process.env[GRADING]);
 
 const warned = new Set<string>();
 export function fallback(component: string, error: unknown): undefined {
@@ -299,4 +306,46 @@ export function judgeDecided8<E extends JudgeEvent>(events: E[], stage0: JudgeRe
     return found;
   };
   return graded("mutation-judge", run, stage0, union, same);
+}
+
+// --- R3: the cases of a grading component, run through the new code and Stage 0 (in a subprocess: it loads new code) ---
+
+const CLP_BIN = fileURLToPath(new URL("../../bin/clp.ts", import.meta.url));
+export function runCases(specsDir: string, ws: Workspace, component: string): { problem?: string; unexecuted: string[] } {
+  const cases = join(specsDir, "..", "cases", `${component}.json`);
+  if (!existsSync(cases)) return { problem: `事例の集まりがありません (${cases})`, unexecuted: [] };
+  const coverage = mkdtempSync(join(tmpdir(), "clp-cases-"));
+  try {
+    const run = spawnSync(process.execPath, [CLP_BIN, "__cases", "--component", component, "--adapter", join(ws.root, ws.paths.adapter), "--cases", cases], {
+      encoding: "utf8",
+      timeout: 300_000,
+      env: { ...process.env, NODE_V8_COVERAGE: coverage },
+    });
+    if (run.status !== 0) return { problem: `事例を流せませんでした: ${(run.stderr ?? "").trim().slice(-500)}`, unexecuted: [] };
+    const result = JSON.parse(run.stdout) as { problem?: string };
+    return { ...result, unexecuted: unexecutedFunctions(coverage, ws) };
+  } finally {
+    rmSync(coverage, { recursive: true, force: true });
+  }
+}
+// 本番コードのうち、読み込まれたファイルの中で、一度も呼ばれなかった関数（モジュールそのものは除く）
+function unexecutedFunctions(dir: string, ws: Workspace): string[] {
+  type Fn = { functionName: string; ranges: { startOffset: number; endOffset: number; count: number }[] };
+  const root = realpathSync(ws.root);
+  const found: string[] = [];
+  for (const name of readdirSync(dir)) {
+    const report = JSON.parse(readFileSync(join(dir, name), "utf8")) as { result?: { url: string; functions: Fn[] }[] };
+    for (const script of report.result ?? []) {
+      if (!script.url.startsWith("file://")) continue;
+      const rel = relative(root, fileURLToPath(script.url)).split(sep).join("/");
+      if (rel.startsWith("..") || !isSource(ws, rel) || script.functions.length === 0) continue;
+      const size = (fn: Fn) => fn.ranges[0].endOffset - fn.ranges[0].startOffset;
+      const module = script.functions.reduce((widest, fn) => (size(fn) > size(widest) ? fn : widest));
+      // 読み出し (get / set) は、判断ではないので数えない（状態を外から見るためのもの）
+      for (const fn of script.functions) {
+        if (fn !== module && fn.ranges[0].count === 0 && fn.functionName !== "" && !/^[gs]et /.test(fn.functionName)) found.push(`${rel}: ${fn.functionName}`);
+      }
+    }
+  }
+  return [...new Set(found)].sort();
 }

@@ -5,37 +5,34 @@ import { ObservationCompare } from "../src/observation-compare.ts";
 let system: ObservationCompare | undefined;
 
 function current(): ObservationCompare {
-  if (!system) throw new Error("adapter: setupIsolation has not been called");
+  if (system === undefined) throw new Error("adapter: setupIsolation was not called");
   return system;
 }
 
 export const adapter: TargetSystemAdapter = {
   async setupIsolation(_ports) {
-    // ObservationCompare asks nothing of its environment and tells it nothing; no ports to connect.
     system = new ObservationCompare();
   },
   async teardownIsolation() {
     system = undefined;
   },
   async executeCommand(command) {
-    const s = current();
     switch (command.name) {
       case "Begin":
-        s.begin({ answered: command.input.answered, answers: command.input.answers });
+        current().begin(command.input.answered, command.input.answers);
         return;
       case "Expected":
-        s.expected(command.input.leaf);
+        current().expected(command.input.leaf);
         return;
       case "Actual":
-        s.actual(command.input.leaf);
+        current().actual(command.input.leaf);
         return;
-      case "Decide":
-        return s.decide();
     }
   },
-  async getCurrentState() {
-    current();
-    // The production code has no states of its own; the specification's only state is READY.
-    return "READY";
+  async executeQuery(query) {
+    switch (query.name) {
+      case "Decide":
+        return current().decide();
+    }
   },
 };

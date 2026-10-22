@@ -551,6 +551,9 @@ export function emitAlloy(ir: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { tex
   const add = (kind: CommandInfo["kind"], what: string, body: string, event?: string) => {
     commands.push({ name: `c${n++}`, kind, what, body, ...(event ? { event } : {}) });
   };
+  // decision rows remembered by an event, and calls made only under a condition (as the inside of `eventually`)
+  const rowSteps: { name: string; step: string }[] = [];
+  const callSteps: { name: string; step: string; event: string }[] = [];
   const tryBody = (make: () => string): string | undefined => {
     try {
       return make();
@@ -610,6 +613,7 @@ export function emitAlloy(ir: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { tex
         });
         if (reachBody) add("reach", `${id}.${eventName}`, reachBody, `${id}.${eventName}`);
         // each row of a decision table the event reads: a trace where the event happens with that row chosen
+        const remembered = new Set(decisionsIn({ ...event, guard: true, output: undefined, calls: [] }, c).map(([table]) => table));
         for (const [table, args] of decisionsIn(event, c)) {
           const rows = c.decisions![table].rows;
           rows.forEach((_, r) => {
@@ -623,6 +627,9 @@ export function emitAlloy(ir: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { tex
               return `eventually (${decls.length ? `some ${decls.join(", ")} | ` : ""}Step.event = ${entry(qualified)} and ${[...Object.keys(def.params).map((p) => `Step.${stepField(qualified, p)} = ${param(p)}`), inner].join(" and ")})`;
             });
             if (body) add("reach", `${id}.${eventName}@${table}[${r}]`, body, `${id}.${eventName}`);
+            // a row whose values the event remembers: they show later, so also a trace that goes on to each call
+            // made only under a condition (a due date, then a late return that charges a fee)
+            if (body && remembered.has(table)) rowSteps.push({ name: `${id}.${eventName}@${table}[${r}]`, step: body.slice("eventually ".length) });
           });
         }
         // a call made only under a condition: a trace where it is made
@@ -633,9 +640,13 @@ export function emitAlloy(ir: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { tex
             return `eventually (${decls.length ? `some ${decls.join(", ")} | ` : ""}Step.event = ${entry(qualified)} and ${[...Object.keys(def.params).map((p) => `Step.${stepField(qualified, p)} = ${param(p)}`), inner].join(" and ")})`;
           });
           if (body) add("reach", `${id}.${eventName}+${call.component}.${call.command}`, body, `${id}.${eventName}`);
+          if (body) callSteps.push({ name: `${id}.${eventName}+${call.component}.${call.command}`, step: body.slice("eventually ".length), event: `${id}.${eventName}` });
         }
       }
     }
+  }
+  for (const row of rowSteps) {
+    for (const call of callSteps) add("reach", `${row.name}→${call.name}`, `eventually (${row.step} and after eventually ${call.step})`, call.event);
   }
   const header = `${lines.join("\n")}\n`;
   const text = renderAlloy(header, commands, (info) => scopeOf(info, analysis, bitwidth, analysis.atoms));

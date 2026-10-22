@@ -1,661 +1,2880 @@
 {
-  "behaviors": [
-    {
-      "description": "A later session has been compared (ok or not, it counts as done). The next session starts (pinned), or, after the last one, interpreting finishes as interpreted.",
-      "from": [
-        "SESSIONS"
-      ],
-      "name": "Compared",
-      "onlyIf": [],
-      "when": {
-        "The running session is not the last": {
-          "emits": [
-            {
-              "effect": "StartSession",
-              "input": {
-                "attempt": 1,
-                "mode": "pinned",
-                "session": {
-                  "$ref": "calculation:nextSession"
-                }
+  "components": {
+    "interpret-driver": {
+      "external": {
+        "commands": {
+          "Accept": {
+            "params": {}
+          },
+          "AcceptingDone": {
+            "params": {}
+          },
+          "CheckCurrent": {
+            "params": {}
+          },
+          "CheckDraft": {
+            "params": {}
+          },
+          "Compare": {
+            "params": {
+              "session": "int"
+            }
+          },
+          "ConsiderNext": {
+            "params": {}
+          },
+          "Finish": {
+            "params": {
+              "status": {
+                "enum": [
+                  "up-to-date",
+                  "interpreted",
+                  "failed"
+                ]
               }
             }
-          ],
-          "set": {
-            "runningAttempt": 1,
-            "runningSession": {
-              "$ref": "calculation:nextSession"
+          },
+          "NextToAccept": {
+            "params": {}
+          },
+          "RecordUncompared": {
+            "params": {
+              "session": "int"
             }
-          }
-        },
-        "otherwise": {
-          "emits": [
-            {
-              "effect": "Finish",
-              "input": {
-                "status": "interpreted"
+          },
+          "RefuseAccepting": {
+            "params": {
+              "reason": {
+                "enum": [
+                  "no-interpretation",
+                  "open-reviews",
+                  "does-not-fit"
+                ]
               }
             }
-          ],
-          "goTo": "DONE"
-        }
-      }
-    },
-    {
-      "description": "A component, in name order. A component without an interpretation (neither a draft nor an accepted one) is chosen, to be interpreted from a skeleton: its first session starts (attempt 1). A component with one has it checked first.",
-      "from": [
-        "CHOOSING"
-      ],
-      "name": "Consider",
-      "onlyIf": [],
-      "when": {
-        "The component has no interpretation (neither a draft nor an accepted one)": {
-          "emits": [
-            {
-              "effect": "StartSession",
-              "input": {
-                "attempt": 1,
-                "mode": "skeleton",
-                "session": 1
-              }
-            }
-          ],
-          "goTo": "SESSIONS",
-          "set": {
-            "runningAttempt": 1,
-            "runningSession": 1,
-            "startsFromCurrent": false
-          }
-        },
-        "otherwise": {
-          "emits": [
-            {
-              "effect": "CheckCurrent",
-              "input": {}
-            }
-          ],
-          "goTo": "CHECKING"
-        }
-      }
-    },
-    {
-      "description": "A component to accept. Without a draft or an interpretation, it is refused (no-interpretation). If its draft (or, without a draft, its interpretation) has questions or disagreements left open, it is refused (open-reviews). Without a draft, an interpretation whose stamp is already the current Layer 1 needs nothing: the next component is asked for. Otherwise it is checked. Every refusal counts as a component that could not be accepted in this round, and the next component is asked for.",
-      "from": [
-        "ACCEPTING"
-      ],
-      "name": "ConsiderAccepting",
-      "onlyIf": [],
-      "when": {
-        "The component has a draft or an interpretation, and it has questions or disagreements left open": {
-          "emits": [
-            {
-              "effect": "RefuseAccepting",
-              "input": {
-                "reason": "open-reviews"
-              }
-            },
-            {
-              "effect": "NextToAccept",
-              "input": {}
-            }
-          ],
-          "set": {
-            "failedInRound": true
-          }
-        },
-        "The component has neither a draft nor an interpretation": {
-          "emits": [
-            {
-              "effect": "RefuseAccepting",
-              "input": {
-                "reason": "no-interpretation"
-              }
-            },
-            {
-              "effect": "NextToAccept",
-              "input": {}
-            }
-          ],
-          "set": {
-            "failedInRound": true
-          }
-        },
-        "The component has no draft, has an interpretation without anything left open, and its stamp is already the current Layer 1": {
-          "emits": [
-            {
-              "effect": "NextToAccept",
-              "input": {}
-            }
-          ]
-        },
-        "otherwise": {
-          "emits": [
-            {
-              "effect": "CheckDraft",
-              "input": {}
-            }
-          ],
-          "goTo": "VERIFYING"
-        }
-      }
-    },
-    {
-      "description": "If the current interpretation passed the check, nothing is to be done for this component: the next one is asked for. Otherwise the component is chosen, to be interpreted from its current interpretation (update): its first session starts.",
-      "from": [
-        "CHECKING"
-      ],
-      "name": "CurrentChecked",
-      "onlyIf": [],
-      "when": {
-        "The check passed": {
-          "emits": [
-            {
-              "effect": "ConsiderNext",
-              "input": {}
-            }
-          ],
-          "goTo": "CHOOSING"
-        },
-        "otherwise": {
-          "emits": [
-            {
-              "effect": "StartSession",
-              "input": {
-                "attempt": 1,
-                "mode": "update",
-                "session": 1
-              }
-            }
-          ],
-          "goTo": "SESSIONS",
-          "set": {
-            "runningAttempt": 1,
-            "runningSession": 1,
-            "startsFromCurrent": true
-          }
-        }
-      }
-    },
-    {
-      "from": [
-        "VERIFYING"
-      ],
-      "name": "DraftChecked",
-      "onlyIf": [],
-      "when": {
-        "otherwise": {
-          "does": "If it passed, it is accepted, which counts as a component accepted in this round; otherwise it is refused (does-not-fit), which counts as one that could not be accepted. The next component is asked for.",
-          "emits": [
-            {
-              "effect": "Accept",
-              "input": {},
-              "onlyWhen": {
-                "$ref": "input:passed"
-              }
-            },
-            {
-              "effect": "RefuseAccepting",
-              "input": {
-                "reason": "does-not-fit"
+          },
+          "RetryRefused": {
+            "params": {}
+          },
+          "StartSession": {
+            "params": {
+              "attempt": "int",
+              "mode": {
+                "enum": [
+                  "skeleton",
+                  "update",
+                  "pinned"
+                ]
               },
-              "onlyWhen": "The check did not pass"
-            },
-            {
-              "effect": "NextToAccept",
-              "input": {}
-            }
-          ],
-          "goTo": "ACCEPTING",
-          "set": {
-            "acceptedInRound": {
-              "$ref": "calculation:acceptedAfterCheck"
-            },
-            "failedInRound": {
-              "$ref": "calculation:failedAfterCheck"
+              "session": "int"
             }
           }
-        }
+        },
+        "queries": {}
       }
     },
-    {
-      "description": "The round is over. If some component could not be accepted and some was accepted in this round (a component that contains another may fit only once the other is accepted), another round runs over those that could not be accepted, starting again with nothing accepted or refused in it. Otherwise accepting is over.",
-      "from": [
-        "ACCEPTING"
-      ],
-      "name": "EndRound",
-      "onlyIf": [],
-      "when": {
-        "Some component could not be accepted and some was accepted in this round": {
-          "emits": [
-            {
-              "effect": "RetryRefused",
-              "input": {}
-            },
-            {
-              "effect": "NextToAccept",
-              "input": {}
-            }
+    "interpret-flow": {
+      "commands": {
+        "Compared": {
+          "events": [
+            "Compared.otherwise"
           ],
-          "set": {
-            "acceptedInRound": false,
-            "failedInRound": false
-          }
-        },
-        "otherwise": {
-          "emits": [
-            {
-              "effect": "AcceptingDone",
-              "input": {}
-            }
-          ],
-          "goTo": "ACCEPTED"
-        }
-      }
-    },
-    {
-      "from": [
-        "CHOOSING"
-      ],
-      "name": "NoMoreComponents",
-      "onlyIf": [],
-      "when": {
-        "otherwise": {
-          "does": "Every component's interpretation fits: interpreting finishes as up-to-date.",
-          "emits": [
-            {
-              "effect": "Finish",
-              "input": {
-                "status": "up-to-date"
-              }
-            }
-          ],
-          "goTo": "DONE"
-        }
-      }
-    },
-    {
-      "description": "An attempt of the running session is over. If it was not ok and attempts remain, the next attempt of the same session starts, in the same mode. If the first session ends without an ok attempt, interpreting finishes as failed. When the first session is ok: with one session, or when it gave no vocabulary (hasModel false), interpreting finishes as interpreted; otherwise the second session starts (attempt 1, pinned). When a later session is ok, it is compared with the first. When a later session ends without an ok attempt, it is recorded as uncompared, and the next session starts (pinned), or, after the last one, interpreting finishes as interpreted.",
-      "from": [
-        "SESSIONS"
-      ],
-      "name": "SessionChecked",
-      "onlyIf": [],
-      "when": {
-        "The attempt was not ok and attempts remain": {
-          "emits": [
-            {
-              "effect": "StartSession",
-              "input": {
-                "attempt": {
-                  "$ref": "calculation:nextAttempt"
-                },
-                "mode": {
-                  "$ref": "calculation:sessionMode"
-                },
-                "session": {
-                  "$ref": "data:runningSession"
-                }
-              }
-            }
-          ],
-          "set": {
-            "runningAttempt": {
-              "$ref": "calculation:nextAttempt"
-            }
-          }
-        },
-        "The attempt was not ok, no attempt remains, and the running session is the first": {
-          "emits": [
-            {
-              "effect": "Finish",
-              "input": {
-                "status": "failed"
-              }
-            }
-          ],
-          "goTo": "DONE"
-        },
-        "The attempt was not ok, no attempt remains, the running session is a later one, and it is not the last": {
-          "emits": [
-            {
-              "effect": "RecordUncompared",
-              "input": {
-                "session": {
-                  "$ref": "data:runningSession"
-                }
-              }
-            },
-            {
-              "effect": "StartSession",
-              "input": {
-                "attempt": 1,
-                "mode": "pinned",
-                "session": {
-                  "$ref": "calculation:nextSession"
-                }
-              }
-            }
-          ],
-          "set": {
-            "runningAttempt": 1,
-            "runningSession": {
-              "$ref": "calculation:nextSession"
-            }
-          }
-        },
-        "The attempt was ok and the running session is a later one": {
-          "emits": [
-            {
-              "effect": "Compare",
-              "input": {
-                "session": {
-                  "$ref": "data:runningSession"
-                }
-              }
-            }
+          "params": {
+            "ok": "bool"
+          },
+          "requires": [
+            "=",
+            [
+              "state",
+              "status"
+            ],
+            [
+              "lit",
+              "SESSIONS"
+            ]
           ]
         },
-        "The attempt was ok, the running session is the first, and there is one session or it gave no vocabulary": {
-          "emits": [
-            {
-              "effect": "Finish",
-              "input": {
-                "status": "interpreted"
-              }
-            }
+        "Consider": {
+          "events": [
+            "Consider.otherwise"
           ],
-          "goTo": "DONE"
+          "params": {
+            "hasCurrent": "bool"
+          },
+          "requires": [
+            "=",
+            [
+              "state",
+              "status"
+            ],
+            [
+              "lit",
+              "CHOOSING"
+            ]
+          ]
         },
-        "The attempt was ok, the running session is the first, there is more than one session, and it gave vocabulary": {
-          "emits": [
+        "ConsiderAccepting": {
+          "events": [
+            "ConsiderAccepting.otherwise"
+          ],
+          "params": {
+            "hasDraft": "bool",
+            "hasInterpretation": "bool",
+            "openReviews": "int",
+            "stampCurrent": "bool"
+          },
+          "requires": [
+            "and",
+            [
+              "and",
+              [
+                ">=",
+                [
+                  "var",
+                  "openReviews"
+                ],
+                0
+              ],
+              [
+                "<=",
+                [
+                  "var",
+                  "openReviews"
+                ],
+                10
+              ]
+            ],
+            [
+              "=",
+              [
+                "state",
+                "status"
+              ],
+              [
+                "lit",
+                "ACCEPTING"
+              ]
+            ]
+          ]
+        },
+        "CurrentChecked": {
+          "events": [
+            "CurrentChecked.otherwise"
+          ],
+          "params": {
+            "passed": "bool"
+          },
+          "requires": [
+            "=",
+            [
+              "state",
+              "status"
+            ],
+            [
+              "lit",
+              "CHECKING"
+            ]
+          ]
+        },
+        "DraftChecked": {
+          "events": [
+            "DraftChecked.otherwise"
+          ],
+          "params": {
+            "passed": "bool"
+          },
+          "requires": [
+            "=",
+            [
+              "state",
+              "status"
+            ],
+            [
+              "lit",
+              "VERIFYING"
+            ]
+          ]
+        },
+        "EndRound": {
+          "events": [
+            "EndRound.otherwise"
+          ],
+          "params": {},
+          "requires": [
+            "=",
+            [
+              "state",
+              "status"
+            ],
+            [
+              "lit",
+              "ACCEPTING"
+            ]
+          ]
+        },
+        "NoMoreComponents": {
+          "events": [
+            "NoMoreComponents.otherwise"
+          ],
+          "params": {},
+          "requires": [
+            "=",
+            [
+              "state",
+              "status"
+            ],
+            [
+              "lit",
+              "CHOOSING"
+            ]
+          ]
+        },
+        "SessionChecked": {
+          "events": [
+            "SessionChecked.otherwise"
+          ],
+          "params": {
+            "hasModel": "bool",
+            "outcome": {
+              "enum": [
+                "ok",
+                "missing",
+                "foreign-change",
+                "check-failed",
+                "boundary-changed"
+              ]
+            }
+          },
+          "requires": [
+            "=",
+            [
+              "state",
+              "status"
+            ],
+            [
+              "lit",
+              "SESSIONS"
+            ]
+          ]
+        },
+        "Start": {
+          "events": [
+            "Start.otherwise"
+          ],
+          "params": {
+            "maxAttempts": "int",
+            "sessions": "int"
+          },
+          "requires": [
+            "and",
+            [
+              "and",
+              [
+                "and",
+                [
+                  "and",
+                  [
+                    ">=",
+                    [
+                      "var",
+                      "sessions"
+                    ],
+                    1
+                  ],
+                  [
+                    "<=",
+                    [
+                      "var",
+                      "sessions"
+                    ],
+                    3
+                  ]
+                ],
+                [
+                  ">=",
+                  [
+                    "var",
+                    "maxAttempts"
+                  ],
+                  1
+                ]
+              ],
+              [
+                "<=",
+                [
+                  "var",
+                  "maxAttempts"
+                ],
+                3
+              ]
+            ],
+            [
+              "=",
+              [
+                "state",
+                "status"
+              ],
+              [
+                "lit",
+                "IDLE"
+              ]
+            ]
+          ]
+        },
+        "StartAccepting": {
+          "events": [
+            "StartAccepting.otherwise"
+          ],
+          "params": {},
+          "requires": [
+            "=",
+            [
+              "state",
+              "status"
+            ],
+            [
+              "lit",
+              "IDLE"
+            ]
+          ]
+        }
+      },
+      "events": {
+        "Compared.otherwise": {
+          "assign": {
+            "runningAttempt": [
+              "ite",
+              [
+                "<",
+                [
+                  "nonNull",
+                  [
+                    "state",
+                    "runningSession"
+                  ]
+                ],
+                [
+                  "nonNull",
+                  [
+                    "state",
+                    "sessionCount"
+                  ]
+                ]
+              ],
+              1,
+              [
+                "state",
+                "runningAttempt"
+              ]
+            ],
+            "runningSession": [
+              "ite",
+              [
+                "<",
+                [
+                  "nonNull",
+                  [
+                    "state",
+                    "runningSession"
+                  ]
+                ],
+                [
+                  "nonNull",
+                  [
+                    "state",
+                    "sessionCount"
+                  ]
+                ]
+              ],
+              [
+                "+",
+                [
+                  "nonNull",
+                  [
+                    "state",
+                    "runningSession"
+                  ]
+                ],
+                1
+              ],
+              [
+                "state",
+                "runningSession"
+              ]
+            ],
+            "status": [
+              "ite",
+              [
+                "<",
+                [
+                  "nonNull",
+                  [
+                    "state",
+                    "runningSession"
+                  ]
+                ],
+                [
+                  "nonNull",
+                  [
+                    "state",
+                    "sessionCount"
+                  ]
+                ]
+              ],
+              [
+                "state",
+                "status"
+              ],
+              [
+                "lit",
+                "DONE"
+              ]
+            ]
+          },
+          "calls": [
             {
-              "effect": "StartSession",
-              "input": {
+              "args": {
                 "attempt": 1,
-                "mode": "pinned",
-                "session": 2
-              }
+                "mode": [
+                  "lit",
+                  "pinned"
+                ],
+                "session": [
+                  "+",
+                  [
+                    "nonNull",
+                    [
+                      "state",
+                      "runningSession"
+                    ]
+                  ],
+                  1
+                ]
+              },
+              "command": "StartSession",
+              "component": "interpret-driver",
+              "when": [
+                "<",
+                [
+                  "nonNull",
+                  [
+                    "state",
+                    "runningSession"
+                  ]
+                ],
+                [
+                  "nonNull",
+                  [
+                    "state",
+                    "sessionCount"
+                  ]
+                ]
+              ]
+            },
+            {
+              "args": {
+                "status": [
+                  "lit",
+                  "interpreted"
+                ]
+              },
+              "command": "Finish",
+              "component": "interpret-driver",
+              "when": [
+                "not",
+                [
+                  "<",
+                  [
+                    "nonNull",
+                    [
+                      "state",
+                      "runningSession"
+                    ]
+                  ],
+                  [
+                    "nonNull",
+                    [
+                      "state",
+                      "sessionCount"
+                    ]
+                  ]
+                ]
+              ]
             }
           ],
-          "set": {
-            "runningAttempt": 1,
-            "runningSession": 2
-          }
+          "command": "Compared",
+          "guard": true
         },
-        "otherwise": {
-          "emits": [
+        "Consider.otherwise": {
+          "assign": {
+            "runningAttempt": [
+              "ite",
+              [
+                "var",
+                "hasCurrent"
+              ],
+              [
+                "state",
+                "runningAttempt"
+              ],
+              1
+            ],
+            "runningSession": [
+              "ite",
+              [
+                "var",
+                "hasCurrent"
+              ],
+              [
+                "state",
+                "runningSession"
+              ],
+              1
+            ],
+            "startsFromCurrent": [
+              "ite",
+              [
+                "var",
+                "hasCurrent"
+              ],
+              [
+                "state",
+                "startsFromCurrent"
+              ],
+              false
+            ],
+            "status": [
+              "ite",
+              [
+                "var",
+                "hasCurrent"
+              ],
+              [
+                "lit",
+                "CHECKING"
+              ],
+              [
+                "lit",
+                "SESSIONS"
+              ]
+            ]
+          },
+          "calls": [
             {
-              "effect": "RecordUncompared",
-              "input": {
-                "session": {
-                  "$ref": "data:runningSession"
-                }
-              }
+              "args": {},
+              "command": "CheckCurrent",
+              "component": "interpret-driver",
+              "when": [
+                "var",
+                "hasCurrent"
+              ]
             },
             {
-              "effect": "Finish",
-              "input": {
-                "status": "interpreted"
-              }
+              "args": {
+                "attempt": 1,
+                "mode": [
+                  "lit",
+                  "skeleton"
+                ],
+                "session": 1
+              },
+              "command": "StartSession",
+              "component": "interpret-driver",
+              "when": [
+                "not",
+                [
+                  "var",
+                  "hasCurrent"
+                ]
+              ]
             }
           ],
-          "goTo": "DONE"
-        }
-      }
-    },
-    {
-      "from": [
-        "IDLE"
-      ],
-      "name": "Start",
-      "onlyIf": [],
-      "when": {
-        "otherwise": {
-          "does": "Interpreting starts with the number of sessions and of attempts per session. The first component is asked for.",
-          "emits": [
+          "command": "Consider",
+          "guard": true
+        },
+        "ConsiderAccepting.otherwise": {
+          "assign": {
+            "failedInRound": [
+              "ite",
+              [
+                "and",
+                [
+                  "not",
+                  [
+                    "var",
+                    "hasDraft"
+                  ]
+                ],
+                [
+                  "not",
+                  [
+                    "var",
+                    "hasInterpretation"
+                  ]
+                ]
+              ],
+              true,
+              [
+                "ite",
+                [
+                  ">",
+                  [
+                    "var",
+                    "openReviews"
+                  ],
+                  0
+                ],
+                true,
+                [
+                  "state",
+                  "failedInRound"
+                ]
+              ]
+            ],
+            "status": [
+              "ite",
+              [
+                "and",
+                [
+                  "not",
+                  [
+                    "var",
+                    "hasDraft"
+                  ]
+                ],
+                [
+                  "not",
+                  [
+                    "var",
+                    "hasInterpretation"
+                  ]
+                ]
+              ],
+              [
+                "state",
+                "status"
+              ],
+              [
+                "ite",
+                [
+                  ">",
+                  [
+                    "var",
+                    "openReviews"
+                  ],
+                  0
+                ],
+                [
+                  "state",
+                  "status"
+                ],
+                [
+                  "ite",
+                  [
+                    "and",
+                    [
+                      "not",
+                      [
+                        "var",
+                        "hasDraft"
+                      ]
+                    ],
+                    [
+                      "var",
+                      "stampCurrent"
+                    ]
+                  ],
+                  [
+                    "state",
+                    "status"
+                  ],
+                  [
+                    "lit",
+                    "VERIFYING"
+                  ]
+                ]
+              ]
+            ]
+          },
+          "calls": [
             {
-              "effect": "ConsiderNext",
-              "input": {}
-            }
-          ],
-          "goTo": "CHOOSING",
-          "set": {
-            "attemptLimit": {
-              "$ref": "input:maxAttempts"
+              "args": {
+                "reason": [
+                  "lit",
+                  "no-interpretation"
+                ]
+              },
+              "command": "RefuseAccepting",
+              "component": "interpret-driver",
+              "when": [
+                "and",
+                [
+                  "not",
+                  [
+                    "var",
+                    "hasDraft"
+                  ]
+                ],
+                [
+                  "not",
+                  [
+                    "var",
+                    "hasInterpretation"
+                  ]
+                ]
+              ]
             },
-            "sessionCount": {
-              "$ref": "input:sessions"
-            }
-          }
-        }
-      }
-    },
-    {
-      "from": [
-        "IDLE"
-      ],
-      "name": "StartAccepting",
-      "onlyIf": [],
-      "when": {
-        "otherwise": {
-          "does": "Accepting starts: a round over every component. The first component is asked for.",
-          "emits": [
             {
-              "effect": "NextToAccept",
-              "input": {}
+              "args": {},
+              "command": "NextToAccept",
+              "component": "interpret-driver",
+              "when": [
+                "and",
+                [
+                  "not",
+                  [
+                    "var",
+                    "hasDraft"
+                  ]
+                ],
+                [
+                  "not",
+                  [
+                    "var",
+                    "hasInterpretation"
+                  ]
+                ]
+              ]
+            },
+            {
+              "args": {
+                "reason": [
+                  "lit",
+                  "open-reviews"
+                ]
+              },
+              "command": "RefuseAccepting",
+              "component": "interpret-driver",
+              "when": [
+                "and",
+                [
+                  "not",
+                  [
+                    "and",
+                    [
+                      "not",
+                      [
+                        "var",
+                        "hasDraft"
+                      ]
+                    ],
+                    [
+                      "not",
+                      [
+                        "var",
+                        "hasInterpretation"
+                      ]
+                    ]
+                  ]
+                ],
+                [
+                  ">",
+                  [
+                    "var",
+                    "openReviews"
+                  ],
+                  0
+                ]
+              ]
+            },
+            {
+              "args": {},
+              "command": "NextToAccept",
+              "component": "interpret-driver",
+              "when": [
+                "and",
+                [
+                  "not",
+                  [
+                    "and",
+                    [
+                      "not",
+                      [
+                        "var",
+                        "hasDraft"
+                      ]
+                    ],
+                    [
+                      "not",
+                      [
+                        "var",
+                        "hasInterpretation"
+                      ]
+                    ]
+                  ]
+                ],
+                [
+                  ">",
+                  [
+                    "var",
+                    "openReviews"
+                  ],
+                  0
+                ]
+              ]
+            },
+            {
+              "args": {},
+              "command": "NextToAccept",
+              "component": "interpret-driver",
+              "when": [
+                "and",
+                [
+                  "not",
+                  [
+                    "and",
+                    [
+                      "not",
+                      [
+                        "var",
+                        "hasDraft"
+                      ]
+                    ],
+                    [
+                      "not",
+                      [
+                        "var",
+                        "hasInterpretation"
+                      ]
+                    ]
+                  ]
+                ],
+                [
+                  "not",
+                  [
+                    ">",
+                    [
+                      "var",
+                      "openReviews"
+                    ],
+                    0
+                  ]
+                ],
+                [
+                  "and",
+                  [
+                    "not",
+                    [
+                      "var",
+                      "hasDraft"
+                    ]
+                  ],
+                  [
+                    "var",
+                    "stampCurrent"
+                  ]
+                ]
+              ]
+            },
+            {
+              "args": {},
+              "command": "CheckDraft",
+              "component": "interpret-driver",
+              "when": [
+                "and",
+                [
+                  "not",
+                  [
+                    "and",
+                    [
+                      "not",
+                      [
+                        "var",
+                        "hasDraft"
+                      ]
+                    ],
+                    [
+                      "not",
+                      [
+                        "var",
+                        "hasInterpretation"
+                      ]
+                    ]
+                  ]
+                ],
+                [
+                  "not",
+                  [
+                    ">",
+                    [
+                      "var",
+                      "openReviews"
+                    ],
+                    0
+                  ]
+                ],
+                [
+                  "not",
+                  [
+                    "and",
+                    [
+                      "not",
+                      [
+                        "var",
+                        "hasDraft"
+                      ]
+                    ],
+                    [
+                      "var",
+                      "stampCurrent"
+                    ]
+                  ]
+                ]
+              ]
             }
           ],
-          "goTo": "ACCEPTING"
+          "command": "ConsiderAccepting",
+          "guard": true
+        },
+        "CurrentChecked.otherwise": {
+          "assign": {
+            "runningAttempt": [
+              "ite",
+              [
+                "var",
+                "passed"
+              ],
+              [
+                "state",
+                "runningAttempt"
+              ],
+              1
+            ],
+            "runningSession": [
+              "ite",
+              [
+                "var",
+                "passed"
+              ],
+              [
+                "state",
+                "runningSession"
+              ],
+              1
+            ],
+            "startsFromCurrent": [
+              "ite",
+              [
+                "var",
+                "passed"
+              ],
+              [
+                "state",
+                "startsFromCurrent"
+              ],
+              true
+            ],
+            "status": [
+              "ite",
+              [
+                "var",
+                "passed"
+              ],
+              [
+                "lit",
+                "CHOOSING"
+              ],
+              [
+                "lit",
+                "SESSIONS"
+              ]
+            ]
+          },
+          "calls": [
+            {
+              "args": {},
+              "command": "ConsiderNext",
+              "component": "interpret-driver",
+              "when": [
+                "var",
+                "passed"
+              ]
+            },
+            {
+              "args": {
+                "attempt": 1,
+                "mode": [
+                  "lit",
+                  "update"
+                ],
+                "session": 1
+              },
+              "command": "StartSession",
+              "component": "interpret-driver",
+              "when": [
+                "not",
+                [
+                  "var",
+                  "passed"
+                ]
+              ]
+            }
+          ],
+          "command": "CurrentChecked",
+          "guard": true
+        },
+        "DraftChecked.otherwise": {
+          "assign": {
+            "acceptedInRound": [
+              "ite",
+              [
+                "var",
+                "passed"
+              ],
+              true,
+              [
+                "state",
+                "acceptedInRound"
+              ]
+            ],
+            "failedInRound": [
+              "ite",
+              [
+                "var",
+                "passed"
+              ],
+              [
+                "state",
+                "failedInRound"
+              ],
+              true
+            ],
+            "status": [
+              "lit",
+              "ACCEPTING"
+            ]
+          },
+          "calls": [
+            {
+              "args": {},
+              "command": "Accept",
+              "component": "interpret-driver",
+              "when": [
+                "var",
+                "passed"
+              ]
+            },
+            {
+              "args": {
+                "reason": [
+                  "lit",
+                  "does-not-fit"
+                ]
+              },
+              "command": "RefuseAccepting",
+              "component": "interpret-driver",
+              "when": [
+                "not",
+                [
+                  "var",
+                  "passed"
+                ]
+              ]
+            },
+            {
+              "args": {},
+              "command": "NextToAccept",
+              "component": "interpret-driver"
+            }
+          ],
+          "command": "DraftChecked",
+          "guard": true
+        },
+        "EndRound.otherwise": {
+          "assign": {
+            "acceptedInRound": [
+              "ite",
+              [
+                "and",
+                [
+                  "state",
+                  "failedInRound"
+                ],
+                [
+                  "state",
+                  "acceptedInRound"
+                ]
+              ],
+              false,
+              [
+                "state",
+                "acceptedInRound"
+              ]
+            ],
+            "failedInRound": [
+              "ite",
+              [
+                "and",
+                [
+                  "state",
+                  "failedInRound"
+                ],
+                [
+                  "state",
+                  "acceptedInRound"
+                ]
+              ],
+              false,
+              [
+                "state",
+                "failedInRound"
+              ]
+            ],
+            "status": [
+              "ite",
+              [
+                "and",
+                [
+                  "state",
+                  "failedInRound"
+                ],
+                [
+                  "state",
+                  "acceptedInRound"
+                ]
+              ],
+              [
+                "state",
+                "status"
+              ],
+              [
+                "lit",
+                "ACCEPTED"
+              ]
+            ]
+          },
+          "calls": [
+            {
+              "args": {},
+              "command": "RetryRefused",
+              "component": "interpret-driver",
+              "when": [
+                "and",
+                [
+                  "state",
+                  "failedInRound"
+                ],
+                [
+                  "state",
+                  "acceptedInRound"
+                ]
+              ]
+            },
+            {
+              "args": {},
+              "command": "NextToAccept",
+              "component": "interpret-driver",
+              "when": [
+                "and",
+                [
+                  "state",
+                  "failedInRound"
+                ],
+                [
+                  "state",
+                  "acceptedInRound"
+                ]
+              ]
+            },
+            {
+              "args": {},
+              "command": "AcceptingDone",
+              "component": "interpret-driver",
+              "when": [
+                "not",
+                [
+                  "and",
+                  [
+                    "state",
+                    "failedInRound"
+                  ],
+                  [
+                    "state",
+                    "acceptedInRound"
+                  ]
+                ]
+              ]
+            }
+          ],
+          "command": "EndRound",
+          "guard": true
+        },
+        "NoMoreComponents.otherwise": {
+          "assign": {
+            "status": [
+              "lit",
+              "DONE"
+            ]
+          },
+          "calls": [
+            {
+              "args": {
+                "status": [
+                  "lit",
+                  "up-to-date"
+                ]
+              },
+              "command": "Finish",
+              "component": "interpret-driver"
+            }
+          ],
+          "command": "NoMoreComponents",
+          "guard": true
+        },
+        "SessionChecked.otherwise": {
+          "assign": {
+            "runningAttempt": [
+              "ite",
+              [
+                "and",
+                [
+                  "not",
+                  [
+                    "=",
+                    [
+                      "var",
+                      "outcome"
+                    ],
+                    [
+                      "lit",
+                      "ok"
+                    ]
+                  ]
+                ],
+                [
+                  "<",
+                  [
+                    "nonNull",
+                    [
+                      "state",
+                      "runningAttempt"
+                    ]
+                  ],
+                  [
+                    "nonNull",
+                    [
+                      "state",
+                      "attemptLimit"
+                    ]
+                  ]
+                ]
+              ],
+              [
+                "+",
+                [
+                  "nonNull",
+                  [
+                    "state",
+                    "runningAttempt"
+                  ]
+                ],
+                1
+              ],
+              [
+                "ite",
+                [
+                  "and",
+                  [
+                    "not",
+                    [
+                      "=",
+                      [
+                        "var",
+                        "outcome"
+                      ],
+                      [
+                        "lit",
+                        "ok"
+                      ]
+                    ]
+                  ],
+                  [
+                    "=",
+                    [
+                      "nonNull",
+                      [
+                        "state",
+                        "runningSession"
+                      ]
+                    ],
+                    1
+                  ]
+                ],
+                [
+                  "state",
+                  "runningAttempt"
+                ],
+                [
+                  "ite",
+                  [
+                    "=",
+                    [
+                      "nonNull",
+                      [
+                        "state",
+                        "runningSession"
+                      ]
+                    ],
+                    1
+                  ],
+                  [
+                    "ite",
+                    [
+                      "or",
+                      [
+                        "=",
+                        [
+                          "nonNull",
+                          [
+                            "state",
+                            "sessionCount"
+                          ]
+                        ],
+                        1
+                      ],
+                      [
+                        "not",
+                        [
+                          "var",
+                          "hasModel"
+                        ]
+                      ]
+                    ],
+                    [
+                      "state",
+                      "runningAttempt"
+                    ],
+                    1
+                  ],
+                  [
+                    "ite",
+                    [
+                      "=",
+                      [
+                        "var",
+                        "outcome"
+                      ],
+                      [
+                        "lit",
+                        "ok"
+                      ]
+                    ],
+                    [
+                      "state",
+                      "runningAttempt"
+                    ],
+                    [
+                      "ite",
+                      [
+                        "<",
+                        [
+                          "nonNull",
+                          [
+                            "state",
+                            "runningSession"
+                          ]
+                        ],
+                        [
+                          "nonNull",
+                          [
+                            "state",
+                            "sessionCount"
+                          ]
+                        ]
+                      ],
+                      1,
+                      [
+                        "state",
+                        "runningAttempt"
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ],
+            "runningSession": [
+              "ite",
+              [
+                "and",
+                [
+                  "not",
+                  [
+                    "=",
+                    [
+                      "var",
+                      "outcome"
+                    ],
+                    [
+                      "lit",
+                      "ok"
+                    ]
+                  ]
+                ],
+                [
+                  "<",
+                  [
+                    "nonNull",
+                    [
+                      "state",
+                      "runningAttempt"
+                    ]
+                  ],
+                  [
+                    "nonNull",
+                    [
+                      "state",
+                      "attemptLimit"
+                    ]
+                  ]
+                ]
+              ],
+              [
+                "state",
+                "runningSession"
+              ],
+              [
+                "ite",
+                [
+                  "and",
+                  [
+                    "not",
+                    [
+                      "=",
+                      [
+                        "var",
+                        "outcome"
+                      ],
+                      [
+                        "lit",
+                        "ok"
+                      ]
+                    ]
+                  ],
+                  [
+                    "=",
+                    [
+                      "nonNull",
+                      [
+                        "state",
+                        "runningSession"
+                      ]
+                    ],
+                    1
+                  ]
+                ],
+                [
+                  "state",
+                  "runningSession"
+                ],
+                [
+                  "ite",
+                  [
+                    "=",
+                    [
+                      "nonNull",
+                      [
+                        "state",
+                        "runningSession"
+                      ]
+                    ],
+                    1
+                  ],
+                  [
+                    "ite",
+                    [
+                      "or",
+                      [
+                        "=",
+                        [
+                          "nonNull",
+                          [
+                            "state",
+                            "sessionCount"
+                          ]
+                        ],
+                        1
+                      ],
+                      [
+                        "not",
+                        [
+                          "var",
+                          "hasModel"
+                        ]
+                      ]
+                    ],
+                    [
+                      "state",
+                      "runningSession"
+                    ],
+                    2
+                  ],
+                  [
+                    "ite",
+                    [
+                      "=",
+                      [
+                        "var",
+                        "outcome"
+                      ],
+                      [
+                        "lit",
+                        "ok"
+                      ]
+                    ],
+                    [
+                      "state",
+                      "runningSession"
+                    ],
+                    [
+                      "ite",
+                      [
+                        "<",
+                        [
+                          "nonNull",
+                          [
+                            "state",
+                            "runningSession"
+                          ]
+                        ],
+                        [
+                          "nonNull",
+                          [
+                            "state",
+                            "sessionCount"
+                          ]
+                        ]
+                      ],
+                      [
+                        "+",
+                        [
+                          "nonNull",
+                          [
+                            "state",
+                            "runningSession"
+                          ]
+                        ],
+                        1
+                      ],
+                      [
+                        "state",
+                        "runningSession"
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ],
+            "status": [
+              "ite",
+              [
+                "and",
+                [
+                  "not",
+                  [
+                    "=",
+                    [
+                      "var",
+                      "outcome"
+                    ],
+                    [
+                      "lit",
+                      "ok"
+                    ]
+                  ]
+                ],
+                [
+                  "<",
+                  [
+                    "nonNull",
+                    [
+                      "state",
+                      "runningAttempt"
+                    ]
+                  ],
+                  [
+                    "nonNull",
+                    [
+                      "state",
+                      "attemptLimit"
+                    ]
+                  ]
+                ]
+              ],
+              [
+                "state",
+                "status"
+              ],
+              [
+                "ite",
+                [
+                  "and",
+                  [
+                    "not",
+                    [
+                      "=",
+                      [
+                        "var",
+                        "outcome"
+                      ],
+                      [
+                        "lit",
+                        "ok"
+                      ]
+                    ]
+                  ],
+                  [
+                    "=",
+                    [
+                      "nonNull",
+                      [
+                        "state",
+                        "runningSession"
+                      ]
+                    ],
+                    1
+                  ]
+                ],
+                [
+                  "lit",
+                  "DONE"
+                ],
+                [
+                  "ite",
+                  [
+                    "=",
+                    [
+                      "nonNull",
+                      [
+                        "state",
+                        "runningSession"
+                      ]
+                    ],
+                    1
+                  ],
+                  [
+                    "ite",
+                    [
+                      "or",
+                      [
+                        "=",
+                        [
+                          "nonNull",
+                          [
+                            "state",
+                            "sessionCount"
+                          ]
+                        ],
+                        1
+                      ],
+                      [
+                        "not",
+                        [
+                          "var",
+                          "hasModel"
+                        ]
+                      ]
+                    ],
+                    [
+                      "lit",
+                      "DONE"
+                    ],
+                    [
+                      "state",
+                      "status"
+                    ]
+                  ],
+                  [
+                    "ite",
+                    [
+                      "=",
+                      [
+                        "var",
+                        "outcome"
+                      ],
+                      [
+                        "lit",
+                        "ok"
+                      ]
+                    ],
+                    [
+                      "state",
+                      "status"
+                    ],
+                    [
+                      "ite",
+                      [
+                        "<",
+                        [
+                          "nonNull",
+                          [
+                            "state",
+                            "runningSession"
+                          ]
+                        ],
+                        [
+                          "nonNull",
+                          [
+                            "state",
+                            "sessionCount"
+                          ]
+                        ]
+                      ],
+                      [
+                        "state",
+                        "status"
+                      ],
+                      [
+                        "lit",
+                        "DONE"
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          },
+          "calls": [
+            {
+              "args": {
+                "attempt": [
+                  "+",
+                  [
+                    "nonNull",
+                    [
+                      "state",
+                      "runningAttempt"
+                    ]
+                  ],
+                  1
+                ],
+                "mode": [
+                  "ite",
+                  [
+                    "=",
+                    [
+                      "nonNull",
+                      [
+                        "state",
+                        "runningSession"
+                      ]
+                    ],
+                    1
+                  ],
+                  [
+                    "ite",
+                    [
+                      "nonNull",
+                      [
+                        "state",
+                        "startsFromCurrent"
+                      ]
+                    ],
+                    [
+                      "lit",
+                      "update"
+                    ],
+                    [
+                      "lit",
+                      "skeleton"
+                    ]
+                  ],
+                  [
+                    "lit",
+                    "pinned"
+                  ]
+                ],
+                "session": [
+                  "nonNull",
+                  [
+                    "state",
+                    "runningSession"
+                  ]
+                ]
+              },
+              "command": "StartSession",
+              "component": "interpret-driver",
+              "when": [
+                "and",
+                [
+                  "not",
+                  [
+                    "=",
+                    [
+                      "var",
+                      "outcome"
+                    ],
+                    [
+                      "lit",
+                      "ok"
+                    ]
+                  ]
+                ],
+                [
+                  "<",
+                  [
+                    "nonNull",
+                    [
+                      "state",
+                      "runningAttempt"
+                    ]
+                  ],
+                  [
+                    "nonNull",
+                    [
+                      "state",
+                      "attemptLimit"
+                    ]
+                  ]
+                ]
+              ]
+            },
+            {
+              "args": {
+                "status": [
+                  "lit",
+                  "failed"
+                ]
+              },
+              "command": "Finish",
+              "component": "interpret-driver",
+              "when": [
+                "and",
+                [
+                  "not",
+                  [
+                    "and",
+                    [
+                      "not",
+                      [
+                        "=",
+                        [
+                          "var",
+                          "outcome"
+                        ],
+                        [
+                          "lit",
+                          "ok"
+                        ]
+                      ]
+                    ],
+                    [
+                      "<",
+                      [
+                        "nonNull",
+                        [
+                          "state",
+                          "runningAttempt"
+                        ]
+                      ],
+                      [
+                        "nonNull",
+                        [
+                          "state",
+                          "attemptLimit"
+                        ]
+                      ]
+                    ]
+                  ]
+                ],
+                [
+                  "and",
+                  [
+                    "not",
+                    [
+                      "=",
+                      [
+                        "var",
+                        "outcome"
+                      ],
+                      [
+                        "lit",
+                        "ok"
+                      ]
+                    ]
+                  ],
+                  [
+                    "=",
+                    [
+                      "nonNull",
+                      [
+                        "state",
+                        "runningSession"
+                      ]
+                    ],
+                    1
+                  ]
+                ]
+              ]
+            },
+            {
+              "args": {
+                "status": [
+                  "lit",
+                  "interpreted"
+                ]
+              },
+              "command": "Finish",
+              "component": "interpret-driver",
+              "when": [
+                "and",
+                [
+                  "not",
+                  [
+                    "and",
+                    [
+                      "not",
+                      [
+                        "=",
+                        [
+                          "var",
+                          "outcome"
+                        ],
+                        [
+                          "lit",
+                          "ok"
+                        ]
+                      ]
+                    ],
+                    [
+                      "<",
+                      [
+                        "nonNull",
+                        [
+                          "state",
+                          "runningAttempt"
+                        ]
+                      ],
+                      [
+                        "nonNull",
+                        [
+                          "state",
+                          "attemptLimit"
+                        ]
+                      ]
+                    ]
+                  ]
+                ],
+                [
+                  "not",
+                  [
+                    "and",
+                    [
+                      "not",
+                      [
+                        "=",
+                        [
+                          "var",
+                          "outcome"
+                        ],
+                        [
+                          "lit",
+                          "ok"
+                        ]
+                      ]
+                    ],
+                    [
+                      "=",
+                      [
+                        "nonNull",
+                        [
+                          "state",
+                          "runningSession"
+                        ]
+                      ],
+                      1
+                    ]
+                  ]
+                ],
+                [
+                  "=",
+                  [
+                    "nonNull",
+                    [
+                      "state",
+                      "runningSession"
+                    ]
+                  ],
+                  1
+                ],
+                [
+                  "or",
+                  [
+                    "=",
+                    [
+                      "nonNull",
+                      [
+                        "state",
+                        "sessionCount"
+                      ]
+                    ],
+                    1
+                  ],
+                  [
+                    "not",
+                    [
+                      "var",
+                      "hasModel"
+                    ]
+                  ]
+                ]
+              ]
+            },
+            {
+              "args": {
+                "attempt": 1,
+                "mode": [
+                  "lit",
+                  "pinned"
+                ],
+                "session": 2
+              },
+              "command": "StartSession",
+              "component": "interpret-driver",
+              "when": [
+                "and",
+                [
+                  "not",
+                  [
+                    "and",
+                    [
+                      "not",
+                      [
+                        "=",
+                        [
+                          "var",
+                          "outcome"
+                        ],
+                        [
+                          "lit",
+                          "ok"
+                        ]
+                      ]
+                    ],
+                    [
+                      "<",
+                      [
+                        "nonNull",
+                        [
+                          "state",
+                          "runningAttempt"
+                        ]
+                      ],
+                      [
+                        "nonNull",
+                        [
+                          "state",
+                          "attemptLimit"
+                        ]
+                      ]
+                    ]
+                  ]
+                ],
+                [
+                  "not",
+                  [
+                    "and",
+                    [
+                      "not",
+                      [
+                        "=",
+                        [
+                          "var",
+                          "outcome"
+                        ],
+                        [
+                          "lit",
+                          "ok"
+                        ]
+                      ]
+                    ],
+                    [
+                      "=",
+                      [
+                        "nonNull",
+                        [
+                          "state",
+                          "runningSession"
+                        ]
+                      ],
+                      1
+                    ]
+                  ]
+                ],
+                [
+                  "=",
+                  [
+                    "nonNull",
+                    [
+                      "state",
+                      "runningSession"
+                    ]
+                  ],
+                  1
+                ],
+                [
+                  "not",
+                  [
+                    "or",
+                    [
+                      "=",
+                      [
+                        "nonNull",
+                        [
+                          "state",
+                          "sessionCount"
+                        ]
+                      ],
+                      1
+                    ],
+                    [
+                      "not",
+                      [
+                        "var",
+                        "hasModel"
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            },
+            {
+              "args": {
+                "session": [
+                  "nonNull",
+                  [
+                    "state",
+                    "runningSession"
+                  ]
+                ]
+              },
+              "command": "Compare",
+              "component": "interpret-driver",
+              "when": [
+                "and",
+                [
+                  "not",
+                  [
+                    "and",
+                    [
+                      "not",
+                      [
+                        "=",
+                        [
+                          "var",
+                          "outcome"
+                        ],
+                        [
+                          "lit",
+                          "ok"
+                        ]
+                      ]
+                    ],
+                    [
+                      "<",
+                      [
+                        "nonNull",
+                        [
+                          "state",
+                          "runningAttempt"
+                        ]
+                      ],
+                      [
+                        "nonNull",
+                        [
+                          "state",
+                          "attemptLimit"
+                        ]
+                      ]
+                    ]
+                  ]
+                ],
+                [
+                  "not",
+                  [
+                    "and",
+                    [
+                      "not",
+                      [
+                        "=",
+                        [
+                          "var",
+                          "outcome"
+                        ],
+                        [
+                          "lit",
+                          "ok"
+                        ]
+                      ]
+                    ],
+                    [
+                      "=",
+                      [
+                        "nonNull",
+                        [
+                          "state",
+                          "runningSession"
+                        ]
+                      ],
+                      1
+                    ]
+                  ]
+                ],
+                [
+                  "not",
+                  [
+                    "=",
+                    [
+                      "nonNull",
+                      [
+                        "state",
+                        "runningSession"
+                      ]
+                    ],
+                    1
+                  ]
+                ],
+                [
+                  "=",
+                  [
+                    "var",
+                    "outcome"
+                  ],
+                  [
+                    "lit",
+                    "ok"
+                  ]
+                ]
+              ]
+            },
+            {
+              "args": {
+                "session": [
+                  "nonNull",
+                  [
+                    "state",
+                    "runningSession"
+                  ]
+                ]
+              },
+              "command": "RecordUncompared",
+              "component": "interpret-driver",
+              "when": [
+                "and",
+                [
+                  "not",
+                  [
+                    "and",
+                    [
+                      "not",
+                      [
+                        "=",
+                        [
+                          "var",
+                          "outcome"
+                        ],
+                        [
+                          "lit",
+                          "ok"
+                        ]
+                      ]
+                    ],
+                    [
+                      "<",
+                      [
+                        "nonNull",
+                        [
+                          "state",
+                          "runningAttempt"
+                        ]
+                      ],
+                      [
+                        "nonNull",
+                        [
+                          "state",
+                          "attemptLimit"
+                        ]
+                      ]
+                    ]
+                  ]
+                ],
+                [
+                  "not",
+                  [
+                    "and",
+                    [
+                      "not",
+                      [
+                        "=",
+                        [
+                          "var",
+                          "outcome"
+                        ],
+                        [
+                          "lit",
+                          "ok"
+                        ]
+                      ]
+                    ],
+                    [
+                      "=",
+                      [
+                        "nonNull",
+                        [
+                          "state",
+                          "runningSession"
+                        ]
+                      ],
+                      1
+                    ]
+                  ]
+                ],
+                [
+                  "not",
+                  [
+                    "=",
+                    [
+                      "nonNull",
+                      [
+                        "state",
+                        "runningSession"
+                      ]
+                    ],
+                    1
+                  ]
+                ],
+                [
+                  "not",
+                  [
+                    "=",
+                    [
+                      "var",
+                      "outcome"
+                    ],
+                    [
+                      "lit",
+                      "ok"
+                    ]
+                  ]
+                ]
+              ]
+            },
+            {
+              "args": {
+                "attempt": 1,
+                "mode": [
+                  "lit",
+                  "pinned"
+                ],
+                "session": [
+                  "+",
+                  [
+                    "nonNull",
+                    [
+                      "state",
+                      "runningSession"
+                    ]
+                  ],
+                  1
+                ]
+              },
+              "command": "StartSession",
+              "component": "interpret-driver",
+              "when": [
+                "and",
+                [
+                  "not",
+                  [
+                    "and",
+                    [
+                      "not",
+                      [
+                        "=",
+                        [
+                          "var",
+                          "outcome"
+                        ],
+                        [
+                          "lit",
+                          "ok"
+                        ]
+                      ]
+                    ],
+                    [
+                      "<",
+                      [
+                        "nonNull",
+                        [
+                          "state",
+                          "runningAttempt"
+                        ]
+                      ],
+                      [
+                        "nonNull",
+                        [
+                          "state",
+                          "attemptLimit"
+                        ]
+                      ]
+                    ]
+                  ]
+                ],
+                [
+                  "not",
+                  [
+                    "and",
+                    [
+                      "not",
+                      [
+                        "=",
+                        [
+                          "var",
+                          "outcome"
+                        ],
+                        [
+                          "lit",
+                          "ok"
+                        ]
+                      ]
+                    ],
+                    [
+                      "=",
+                      [
+                        "nonNull",
+                        [
+                          "state",
+                          "runningSession"
+                        ]
+                      ],
+                      1
+                    ]
+                  ]
+                ],
+                [
+                  "not",
+                  [
+                    "=",
+                    [
+                      "nonNull",
+                      [
+                        "state",
+                        "runningSession"
+                      ]
+                    ],
+                    1
+                  ]
+                ],
+                [
+                  "not",
+                  [
+                    "=",
+                    [
+                      "var",
+                      "outcome"
+                    ],
+                    [
+                      "lit",
+                      "ok"
+                    ]
+                  ]
+                ],
+                [
+                  "<",
+                  [
+                    "nonNull",
+                    [
+                      "state",
+                      "runningSession"
+                    ]
+                  ],
+                  [
+                    "nonNull",
+                    [
+                      "state",
+                      "sessionCount"
+                    ]
+                  ]
+                ]
+              ]
+            },
+            {
+              "args": {
+                "status": [
+                  "lit",
+                  "interpreted"
+                ]
+              },
+              "command": "Finish",
+              "component": "interpret-driver",
+              "when": [
+                "and",
+                [
+                  "not",
+                  [
+                    "and",
+                    [
+                      "not",
+                      [
+                        "=",
+                        [
+                          "var",
+                          "outcome"
+                        ],
+                        [
+                          "lit",
+                          "ok"
+                        ]
+                      ]
+                    ],
+                    [
+                      "<",
+                      [
+                        "nonNull",
+                        [
+                          "state",
+                          "runningAttempt"
+                        ]
+                      ],
+                      [
+                        "nonNull",
+                        [
+                          "state",
+                          "attemptLimit"
+                        ]
+                      ]
+                    ]
+                  ]
+                ],
+                [
+                  "not",
+                  [
+                    "and",
+                    [
+                      "not",
+                      [
+                        "=",
+                        [
+                          "var",
+                          "outcome"
+                        ],
+                        [
+                          "lit",
+                          "ok"
+                        ]
+                      ]
+                    ],
+                    [
+                      "=",
+                      [
+                        "nonNull",
+                        [
+                          "state",
+                          "runningSession"
+                        ]
+                      ],
+                      1
+                    ]
+                  ]
+                ],
+                [
+                  "not",
+                  [
+                    "=",
+                    [
+                      "nonNull",
+                      [
+                        "state",
+                        "runningSession"
+                      ]
+                    ],
+                    1
+                  ]
+                ],
+                [
+                  "not",
+                  [
+                    "=",
+                    [
+                      "var",
+                      "outcome"
+                    ],
+                    [
+                      "lit",
+                      "ok"
+                    ]
+                  ]
+                ],
+                [
+                  "not",
+                  [
+                    "<",
+                    [
+                      "nonNull",
+                      [
+                        "state",
+                        "runningSession"
+                      ]
+                    ],
+                    [
+                      "nonNull",
+                      [
+                        "state",
+                        "sessionCount"
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            }
+          ],
+          "command": "SessionChecked",
+          "guard": true
+        },
+        "Start.otherwise": {
+          "assign": {
+            "attemptLimit": [
+              "var",
+              "maxAttempts"
+            ],
+            "sessionCount": [
+              "var",
+              "sessions"
+            ],
+            "status": [
+              "lit",
+              "CHOOSING"
+            ]
+          },
+          "calls": [
+            {
+              "args": {},
+              "command": "ConsiderNext",
+              "component": "interpret-driver"
+            }
+          ],
+          "command": "Start",
+          "guard": true
+        },
+        "StartAccepting.otherwise": {
+          "assign": {
+            "acceptedInRound": false,
+            "failedInRound": false,
+            "status": [
+              "lit",
+              "ACCEPTING"
+            ]
+          },
+          "calls": [
+            {
+              "args": {},
+              "command": "NextToAccept",
+              "component": "interpret-driver"
+            }
+          ],
+          "command": "StartAccepting",
+          "guard": true
+        }
+      },
+      "init": {
+        "acceptedInRound": false,
+        "attemptLimit": null,
+        "failedInRound": false,
+        "runningAttempt": null,
+        "runningSession": null,
+        "sessionCount": null,
+        "startsFromCurrent": null,
+        "status": [
+          "lit",
+          "IDLE"
+        ]
+      },
+      "properties": {
+        "attemptsWithinLimit": {
+          "is": [
+            "always",
+            [
+              "or",
+              [
+                "or",
+                [
+                  "=",
+                  [
+                    "state",
+                    "runningAttempt"
+                  ],
+                  null
+                ],
+                [
+                  "=",
+                  [
+                    "state",
+                    "attemptLimit"
+                  ],
+                  null
+                ]
+              ],
+              [
+                "<=",
+                [
+                  "state",
+                  "runningAttempt"
+                ],
+                [
+                  "state",
+                  "attemptLimit"
+                ]
+              ]
+            ]
+          ],
+          "kind": "invariant"
+        },
+        "sessionsWithinCount": {
+          "is": [
+            "always",
+            [
+              "or",
+              [
+                "or",
+                [
+                  "=",
+                  [
+                    "state",
+                    "runningSession"
+                  ],
+                  null
+                ],
+                [
+                  "=",
+                  [
+                    "state",
+                    "sessionCount"
+                  ],
+                  null
+                ]
+              ],
+              [
+                "<=",
+                [
+                  "state",
+                  "runningSession"
+                ],
+                [
+                  "state",
+                  "sessionCount"
+                ]
+              ]
+            ]
+          ],
+          "kind": "invariant"
+        }
+      },
+      "relies": [
+        "interpret-driver"
+      ],
+      "state": {
+        "acceptedInRound": "bool",
+        "attemptLimit": {
+          "optional": "int"
+        },
+        "failedInRound": "bool",
+        "runningAttempt": {
+          "optional": "int"
+        },
+        "runningSession": {
+          "optional": "int"
+        },
+        "sessionCount": {
+          "optional": "int"
+        },
+        "startsFromCurrent": {
+          "optional": "bool"
+        },
+        "status": {
+          "enum": [
+            "IDLE",
+            "CHOOSING",
+            "CHECKING",
+            "SESSIONS",
+            "DONE",
+            "ACCEPTING",
+            "VERIFYING",
+            "ACCEPTED"
+          ]
         }
       }
     }
-  ],
-  "decisions": {},
-  "descriptions": {
-    "component": "Decides how `clp interpret` proceeds: which component to interpret and from what, how sessions and attempts follow each other and when sessions are compared; and for `clp interpret --accept`, which drafts are accepted, round after round.",
-    "data.acceptedInRound": "Whether some component was accepted in the accepting round being run.",
-    "data.attemptLimit": "How many attempts a session has before it gives up.",
-    "data.failedInRound": "Whether some component could not be accepted in the accepting round being run.",
-    "data.runningAttempt": "Its attempt.",
-    "data.runningSession": "The session running (1 is the one kept as the draft).",
-    "data.sessionCount": "How many sessions interpret the component (the first is kept as the draft; the others are compared with it).",
-    "data.startsFromCurrent": "Whether the chosen component starts from its current interpretation (rather than from a skeleton).",
-    "effects.Accept": "Accept it: the draft becomes the interpretation, stamped with the current Layer 1.",
-    "effects.AcceptingDone": "Accepting is over.",
-    "effects.CheckCurrent": "Check the current interpretation of the component being considered, and answer with CurrentChecked.",
-    "effects.CheckDraft": "Check the draft (or the re-stamped interpretation) of the component being accepted, and answer with DraftChecked.",
-    "effects.Compare": "Compare the interpretation of this session with the first one, and answer with Compared.",
-    "effects.ConsiderNext": "Give the next component (Consider), or NoMoreComponents if there is none.",
-    "effects.Finish": "Interpreting is over, with this outcome.",
-    "effects.NextToAccept": "Give the next component to accept (ConsiderAccepting), or EndRound if there is none in this round.",
-    "effects.RecordUncompared": "This session could not be compared (it found no interpretation that passed).",
-    "effects.RefuseAccepting": "The component is not accepted, for this reason.",
-    "effects.RetryRefused": "Run another round over the components that were not accepted.",
-    "effects.StartSession": "Run an attempt of an interpretation session, and answer with SessionChecked. `mode`: from a skeleton, from the current interpretation (update), or from a skeleton with the first session's vocabulary fixed (pinned).",
-    "states.ACCEPTED": "Accepting is over.",
-    "states.ACCEPTING": "Drafts are being accepted, one component after another, round after round.",
-    "states.CHECKING": "The current interpretation of a component is being checked.",
-    "states.CHOOSING": "Components are being looked at in order, to find the first one whose interpretation is missing or does not fit.",
-    "states.DONE": "Interpreting is over.",
-    "states.IDLE": "Nothing is being done.",
-    "states.SESSIONS": "Interpretation sessions are running.",
-    "states.VERIFYING": "A draft (or a re-stamped interpretation) is being checked before it is accepted."
   },
-  "irVersion": 7,
-  "model": {
-    "calculations": {
-      "acceptedAfterCheck": {
-        "description": "Whether some component was accepted in this round, counting the one just checked if it passed",
-        "output": "boolean"
-      },
-      "failedAfterCheck": {
-        "description": "Whether some component could not be accepted in this round, counting the one just checked if it did not pass",
-        "output": "boolean"
-      },
-      "nextAttempt": {
-        "description": "The running attempt plus one",
-        "output": "integer"
-      },
-      "nextSession": {
-        "description": "The running session plus one",
-        "output": "integer"
-      },
-      "sessionMode": {
-        "description": "The mode of the running session: for the first session, update if it starts from the current interpretation and skeleton otherwise; pinned for a later session",
-        "output": [
-          "skeleton",
-          "update",
-          "pinned"
-        ]
-      }
-    },
-    "commands": {
-      "Compared": {
-        "ok": "boolean"
-      },
-      "Consider": {
-        "hasCurrent": "boolean"
-      },
-      "ConsiderAccepting": {
-        "hasDraft": "boolean",
-        "hasInterpretation": "boolean",
-        "openReviews": {
-          "max": 10,
-          "min": 0,
-          "type": "integer"
-        },
-        "stampCurrent": "boolean"
-      },
-      "CurrentChecked": {
-        "passed": "boolean"
-      },
-      "DraftChecked": {
-        "passed": "boolean"
-      },
-      "EndRound": {},
-      "NoMoreComponents": {},
-      "SessionChecked": {
-        "hasModel": "boolean",
-        "outcome": [
-          "ok",
-          "missing",
-          "foreign-change",
-          "check-failed",
-          "boundary-changed"
-        ]
-      },
-      "Start": {
-        "maxAttempts": {
-          "max": 3,
-          "min": 1,
-          "type": "integer"
-        },
-        "sessions": {
-          "max": 3,
-          "min": 1,
-          "type": "integer"
-        }
-      },
-      "StartAccepting": {}
-    },
-    "data": {
-      "acceptedInRound": "boolean",
-      "attemptLimit": {
-        "max": 3,
-        "min": 1,
-        "type": "integer"
-      },
-      "failedInRound": "boolean",
-      "runningAttempt": {
-        "max": 3,
-        "min": 1,
-        "type": "integer"
-      },
-      "runningSession": {
-        "max": 3,
-        "min": 1,
-        "type": "integer"
-      },
-      "sessionCount": {
-        "max": 3,
-        "min": 1,
-        "type": "integer"
-      },
-      "startsFromCurrent": "boolean"
-    },
-    "effects": {
-      "Accept": {},
-      "AcceptingDone": {},
-      "CheckCurrent": {},
-      "CheckDraft": {},
-      "Compare": {
-        "session": {
-          "max": 3,
-          "min": 1,
-          "type": "integer"
-        }
-      },
-      "ConsiderNext": {},
-      "Finish": {
-        "status": [
-          "up-to-date",
-          "interpreted",
-          "failed"
-        ]
-      },
-      "NextToAccept": {},
-      "RecordUncompared": {
-        "session": {
-          "max": 3,
-          "min": 1,
-          "type": "integer"
-        }
-      },
-      "RefuseAccepting": {
-        "reason": [
-          "no-interpretation",
-          "open-reviews",
-          "does-not-fit"
-        ]
-      },
-      "RetryRefused": {},
-      "StartSession": {
-        "attempt": {
-          "max": 3,
-          "min": 1,
-          "type": "integer"
-        },
-        "mode": [
-          "skeleton",
-          "update",
-          "pinned"
-        ],
-        "session": {
-          "max": 3,
-          "min": 1,
-          "type": "integer"
-        }
-      }
-    },
-    "final": [
-      "DONE",
-      "ACCEPTED"
+  "entries": {
+    "commands": [
+      "interpret-flow.Compared",
+      "interpret-flow.Consider",
+      "interpret-flow.ConsiderAccepting",
+      "interpret-flow.CurrentChecked",
+      "interpret-flow.DraftChecked",
+      "interpret-flow.EndRound",
+      "interpret-flow.NoMoreComponents",
+      "interpret-flow.SessionChecked",
+      "interpret-flow.Start",
+      "interpret-flow.StartAccepting"
     ],
-    "init": "IDLE",
-    "initial": {
-      "acceptedInRound": false,
-      "failedInRound": false
-    },
-    "queries": {},
-    "states": [
-      "IDLE",
-      "CHOOSING",
-      "CHECKING",
-      "SESSIONS",
-      "DONE",
-      "ACCEPTING",
-      "VERIFYING",
-      "ACCEPTED"
+    "queries": []
+  },
+  "irVersion": 8,
+  "notes": {
+    "interpret-driver": "The driver: it does what the flow asks for, and answers with a command.",
+    "interpret-flow": "Decides how `clp interpret` proceeds: which component to interpret and from what, how sessions and attempts follow each other and when sessions are compared; and for `clp interpret --accept`, which drafts are accepted, round after round.",
+    "interpret-flow.does.compared": "A later session has been compared (ok or not, it counts as done). The next session starts (pinned), or, after the last one, interpreting finishes as interpreted.",
+    "interpret-flow.does.consider": "A component, in name order. A component without an interpretation (neither a draft nor an accepted one) is chosen, to be interpreted from a skeleton: its first session starts (attempt 1). A component with one has it checked first.",
+    "interpret-flow.does.considerAccepting": "A component to accept. Without a draft or an interpretation, it is refused (no-interpretation). If its draft (or, without a draft, its interpretation) has questions or disagreements left open, it is refused (open-reviews). Without a draft, an interpretation whose stamp is already the current Layer 1 needs nothing: the next component is asked for. Otherwise it is checked. Every refusal counts as a component that could not be accepted in this round, and the next component is asked for.",
+    "interpret-flow.does.currentChecked": "If the current interpretation passed the check, nothing is to be done for this component: the next one is asked for. Otherwise the component is chosen, to be interpreted from its current interpretation (update): its first session starts.",
+    "interpret-flow.does.draftChecked": "If it passed, it is accepted, which counts as a component accepted in this round; otherwise it is refused (does-not-fit), which counts as one that could not be accepted. The next component is asked for.",
+    "interpret-flow.does.endRound": "The round is over. If some component could not be accepted and some was accepted in this round (a component that contains another may fit only once the other is accepted), another round runs over those that could not be accepted, starting again with nothing accepted or refused in it. Otherwise accepting is over.",
+    "interpret-flow.does.noMoreComponents": "Every component's interpretation fits: interpreting finishes as up-to-date.",
+    "interpret-flow.does.sessionChecked": "An attempt of the running session is over. If it was not ok and attempts remain, the next attempt of the same session starts, in the same mode. If the first session ends without an ok attempt, interpreting finishes as failed. When the first session is ok: with one session, or when it gave no vocabulary (hasModel false), interpreting finishes as interpreted; otherwise the second session starts (attempt 1, pinned). When a later session is ok, it is compared with the first. When a later session ends without an ok attempt, it is recorded as uncompared, and the next session starts (pinned), or, after the last one, interpreting finishes as interpreted.",
+    "interpret-flow.does.start": "Interpreting starts with the number of sessions and of attempts per session. The first component is asked for.",
+    "interpret-flow.does.startAccepting": "Accepting starts: a round over every component. The first component is asked for."
+  },
+  "root": "interpret-flow",
+  "sorts": [],
+  "trace": {
+    "interpret-flow.does.compared": [
+      "InterpretFlow.commands.Compared"
+    ],
+    "interpret-flow.does.consider": [
+      "InterpretFlow.commands.Consider"
+    ],
+    "interpret-flow.does.considerAccepting": [
+      "InterpretFlow.commands.ConsiderAccepting"
+    ],
+    "interpret-flow.does.currentChecked": [
+      "InterpretFlow.commands.CurrentChecked"
+    ],
+    "interpret-flow.does.draftChecked": [
+      "InterpretFlow.commands.DraftChecked"
+    ],
+    "interpret-flow.does.endRound": [
+      "InterpretFlow.commands.EndRound"
+    ],
+    "interpret-flow.does.noMoreComponents": [
+      "InterpretFlow.commands.NoMoreComponents"
+    ],
+    "interpret-flow.does.sessionChecked": [
+      "InterpretFlow.commands.SessionChecked"
+    ],
+    "interpret-flow.does.start": [
+      "InterpretFlow.commands.Start"
+    ],
+    "interpret-flow.does.startAccepting": [
+      "InterpretFlow.commands.StartAccepting"
     ]
   }
 }

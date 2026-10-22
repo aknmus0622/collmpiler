@@ -1,35 +1,31 @@
 /**
- * How one component is reconciled with its specification: which phases
- * (design, wiring, implementation) are run as agent sessions, how a rejected
- * check repeats a phase, and how a phase that runs out of attempts restarts
- * the pipeline from design in a new round.
+ * Pipeline: reconciles one component with its specification in up to three
+ * phases (design, wiring, implementation). Each phase is an agent session that
+ * the driver runs, followed by a check whose result comes back as a command.
  *
- * Corresponds to the specification component "pipeline". One `Pipeline`
- * object drives one reconciliation. It does no work itself: whoever owns it
- * runs the sessions and the checks when told to by its `PipelineListener`,
- * and reports each check's result back by calling the matching method.
- * Facts about the workspace are asked of a `PipelineWorkspace` when needed.
- * Nothing is kept across a restart of the system.
+ * Corresponds to the specification component `pipeline`. Nothing it keeps is
+ * durable, and it serves no HTTP routes. Its state is {@link PipelineState}; it
+ * relies on two dependencies:
  *
- * Command -> method:
- *   `Start`                 -> `start`
- *   `DesignChecked`         -> `designChecked`
- *   `WiringChecked`         -> `wiringChecked`
- *   `ImplementationChecked` -> `implementationChecked`
- *   `CurrentCodeGraded`     -> `currentCodeGraded`
+ * - the output directory ({@link OutputDirectory}, specification component
+ *   `output`), asked what it holds when the pipeline starts;
+ * - the driver ({@link PipelineDriver}, specification component
+ *   `pipeline-driver`), told which session to start, to grade the current code,
+ *   or to discard the code.
  *
- * Query -> workspace method:
- *   `hasProductionCode` -> `PipelineWorkspace.hasProductionCode`
- *   `boundaryChanged`   -> `PipelineWorkspace.boundaryChanged`
- *   `hasAdapter`        -> `PipelineWorkspace.hasAdapter`
+ * Each specification command is a pure step function (`*Step`) that takes the
+ * state before the command and answers the state after it together with the
+ * calls to make on the driver, in order ({@link PipelineStep}). The decision of
+ * where the pipeline starts is the pure function {@link pipelinePlan}.
+ * {@link Pipeline} keeps the state, asks the output directory, runs those
+ * functions and makes the calls on its driver.
  *
- * Effect -> listener method:
- *   `StartSession`     -> `PipelineListener.startSession`
- *   `GradeCurrentCode` -> `PipelineListener.gradeCurrentCode`
- *   `DiscardCode`      -> `PipelineListener.discardCode`
- *
- * The specification's calculations, decision table and conditions are the
- * exported pure functions at the end of this file.
+ * Use: `start` once with the two limits; then, each time the driver has finished
+ * what it was asked for, send the matching command (`designChecked`,
+ * `wiringChecked`, `implementationChecked` after a session's check,
+ * `currentCodeGraded` after grading) until the status is `"DONE"` or `"FAILED"`.
+ * Commands are only sent in the status stated for each method; other inputs are
+ * never sent and need no handling.
  */
 
 import type { Phase } from "./gate-rules.ts";
@@ -37,295 +33,390 @@ import type { Phase } from "./gate-rules.ts";
 export type { Phase };
 
 /**
- * Where the pipeline stands; values identical to the specification's states.
- *   `"IDLE"`           nothing has been done yet (the starting state); `start` may be called.
- *   `"DESIGN"`         a design session is running; the owner answers with `designChecked`.
- *   `"WIRING"`         a wiring session is running; the owner answers with `wiringChecked`.
- *   `"GRADING"`        the current code is being graded without an agent; the owner answers with `currentCodeGraded`.
- *   `"IMPLEMENTATION"` an implementation session is running; the owner answers with `implementationChecked`.
- *   `"DONE"`           the component fits its specification (final).
- *   `"FAILED"`         attempts and rounds ran out (final).
+ * Where the pipeline is (specification state field `status`, also the answer of
+ * the query `Status`). The names are the specification's.
+ *
+ * - `"IDLE"`: not started yet; `start` comes next.
+ * - `"DESIGN"`: a design session has been started; `designChecked` comes next.
+ * - `"WIRING"`: a wiring session has been started; `wiringChecked` comes next.
+ * - `"GRADING"`: the driver was told to grade the current code;
+ *   `currentCodeGraded` comes next.
+ * - `"IMPLEMENTATION"`: an implementation session has been started;
+ *   `implementationChecked` comes next.
+ * - `"DONE"`: finished successfully; no command comes any more.
+ * - `"FAILED"`: gave up; no command comes any more.
  */
-export type PipelineState =
-  | "IDLE"
-  | "DESIGN"
-  | "WIRING"
-  | "GRADING"
-  | "IMPLEMENTATION"
-  | "DONE"
-  | "FAILED";
+export type PipelineStatus = "IDLE" | "DESIGN" | "WIRING" | "GRADING" | "IMPLEMENTATION" | "DONE" | "FAILED";
 
-/** Input of `start` (spec command `Start`). Field names identical to the specification's. */
+/**
+ * The limits and counters the pipeline remembers (specification state field
+ * `memory`). Each field has the name of the specification record field it holds.
+ */
+export interface PipelineMemory {
+  /** The number of the current attempt within the current phase, from 1 (field `attempt`). */
+  readonly attempt: number;
+  /** The limit of attempts per phase given to `start` (field `attemptsPerPhase`). */
+  readonly attemptsPerPhase: number;
+  /**
+   * Whether the plan changes existing production code rather than writing it from
+   * nothing (field `incremental`).
+   */
+  readonly incremental: boolean;
+  /** The number of the current round, from 1 (field `round`). */
+  readonly round: number;
+  /** The limit of rounds given to `start` (field `rounds`). */
+  readonly rounds: number;
+}
+
+/**
+ * Everything the pipeline remembers (the specification's `state`). Each field has
+ * the name of the specification state field it holds.
+ */
+export interface PipelineState {
+  /** The limits and counters (state `memory`). */
+  readonly memory: PipelineMemory;
+  /** Where the pipeline is (state `status`). */
+  readonly status: PipelineStatus;
+}
+
+/** The state the pipeline starts from (the specification's `init`). */
+export function initialPipelineState(): PipelineState {
+  return {
+    memory: { attempt: 0, attemptsPerPhase: 0, incremental: false, round: 0, rounds: 0 },
+    status: "IDLE",
+  };
+}
+
+/** The limits given to `start` (parameters of specification `Start`). */
 export interface PipelineLimits {
-  /** How many attempts each phase has, 1 to 3 (remembered as spec data `maxAttempts`). */
-  attemptsPerPhase: number;
-  /** How many rounds the pipeline has, 1 to 3 (remembered as spec data `maxRounds`). */
-  rounds: number;
+  /** How many attempts each phase may take (specification parameter `attemptsPerPhase`). */
+  readonly attemptsPerPhase: number;
+  /** How many rounds the pipeline may take (specification parameter `rounds`). */
+  readonly rounds: number;
 }
 
 /**
- * What the pipeline remembers between commands (spec `model.data`; field
- * names identical to the specification's). Meaningful only after `start`.
+ * What the output directory holds, as far as the plan needs it: the answers of
+ * the three {@link OutputDirectory} queries, gathered into one record.
  */
-export interface PipelineProgress {
-  /** The running round, from 1. */
-  round: number;
-  /** The running attempt within the current phase, from 1. */
-  attempt: number;
-  /** The limit of attempts per phase (from `PipelineLimits.attemptsPerPhase`). */
-  maxAttempts: number;
-  /** The limit of rounds (from `PipelineLimits.rounds`). */
-  maxRounds: number;
-  /** Whether existing code is being changed, i.e. the code was not written from nothing (decided by `start`). */
-  incremental: boolean;
+export interface OutputFacts {
+  /** Whether there is production code (specification query `output.HasProductionCode`). */
+  readonly hasProductionCode: boolean;
+  /**
+   * Whether the boundary of the production code differs from the previous run
+   * (specification query `output.BoundaryChanged`).
+   */
+  readonly boundaryChanged: boolean;
+  /** Whether there is an adapter to a test harness (specification query `output.HasAdapter`). */
+  readonly hasAdapter: boolean;
 }
 
-/** Payload of the `StartSession` effect. Field names identical to the specification's. */
-export interface SessionStart {
-  /** Which phase's agent session to run. */
-  phase: Phase;
-  /** The round the session belongs to, 1 to 4. */
-  round: number;
-  /** The attempt of that phase this session is, 1 to 4. */
-  attempt: number;
+/** The answer of the decision table `plan`: where the pipeline starts. */
+export interface PipelinePlan {
+  /** Whether the plan changes existing production code (result field `incremental`). */
+  readonly incremental: boolean;
+  /** The status the pipeline enters when it starts (result field `next`). */
+  readonly next: "DESIGN" | "WIRING" | "GRADING";
+  /**
+   * The phase of the first session to start, or `null` when no session is
+   * started and the current code is graded instead (result field `phase`).
+   */
+  readonly phase: "design" | "wiring" | null;
 }
 
 /**
- * Dependency: answers questions about the workspace (spec queries). Asked
- * only by `start`, at the moment the answer is needed; answers are never
- * cached and may differ from one run to the next.
+ * Specification decision table `plan`. Pure.
+ *
+ * @param facts what the output directory holds (the specification asks the
+ *              `output` queries; here their answers are passed in).
  */
-export interface PipelineWorkspace {
-  /** Spec query `hasProductionCode`: whether the component already has production code. */
+export function pipelinePlan(facts: OutputFacts): PipelinePlan {
+  if (!facts.hasProductionCode) return { incremental: false, next: "DESIGN", phase: "design" };
+  if (facts.boundaryChanged) return { incremental: true, next: "DESIGN", phase: "design" };
+  if (!facts.hasAdapter) return { incremental: true, next: "WIRING", phase: "wiring" };
+  return { incremental: true, next: "GRADING", phase: null };
+}
+
+/**
+ * The output directory (specification component `output`, external). Asked what
+ * it holds; the pipeline asks only while performing `start`.
+ */
+export interface OutputDirectory {
+  /** Whether there is production code (specification query `HasProductionCode`). */
   hasProductionCode(): boolean;
-  /** Spec query `boundaryChanged`: whether the component's boundary differs from the one the previous run worked from. */
+  /** Whether the boundary of the production code differs from the previous run (specification query `BoundaryChanged`). */
   boundaryChanged(): boolean;
-  /** Spec query `hasAdapter`: whether a test adapter for the component exists. */
+  /** Whether there is an adapter to a test harness (specification query `HasAdapter`). */
   hasAdapter(): boolean;
 }
 
+/** Reads the three answers of the output directory into one record. */
+export function readOutputFacts(output: OutputDirectory): OutputFacts {
+  return {
+    hasProductionCode: output.hasProductionCode(),
+    boundaryChanged: output.boundaryChanged(),
+    hasAdapter: output.hasAdapter(),
+  };
+}
+
 /**
- * Dependency: told what the pipeline does to its environment (spec effects).
- * Each method is told synchronously from within the command method that
- * emits it, in the specification's order.
+ * The driver (specification component `pipeline-driver`, external): runs what the
+ * pipeline asks for. Each method is one of its specification commands; the
+ * pipeline calls them, in order, during one of its own commands. None of them
+ * answers anything; the result comes back later as a command on {@link Pipeline}.
  */
-export interface PipelineListener {
-  /** Spec effect `StartSession`: run an agent session of this phase, round and attempt, check it, and answer with the matching `...Checked` method. */
-  startSession(start: SessionStart): void;
-  /** Spec effect `GradeCurrentCode`: grade the production code as it is, without an agent, in the given round (1 to 4), and answer with `currentCodeGraded`. */
+export interface PipelineDriver {
+  /**
+   * Starts an agent session (specification `StartSession`). Its check comes back
+   * as `designChecked`, `wiringChecked` or `implementationChecked`, by phase.
+   *
+   * @param round   the round the session belongs to (specification parameter `round`).
+   * @param attempt the attempt within the phase (specification parameter `attempt`).
+   * @param phase   which phase the session is for (specification parameter `phase`).
+   */
+  startSession(round: number, attempt: number, phase: Phase): void;
+  /**
+   * Grades the current code without a session (specification `GradeCurrentCode`).
+   * The grade comes back as `currentCodeGraded`.
+   *
+   * @param round the round the grading belongs to (specification parameter `round`).
+   */
   gradeCurrentCode(round: number): void;
-  /** Spec effect `DiscardCode`: throw away the production code written so far (no payload). */
+  /** Discards the production code written so far (specification `DiscardCode`). */
   discardCode(): void;
 }
 
 /**
- * Drives one reconciliation. Starts in `"IDLE"`. Each method performs one
- * specification command; calling a method in a state the command is not
- * listed for has unspecified behaviour.
+ * One call the pipeline makes on its driver: `call` names the
+ * {@link PipelineDriver} method, the other fields are its arguments.
+ */
+export type DriverCall =
+  | { readonly call: "startSession"; readonly round: number; readonly attempt: number; readonly phase: Phase }
+  | { readonly call: "gradeCurrentCode"; readonly round: number }
+  | { readonly call: "discardCode" };
+
+/** Makes one call on the driver. */
+export function callDriver(driver: PipelineDriver, call: DriverCall): void {
+  switch (call.call) {
+    case "startSession":
+      driver.startSession(call.round, call.attempt, call.phase);
+      return;
+    case "gradeCurrentCode":
+      driver.gradeCurrentCode(call.round);
+      return;
+    case "discardCode":
+      driver.discardCode();
+      return;
+  }
+}
+
+/** The result of a step function: the state after the command and the calls to make on the driver, in order. */
+export interface PipelineStep {
+  readonly state: PipelineState;
+  readonly calls: readonly DriverCall[];
+}
+
+// ---------------------------------------------------------------------------
+// Step functions: one per specification command, pure
+
+/**
+ * Specification command `Start`: the pipeline starts. Sent only in status
+ * `"IDLE"`, with each limit from 1 to 3.
+ *
+ * @param limits the two limits (specification parameters `attemptsPerPhase` and `rounds`).
+ * @param facts  what the output directory holds now (answers of the `output` queries).
+ */
+export function startStep(state: PipelineState, limits: PipelineLimits, facts: OutputFacts): PipelineStep {
+  const plan = pipelinePlan(facts);
+  const memory: PipelineMemory = {
+    attempt: 1,
+    attemptsPerPhase: limits.attemptsPerPhase,
+    incremental: plan.incremental,
+    round: 1,
+    rounds: limits.rounds,
+  };
+  const calls: DriverCall[] =
+    plan.phase === null
+      ? [{ call: "gradeCurrentCode", round: 1 }]
+      : [{ call: "startSession", round: 1, attempt: 1, phase: plan.phase }];
+  return { state: { ...state, memory, status: plan.next }, calls };
+}
+
+/**
+ * Specification command `DesignChecked`: the check of a design session finished.
+ * Sent only in status `"DESIGN"`.
+ *
+ * @param passed whether the check accepted the session (specification parameter `passed`).
+ */
+export function designCheckedStep(state: PipelineState, passed: boolean): PipelineStep {
+  if (passed) return enterPhase(state, "WIRING", "wiring");
+  return rejected(state, "design");
+}
+
+/**
+ * Specification command `WiringChecked`: the check of a wiring session finished.
+ * Sent only in status `"WIRING"`.
+ *
+ * @param passed whether the check accepted the session (specification parameter `passed`).
+ */
+export function wiringCheckedStep(state: PipelineState, passed: boolean): PipelineStep {
+  if (!passed) return rejected(state, "wiring");
+  if (state.memory.incremental) {
+    return {
+      state: { ...state, memory: { ...state.memory, attempt: 1 }, status: "GRADING" },
+      calls: [{ call: "gradeCurrentCode", round: state.memory.round }],
+    };
+  }
+  return enterPhase(state, "IMPLEMENTATION", "implementation");
+}
+
+/**
+ * Specification command `ImplementationChecked`: the check of an implementation
+ * session finished. Sent only in status `"IMPLEMENTATION"`.
+ *
+ * @param passed whether the check accepted the session (specification parameter `passed`).
+ */
+export function implementationCheckedStep(state: PipelineState, passed: boolean): PipelineStep {
+  if (passed) return { state: { ...state, status: "DONE" }, calls: [] };
+  return rejected(state, "implementation");
+}
+
+/**
+ * Specification command `CurrentCodeGraded`: grading the current code finished.
+ * Sent only in status `"GRADING"`.
+ *
+ * @param passed whether the current code passed (specification parameter `passed`).
+ */
+export function currentCodeGradedStep(state: PipelineState, passed: boolean): PipelineStep {
+  if (passed) return { state: { ...state, status: "DONE" }, calls: [] };
+  return enterPhase(state, "IMPLEMENTATION", "implementation");
+}
+
+/** Enters a phase with its first attempt in the current round and starts its session. */
+function enterPhase(state: PipelineState, status: PipelineStatus, phase: Phase): PipelineStep {
+  const memory = { ...state.memory, attempt: 1 };
+  return {
+    state: { ...state, memory, status },
+    calls: [{ call: "startSession", round: memory.round, attempt: 1, phase }],
+  };
+}
+
+/**
+ * A phase's check rejected its session: the phase repeats while attempts remain;
+ * otherwise a new round restarts from design (discarding the code unless the plan
+ * is incremental) while rounds remain; otherwise the pipeline fails.
+ */
+function rejected(state: PipelineState, phase: Phase): PipelineStep {
+  const { memory } = state;
+  if (memory.attempt < memory.attemptsPerPhase) {
+    const attempt = memory.attempt + 1;
+    return {
+      state: { ...state, memory: { ...memory, attempt } },
+      calls: [{ call: "startSession", round: memory.round, attempt, phase }],
+    };
+  }
+  if (memory.round < memory.rounds) {
+    const round = memory.round + 1;
+    const calls: DriverCall[] = memory.incremental ? [] : [{ call: "discardCode" }];
+    calls.push({ call: "startSession", round, attempt: 1, phase: "design" });
+    return { state: { ...state, memory: { ...memory, attempt: 1, round }, status: "DESIGN" }, calls };
+  }
+  return { state: { ...state, status: "FAILED" }, calls: [] };
+}
+
+// ---------------------------------------------------------------------------
+// The component
+
+/**
+ * The pipeline for one component. It starts in the initial state, keeps its
+ * state between commands, and makes its calls on the driver synchronously, in
+ * order, before the command method returns. No command answers anything; read
+ * {@link Pipeline.status} (specification query `Status`) or
+ * {@link Pipeline.state} to see where it is.
  */
 export class Pipeline {
-  private readonly workspace: PipelineWorkspace;
-  private readonly listener: PipelineListener;
-  private current: PipelineState = "IDLE";
-  private remembered: PipelineProgress = {
-    round: 1,
-    attempt: 1,
-    maxAttempts: 1,
-    maxRounds: 1,
-    incremental: false,
-  };
+  private readonly output: OutputDirectory;
+  private readonly driver: PipelineDriver;
+  private current: PipelineState = initialPipelineState();
 
   /**
-   * @param workspace asked about the workspace when `start` needs it.
-   * @param listener receives every effect of the pipeline.
+   * @param output the output directory, asked what it holds during `start` (specification `output`).
+   * @param driver the driver told to start sessions, grade or discard code (specification `pipeline-driver`).
    */
-  constructor(workspace: PipelineWorkspace, listener: PipelineListener) {
-    this.workspace = workspace;
-    this.listener = listener;
+  constructor(output: OutputDirectory, driver: PipelineDriver) {
+    this.output = output;
+    this.driver = driver;
   }
 
-  /** Current state of the pipeline (spec state names). */
+  /** The current state (all specification state fields, with the same names). */
   get state(): PipelineState {
     return this.current;
   }
 
-  /** What the pipeline currently remembers (spec data); a copy. Meaningful only after `start`. */
-  get progress(): PipelineProgress {
-    return { ...this.remembered };
+  /** Where the pipeline is (specification query `Status`). */
+  status(): PipelineStatus {
+    return this.current.status;
   }
 
   /**
-   * Spec command `Start` (from `"IDLE"`): remembers the limits, asks the
-   * workspace what plan applies, and either tells `startSession` for the
-   * plan's phase or tells `gradeCurrentCode`; moves to the plan's state.
+   * Starts the pipeline (specification `Start`). Sent only in status `"IDLE"`,
+   * with each limit from 1 to 3. The output directory is asked what it holds;
+   * the driver is then told to start a session (`startSession`) or to grade the
+   * current code (`gradeCurrentCode`).
+   *
+   * @param limits the limit of attempts per phase and the limit of rounds
+   *               (specification parameters `attemptsPerPhase` and `rounds`).
    */
   start(limits: PipelineLimits): void {
-    const plan = planFor(this.askPlanFacts());
-    this.remembered = {
-      round: 1,
-      attempt: 1,
-      maxAttempts: limits.attemptsPerPhase,
-      maxRounds: limits.rounds,
-      incremental: plan.incremental,
-    };
-    if (plan.phase !== null) {
-      this.listener.startSession({ phase: plan.phase, round: 1, attempt: 1 });
-    } else {
-      this.listener.gradeCurrentCode(1);
-    }
-    this.current = plan.next;
+    this.apply(startStep(this.current, limits, readOutputFacts(this.output)));
   }
 
   /**
-   * Spec command `DesignChecked` (in `"DESIGN"`): answer to a design
-   * session; `passed` is whether its check passed. May tell `discardCode`
-   * and/or `startSession`, and may change the state.
+   * The check of a design session finished (specification `DesignChecked`). Sent
+   * only in status `"DESIGN"`. The driver may be told `discardCode` and/or
+   * `startSession`.
+   *
+   * @param passed whether the check accepted the session (specification parameter `passed`).
    */
   designChecked(passed: boolean): void {
-    if (!passed) {
-      this.checkRejected("design");
-      return;
-    }
-    this.remembered.attempt = 1;
-    this.listener.startSession({ phase: "wiring", round: this.remembered.round, attempt: 1 });
-    this.current = "WIRING";
+    this.apply(designCheckedStep(this.current, passed));
   }
 
   /**
-   * Spec command `WiringChecked` (in `"WIRING"`): answer to a wiring
-   * session; `passed` is whether its check passed. May tell `discardCode`,
-   * `startSession` or `gradeCurrentCode`, and may change the state.
+   * The check of a wiring session finished (specification `WiringChecked`). Sent
+   * only in status `"WIRING"`. The driver may be told `discardCode`,
+   * `startSession` or `gradeCurrentCode`.
+   *
+   * @param passed whether the check accepted the session (specification parameter `passed`).
    */
   wiringChecked(passed: boolean): void {
-    if (!passed) {
-      this.checkRejected("wiring");
-      return;
-    }
-    this.remembered.attempt = 1;
-    if (this.remembered.incremental) {
-      this.listener.gradeCurrentCode(this.remembered.round);
-      this.current = "GRADING";
-    } else {
-      this.listener.startSession({ phase: "implementation", round: this.remembered.round, attempt: 1 });
-      this.current = "IMPLEMENTATION";
-    }
+    this.apply(wiringCheckedStep(this.current, passed));
   }
 
   /**
-   * Spec command `ImplementationChecked` (in `"IMPLEMENTATION"`): answer to
-   * an implementation session; `passed` is whether its check passed. May
-   * tell `discardCode` and/or `startSession`, and may change the state.
+   * The check of an implementation session finished (specification
+   * `ImplementationChecked`). Sent only in status `"IMPLEMENTATION"`. The driver
+   * may be told `discardCode` and/or `startSession`.
+   *
+   * @param passed whether the check accepted the session (specification parameter `passed`).
    */
   implementationChecked(passed: boolean): void {
-    if (!passed) {
-      this.checkRejected("implementation");
-      return;
-    }
-    this.current = "DONE";
+    this.apply(implementationCheckedStep(this.current, passed));
   }
 
   /**
-   * Spec command `CurrentCodeGraded` (in `"GRADING"`): answer to
-   * `gradeCurrentCode`; `passed` is whether the current code passed. May
-   * tell `startSession`, and changes the state.
+   * Grading the current code finished (specification `CurrentCodeGraded`). Sent
+   * only in status `"GRADING"`. The driver may be told `startSession`.
+   *
+   * @param passed whether the current code passed (specification parameter `passed`).
    */
   currentCodeGraded(passed: boolean): void {
-    if (passed) {
-      this.current = "DONE";
-      return;
-    }
-    this.listener.startSession({ phase: "implementation", round: this.remembered.round, attempt: 1 });
-    this.current = "IMPLEMENTATION";
+    this.apply(currentCodeGradedStep(this.current, passed));
   }
 
-  /** The workspace facts, each asked only when the plan reads it. */
-  private askPlanFacts(): PlanFacts {
-    const workspace = this.workspace;
-    return {
-      get hasProductionCode() {
-        return workspace.hasProductionCode();
-      },
-      get boundaryChanged() {
-        return workspace.boundaryChanged();
-      },
-      get hasAdapter() {
-        return workspace.hasAdapter();
-      },
-    };
+  /** Keeps the state after a step and makes its calls on the driver, in order. */
+  private apply(step: PipelineStep): void {
+    this.current = step.state;
+    for (const call of step.calls) callDriver(this.driver, call);
   }
-
-  /** A rejected check: repeat the phase, else restart from design in a new round, else fail. */
-  private checkRejected(phase: Phase): void {
-    const progress = this.remembered;
-    if (attemptsRemain(progress)) {
-      const attempt = nextAttempt(progress);
-      this.listener.startSession({ phase, round: progress.round, attempt });
-      progress.attempt = attempt;
-    } else if (roundsRemain(progress)) {
-      const round = nextRound(progress);
-      if (!progress.incremental) {
-        this.listener.discardCode();
-      }
-      this.listener.startSession({ phase: "design", round, attempt: 1 });
-      progress.attempt = 1;
-      progress.round = round;
-      this.current = "DESIGN";
-    } else {
-      this.current = "FAILED";
-    }
-  }
-}
-
-/** Facts about the workspace that the spec decision table `plan` is decided from (the answers of the spec queries). */
-export interface PlanFacts {
-  /** Answer of `PipelineWorkspace.hasProductionCode`. */
-  hasProductionCode: boolean;
-  /** Answer of `PipelineWorkspace.boundaryChanged`. */
-  boundaryChanged: boolean;
-  /** Answer of `PipelineWorkspace.hasAdapter`. */
-  hasAdapter: boolean;
-}
-
-/** One row of the spec decision table `plan` (column names identical to the specification's). */
-export interface Plan {
-  /** The phase whose session `start` begins with, or `null` when `start` grades the current code instead. */
-  phase: Phase | null;
-  /** The state `start` moves to. */
-  next: PipelineState;
-  /** The value remembered as `PipelineProgress.incremental`. */
-  incremental: boolean;
-}
-
-/** Pure decision: spec decision table `plan`, used by `start`. */
-export function planFor(facts: PlanFacts): Plan {
-  if (!facts.hasProductionCode) {
-    return { phase: "design", next: "DESIGN", incremental: false };
-  }
-  if (facts.boundaryChanged) {
-    return { phase: "design", next: "DESIGN", incremental: true };
-  }
-  if (!facts.hasAdapter) {
-    return { phase: "wiring", next: "WIRING", incremental: true };
-  }
-  return { phase: null, next: "GRADING", incremental: true };
-}
-
-/** Pure calculation: spec calculation `nextAttempt`, from what is remembered. */
-export function nextAttempt(progress: PipelineProgress): number {
-  return progress.attempt + 1;
-}
-
-/** Pure calculation: spec calculation `nextRound`, from what is remembered. */
-export function nextRound(progress: PipelineProgress): number {
-  return progress.round + 1;
-}
-
-/** Pure condition: spec condition "Attempts remain in this phase", from what is remembered. */
-export function attemptsRemain(progress: PipelineProgress): boolean {
-  return progress.attempt < progress.maxAttempts;
-}
-
-/** Pure condition: spec condition "Rounds remain", from what is remembered. */
-export function roundsRemain(progress: PipelineProgress): boolean {
-  return progress.round < progress.maxRounds;
 }

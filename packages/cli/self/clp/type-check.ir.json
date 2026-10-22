@@ -1,446 +1,577 @@
 {
-  "behaviors": [
-    {
-      "description": "A threshold (around) of the number type just given. One below its minimum or above its maximum is reported as around-outside.",
-      "from": [
-        "READY"
-      ],
-      "name": "Around",
-      "onlyIf": [],
-      "when": {
-        "The threshold is below the remembered minimum (if any) or above the remembered maximum (if any)": {
-          "emits": [
-            {
-              "effect": "Report",
-              "input": {
-                "code": "around-outside",
-                "owner": ""
-              }
+  "components": {
+    "type-check": {
+      "calcs": {
+        "promise": {
+          "is": [
+            "ite",
+            [
+              "and",
+              [
+                "var",
+                "hasParams"
+              ],
+              [
+                "or",
+                [
+                  "var",
+                  "fresh"
+                ],
+                [
+                  "var",
+                  "increasing"
+                ]
+              ]
+            ],
+            [
+              "concat",
+              [
+                "ite",
+                [
+                  "and",
+                  [
+                    "var",
+                    "increasing"
+                  ],
+                  [
+                    "not",
+                    [
+                      "var",
+                      "integer"
+                    ]
+                  ]
+                ],
+                [
+                  "concat",
+                  [
+                    "ite",
+                    [
+                      "and",
+                      [
+                        "var",
+                        "fresh"
+                      ],
+                      [
+                        "var",
+                        "increasing"
+                      ]
+                    ],
+                    [
+                      "list",
+                      [
+                        "lit",
+                        "fresh-and-increasing"
+                      ]
+                    ],
+                    [
+                      "list"
+                    ]
+                  ],
+                  [
+                    "list",
+                    [
+                      "lit",
+                      "increasing-not-integer"
+                    ]
+                  ]
+                ],
+                [
+                  "ite",
+                  [
+                    "and",
+                    [
+                      "var",
+                      "fresh"
+                    ],
+                    [
+                      "var",
+                      "increasing"
+                    ]
+                  ],
+                  [
+                    "list",
+                    [
+                      "lit",
+                      "fresh-and-increasing"
+                    ]
+                  ],
+                  [
+                    "list"
+                  ]
+                ]
+              ],
+              [
+                "list",
+                [
+                  "lit",
+                  "promise-with-params"
+                ]
+              ]
+            ],
+            [
+              "ite",
+              [
+                "and",
+                [
+                  "var",
+                  "increasing"
+                ],
+                [
+                  "not",
+                  [
+                    "var",
+                    "integer"
+                  ]
+                ]
+              ],
+              [
+                "concat",
+                [
+                  "ite",
+                  [
+                    "and",
+                    [
+                      "var",
+                      "fresh"
+                    ],
+                    [
+                      "var",
+                      "increasing"
+                    ]
+                  ],
+                  [
+                    "list",
+                    [
+                      "lit",
+                      "fresh-and-increasing"
+                    ]
+                  ],
+                  [
+                    "list"
+                  ]
+                ],
+                [
+                  "list",
+                  [
+                    "lit",
+                    "increasing-not-integer"
+                  ]
+                ]
+              ],
+              [
+                "ite",
+                [
+                  "and",
+                  [
+                    "var",
+                    "fresh"
+                  ],
+                  [
+                    "var",
+                    "increasing"
+                  ]
+                ],
+                [
+                  "list",
+                  [
+                    "lit",
+                    "fresh-and-increasing"
+                  ]
+                ],
+                [
+                  "list"
+                ]
+              ]
+            ]
+          ],
+          "params": {
+            "fresh": "bool",
+            "hasParams": "bool",
+            "increasing": "bool",
+            "integer": "bool"
+          },
+          "result": {
+            "list": {
+              "enum": [
+                "fresh-and-increasing",
+                "increasing-not-integer",
+                "promise-with-params"
+              ]
             }
-          ]
+          }
         },
-        "otherwise": {}
-      }
-    },
-    {
-      "from": [
-        "READY"
-      ],
-      "name": "BeginClaims",
-      "onlyIf": [],
-      "when": {
-        "otherwise": {
-          "does": "The names of a specification are checked next. Only the reserved name `status` is claimed so far (by reserved).",
-          "set": {
-            "claims": {
-              "$ref": "calculation:reservedClaims"
+        "row": {
+          "is": [
+            "ite",
+            [
+              "var",
+              "sameColumns"
+            ],
+            [
+              "ite",
+              [
+                "var",
+                "constantCells"
+              ],
+              [
+                "ite",
+                [
+                  "and",
+                  [
+                    "var",
+                    "last"
+                  ],
+                  [
+                    "not",
+                    [
+                      "var",
+                      "otherwise"
+                    ]
+                  ]
+                ],
+                [
+                  "list",
+                  [
+                    "lit",
+                    "last-not-otherwise"
+                  ]
+                ],
+                [
+                  "ite",
+                  [
+                    "and",
+                    [
+                      "var",
+                      "otherwise"
+                    ],
+                    [
+                      "not",
+                      [
+                        "var",
+                        "last"
+                      ]
+                    ]
+                  ],
+                  [
+                    "list",
+                    [
+                      "lit",
+                      "otherwise-not-last"
+                    ]
+                  ],
+                  [
+                    "list"
+                  ]
+                ]
+              ],
+              [
+                "concat",
+                [
+                  "ite",
+                  [
+                    "and",
+                    [
+                      "var",
+                      "last"
+                    ],
+                    [
+                      "not",
+                      [
+                        "var",
+                        "otherwise"
+                      ]
+                    ]
+                  ],
+                  [
+                    "list",
+                    [
+                      "lit",
+                      "last-not-otherwise"
+                    ]
+                  ],
+                  [
+                    "ite",
+                    [
+                      "and",
+                      [
+                        "var",
+                        "otherwise"
+                      ],
+                      [
+                        "not",
+                        [
+                          "var",
+                          "last"
+                        ]
+                      ]
+                    ],
+                    [
+                      "list",
+                      [
+                        "lit",
+                        "otherwise-not-last"
+                      ]
+                    ],
+                    [
+                      "list"
+                    ]
+                  ]
+                ],
+                [
+                  "list",
+                  [
+                    "lit",
+                    "cell-not-constant"
+                  ]
+                ]
+              ]
+            ],
+            [
+              "concat",
+              [
+                "ite",
+                [
+                  "var",
+                  "constantCells"
+                ],
+                [
+                  "ite",
+                  [
+                    "and",
+                    [
+                      "var",
+                      "last"
+                    ],
+                    [
+                      "not",
+                      [
+                        "var",
+                        "otherwise"
+                      ]
+                    ]
+                  ],
+                  [
+                    "list",
+                    [
+                      "lit",
+                      "last-not-otherwise"
+                    ]
+                  ],
+                  [
+                    "ite",
+                    [
+                      "and",
+                      [
+                        "var",
+                        "otherwise"
+                      ],
+                      [
+                        "not",
+                        [
+                          "var",
+                          "last"
+                        ]
+                      ]
+                    ],
+                    [
+                      "list",
+                      [
+                        "lit",
+                        "otherwise-not-last"
+                      ]
+                    ],
+                    [
+                      "list"
+                    ]
+                  ]
+                ],
+                [
+                  "concat",
+                  [
+                    "ite",
+                    [
+                      "and",
+                      [
+                        "var",
+                        "last"
+                      ],
+                      [
+                        "not",
+                        [
+                          "var",
+                          "otherwise"
+                        ]
+                      ]
+                    ],
+                    [
+                      "list",
+                      [
+                        "lit",
+                        "last-not-otherwise"
+                      ]
+                    ],
+                    [
+                      "ite",
+                      [
+                        "and",
+                        [
+                          "var",
+                          "otherwise"
+                        ],
+                        [
+                          "not",
+                          [
+                            "var",
+                            "last"
+                          ]
+                        ]
+                      ],
+                      [
+                        "list",
+                        [
+                          "lit",
+                          "otherwise-not-last"
+                        ]
+                      ],
+                      [
+                        "list"
+                      ]
+                    ]
+                  ],
+                  [
+                    "list",
+                    [
+                      "lit",
+                      "cell-not-constant"
+                    ]
+                  ]
+                ]
+              ],
+              [
+                "list",
+                [
+                  "lit",
+                  "columns-differ"
+                ]
+              ]
+            ]
+          ],
+          "params": {
+            "constantCells": "bool",
+            "last": "bool",
+            "otherwise": "bool",
+            "sameColumns": "bool"
+          },
+          "result": {
+            "list": {
+              "enum": [
+                "last-not-otherwise",
+                "otherwise-not-last",
+                "cell-not-constant",
+                "columns-differ"
+              ]
             }
           }
         }
-      }
-    },
-    {
-      "from": [
-        "READY"
-      ],
-      "name": "BeginColumn",
-      "onlyIf": [],
-      "when": {
-        "otherwise": {
-          "does": "A column of a decision table is checked next: no value has been seen in it yet.",
-          "set": {
-            "kinds": {
-              "$ref": "calculation:noKinds"
-            }
-          }
-        }
-      }
-    },
-    {
-      "description": "One value of the column, by kind. A null value (the row does not use the column) is not counted.",
-      "from": [
-        "READY"
-      ],
-      "name": "Cell",
-      "onlyIf": [],
-      "when": {
-        "The value is not null and its kind has not been seen yet in the column": {
-          "set": {
-            "kinds": {
-              "$ref": "calculation:kindsWithCell"
-            }
-          }
-        },
-        "otherwise": {}
-      }
-    },
-    {
-      "description": "A name is claimed, by data, a query without input, an asked answer, a part, or a command input. If it is already claimed, it is reported as name-collision, with what had claimed it, and stays claimed by that, unless both claims are shared ones by the same kind of owner (asked answers of different commands, inputs of different commands), which may share a name. Otherwise it is now claimed by this owner.",
-      "from": [
-        "READY"
-      ],
-      "name": "Claim",
-      "onlyIf": [],
-      "when": {
-        "The name is already claimed, and the two claims are not both shared ones by the same kind of owner": {
-          "emits": [
+      },
+      "init": {},
+      "queries": {
+        "Promise": {
+          "is": [
+            "calc",
+            "promise",
             {
-              "effect": "Report",
-              "input": {
-                "code": "name-collision",
-                "owner": {
-                  "$ref": "calculation:earlierOwner"
-                }
-              }
-            }
-          ]
-        },
-        "The name is not claimed yet": {
-          "set": {
-            "claims": {
-              "$ref": "calculation:claimsWithNew"
-            }
-          }
-        },
-        "otherwise": {}
-      }
-    },
-    {
-      "description": "The column is over. If the values seen since the last BeginColumn are of more than one kind, it is reported as mixed-column. What was seen is kept until the next BeginColumn.",
-      "from": [
-        "READY"
-      ],
-      "name": "EndColumn",
-      "onlyIf": [],
-      "when": {
-        "The values seen since the last BeginColumn are of more than one kind": {
-          "emits": [
-            {
-              "effect": "Report",
-              "input": {
-                "code": "mixed-column",
-                "owner": ""
-              }
-            }
-          ]
-        },
-        "otherwise": {}
-      }
-    },
-    {
-      "description": "A condition that a query failed, with what is known of the query it names. If no such query is declared (neither asked by that name nor declared), it is reported as failure-unknown; otherwise, if the query cannot fail (no mayFail), as failure-not-may-fail; otherwise, if the query takes an input and was not asked by that name, as failure-not-asked. At most one is reported.",
-      "from": [
-        "READY"
-      ],
-      "name": "Failure",
-      "onlyIf": [],
-      "when": {
-        "The query named is asked by that name or declared, and cannot fail (no mayFail)": {
-          "emits": [
-            {
-              "effect": "Report",
-              "input": {
-                "code": "failure-not-may-fail",
-                "owner": ""
-              }
-            }
-          ]
-        },
-        "The query named is asked by that name or declared, can fail, takes an input, and was not asked by that name": {
-          "emits": [
-            {
-              "effect": "Report",
-              "input": {
-                "code": "failure-not-asked",
-                "owner": ""
-              }
-            }
-          ]
-        },
-        "The query named is neither asked by that name nor declared": {
-          "emits": [
-            {
-              "effect": "Report",
-              "input": {
-                "code": "failure-unknown",
-                "owner": ""
-              }
-            }
-          ]
-        },
-        "otherwise": {}
-      }
-    },
-    {
-      "from": [
-        "READY"
-      ],
-      "name": "Promise",
-      "onlyIf": [],
-      "when": {
-        "otherwise": {
-          "does": "A query that declares a promise. If the kind of its answer cannot keep it (a structured value, an enumeration or a boolean never can; increasing cannot be kept by a string, nor fresh by a number; an integer can keep both), it is reported as promise-kind. Then, independently, a query that takes an input is reported as promise-input.",
-          "emits": [
-            {
-              "effect": "Report",
-              "input": {
-                "code": "promise-kind",
-                "owner": ""
-              },
-              "onlyWhen": "The kind of the query's answer cannot keep its promise"
-            },
-            {
-              "effect": "Report",
-              "input": {
-                "code": "promise-input",
-                "owner": ""
-              },
-              "onlyWhen": "The query takes an input"
-            }
-          ]
-        }
-      }
-    },
-    {
-      "from": [
-        "READY"
-      ],
-      "name": "Type",
-      "onlyIf": [],
-      "when": {
-        "otherwise": {
-          "does": "A type, on its own (types inside it are given separately). An enumeration with no members is reported as empty-enum, and a oneOf with no variants as empty-one-of. A number type with both a minimum and a maximum, the minimum above the maximum, is reported as min-above-max. Every type replaces the minimum and maximum remembered for the thresholds that follow: those of a number type (if any), none for any other type.",
-          "emits": [
-            {
-              "effect": "Report",
-              "input": {
-                "code": "empty-enum",
-                "owner": ""
-              },
-              "onlyWhen": "The type is an enumeration with no members"
-            },
-            {
-              "effect": "Report",
-              "input": {
-                "code": "empty-one-of",
-                "owner": ""
-              },
-              "onlyWhen": "The type is a oneOf with no variants"
-            },
-            {
-              "effect": "Report",
-              "input": {
-                "code": "min-above-max",
-                "owner": ""
-              },
-              "onlyWhen": "The type is a number type with both a minimum and a maximum, and the minimum is above the maximum"
+              "fresh": [
+                "var",
+                "fresh"
+              ],
+              "hasParams": [
+                "var",
+                "hasParams"
+              ],
+              "increasing": [
+                "var",
+                "increasing"
+              ],
+              "integer": [
+                "var",
+                "integer"
+              ]
             }
           ],
-          "set": {
-            "boundedAbove": {
-              "$ref": "calculation:hasMaximum"
-            },
-            "boundedBelow": {
-              "$ref": "calculation:hasMinimum"
-            },
-            "highest": {
-              "$ref": "calculation:maximum"
-            },
-            "lowest": {
-              "$ref": "calculation:minimum"
-            }
-          }
-        }
-      }
-    }
-  ],
-  "decisions": {},
-  "descriptions": {
-    "component": "Checks, one fact at a time, what a specification declares: types, decision-table columns, promises, failure conditions and names.",
-    "data.boundedAbove": "Whether the number type last given has a maximum.",
-    "data.boundedBelow": "Whether the number type last given has a minimum.",
-    "data.claims": "The names claimed so far, each with what claimed it.",
-    "data.highest": "Its maximum.",
-    "data.kinds": "The kinds of the values seen so far in the column being checked (null not counted), each once.",
-    "data.lowest": "Its minimum.",
-    "effects.Report": "What was just given is wrong, for this reason. `owner` is what had already claimed the name (only for name-collision; empty otherwise)."
-  },
-  "irVersion": 7,
-  "model": {
-    "calculations": {
-      "claimsWithNew": {
-        "description": "The names claimed so far, followed by the name just claimed, with its owner",
-        "output": {
-          "list": {
-            "record": {
-              "name": "string",
-              "owner": "string"
-            }
-          }
-        }
-      },
-      "earlierOwner": {
-        "description": "What had already claimed the name just given; empty when it is not claimed",
-        "output": "string"
-      },
-      "hasMaximum": {
-        "description": "Whether the type just given is a number type with a maximum",
-        "output": "boolean"
-      },
-      "hasMinimum": {
-        "description": "Whether the type just given is a number type with a minimum",
-        "output": "boolean"
-      },
-      "kindsWithCell": {
-        "description": "The kinds seen so far in the column, followed by the kind of the value just given",
-        "output": {
-          "list": "string"
-        }
-      },
-      "maximum": {
-        "description": "The maximum of the type just given when it is a number type with one; 0 otherwise",
-        "output": "number"
-      },
-      "minimum": {
-        "description": "The minimum of the type just given when it is a number type with one; 0 otherwise",
-        "output": "number"
-      },
-      "noKinds": {
-        "description": "An empty list: no kind seen",
-        "output": {
-          "list": "string"
-        }
-      },
-      "reservedClaims": {
-        "description": "A list holding only the name `status`, claimed by reserved",
-        "output": {
-          "list": {
-            "record": {
-              "name": "string",
-              "owner": "string"
-            }
-          }
-        }
-      }
-    },
-    "commands": {
-      "Around": {
-        "value": "number"
-      },
-      "BeginClaims": {},
-      "BeginColumn": {},
-      "Cell": {
-        "kind": [
-          "number",
-          "string",
-          "boolean",
-          "null"
-        ]
-      },
-      "Claim": {
-        "name": {
-          "among": {
-            "data": "claims",
-            "field": "name"
+          "params": {
+            "fresh": "bool",
+            "hasParams": "bool",
+            "increasing": "bool",
+            "integer": "bool"
           },
-          "type": "string"
+          "result": {
+            "list": {
+              "enum": [
+                "fresh-and-increasing",
+                "increasing-not-integer",
+                "promise-with-params"
+              ]
+            }
+          }
         },
-        "owner": [
-          "data",
-          "queries",
-          "asks",
-          "parts",
-          "input"
-        ],
-        "shared": "boolean"
-      },
-      "EndColumn": {},
-      "Failure": {
-        "asked": "boolean",
-        "declared": "boolean",
-        "mayFail": "boolean",
-        "takesInput": "boolean"
-      },
-      "Promise": {
-        "output": [
-          "structured",
-          "enum",
-          "boolean",
-          "string",
-          "integer",
-          "number"
-        ],
-        "promise": [
-          "fresh",
-          "increasing"
-        ],
-        "takesInput": "boolean"
-      },
-      "Type": {
-        "hasMax": "boolean",
-        "hasMin": "boolean",
-        "kind": [
-          "enum",
-          "one-of",
-          "number",
-          "other"
-        ],
-        "max": "number",
-        "members": {
-          "max": 1000,
-          "min": 0,
-          "type": "integer"
-        },
-        "min": "number"
-      }
-    },
-    "data": {
-      "boundedAbove": "boolean",
-      "boundedBelow": "boolean",
-      "claims": {
-        "list": {
-          "record": {
-            "name": "string",
-            "owner": "string"
+        "Row": {
+          "is": [
+            "calc",
+            "row",
+            {
+              "constantCells": [
+                "var",
+                "constantCells"
+              ],
+              "last": [
+                "var",
+                "last"
+              ],
+              "otherwise": [
+                "var",
+                "otherwise"
+              ],
+              "sameColumns": [
+                "var",
+                "sameColumns"
+              ]
+            }
+          ],
+          "params": {
+            "constantCells": "bool",
+            "last": "bool",
+            "otherwise": "bool",
+            "sameColumns": "bool"
+          },
+          "result": {
+            "list": {
+              "enum": [
+                "last-not-otherwise",
+                "otherwise-not-last",
+                "cell-not-constant",
+                "columns-differ"
+              ]
+            }
           }
         }
       },
-      "highest": "number",
-      "kinds": {
-        "list": "string"
-      },
-      "lowest": "number"
-    },
-    "effects": {
-      "Report": {
-        "code": [
-          "empty-enum",
-          "empty-one-of",
-          "min-above-max",
-          "around-outside",
-          "mixed-column",
-          "promise-kind",
-          "promise-input",
-          "failure-unknown",
-          "failure-not-may-fail",
-          "failure-not-asked",
-          "name-collision"
-        ],
-        "owner": "string"
-      }
-    },
-    "init": "READY",
-    "initial": {
-      "boundedAbove": false,
-      "boundedBelow": false,
-      "claims": [],
-      "highest": 0,
-      "kinds": [],
-      "lowest": 0
-    },
-    "queries": {},
-    "states": [
-      "READY"
+      "state": {}
+    }
+  },
+  "entries": {
+    "commands": [],
+    "queries": [
+      "type-check.Promise",
+      "type-check.Row"
     ]
-  }
+  },
+  "irVersion": 8,
+  "notes": {
+    "type-check": "Decides what is wrong with the promises of the outside world and the rows of decision tables.",
+    "type-check.calcs.promise": "The promise of a query of the outside world: whether it promises fresh answers, increasing ones, whether it answers integers, and whether it has parameters. The problems, in this order: promising both fresh and increasing; promising increasing answers that are not integers; promising either one for a query with parameters.",
+    "type-check.calcs.row": "A row of a decision table: whether it is the last row, whether its condition is otherwise, whether every cell is a constant, and whether it has the same columns as the first row. The problems, in this order: the last row is not otherwise; otherwise is not the last row; a cell is not a constant; the columns differ."
+  },
+  "root": "type-check",
+  "sorts": []
 }

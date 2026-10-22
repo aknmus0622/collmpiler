@@ -1,62 +1,63 @@
-import type { Command, CommandOutput, Ports, StateName, TargetSystemAdapter } from "./todos.adapter.contract.ts";
+import type { Ports, TargetSystemAdapter } from "./todos.adapter.contract.ts";
+import { Store } from "../src/store.ts";
 import { Todos } from "../src/todos.ts";
 import type { IdSource } from "../src/todos.ts";
 
 // Import the production code from ../src/ and forward each call to it. No business logic here.
-
 let ports: Ports | undefined;
+let store: Store | undefined;
 let todos: Todos | undefined;
 
-function idsFor(ports: Ports): IdSource {
-  return { newId: () => ports.queries.newId() };
+function start(p: Ports): void {
+  const ids: IdSource = { newId: () => p.ids.NewId() };
+  store = Store.open(p.storage);
+  todos = new Todos(store, ids);
 }
 
-function start(ports: Ports): Todos {
-  return Todos.open(ports.storage, idsFor(ports));
+function stop(): void {
+  store?.close();
+  store = undefined;
+  todos = undefined;
 }
 
-function system(): Todos {
-  if (todos === undefined) {
-    throw new Error("adapter: no system; setupIsolation was not called");
-  }
-  return todos;
+function system(): { store: Store; todos: Todos } {
+  if (!store || !todos) throw new Error("adapter: the system is not set up");
+  return { store, todos };
 }
 
 export const adapter: TargetSystemAdapter = {
   async setupIsolation(p) {
+    stop();
     ports = p;
-    todos = start(p);
+    start(p);
   },
   async teardownIsolation() {
-    const current = todos;
-    todos = undefined;
+    stop();
     ports = undefined;
-    current?.close();
   },
-  async executeCommand(command: Command): Promise<CommandOutput[keyof CommandOutput] | void> {
+  async executeCommand(command) {
+    const { todos } = system();
     switch (command.name) {
       case "Add":
-        return system().add(command.input.title);
+        return todos.add(command.input.title);
       case "Complete":
-        return system().complete(command.input.id);
-      case "List":
-        return system().list(command.input.only);
+        return todos.complete(command.input.id);
       case "Remove":
-        return system().remove(command.input.id);
+        return todos.remove(command.input.id);
     }
   },
-  async getCurrentState(): Promise<StateName> {
-    // The production list has a single state (specification `READY`) and exposes no accessor for it.
-    system();
-    return "READY";
+  async executeQuery(query) {
+    const { store, todos } = system();
+    switch (query.name) {
+      case "List":
+        return todos.list(query.input.only);
+      case "store.Entries":
+        return store.entries();
+    }
   },
   async restartSystem() {
-    if (ports === undefined) {
-      throw new Error("adapter: no system; setupIsolation was not called");
-    }
-    const old = todos;
-    todos = undefined;
-    old?.close();
-    todos = start(ports);
+    if (!ports) throw new Error("adapter: the system is not set up");
+    stop();
+    start(ports);
   },
 };

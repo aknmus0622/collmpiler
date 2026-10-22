@@ -1,9984 +1,1681 @@
 {
- "about": "Cases for the observation-compare grading component (SELF_HOSTING.md §10.3, R3): observations, each compared with itself (keys in another order) and with every one-place change, and answers missing. Inputs only: the expected verdicts are what Stage 0 (packages/cli/src/observe.ts) decides.",
+ "about": "Cases for the observation-compare grading component (SELF_HOSTING.md §10.3, R3), in the 1.0 form: each case is a kind of question (`variant`, an index into VARIANTS in packages/cli/src/v1/agreement.ts, when there are several) and its input. Inputs only: the expected answers are what Stage 0 (packages/cli/src/observe.ts) decides. Kept by people: add a case when a disagreement is found or a function is never executed.",
+ "irVersion": 8,
  "cases": [
   {
-   "expected": {
-    "state": "READY",
-    "effects": []
-   },
-   "actual": {
-    "effects": [],
-    "state": "READY"
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": []
-   },
-   "actual": {
-    "state": "READYx",
-    "effects": []
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": []
-   },
-   "actual": {
-    "state": "EADY",
-    "effects": []
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": []
-   },
-   "actual": {
-    "state": null,
-    "effects": []
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": []
-   },
-   "actual": {
-    "state": "READY",
-    "effects": {}
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": []
-   },
-   "actual": {
-    "state": "READY",
-    "effects": null
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": []
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     null
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "OPEN",
-    "effects": [
-     {
-      "name": "Notify",
-      "payload": {}
-     }
-    ]
-   },
-   "actual": {
-    "effects": [
-     {
-      "name": "Notify",
-      "payload": {}
-     }
-    ],
-    "state": "OPEN"
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "OPEN",
-    "effects": [
-     {
-      "name": "Notify",
-      "payload": {}
-     }
-    ]
-   },
-   "actual": {
-    "state": "OPENx",
-    "effects": [
-     {
-      "name": "Notify",
-      "payload": {}
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "OPEN",
-    "effects": [
-     {
-      "name": "Notify",
-      "payload": {}
-     }
-    ]
-   },
-   "actual": {
-    "state": "PEN",
-    "effects": [
-     {
-      "name": "Notify",
-      "payload": {}
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "OPEN",
-    "effects": [
-     {
-      "name": "Notify",
-      "payload": {}
-     }
-    ]
-   },
-   "actual": {
-    "state": null,
-    "effects": [
-     {
-      "name": "Notify",
-      "payload": {}
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "OPEN",
-    "effects": [
-     {
-      "name": "Notify",
-      "payload": {}
-     }
-    ]
-   },
-   "actual": {
-    "state": "OPEN",
-    "effects": {}
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "OPEN",
-    "effects": [
-     {
-      "name": "Notify",
-      "payload": {}
-     }
-    ]
-   },
-   "actual": {
-    "state": "OPEN",
-    "effects": null
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "OPEN",
-    "effects": [
-     {
-      "name": "Notify",
-      "payload": {}
-     }
-    ]
-   },
-   "actual": {
-    "state": "OPEN",
-    "effects": [
-     {
-      "name": "Notify",
-      "payload": {}
-     },
-     null
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "OPEN",
-    "effects": [
-     {
-      "name": "Notify",
-      "payload": {}
-     }
-    ]
-   },
-   "actual": {
-    "state": "OPEN",
-    "effects": []
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "OPEN",
-    "effects": [
-     {
-      "name": "Notify",
-      "payload": {}
-     }
-    ]
-   },
-   "actual": {
-    "state": "OPEN",
-    "effects": [
-     {
-      "name": "Notify",
-      "payload": {}
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "OPEN",
-    "effects": [
-     {
-      "name": "Notify",
-      "payload": {}
-     }
-    ]
-   },
-   "actual": {
-    "state": "OPEN",
-    "effects": [
-     []
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "OPEN",
-    "effects": [
-     {
-      "name": "Notify",
-      "payload": {}
-     }
-    ]
-   },
-   "actual": {
-    "state": "OPEN",
-    "effects": [
-     null
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "OPEN",
-    "effects": [
-     {
-      "name": "Notify",
-      "payload": {}
-     }
-    ]
-   },
-   "actual": {
-    "state": "OPEN",
-    "effects": [
-     {
-      "name": "Notify",
-      "payload": {},
-      "extra": null
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "OPEN",
-    "effects": [
-     {
-      "name": "Notify",
-      "payload": {}
-     }
-    ]
-   },
-   "actual": {
-    "state": "OPEN",
-    "effects": [
-     {
-      "payload": {}
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "OPEN",
-    "effects": [
-     {
-      "name": "Notify",
-      "payload": {}
-     }
-    ]
-   },
-   "actual": {
-    "state": "OPEN",
-    "effects": [
-     {
-      "name": "Notify"
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "OPEN",
-    "effects": [
-     {
-      "name": "Notify",
-      "payload": {}
-     }
-    ]
-   },
-   "actual": {
-    "state": "OPEN",
-    "effects": [
-     {
-      "name": "Notifyx",
-      "payload": {}
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "OPEN",
-    "effects": [
-     {
-      "name": "Notify",
-      "payload": {}
-     }
-    ]
-   },
-   "actual": {
-    "state": "OPEN",
-    "effects": [
-     {
-      "name": "otify",
-      "payload": {}
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "OPEN",
-    "effects": [
-     {
-      "name": "Notify",
-      "payload": {}
-     }
-    ]
-   },
-   "actual": {
-    "state": "OPEN",
-    "effects": [
-     {
-      "name": null,
-      "payload": {}
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "OPEN",
-    "effects": [
-     {
-      "name": "Notify",
-      "payload": {}
-     }
-    ]
-   },
-   "actual": {
-    "state": "OPEN",
-    "effects": [
-     {
-      "name": "Notify",
-      "payload": []
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "OPEN",
-    "effects": [
-     {
-      "name": "Notify",
-      "payload": {}
-     }
-    ]
-   },
-   "actual": {
-    "state": "OPEN",
-    "effects": [
-     {
-      "name": "Notify",
-      "payload": null
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "OPEN",
-    "effects": [
-     {
-      "name": "Notify",
-      "payload": {}
-     }
-    ]
-   },
-   "actual": {
-    "state": "OPEN",
-    "effects": [
-     {
-      "name": "Notify",
-      "payload": {
-       "extra": null
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ],
-    "state": "PAID"
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAIDx",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "AID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": null,
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": {}
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": null
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     },
-     null
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     },
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     [],
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     null,
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      },
-      "extra": null
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge"
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Chargex",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "harge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": null,
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": []
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": null
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY",
-       "extra": null
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1201,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": "1200",
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": null,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPYx"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "PY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": null
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     []
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     null
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      },
-      "extra": null
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail"
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mailx",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "ail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": null,
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": []
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": null
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ],
-       "extra": null
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b"
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@bx",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": null,
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": {}
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": null
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y",
-        null
-       ]
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "y",
-        "x"
-       ]
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "xx",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        null,
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "yx"
-       ]
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        ""
-       ]
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        "y"
-       ]
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "PAID",
-    "effects": [
-     {
-      "name": "Charge",
-      "payload": {
-       "amount": 1200,
-       "currency": "JPY"
-      }
-     },
-     {
-      "name": "Mail",
-      "payload": {
-       "to": "a@b",
-       "lines": [
-        "x",
-        null
-       ]
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": true
-   },
-   "actual": {
-    "output": true,
-    "effects": [],
-    "state": "READY"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": true
-   },
-   "actual": {
-    "state": "READYx",
-    "effects": [],
-    "output": true
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": true
-   },
-   "actual": {
-    "state": "EADY",
-    "effects": [],
-    "output": true
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": true
-   },
-   "actual": {
-    "state": null,
-    "effects": [],
-    "output": true
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": true
-   },
-   "actual": {
-    "state": "READY",
-    "effects": {},
-    "output": true
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": true
-   },
-   "actual": {
-    "state": "READY",
-    "effects": null,
-    "output": true
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": true
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     null
-    ],
-    "output": true
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": true
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": false
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": true
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": null
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": true
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": 1
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": true
-   },
-   "actual": {
-    "state": "READY",
-    "effects": []
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": []
-   },
-   "actual": {
-    "state": "READY",
-    "effects": []
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": null
-   },
-   "actual": {
-    "output": null,
-    "effects": [],
-    "state": "READY"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": null
-   },
-   "actual": {
-    "state": "READYx",
-    "effects": [],
-    "output": null
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": null
-   },
-   "actual": {
-    "state": "EADY",
-    "effects": [],
-    "output": null
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": null
-   },
-   "actual": {
-    "state": null,
-    "effects": [],
-    "output": null
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": null
-   },
-   "actual": {
-    "state": "READY",
-    "effects": {},
-    "output": null
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": null
-   },
-   "actual": {
-    "state": "READY",
-    "effects": null,
-    "output": null
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": null
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     null
-    ],
-    "output": null
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": null
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": 0
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": null
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": false
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": null
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": ""
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": null
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {}
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": null
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": []
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": null
-   },
-   "actual": {
-    "state": "READY",
-    "effects": []
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": []
-   },
-   "actual": {
-    "state": "READY",
-    "effects": []
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": false
-     }
-    }
-   },
-   "actual": {
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": false
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.Y",
+       "args": {
+        "n": 1
+       }
+      }
+     ],
+     "output": 1
+    },
+    "actual": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.Y",
+       "args": {}
+      }
+     ],
+     "output": null
+    },
+    "answers": false
+   }
+  },
+  {
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {
+        "n": 2
+       }
+      }
+     ],
+     "output": null
+    },
+    "actual": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.Y",
+       "args": {}
+      }
+     ],
+     "output": "ok"
+    },
+    "answers": true
+   }
+  },
+  {
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {
+        "n": 2
+       }
+      }
+     ],
+     "output": 1
+    },
+    "actual": {
+     "state": null,
+     "effects": [],
+     "output": {
+      "r": "x"
      }
     },
-    "effects": [],
-    "state": "READY"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": false
-     }
-    }
-   },
-   "actual": {
-    "state": "READYx",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": false
-     }
-    }
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": false
-     }
-    }
-   },
-   "actual": {
-    "state": "EADY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": false
-     }
-    }
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": false
-     }
-    }
-   },
-   "actual": {
-    "state": null,
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": false
-     }
-    }
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": false
-     }
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": {},
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": false
-     }
-    }
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": false
-     }
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": null,
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": false
-     }
-    }
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": false
-     }
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     null
-    ],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": false
-     }
-    }
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": false
-     }
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": []
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": false
-     }
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": null
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": false
-     }
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": false
-     },
-     "extra": null
-    }
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": false
-     }
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": false
-     }
-    }
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": false
-     }
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201
-    }
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": false
-     }
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 202,
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": false
-     }
-    }
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": false
-     }
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": "201",
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": false
-     }
-    }
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": false
-     }
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": null,
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": false
-     }
-    }
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": false
-     }
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": []
-    }
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": false
-     }
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": null
-    }
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": false
-     }
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": false,
-      "extra": null
-     }
-    }
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": false
-     }
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "title": "a.b|c",
-      "done": false
-     }
-    }
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": false
-     }
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "done": false
-     }
-    }
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": false
-     }
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": "a.b|c"
-     }
-    }
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": false
-     }
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1x",
-      "title": "a.b|c",
-      "done": false
-     }
-    }
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": false
-     }
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "1",
-      "title": "a.b|c",
-      "done": false
-     }
-    }
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": false
-     }
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": null,
-      "title": "a.b|c",
-      "done": false
-     }
-    }
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": false
-     }
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": "a.b|cx",
-      "done": false
-     }
-    }
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": false
-     }
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": ".b|c",
-      "done": false
-     }
-    }
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": false
-     }
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": null,
-      "done": false
-     }
-    }
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": false
-     }
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": true
-     }
-    }
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": false
-     }
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": null
-     }
-    }
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": false
-     }
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": 0
-     }
-    }
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "status": 201,
-     "body": {
-      "id": "t1",
-      "title": "a.b|c",
-      "done": false
-     }
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": []
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": []
-   },
-   "actual": {
-    "state": "READY",
-    "effects": []
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "output": [
-     1,
-     2,
-     3
-    ],
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "state": "READY"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READYx",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "EADY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": null,
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": {},
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": null,
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     },
-     null
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     []
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     null
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      },
-      "extra": null
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     {
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved"
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Savedx",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "odos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": null,
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": []
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": null
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null,
-       "extra": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       }
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": [],
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": null,
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": [],
-        "extra": null
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1"
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1x",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": null,
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": {}
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": null
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": [
-         null
-        ]
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": 0
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": false
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": ""
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": {}
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": []
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": {}
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": null
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3,
-     null
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     2,
-     3
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     3,
-     2,
-     1
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     2,
-     2,
-     3
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     "1",
-     2,
-     3
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     null,
-     2,
-     3
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     3,
-     3
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     "2",
-     3
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     null,
-     3
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     4
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     "3"
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     null
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ],
-    "output": [
-     1,
-     2,
-     3
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     {
-      "name": "todos.Saved",
-      "payload": {
-       "item": {
-        "id": "1",
-        "tags": []
-       },
-       "note": null
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "output": "ok",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "state": "DONE"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONEx",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "ONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": null,
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": {},
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": null,
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     },
-     null
-    ],
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [],
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [
-     []
-    ],
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [
-     null
-    ],
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
+    "answers": false
+   }
+  },
+  {
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {
+        "n": 1
        }
       },
-      "extra": null
-     }
-    ],
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [
-     {
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E"
-     }
-    ],
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "Ex",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": null,
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": []
-     }
-    ],
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": null
-     }
-    ],
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       },
-       "extra": null
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {}
-     }
-    ],
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": []
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": null
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        },
-        "extra": null
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {}
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": []
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": null
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ],
-         "extra": null
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {}
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": {}
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": null
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          },
-          null
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 2.5
-          },
-          {
-           "a": 1
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          [],
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          null,
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1,
-           "extra": null
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {},
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 2
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": "1"
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": null
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          []
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          null
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5,
-           "extra": null
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {}
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 3.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": "2.5"
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": null
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "okx"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "k"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": null
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ],
-    "output": "ok"
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ]
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ]
-   },
-   "actual": {
-    "state": "DONE",
-    "effects": [
-     {
-      "name": "E",
-      "payload": {
-       "nested": {
-        "deep": {
-         "list": [
-          {
-           "a": 1
-          },
-          {
-           "a": 2.5
-          }
-         ]
-        }
-       }
-      }
-     }
-    ]
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "a.b": 1,
-     "a": {
-      "b": 1
-     }
-    }
-   },
-   "actual": {
-    "output": {
-     "a.b": 1,
-     "a": {
-      "b": 1
+      {
+       "port": "a.X",
+       "args": {
+        "n": 2
+       }
+      }
+     ],
+     "output": {
+      "r": "x"
      }
     },
-    "effects": [],
-    "state": "READY"
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "a.b": 1,
-     "a": {
-      "b": 1
-     }
-    }
-   },
-   "actual": {
-    "state": "READYx",
-    "effects": [],
-    "output": {
-     "a.b": 1,
-     "a": {
-      "b": 1
-     }
-    }
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "a.b": 1,
-     "a": {
-      "b": 1
-     }
-    }
-   },
-   "actual": {
-    "state": "EADY",
-    "effects": [],
-    "output": {
-     "a.b": 1,
-     "a": {
-      "b": 1
-     }
-    }
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "a.b": 1,
-     "a": {
-      "b": 1
-     }
-    }
-   },
-   "actual": {
-    "state": null,
-    "effects": [],
-    "output": {
-     "a.b": 1,
-     "a": {
-      "b": 1
-     }
-    }
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "a.b": 1,
-     "a": {
-      "b": 1
-     }
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": {},
-    "output": {
-     "a.b": 1,
-     "a": {
-      "b": 1
-     }
-    }
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "a.b": 1,
-     "a": {
-      "b": 1
-     }
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": null,
-    "output": {
-     "a.b": 1,
-     "a": {
-      "b": 1
-     }
-    }
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "a.b": 1,
-     "a": {
-      "b": 1
-     }
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     null
-    ],
-    "output": {
-     "a.b": 1,
-     "a": {
-      "b": 1
-     }
-    }
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "a.b": 1,
-     "a": {
-      "b": 1
-     }
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": []
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "a.b": 1,
-     "a": {
-      "b": 1
-     }
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": null
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "a.b": 1,
-     "a": {
-      "b": 1
-     }
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "a.b": 1,
-     "a": {
-      "b": 1
-     },
-     "extra": null
-    }
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "a.b": 1,
-     "a": {
-      "b": 1
-     }
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "a": {
-      "b": 1
-     }
-    }
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "a.b": 1,
-     "a": {
-      "b": 1
-     }
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "a.b": 1
-    }
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "a.b": 1,
-     "a": {
-      "b": 1
-     }
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "a.b": 2,
-     "a": {
-      "b": 1
-     }
-    }
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "a.b": 1,
-     "a": {
-      "b": 1
-     }
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "a.b": "1",
-     "a": {
-      "b": 1
-     }
-    }
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "a.b": 1,
-     "a": {
-      "b": 1
-     }
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "a.b": null,
-     "a": {
-      "b": 1
-     }
-    }
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "a.b": 1,
-     "a": {
-      "b": 1
-     }
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "a.b": 1,
-     "a": []
-    }
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "a.b": 1,
-     "a": {
-      "b": 1
-     }
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "a.b": 1,
-     "a": null
-    }
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "a.b": 1,
-     "a": {
-      "b": 1
-     }
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "a.b": 1,
-     "a": {
-      "b": 1,
-      "extra": null
-     }
-    }
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "a.b": 1,
-     "a": {
-      "b": 1
-     }
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "a.b": 1,
-     "a": {}
-    }
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "a.b": 1,
-     "a": {
-      "b": 1
-     }
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "a.b": 1,
-     "a": {
-      "b": 2
-     }
-    }
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "a.b": 1,
-     "a": {
-      "b": 1
-     }
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "a.b": 1,
-     "a": {
-      "b": "1"
-     }
-    }
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "a.b": 1,
-     "a": {
-      "b": 1
-     }
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "a.b": 1,
-     "a": {
-      "b": null
-     }
-    }
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "a.b": 1,
-     "a": {
-      "b": 1
-     }
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": []
-   },
-   "answers": true
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": []
-   },
-   "actual": {
-    "state": "READY",
-    "effects": []
-   },
-   "answers": false
-  },
-  {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "t": "0",
-     "f": false
-    }
-   },
-   "actual": {
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "t": "0",
-     "f": false
+    "actual": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {}
+      }
+     ],
+     "output": null
     },
-    "effects": [],
-    "state": "READY"
-   },
-   "answers": true
+    "answers": false
+   }
   },
   {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "t": "0",
-     "f": false
-    }
-   },
-   "actual": {
-    "state": "READYx",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "t": "0",
-     "f": false
-    }
-   },
-   "answers": true
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {}
+      },
+      {
+       "port": "a.Y",
+       "args": {
+        "n": 1
+       }
+      }
+     ],
+     "output": "ok"
+    },
+    "actual": {
+     "state": null,
+     "effects": [],
+     "output": null
+    },
+    "answers": false
+   }
   },
   {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "t": "0",
-     "f": false
-    }
-   },
-   "actual": {
-    "state": "EADY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "t": "0",
-     "f": false
-    }
-   },
-   "answers": true
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.Y",
+       "args": {
+        "n": 1
+       }
+      }
+     ],
+     "output": {
+      "r": "x"
+     }
+    },
+    "actual": {
+     "state": null,
+     "effects": [],
+     "output": null
+    },
+    "answers": true
+   }
   },
   {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "t": "0",
-     "f": false
-    }
-   },
-   "actual": {
-    "state": null,
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "t": "0",
-     "f": false
-    }
-   },
-   "answers": true
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.Y",
+       "args": {
+        "n": 2
+       }
+      }
+     ],
+     "output": {
+      "r": "x"
+     }
+    },
+    "actual": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.Y",
+       "args": {}
+      },
+      {
+       "port": "a.X",
+       "args": {}
+      }
+     ],
+     "output": {
+      "r": "x"
+     }
+    },
+    "answers": true
+   }
   },
   {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "t": "0",
-     "f": false
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": {},
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "t": "0",
-     "f": false
-    }
-   },
-   "answers": true
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {
+        "n": 2
+       }
+      }
+     ],
+     "output": "ok"
+    },
+    "actual": {
+     "state": null,
+     "effects": [],
+     "output": 1
+    },
+    "answers": true
+   }
   },
   {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "t": "0",
-     "f": false
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": null,
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "t": "0",
-     "f": false
-    }
-   },
-   "answers": true
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {
+        "n": 2
+       }
+      }
+     ],
+     "output": null
+    },
+    "actual": {
+     "state": null,
+     "effects": [],
+     "output": {
+      "r": "x"
+     }
+    },
+    "answers": true
+   }
   },
   {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "t": "0",
-     "f": false
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [
-     null
-    ],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "t": "0",
-     "f": false
-    }
-   },
-   "answers": true
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {}
+      }
+     ],
+     "output": "ok"
+    },
+    "actual": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.Y",
+       "args": {
+        "n": 1
+       }
+      }
+     ],
+     "output": {
+      "r": "x"
+     }
+    },
+    "answers": true
+   }
   },
   {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "t": "0",
-     "f": false
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": []
-   },
-   "answers": true
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.Y",
+       "args": {
+        "n": 2
+       }
+      },
+      {
+       "port": "a.X",
+       "args": {
+        "n": 1
+       }
+      }
+     ],
+     "output": "ok"
+    },
+    "actual": {
+     "state": null,
+     "effects": [],
+     "output": 1
+    },
+    "answers": false
+   }
   },
   {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "t": "0",
-     "f": false
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": null
-   },
-   "answers": true
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [],
+     "output": "ok"
+    },
+    "actual": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {
+        "n": 2
+       }
+      },
+      {
+       "port": "a.X",
+       "args": {
+        "n": 1
+       }
+      }
+     ],
+     "output": "ok"
+    },
+    "answers": false
+   }
   },
   {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "t": "0",
-     "f": false
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "t": "0",
-     "f": false,
-     "extra": null
-    }
-   },
-   "answers": true
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.Y",
+       "args": {
+        "n": 2
+       }
+      },
+      {
+       "port": "a.Y",
+       "args": {
+        "n": 2
+       }
+      }
+     ],
+     "output": 1
+    },
+    "actual": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.Y",
+       "args": {
+        "n": 1
+       }
+      }
+     ],
+     "output": null
+    },
+    "answers": true
+   }
   },
   {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "t": "0",
-     "f": false
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "w": -1,
-     "s": "",
-     "t": "0",
-     "f": false
-    }
-   },
-   "answers": true
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {
+        "n": 2
+       }
+      }
+     ],
+     "output": null
+    },
+    "actual": {
+     "state": null,
+     "effects": [],
+     "output": {
+      "r": "x"
+     }
+    },
+    "answers": false
+   }
   },
   {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "t": "0",
-     "f": false
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "s": "",
-     "t": "0",
-     "f": false
-    }
-   },
-   "answers": true
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.Y",
+       "args": {
+        "n": 2
+       }
+      }
+     ],
+     "output": 1
+    },
+    "actual": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.Y",
+       "args": {}
+      }
+     ],
+     "output": "ok"
+    },
+    "answers": true
+   }
   },
   {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "t": "0",
-     "f": false
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "t": "0",
-     "f": false
-    }
-   },
-   "answers": true
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.Y",
+       "args": {
+        "n": 2
+       }
+      },
+      {
+       "port": "a.Y",
+       "args": {}
+      }
+     ],
+     "output": 1
+    },
+    "actual": {
+     "state": null,
+     "effects": [],
+     "output": {
+      "r": "x"
+     }
+    },
+    "answers": true
+   }
   },
   {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "t": "0",
-     "f": false
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "f": false
-    }
-   },
-   "answers": true
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {
+        "n": 2
+       }
+      }
+     ],
+     "output": 1
+    },
+    "actual": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.Y",
+       "args": {
+        "n": 1
+       }
+      },
+      {
+       "port": "a.X",
+       "args": {
+        "n": 1
+       }
+      }
+     ],
+     "output": "ok"
+    },
+    "answers": true
+   }
   },
   {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "t": "0",
-     "f": false
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "t": "0"
-    }
-   },
-   "answers": true
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.Y",
+       "args": {}
+      }
+     ],
+     "output": null
+    },
+    "actual": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.Y",
+       "args": {}
+      },
+      {
+       "port": "a.X",
+       "args": {
+        "n": 2
+       }
+      }
+     ],
+     "output": null
+    },
+    "answers": true
+   }
   },
   {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "t": "0",
-     "f": false
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 1,
-     "w": -1,
-     "s": "",
-     "t": "0",
-     "f": false
-    }
-   },
-   "answers": true
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {
+        "n": 1
+       }
+      }
+     ],
+     "output": 1
+    },
+    "actual": {
+     "state": null,
+     "effects": [],
+     "output": null
+    },
+    "answers": true
+   }
   },
   {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "t": "0",
-     "f": false
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": "0",
-     "w": -1,
-     "s": "",
-     "t": "0",
-     "f": false
-    }
-   },
-   "answers": true
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.Y",
+       "args": {
+        "n": 2
+       }
+      }
+     ],
+     "output": {
+      "r": "x"
+     }
+    },
+    "actual": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {
+        "n": 2
+       }
+      },
+      {
+       "port": "a.Y",
+       "args": {
+        "n": 2
+       }
+      }
+     ],
+     "output": 1
+    },
+    "answers": false
+   }
   },
   {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "t": "0",
-     "f": false
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": null,
-     "w": -1,
-     "s": "",
-     "t": "0",
-     "f": false
-    }
-   },
-   "answers": true
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {}
+      },
+      {
+       "port": "a.X",
+       "args": {
+        "n": 1
+       }
+      }
+     ],
+     "output": "ok"
+    },
+    "actual": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {
+        "n": 1
+       }
+      },
+      {
+       "port": "a.Y",
+       "args": {}
+      }
+     ],
+     "output": 1
+    },
+    "answers": false
+   }
   },
   {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "t": "0",
-     "f": false
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": 0,
-     "s": "",
-     "t": "0",
-     "f": false
-    }
-   },
-   "answers": true
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.Y",
+       "args": {
+        "n": 1
+       }
+      },
+      {
+       "port": "a.Y",
+       "args": {
+        "n": 2
+       }
+      }
+     ],
+     "output": "ok"
+    },
+    "actual": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.Y",
+       "args": {
+        "n": 2
+       }
+      }
+     ],
+     "output": 1
+    },
+    "answers": true
+   }
   },
   {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "t": "0",
-     "f": false
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": "-1",
-     "s": "",
-     "t": "0",
-     "f": false
-    }
-   },
-   "answers": true
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.Y",
+       "args": {}
+      }
+     ],
+     "output": null
+    },
+    "actual": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {}
+      },
+      {
+       "port": "a.X",
+       "args": {
+        "n": 1
+       }
+      }
+     ],
+     "output": 1
+    },
+    "answers": true
+   }
   },
   {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "t": "0",
-     "f": false
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": null,
-     "s": "",
-     "t": "0",
-     "f": false
-    }
-   },
-   "answers": true
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.Y",
+       "args": {}
+      },
+      {
+       "port": "a.Y",
+       "args": {
+        "n": 2
+       }
+      }
+     ],
+     "output": {
+      "r": "x"
+     }
+    },
+    "actual": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.Y",
+       "args": {}
+      }
+     ],
+     "output": "ok"
+    },
+    "answers": false
+   }
   },
   {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "t": "0",
-     "f": false
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "x",
-     "t": "0",
-     "f": false
-    }
-   },
-   "answers": true
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {
+        "n": 2
+       }
+      }
+     ],
+     "output": {
+      "r": "x"
+     }
+    },
+    "actual": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {
+        "n": 1
+       }
+      }
+     ],
+     "output": {
+      "r": "x"
+     }
+    },
+    "answers": false
+   }
   },
   {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "t": "0",
-     "f": false
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": 0,
-     "t": "0",
-     "f": false
-    }
-   },
-   "answers": true
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.Y",
+       "args": {
+        "n": 1
+       }
+      }
+     ],
+     "output": null
+    },
+    "actual": {
+     "state": null,
+     "effects": [],
+     "output": 1
+    },
+    "answers": true
+   }
   },
   {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "t": "0",
-     "f": false
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": null,
-     "t": "0",
-     "f": false
-    }
-   },
-   "answers": true
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {
+        "n": 1
+       }
+      },
+      {
+       "port": "a.X",
+       "args": {
+        "n": 2
+       }
+      }
+     ],
+     "output": 1
+    },
+    "actual": {
+     "state": null,
+     "effects": [],
+     "output": 1
+    },
+    "answers": true
+   }
   },
   {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "t": "0",
-     "f": false
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "t": "0x",
-     "f": false
-    }
-   },
-   "answers": true
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {
+        "n": 1
+       }
+      },
+      {
+       "port": "a.X",
+       "args": {
+        "n": 1
+       }
+      }
+     ],
+     "output": 1
+    },
+    "actual": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.Y",
+       "args": {}
+      }
+     ],
+     "output": null
+    },
+    "answers": false
+   }
   },
   {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "t": "0",
-     "f": false
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "t": "",
-     "f": false
-    }
-   },
-   "answers": true
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {
+        "n": 2
+       }
+      }
+     ],
+     "output": 1
+    },
+    "actual": {
+     "state": null,
+     "effects": [],
+     "output": "ok"
+    },
+    "answers": false
+   }
   },
   {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "t": "0",
-     "f": false
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "t": null,
-     "f": false
-    }
-   },
-   "answers": true
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [],
+     "output": null
+    },
+    "actual": {
+     "state": null,
+     "effects": [],
+     "output": null
+    },
+    "answers": false
+   }
   },
   {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "t": "0",
-     "f": false
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "t": "0",
-     "f": true
-    }
-   },
-   "answers": true
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {}
+      }
+     ],
+     "output": {
+      "r": "x"
+     }
+    },
+    "actual": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {}
+      },
+      {
+       "port": "a.X",
+       "args": {
+        "n": 1
+       }
+      }
+     ],
+     "output": {
+      "r": "x"
+     }
+    },
+    "answers": false
+   }
   },
   {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "t": "0",
-     "f": false
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "t": "0",
-     "f": null
-    }
-   },
-   "answers": true
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {}
+      },
+      {
+       "port": "a.X",
+       "args": {}
+      }
+     ],
+     "output": null
+    },
+    "actual": {
+     "state": null,
+     "effects": [],
+     "output": null
+    },
+    "answers": true
+   }
   },
   {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "t": "0",
-     "f": false
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "t": "0",
-     "f": 0
-    }
-   },
-   "answers": true
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [],
+     "output": {
+      "r": "x"
+     }
+    },
+    "actual": {
+     "state": null,
+     "effects": [],
+     "output": "ok"
+    },
+    "answers": true
+   }
   },
   {
-   "expected": {
-    "state": "READY",
-    "effects": [],
-    "output": {
-     "v": 0,
-     "w": -1,
-     "s": "",
-     "t": "0",
-     "f": false
-    }
-   },
-   "actual": {
-    "state": "READY",
-    "effects": []
-   },
-   "answers": true
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.Y",
+       "args": {
+        "n": 1
+       }
+      }
+     ],
+     "output": "ok"
+    },
+    "actual": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {
+        "n": 1
+       }
+      },
+      {
+       "port": "a.Y",
+       "args": {}
+      }
+     ],
+     "output": "ok"
+    },
+    "answers": true
+   }
   },
   {
-   "expected": {
-    "state": "READY",
-    "effects": []
-   },
-   "actual": {
-    "state": "READY",
-    "effects": []
-   },
-   "answers": false
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [],
+     "output": null
+    },
+    "actual": {
+     "state": null,
+     "effects": [],
+     "output": {
+      "r": "x"
+     }
+    },
+    "answers": true
+   }
+  },
+  {
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.Y",
+       "args": {}
+      }
+     ],
+     "output": null
+    },
+    "actual": {
+     "state": null,
+     "effects": [],
+     "output": "ok"
+    },
+    "answers": false
+   }
+  },
+  {
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {}
+      }
+     ],
+     "output": {
+      "r": "x"
+     }
+    },
+    "actual": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {
+        "n": 2
+       }
+      }
+     ],
+     "output": {
+      "r": "x"
+     }
+    },
+    "answers": true
+   }
+  },
+  {
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.Y",
+       "args": {}
+      },
+      {
+       "port": "a.Y",
+       "args": {}
+      }
+     ],
+     "output": 1
+    },
+    "actual": {
+     "state": null,
+     "effects": [],
+     "output": "ok"
+    },
+    "answers": true
+   }
+  },
+  {
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.Y",
+       "args": {
+        "n": 2
+       }
+      }
+     ],
+     "output": "ok"
+    },
+    "actual": {
+     "state": null,
+     "effects": [],
+     "output": null
+    },
+    "answers": false
+   }
+  },
+  {
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.Y",
+       "args": {}
+      }
+     ],
+     "output": 1
+    },
+    "actual": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.Y",
+       "args": {
+        "n": 1
+       }
+      }
+     ],
+     "output": "ok"
+    },
+    "answers": false
+   }
+  },
+  {
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {
+        "n": 1
+       }
+      },
+      {
+       "port": "a.Y",
+       "args": {
+        "n": 2
+       }
+      }
+     ],
+     "output": {
+      "r": "x"
+     }
+    },
+    "actual": {
+     "state": null,
+     "effects": [],
+     "output": {
+      "r": "x"
+     }
+    },
+    "answers": true
+   }
+  },
+  {
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [],
+     "output": "ok"
+    },
+    "actual": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {}
+      },
+      {
+       "port": "a.Y",
+       "args": {}
+      }
+     ],
+     "output": 1
+    },
+    "answers": false
+   }
+  },
+  {
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {
+        "n": 2
+       }
+      },
+      {
+       "port": "a.Y",
+       "args": {}
+      }
+     ],
+     "output": {
+      "r": "x"
+     }
+    },
+    "actual": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.Y",
+       "args": {
+        "n": 2
+       }
+      },
+      {
+       "port": "a.Y",
+       "args": {
+        "n": 1
+       }
+      }
+     ],
+     "output": null
+    },
+    "answers": true
+   }
+  },
+  {
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.Y",
+       "args": {
+        "n": 2
+       }
+      }
+     ],
+     "output": 1
+    },
+    "actual": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {
+        "n": 2
+       }
+      },
+      {
+       "port": "a.Y",
+       "args": {
+        "n": 2
+       }
+      }
+     ],
+     "output": "ok"
+    },
+    "answers": false
+   }
+  },
+  {
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {
+        "n": 1
+       }
+      }
+     ],
+     "output": {
+      "r": "x"
+     }
+    },
+    "actual": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {}
+      }
+     ],
+     "output": "ok"
+    },
+    "answers": false
+   }
+  },
+  {
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {
+        "n": 2
+       }
+      }
+     ],
+     "output": {
+      "r": "x"
+     }
+    },
+    "actual": {
+     "state": null,
+     "effects": [],
+     "output": "ok"
+    },
+    "answers": false
+   }
+  },
+  {
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {
+        "n": 2
+       }
+      },
+      {
+       "port": "a.Y",
+       "args": {
+        "n": 1
+       }
+      }
+     ],
+     "output": null
+    },
+    "actual": {
+     "state": null,
+     "effects": [],
+     "output": 1
+    },
+    "answers": true
+   }
+  },
+  {
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [],
+     "output": "ok"
+    },
+    "actual": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {
+        "n": 1
+       }
+      },
+      {
+       "port": "a.Y",
+       "args": {}
+      }
+     ],
+     "output": {
+      "r": "x"
+     }
+    },
+    "answers": true
+   }
+  },
+  {
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {}
+      }
+     ],
+     "output": {
+      "r": "x"
+     }
+    },
+    "actual": {
+     "state": null,
+     "effects": [],
+     "output": {
+      "r": "x"
+     }
+    },
+    "answers": true
+   }
+  },
+  {
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {}
+      },
+      {
+       "port": "a.Y",
+       "args": {
+        "n": 1
+       }
+      }
+     ],
+     "output": 1
+    },
+    "actual": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {
+        "n": 1
+       }
+      }
+     ],
+     "output": "ok"
+    },
+    "answers": true
+   }
+  },
+  {
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [],
+     "output": {
+      "r": "x"
+     }
+    },
+    "actual": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {}
+      },
+      {
+       "port": "a.X",
+       "args": {
+        "n": 2
+       }
+      }
+     ],
+     "output": null
+    },
+    "answers": true
+   }
+  },
+  {
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.Y",
+       "args": {
+        "n": 1
+       }
+      }
+     ],
+     "output": {
+      "r": "x"
+     }
+    },
+    "actual": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {
+        "n": 1
+       }
+      }
+     ],
+     "output": 1
+    },
+    "answers": false
+   }
+  },
+  {
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [],
+     "output": {
+      "r": "x"
+     }
+    },
+    "actual": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {
+        "n": 2
+       }
+      },
+      {
+       "port": "a.Y",
+       "args": {
+        "n": 2
+       }
+      }
+     ],
+     "output": {
+      "r": "x"
+     }
+    },
+    "answers": true
+   }
+  },
+  {
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.Y",
+       "args": {
+        "n": 2
+       }
+      }
+     ],
+     "output": 1
+    },
+    "actual": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {
+        "n": 1
+       }
+      },
+      {
+       "port": "a.X",
+       "args": {}
+      }
+     ],
+     "output": 1
+    },
+    "answers": false
+   }
+  },
+  {
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [],
+     "output": 1
+    },
+    "actual": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {
+        "n": 1
+       }
+      }
+     ],
+     "output": "ok"
+    },
+    "answers": false
+   }
+  },
+  {
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [],
+     "output": {
+      "r": "x"
+     }
+    },
+    "actual": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {
+        "n": 2
+       }
+      }
+     ],
+     "output": 1
+    },
+    "answers": true
+   }
+  },
+  {
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {
+        "n": 2
+       }
+      },
+      {
+       "port": "a.X",
+       "args": {
+        "n": 1
+       }
+      }
+     ],
+     "output": {
+      "r": "x"
+     }
+    },
+    "actual": {
+     "state": null,
+     "effects": [],
+     "output": "ok"
+    },
+    "answers": false
+   }
+  },
+  {
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {}
+      },
+      {
+       "port": "a.Y",
+       "args": {
+        "n": 2
+       }
+      }
+     ],
+     "output": "ok"
+    },
+    "actual": {
+     "state": null,
+     "effects": [],
+     "output": "ok"
+    },
+    "answers": false
+   }
+  },
+  {
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [],
+     "output": {
+      "r": "x"
+     }
+    },
+    "actual": {
+     "state": null,
+     "effects": [],
+     "output": "ok"
+    },
+    "answers": false
+   }
+  },
+  {
+   "input": {
+    "expected": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.Y",
+       "args": {
+        "n": 2
+       }
+      }
+     ],
+     "output": "ok"
+    },
+    "actual": {
+     "state": null,
+     "effects": [
+      {
+       "port": "a.X",
+       "args": {}
+      }
+     ],
+     "output": 1
+    },
+    "answers": false
+   }
   }
  ]
 }

@@ -1,17 +1,17 @@
 # A to-do API
 
 A to-do list behind an HTTP API, taken all the way through with `clp`. The spec is written by a person. The
-interpretations are derived by an LLM. The list (`src/todoList.ts` and friends) **and the HTTP server**
-(`src/httpServer.ts`, `src/todoApi.ts`, `src/apiResponses.ts`) are written by agents and verified, the server over
-real HTTP. Only the composition root (`server/main.ts`: a real identifier source and a port) is written by a person.
+interpretations are derived by an LLM. The list (`src/todo-list.ts`, `src/todo-rules.ts` and friends) **and the HTTP
+server** (`src/todo-server.ts`, `src/todo-api.ts`) are written by agents and verified, the server over real HTTP. Only
+the composition root (`server/main.ts`: a real identifier source and a port) is written by a person.
 
 ```text
 examples/todo-ts/
-├── specs/    todo-item.* (one item: OPEN → DONE), todos.* (the list, which contains many items) and todo-api.*
-│             (the API, which contains the list): components and decisions written by a person, interpretations derived
+├── specs/    todos.* (the list) and todo-api.* (the API, which contains the list): Layer 1 written by a person,
+│             interpretations derived
 ├── src/      the list and the HTTP server, written by agents
 ├── clp/      the test side, generated (todo-api.adapter.ts starts the server and sends requests with fetch)
-└── server/   main.ts: gives the server its dependency and a port (written by a person, 9 lines)
+└── server/   main.ts: gives the server its dependency and a port (written by a person, 8 lines)
 ```
 
 ```bash
@@ -27,6 +27,24 @@ pnpm exec clp verify --out .     # verify both components (the API over HTTP, 50
 | `POST /todos/:id/complete` | `CompleteTodo` | `Complete` | 200, 404, 409 |
 | `DELETE /todos/:id` | `DeleteTodo` | `Remove` | 204, 404 |
 | `GET /todos?only=all\|open\|done` | `GetTodos` | `List` | 200 with the items, in the order they were added |
+
+## In the 1.0 notation
+
+The list is `service("A to-do list. ...", { state: { items: List<Todo>() }, commands: { Add(title: string): { result:
+"created" | "invalid"; todo: Todo | null } { return does.add("...") }, ... } })`: what each command takes and answers
+is code, what it does is a sentence. Identifiers come from the outside world, `external(..., { queries: { NewId:
+(): TodoId => answer({ fresh: true }) } })`. The API calls the list's commands (so it contains the list) and gives
+each command a route; the status codes are in its sentences, so they are verified.
+
+The 0.3 version made one item a component of its own (`many(TodoItem, by("id"))`). In 1.0 that is not a component:
+many items are state (`List<Todo>`), and an item's life is in the expressions of the list's interpretation, which
+are the IR the implementing agent reads.
+
+Both interpretations were derived with two sessions each and accepted; `clp apply` wrote the list and then the API
+(design, wiring, implementation) from nothing, and both passed. `server/main.ts` was rewritten against the new
+production code (`startTodoServer`).
+
+The sections below are the history of this example in the 0.3 notation (removed since).
 
 ## One item as a component (1.0, N5)
 

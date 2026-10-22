@@ -1,18 +1,14 @@
 import { parseArgs } from "node:util";
 import { readAssets } from "../assets.ts";
-import { accept, describeDifference, interpret } from "../interpret.ts";
 import { commandStrategy } from "../strategy.ts";
-import { resolve } from "node:path";
 import { accept8, interpret8 } from "../v1/interpret.ts";
 import { describeDifference8 } from "../v1/compare.ts";
-import { isV1Specs } from "../v1/prepare.ts";
 
 export const summary = "解釈 (Layer 2) を LLM に導かせる。--accept で確定する";
 export const usage = `clp interpret --agent "<command>" [--specs <dir>] [--component <name>] [--sessions <n>] [options]
 clp interpret --accept [--specs <dir>] [--component <name>]
 
-  人が書くのは Layer 1（決定表とコンポーネント）だけです。Layer 1 が文のままにした所の構造と、文の意味を、
-  LLM が解釈として導きます。導いたものは <名前>.interpretation.draft.ts に書き出され、確定するまで使われません。
+  人が書くのは Layer 1 だけです。Layer 1 が文のままにした所の中身（式）を、LLM が解釈として導きます。導いたものは <名前>.interpretation.draft.ts に書き出され、確定するまで使われません。
   解釈が無いか、Layer 1 のあとで古くなっているコンポーネントが対象です（どれも新しければ、何もしません）。
 
   --agent "<command>"  エージェントを起動するコマンド
@@ -47,9 +43,8 @@ const { values } = parseArgs({
   },
 });
 
-const v1 = isV1Specs(resolve(process.cwd(), values.specs));
 if (values.accept) {
-  const { accepted, problems } = await (v1 ? accept8 : accept)({ specs: values.specs, component: values.component });
+  const { accepted, problems } = await accept8({ specs: values.specs, component: values.component });
   for (const file of accepted) console.error(`確定しました: ${file}`);
   for (const problem of problems) console.error(`error[not-accepted] ${problem}`);
   if (accepted.length === 0 && problems.length === 0) console.error("確定するものはありません（どの解釈も、いまの Layer 1 のものです）");
@@ -59,7 +54,7 @@ if (values.accept) {
     console.error(`エージェントを指定してください (--agent)。確定するなら --accept です\n\n${usage}`);
     process.exit(2);
   }
-  const result = await (v1 ? interpret8 : interpret)({
+  const result = await interpret8({
     specs: values.specs,
     component: values.component,
     strategy: commandStrategy(values.agent, { transcriptDir: values.transcripts, ...(values["agent-timeout"] === undefined ? {} : { timeoutMs: Number(values["agent-timeout"]) * 1000 }) }),
@@ -73,14 +68,13 @@ if (values.accept) {
   if (result.status === "interpreted") {
     console.error(`\n解釈を書き出しました: ${result.draft}`);
     if (result.updates) console.error(`いまの解釈 (${result.updates}) を、Layer 1 の変更に合わせて直したものです。`);
-    if ("changed" in result && result.changed) console.error(`構造が変わったもの: ${result.changed.join(", ") || "なし"}（変わらなかったもの: ${"unchanged" in result ? result.unchanged : 0}。意味の関数の変更は含みません）`);
     for (const comparison of result.comparisons ?? []) {
       if (comparison.status === "failed") console.error(`\n${comparison.session} つ目の解釈は導けなかったので、比べていません。`);
       else if (comparison.differences.length === 0) console.error(`\n${comparison.session} つ目の解釈は、試したコマンド列のすべてで、1つ目と一致しました。`);
-      for (const difference of comparison.differences) console.error(`\n${v1 ? describeDifference8(difference as never, comparison.session) : describeDifference(difference as never, comparison.session)}`);
+      for (const difference of comparison.differences) console.error(`\n${describeDifference8(difference, comparison.session)}`);
     }
     for (const question of result.questions) console.error(`疑問点 (${question.line} 行目): ${question.text}`);
-    if ("reading" in result && result.reading) console.error(`\n読み下し（Layer 1 の文と、解釈がそれをどう読んだか）:\n${result.reading}`);
+    if (result.reading) console.error(`\n読み下し（Layer 1 の文と、解釈がそれをどう読んだか）:\n${result.reading}`);
     console.error(
       (result.comparisons ?? []).reduce((count, comparison) => count + (comparison.status === "failed" ? 1 : comparison.differences.length), 0) + result.questions.length > 0
         ? "\n食い違いと疑問点は、Layer 1 の記述があいまいな所です。下書きに // REVIEW: / // REVIEW(clp): として書いてあり、" +

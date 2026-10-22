@@ -1,164 +1,226 @@
 /**
- * Turns answers drawn at random into answers that keep the promises a
- * dependency makes about its answers (`fresh`, `increasing`), and decides
- * what survives a restart of the system.
+ * Promise keeper: turns answers drawn at random into answers that keep a
+ * dependency's promises, and decides what survives a restart.
  *
- * Corresponds to the specification component "promise-keeper". The
- * component has no states of its own (it is always in the specification
- * state `READY`), no dependencies and no effects. One `PromiseKeeper` object
- * remembers what it has been given between calls; each method performs one
- * specification command.
+ * Corresponds to the specification component `promise-keeper`. It has no
+ * dependencies and is not durable. Its entries map onto this module as follows:
  *
- * Fresh answers are decided in a sequence: start it with `beginFreshNumber`
- * or `beginFreshText` (which forgets the values answered before), give each
- * value the query answered before with `usedNumber` / `usedText`, in the
- * order they were answered, then ask `fresh` for the answer. `increasing`
- * and `restart` depend only on their arguments and can be called at any time.
+ * - Commands `BeginFreshNumber`, `BeginFreshText`, `UsedNumber`, `UsedText`
+ *   and query `Fresh`: the methods of {@link FreshAnswer}, one instance per
+ *   fresh answer being decided.
+ * - Query `Increasing`: the pure function {@link increasingAnswer}.
+ * - Query `Restart`: the pure function {@link restartOutcome}.
  *
- * Command -> method:
- *   `BeginFreshNumber` -> `beginFreshNumber`
- *   `BeginFreshText`   -> `beginFreshText`
- *   `Fresh`            -> `fresh`
- *   `Increasing`       -> `increasing`
- *   `Restart`          -> `restart`
- *   `UsedNumber`       -> `usedNumber`
- *   `UsedText`         -> `usedText`
- *
- * Remembered data (spec `data`: `freshDrawn`, `used`) is private; it is
- * observable only through the answer of `fresh`. It starts as in the
- * specification's `model.initial`.
+ * The decisions themselves live in the pure functions {@link freshAnswer},
+ * {@link afterUsedNumber} and {@link afterUsedText}; the class only holds the
+ * state between commands.
  */
 
-/** A value a query answers: a number (an integer) or a text (spec type `value`). */
-export type AnsweredValue = number | string;
+/** Any JSON value (specification type `json`). */
+export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 
-/** Answer of `Restart` (spec output `Restart`). */
+/**
+ * The kind of value a fresh answer is decided for (specification state
+ * `freshKind`, without its `null`).
+ *
+ * - `"number"`: the query answers numbers (started by `BeginFreshNumber`).
+ * - `"text"`: the query answers texts (started by `BeginFreshText`).
+ */
+export type FreshKind = "number" | "text";
+
+/**
+ * What the promise keeper remembers about the fresh answer being decided.
+ * Each field is the specification state field of the same name; the initial
+ * value is {@link initialFreshState}.
+ */
+export interface FreshState {
+  /** The value drawn at random, or `null` before any `Begin…` command (state `freshDrawn`). */
+  freshDrawn: Json;
+  /** The answer to give instead of the drawn value when that one was already answered before (state `freshInstead`). */
+  freshInstead: Json;
+  /** Whether the query answers numbers or texts; `null` before any `Begin…` command (state `freshKind`). */
+  freshKind: FreshKind | null;
+  /** The largest number reported as answered before, or `null` if none yet (state `largestUsed`). */
+  largestUsed: number | null;
+  /** Every value reported as answered before, of either kind, in the order reported (state `used`). */
+  used: Json[];
+}
+
+/** The state before any command: the specification's `init`. */
+export function initialFreshState(): FreshState {
+  return { freshDrawn: null, freshInstead: null, freshKind: null, largestUsed: null, used: [] };
+}
+
+/** The state right after a `Begin…` command: the drawn value, nothing answered before yet. */
+function beginFresh(drawn: Json, freshKind: FreshKind): FreshState {
+  return { freshDrawn: drawn, freshInstead: null, freshKind, largestUsed: null, used: [] };
+}
+
+/** The drawn text followed by "#" and the count of values answered before, including the one being reported. */
+function numberedText(state: FreshState): string {
+  return `${state.freshDrawn}#${state.used.length + 1}`;
+}
+
+/**
+ * Specification command `BeginFreshNumber`: start deciding the fresh answer of
+ * a query that answers numbers. Forgets everything about any earlier answer.
+ *
+ * @param drawn the number drawn at random.
+ * @returns the new state.
+ */
+export function beginFreshNumber(drawn: number): FreshState {
+  return beginFresh(drawn, "number");
+}
+
+/**
+ * Specification command `BeginFreshText`: start deciding the fresh answer of
+ * a query that answers texts. Forgets everything about any earlier answer.
+ *
+ * @param drawn the text drawn at random.
+ * @returns the new state.
+ */
+export function beginFreshText(drawn: string): FreshState {
+  return beginFresh(drawn, "text");
+}
+
+/**
+ * Specification command `UsedNumber`: report a number the query answered
+ * before. Only called after a `Begin…` command.
+ *
+ * @param state the state before the command.
+ * @param answered the number answered before.
+ * @returns the new state.
+ */
+export function afterUsedNumber(state: FreshState, answered: number): FreshState {
+  const largestUsed = state.largestUsed === null ? answered : Math.max(state.largestUsed, answered);
+  return {
+    ...state,
+    freshInstead: state.freshKind === "number" ? largestUsed + 1 : numberedText(state),
+    largestUsed,
+    used: [...state.used, answered],
+  };
+}
+
+/**
+ * Specification command `UsedText`: report a text the query answered before.
+ * Only called after a `Begin…` command.
+ *
+ * @param state the state before the command.
+ * @param answered the text answered before.
+ * @returns the new state.
+ */
+export function afterUsedText(state: FreshState, answered: string): FreshState {
+  return {
+    ...state,
+    freshInstead: state.freshKind === "text" ? numberedText(state) : state.freshInstead,
+    used: [...state.used, answered],
+  };
+}
+
+/**
+ * Specification query `Fresh` (calculation `fresh`): the answer that keeps the
+ * promise of never answering the same value twice, read from the state.
+ *
+ * @param state the current state.
+ * @returns the fresh answer (`null` if no `Begin…` command has happened).
+ */
+export function freshAnswer(state: FreshState): Json {
+  // Drawn and answered values are numbers or texts, so strict equality is value equality.
+  return state.used.includes(state.freshDrawn) ? state.freshInstead : state.freshDrawn;
+}
+
+/**
+ * Holds the state of one fresh answer between commands. Start it with
+ * {@link FreshAnswer.beginNumber} or {@link FreshAnswer.beginText}, report each
+ * value answered before with {@link FreshAnswer.usedNumber} or
+ * {@link FreshAnswer.usedText}, then read the answer with {@link FreshAnswer.fresh}.
+ * A new instance is in the specification's initial state.
+ */
+export class FreshAnswer {
+  #state: FreshState;
+
+  constructor() {
+    this.#state = initialFreshState();
+  }
+
+  /** Specification command `BeginFreshNumber`; see {@link beginFreshNumber}. */
+  beginNumber(drawn: number): void {
+    this.#state = beginFreshNumber(drawn);
+  }
+
+  /** Specification command `BeginFreshText`; see {@link beginFreshText}. */
+  beginText(drawn: string): void {
+    this.#state = beginFreshText(drawn);
+  }
+
+  /** Specification command `UsedNumber`; see {@link afterUsedNumber}. */
+  usedNumber(answered: number): void {
+    this.#state = afterUsedNumber(this.#state, answered);
+  }
+
+  /** Specification command `UsedText`; see {@link afterUsedText}. */
+  usedText(answered: string): void {
+    this.#state = afterUsedText(this.#state, answered);
+  }
+
+  /** Specification query `Fresh`; see {@link freshAnswer}. */
+  fresh(): Json {
+    return freshAnswer(this.#state);
+  }
+
+  /** The current state, as the specification's state fields (a copy). */
+  get state(): FreshState {
+    return { ...this.#state, used: [...this.#state.used] };
+  }
+}
+
+/**
+ * The input of the `Increasing` query: one answer of a query that promises
+ * never to answer less than before. Each field is the specification parameter
+ * of the same name.
+ */
+export interface IncreasingInput {
+  /** The increment to apply to the previous answer (parameter `delta`). */
+  delta: number;
+  /** The value drawn at random (parameter `drawn`). */
+  drawn: number;
+  /** The largest value the query may answer, or `null` when there is none (parameter `max`). */
+  max: number | null;
+  /** The previous answer, or `null` when it has not answered before (parameter `previous`). */
+  previous: number | null;
+}
+
+/**
+ * Specification query `Increasing` (calculation `increasing`).
+ *
+ * Pure: answers the same result for the same arguments, touches nothing.
+ *
+ * @param input the specification's parameters, as one record.
+ * @returns the answer to give.
+ */
+export function increasingAnswer(input: IncreasingInput): number {
+  const { delta, drawn, max, previous } = input;
+  if (previous === null) return drawn;
+  return max === null ? previous + delta : Math.min(previous + delta, max);
+}
+
+/**
+ * What happens to a component when the system restarts (specification result
+ * of `Restart`).
+ *
+ * - `"keep"`: it keeps its state and data.
+ * - `"start-again"`: it starts over from its initial state.
+ */
 export type RestartOutcome = "keep" | "start-again";
 
-/** Input of `Increasing`. Field names identical to the specification's. */
-export interface IncreasingInput {
-  /** The answer of the increasing query before this one, or `null` when it has not answered before. */
-  previous: number | null;
-  /** The value drawn at random for this answer (an integer). */
-  drawn: number;
-  /** The increment to apply to the previous answer (a non-negative integer). */
-  delta: number;
-  /** The largest answer allowed, or `null` when there is none. */
-  max: number | null;
-}
-
 /**
- * Remembers the value drawn for the fresh answer being decided and the
- * values answered before, and answers the promise-keeping values.
+ * Specification query `Restart` (calculation `restart`).
+ *
+ * Pure: answers the same result for the same arguments, touches nothing.
+ *
+ * @param durable whether the component is declared durable (parameter `durable`).
+ * @returns what happens to it on restart.
  */
-export class PromiseKeeper {
-  private freshDrawn: AnsweredValue | null = null;
-  private used: AnsweredValue[] = [];
-
-  /**
-   * Spec command `BeginFreshNumber`: the fresh answer of a query that answers
-   * numbers is decided next, for the integer `drawn` (spec data
-   * `freshDrawn`). Forgets the values answered before (spec data `used`).
-   */
-  beginFreshNumber(drawn: number): void {
-    this.freshDrawn = drawn;
-    this.used = [];
-  }
-
-  /**
-   * Spec command `BeginFreshText`: the fresh answer of a query that answers
-   * texts is decided next, for the text `drawn` (spec data `freshDrawn`).
-   * Forgets the values answered before (spec data `used`).
-   */
-  beginFreshText(drawn: string): void {
-    this.freshDrawn = drawn;
-    this.used = [];
-  }
-
-  /**
-   * Spec command `UsedNumber`: the integer `value` is a number the query
-   * answered before; appended to the values answered before (spec data `used`).
-   */
-  usedNumber(value: number): void {
-    this.used = usedWithValue(this.used, value);
-  }
-
-  /**
-   * Spec command `UsedText`: the text `value` is a text the query answered
-   * before; appended to the values answered before (spec data `used`).
-   */
-  usedText(value: string): void {
-    this.used = usedWithValue(this.used, value);
-  }
-
-  /**
-   * Spec command `Fresh`: answers the fresh answer for the value given to the
-   * last `beginFresh...` and the values given through `used...` since. A
-   * number when the sequence was started with a number, a text otherwise.
-   * Changes nothing.
-   */
-  fresh(): AnsweredValue {
-    // Before any `beginFresh...` no value has been drawn; the answer is that absent value.
-    return freshAnswer(this.freshDrawn as AnsweredValue, this.used);
-  }
-
-  /**
-   * Spec command `Increasing`: answers the integer a query that promises
-   * never to answer less than before answers this time. Changes nothing.
-   */
-  increasing(input: IncreasingInput): number {
-    return increasingAnswer(input);
-  }
-
-  /**
-   * Spec command `Restart`: the system restarts; `durable` tells whether the
-   * component that restarts is durable. Answers `"keep"` when it keeps its
-   * state and data, `"start-again"` when it starts again. Changes nothing.
-   */
-  restart(durable: boolean): RestartOutcome {
-    return restartOutcome(durable);
-  }
-}
-
-/**
- * The fresh answer for the value drawn `drawn`, given the values answered
- * before `used` (in order). Pure; used by `PromiseKeeper.fresh`.
- */
-export function freshAnswer(drawn: AnsweredValue, used: readonly AnsweredValue[]): AnsweredValue {
-  if (!used.includes(drawn)) return drawn;
-  if (typeof drawn === "number") return oneMoreThanLargest(used);
-  return drawnNumbered(drawn, used);
-}
-
-/** Spec calculation `oneMoreThanLargest`, over the values answered before `used`. */
-export function oneMoreThanLargest(used: readonly AnsweredValue[]): number {
-  const numbers = used.filter((value): value is number => typeof value === "number");
-  return Math.max(...numbers) + 1;
-}
-
-/** Spec calculation `drawnNumbered`, for the text drawn `drawn` and the values answered before `used`. */
-export function drawnNumbered(drawn: string, used: readonly AnsweredValue[]): string {
-  return `${drawn}#${used.length}`;
-}
-
-/** Spec calculation `usedWithValue`: the new list of values answered before after `value` is given. Does not change `used`. */
-export function usedWithValue(used: readonly AnsweredValue[], value: AnsweredValue): AnsweredValue[] {
-  return [...used, value];
-}
-
-/** The answer of the increasing query for `input`. Pure; used by `PromiseKeeper.increasing`. */
-export function increasingAnswer(input: IncreasingInput): number {
-  if (input.previous === null) return input.drawn;
-  return increasedAnswer(input.previous, input.delta, input.max);
-}
-
-/** Spec calculation `increasedAnswer`, for an answer before `previous`, increment `delta` and optional maximum `max`. */
-export function increasedAnswer(previous: number, delta: number, max: number | null): number {
-  const increased = previous + delta;
-  return max === null ? increased : Math.min(increased, max);
-}
-
-/** What a component does on a restart, given whether it is `durable`. Pure; used by `PromiseKeeper.restart`. */
 export function restartOutcome(durable: boolean): RestartOutcome {
   return durable ? "keep" : "start-again";
 }

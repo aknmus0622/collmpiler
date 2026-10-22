@@ -2,7 +2,6 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { stripTypeScriptTypes } from "node:module";
 import { join } from "node:path";
 import type { Violation } from "./check.ts";
-import type { Ir } from "./generate.ts";
 import { literalsOf, scan } from "./scan.ts";
 
 // ミューテーションのゲート: 本番コードをわざと壊し、PBT が落ちることを確かめる。
@@ -42,28 +41,7 @@ export interface MutationStrategy {
   run(input: MutationInput): MutationReport | Promise<MutationReport>;
 }
 
-// 決定表の出力に現れる値（割引率、クーポン種別など）。業務上の判断の結果そのもの
-export function decisionValues(ir: Ir): DecisionValue[] {
-  const values = new Set<DecisionValue>();
-  const walk = (node: unknown) => {
-    if (typeof node === "number" || typeof node === "string") values.add(node);
-    else if (typeof node === "object" && node !== null) Object.values(node).forEach(walk);
-  };
-  for (const decision of Object.values(ir.decisions)) Object.values(decision.rows).forEach(walk);
-  // 仕様がじかに決めて、検証で観測される定数（返す値と、副作用の入力）。参照（{ $ref }、{ $was }）は値ではない。
-  // 決定表を持たない部品（答えが文字列だけ、など）では、これが無いと壊すものが無く、正しい実装が差し戻された
-  const constant = (node: unknown) => {
-    if (typeof node === "number" || typeof node === "string") values.add(node);
-    else if (typeof node === "object" && node !== null && !("$ref" in node) && !("$was" in node)) Object.values(node).forEach(constant);
-  };
-  for (const behavior of ir.behaviors) {
-    for (const outcome of Object.values(behavior.when) as { responds?: unknown; emits?: { input: unknown }[] }[]) {
-      constant(outcome.responds);
-      for (const emitted of outcome.emits ?? []) constant(emitted.input);
-    }
-  }
-  return [...values];
-}
+// 本番コードで壊してよい値（決定表のセル、答えと外の世界への定数）は、v1/values.ts の decisionValues8 が決める
 
 // 型を空白に置換してからトークン化するので、型の中のリテラルは対象にならず、位置は元のソースと一致する
 function runtimeLiterals(source: string) {
