@@ -7,7 +7,8 @@
     "clp": "./bin/clp.ts"
   },
   "exports": {
-    "./runtime": "./src/runtime.ts"
+    "./runtime": "./src/runtime.ts",
+    "./v1/runtime": "./src/v1/runtime.ts"
   },
   "engines": {
     "node": ">=22.18"

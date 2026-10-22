@@ -9,7 +9,11 @@ import type { Asset } from "./assets.ts";
 import { entryGate, exitGate, partFilesOf, requestFactsOf, verifyGate } from "./gates.ts";
 import type { Feedback, GateContext, MutationSummary } from "./gates.ts";
 import { requireModel, seedOf } from "./generate.ts";
-import type { Ir } from "./generate.ts";
+import type { AnyIr as Ir, Ir as Ir7 } from "./generate.ts";
+import { isIr8 } from "./generate.ts";
+import { loadProgram } from "./v1/load.ts";
+import { checkSpec, isV1Specs, prepare } from "./v1/prepare.ts";
+import { boundary8, defaultRuns8 } from "./v1/runtime.ts";
 import { DEFAULT_GUIDE } from "./guide.ts";
 import { DRAFT_SUFFIX, listComponents, loadSpecs } from "./loader.ts";
 import type { MutationStrategy } from "./mutation.ts";
@@ -102,16 +106,31 @@ export async function implement(options: ImplementOptions) {
   // 仕様にあるコンポーネントをすべて読み、検査する。仕様自身の誤りは、エージェントを呼ぶ前に人に報告する
   const target = options.target ?? typescriptTarget;
   const layout = resolveLayout(options);
-  const names = await listComponents(specsDir, { drafts });
+  const v1 = isV1Specs(specsDir);
+  const names = v1 ? loadProgram(specsDir, { drafts }).components : await listComponents(specsDir, { drafts });
   if (names.length === 0) throw new Error("仕様にコンポーネントがありません（component(...) を export してください）");
   if (options.component !== undefined && !names.includes(options.component)) {
     throw new Error(`コンポーネント "${options.component}" がありません (あるのは: ${names.join(", ")})`);
   }
   const units: Unit[] = [];
-  const specs = new Map(await Promise.all(names.map(async (name) => [name, await loadSpecs(specsDir, { drafts, component: name, judges: loadJudges })] as const)));
+  if (v1) {
+    // 1.0 の書き方 (DSL.md §17): 読み取り、IR 版 8、仕様だけの実行、具体例
+    for (const name of names) {
+      const prepared = prepare(specsDir, name, { drafts });
+      const errors = prepared.problems.filter((p) => p.severity === "error");
+      for (const p of prepared.problems.filter((p) => p.severity === "warning")) log(`注意 (${name}): ${p.where}: ${p.message}`);
+      if (errors.length > 0 || !prepared.ir) throw new Error(`仕様 (${name}) にエラーがあります:\n${errors.map((p) => `  ${p.where}: ${p.message}`).join("\n")}`);
+      const checked = await checkSpec(prepared.ir, { runs: options.runs });
+      if (checked.problems.length > 0) throw new Error(`仕様 (${name}) に誤りがあります:\n${checked.problems.map((p) => `  ${p.where}: ${p.message}`).join("\n")}`);
+      for (const warning of checked.warnings) log(`注意 (${name}): ${warning}`);
+      const ir = JSON.parse(stableStringify(prepared.ir)) as Ir;
+      units.push({ name, ir, ws: workspaceOf(layout, target.files, name, names), seed: seedOf(ir), assets: prepared.assets, roots: prepared.roots });
+    }
+  }
+  const specs = new Map(v1 ? [] : await Promise.all(names.map(async (name) => [name, await loadSpecs(specsDir, { drafts, component: name, judges: loadJudges })] as const)));
   // 含む部品が作るときに渡すデータ（覚える (set) コマンドが無くても、設定される）
   const provided = providedData([...specs.values()]);
-  for (const name of names) {
+  for (const name of v1 ? [] : names) {
     const spec = specs.get(name)!;
     const { ir: extracted, diagnostics } = extract(spec, await references(spec));
     const errors = diagnostics.filter((d) => d.severity === "error");
@@ -126,8 +145,8 @@ export async function implement(options: ImplementOptions) {
     }
     const ir = JSON.parse(stableStringify(extracted)) as Ir;
     // 契約の文面の判断を、使える中でいちばん新しい Stage で前もって下す（生成は同期なので、ここで登録しておく）
-    await planContract(ir);
-    requireModel(ir);
+    await planContract(ir as Ir7);
+    requireModel(ir as Ir7);
     const checked = await selfCheck(spec, { seed: 1 });
     if (!checked.ok) {
       throw new Error(`仕様 (${name}) に誤りがあります: ${checked.message}\n  再現するコマンド列: ${JSON.stringify(checked.steps)}`);
@@ -156,7 +175,9 @@ export async function implement(options: ImplementOptions) {
   // 部品を含む部品は、含む部品のあとに一致させる（中の部品の本番コードを使うので）
   // 保存先の部品 (durable: Store。W7) も、含む部品と同じに扱う: 先に一致させ、本番コードは使うだけ
   const partsOf = (unit: Unit, trail: string[] = []): string[] =>
-    [...Object.values(unit.ir.model?.parts ?? {}), ...(typeof unit.ir.model?.durable === "object" ? [{ component: unit.ir.model.durable.store }] : [])].flatMap(({ component }) => {
+    isIr8(unit.ir)
+      ? ((ir) => Object.keys(ir.components).filter((id) => id !== unit.name && !ir.components[id].external && units.some((u) => u.name === id)))(unit.ir)
+      : [...Object.values(unit.ir.model?.parts ?? {}), ...(typeof unit.ir.model?.durable === "object" ? [{ component: unit.ir.model.durable.store }] : [])].flatMap(({ component }) => {
       const inner = units.find((candidate) => candidate.name === component);
       return inner && !trail.includes(component) ? [component, ...partsOf(inner, [...trail, component])] : [];
     });
@@ -200,7 +221,7 @@ export async function implement(options: ImplementOptions) {
       specsDir,
       ws: unit.ws,
       seed: unit.seed,
-      runs: options.runs ?? defaultRuns(unit.ir.model),
+      runs: options.runs ?? runsOf(unit.ir),
       guide: DEFAULT_GUIDE,
       assets: mergeAssets(unit.assets, options.assets ?? []),
       drafts,
@@ -210,7 +231,7 @@ export async function implement(options: ImplementOptions) {
       baseline: "",
       before: {},
       // ほかのコンポーネントは、それぞれ自身の検証と同じ回数で確かめ直す（部品を含むものは少なく、などが違う）
-      others: units.filter((other) => other !== unit).map(({ name, ir, ws, seed }) => ({ name, ir, ws, seed, runs: options.runs ?? defaultRuns(ir.model) })),
+      others: units.filter((other) => other !== unit).map(({ name, ir, ws, seed }) => ({ name, ir, ws, seed, runs: options.runs ?? runsOf(ir) })),
       parts: partsOf(unit),
     };
     // 含む部品のコード: この部品の作業では、使うだけ
@@ -247,6 +268,8 @@ export async function implement(options: ImplementOptions) {
   // seed は、最初のコンポーネントのもの（コンポーネントが1つのときの、従来の形）
   return { status, oracle, attempts, stages, seed: units[0].seed, seeds: Object.fromEntries(units.map((unit) => [unit.name, unit.seed])) };
 }
+
+const runsOf = (ir: Ir) => (isIr8(ir) ? defaultRuns8(ir) : defaultRuns(ir.model));
 
 // roots: 仕様の起点（Layer 1 と解釈のファイル。合格の記録が、そこからたどったファイルだけをハッシュする）
 type Unit = { name: string; ir: Ir; ws: Workspace; seed: number; assets: Asset[]; roots: string[] };
@@ -471,7 +494,8 @@ function planOf(ctx: GateContext, from: Phase | undefined): { phases: readonly P
   // 契約は境界 (状態・コマンドと入力・問い合わせ・副作用) から決まる。前回の IR の境界と比べる
   // （生成した契約のファイルは、ヘッダーに仕様全体のハッシュを含むので、そのままは比べられない）
   const previous = read(ws.paths.ir);
-  if (previous === undefined || boundaryOf(JSON.parse(previous) as Ir) !== boundaryOf(ctx.ir)) {
+  const boundary = (ir: Ir) => (isIr8(ir) ? boundary8(ir) : boundaryOf(ir));
+  if (previous === undefined || boundary(JSON.parse(previous) as Ir) !== boundary(ctx.ir)) {
     return { phases: PHASES, incremental, reason: "the contract changed" };
   }
   if (read(ws.paths.adapter) === undefined) return { phases: ["wiring", "implementation"], incremental, reason: "no adapter yet" };

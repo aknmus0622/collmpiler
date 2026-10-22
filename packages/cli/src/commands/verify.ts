@@ -5,6 +5,8 @@ import { parseArgs } from "node:util";
 import { resolveLayout, workspaceOf } from "../layout.ts";
 import { listComponents } from "../loader.ts";
 import { selectTarget } from "../target-typescript.ts";
+import { loadProgram } from "../v1/load.ts";
+import { isV1Specs } from "../v1/prepare.ts";
 
 export const summary = "すでにある本番コードを、仕様に照らして検証する (PBT)";
 export const usage = `clp verify (--out <dir> | --src <dir> --tests <dir | path-prefix.>) [--specs <dir>] [--component <name>] [options]
@@ -43,7 +45,8 @@ export async function main(args: string[]): Promise<void> {
   }
   const target = selectTarget(values.target);
   const layout = resolveLayout(values);
-  const names = await listComponents(resolve(process.cwd(), values.specs), { drafts: values.drafts });
+  const specsDir = resolve(process.cwd(), values.specs);
+  const names = isV1Specs(specsDir) ? loadProgram(specsDir, { drafts: values.drafts }).components : await listComponents(specsDir, { drafts: values.drafts });
   if (values.component !== undefined && !names.includes(values.component)) {
     console.error(`コンポーネント "${values.component}" がありません (あるのは: ${names.join(", ") || "なし"})`);
     process.exit(2);

@@ -4,6 +4,7 @@ import { FILES, TEST_DIR } from "./generate.ts";
 import { label } from "./layout.ts";
 import type { Workspace } from "./layout.ts";
 import type { Target } from "./target.ts";
+import { OPS } from "./v1/ops.ts";
 
 // エージェントに渡す依頼文。実装は TDD の流れに沿って3つの段階に分かれ、段階ごとに別の依頼になる。
 // 段階ごとに見せる情報が違うので、依頼文もその段階で見えるものだけに触れる。
@@ -127,11 +128,57 @@ The IR describes one component by its boundary.
   - \`{"$was": [<states>]}\`: true if the state before the command was one of those listed.
   - \`{"$ref": "call:<name>"}\`: the answer of a command listed in \`calls\` (\`call:<name>.<field>\`: one field of it).`;
 
+// 1.0 (IR version 8): the IR is the formal model itself, and the implementer reads its expressions.
+const IR_GUIDE_8 = (ws: Workspace) => `## How to read the IR
+
+\`${ws.paths.ir}\` is the specification itself, as a formal model; \`${ws.paths.ir.replace(/ir\.json$/, "spec.md")}\` is the same
+model read aloud, with the author's prose next to it. Where they seem to disagree, the IR is right.
+
+- \`root\` is the component to implement. \`components\` holds it and every component it contains (\`contains\`:
+  their state is part of this system, and their production code may already exist — see below) or relies on
+  (\`relies\`: the outside world, \`external\`, reached through dependencies you are given).
+- \`entries\` lists what drives the system from outside: \`commands\` change it, \`queries\` only answer.
+- A component's \`state\` is what it remembers, with the types below, starting from \`init\`. Nothing else is remembered.
+- \`commands.<name>\`: \`params\` (the input), \`output\` (what it answers, if it answers), \`requires\` (if present:
+  inputs for which it is not specified; they are never sent), and \`events\`, one per case.
+- \`events.<name>\`: when \`guard\` holds (exactly one event of a command holds at a time), the state fields in
+  \`assign\` take their new values, the commands in \`calls\` are called in order (each only if its \`when\` holds) and
+  the command answers \`output\`. Every expression is computed from the values **before** the command: an
+  assignment never sees another one. A call of a component inside this system happens in the same step; a call of
+  an \`external\` component is an effect on the outside world.
+- \`queries.<name>\`: answers \`is\`, computed from the state.
+- \`conditions\`, \`calcs\`, \`decisions\`: named expressions used by the others. A decision table answers the
+  \`then\` of the first row whose \`when\` holds.
+- \`external.queries\`: what the outside world answers; \`promise\` (\`fresh\`: never the same value twice;
+  \`increasing\`: never less than before) is guaranteed by it — rely on it, do not implement it. \`mayFail\`: asking
+  can fail (the dependency throws); what happens then is the events whose guard has \`["failed", …]\`.
+  \`external.commands\`: what the system does to the outside world.
+- \`properties\`: what always holds in the specification. They are facts you can rely on, not something to check.
+- \`durable\` (if present): what the component keeps survives a restart of the system, as after a crash. Keep it in
+  storage (Node's \`node:sqlite\`), at the location the production code is given when started; a component without
+  it starts over.
+- \`routes\` (if present): how each command reaches the system over HTTP (\`"POST /todos/:id"\`). The production
+  code serves them itself with Node's \`node:http\`: it can be started with its dependencies on a given port (0 for
+  any free one), tells the port it listens on, and can be stopped. \`:name\` is the input field \`name\`, the field
+  \`body\` is the JSON request body, other fields are query-string parameters; an answer with \`status\` (and
+  \`body\`) is that response.
+- \`notes\` is prose, for intent only; \`trace\` says which elements each sentence of the author became.
+
+Types: \`"int"\` (an integer — every number is one), \`"string"\`, \`"bool"\`, \`"json"\` (any JSON value),
+\`{"enum": [...]}\`, \`{"atom": "MemberId"}\` (an identifier: an opaque string, compared only for equality),
+\`{"record": {...}}\`, \`{"list": T}\` (ordered), \`{"set": T}\` (no order, no duplicates), \`{"map": [K, V]}\` (each key
+has one value), \`{"optional": T}\` (a T or \`null\`).
+
+Expressions are s-expressions: numbers, booleans and \`null\` are themselves; everything else is
+\`[operator, ...arguments]\`. The operators:
+
+${OPS.map((op) => `- \`${op.name}\`: ${op.meaning}`).join("\n")}`;
+
 // 本番コードと同じ場所にテスト側のファイルが並ぶとき、その名前を本番コードに使わせない
 const reserved = (ws: Workspace) =>
   ws.prefix === "" ? "" : `\n- File names starting with \`${ws.prefix}\` are reserved for the test harness. Do not create, edit, or import such files.`;
 
-const design = (target: Target, ws: Workspace, guide: string, incremental: boolean) => `${
+const design = (target: Target, ws: Workspace, guide: string, incremental: boolean, v8 = false) => `${
   incremental
     ? `Production code already exists under \`${label(ws.src)}\`, but it does not yet fit the specification in
 \`${ws.paths.ir}\`: it was written for an earlier version of that specification, or for other components of the
@@ -191,10 +238,10 @@ This is guidance on how to design the code, not something the harness checks.
 
 ${guide.trim()}
 
-${IR_GUIDE}
+${v8 ? IR_GUIDE_8(ws) : IR_GUIDE}
 `;
 
-const wiring = (target: Target, ws: Workspace, incremental: boolean) => `Connect the production code under \`${label(ws.src)}\` to the test harness by filling in
+const wiring = (target: Target, ws: Workspace, incremental: boolean, v8 = false) => `Connect the production code under \`${label(ws.src)}\` to the test harness by filling in
 \`${ws.paths.adapter}\`. The interface to implement, and the stand-ins the harness provides for
 everything the system depends on, are defined in \`${ws.paths.contract}\`.
 
@@ -211,7 +258,7 @@ it: your job is only to connect the two sides.
 
 ## What to write
 
-${target.request(ws).adapterGuide}
+${v8 ? target.request(ws).adapterGuide8 ?? target.request(ws).adapterGuide : target.request(ws).adapterGuide}
 
 ## Rules (checked mechanically)
 
@@ -224,7 +271,7 @@ ${target.request(ws).adapterGuide}
 - Work only from the files in this directory. Do not read anything outside it.
 `;
 
-const implementation = (target: Target, ws: Workspace, guide: string, incremental: boolean) => `${
+const implementation = (target: Target, ws: Workspace, guide: string, incremental: boolean, v8 = false) => `${
   incremental
     ? `Change the production code under \`${label(ws.src)}\` so that it satisfies the specification in
 \`${ws.paths.ir}\`. The code was written before the specification took its current form. Its design and signatures
@@ -260,16 +307,25 @@ This is guidance on how to design the code, not something the harness checks.
 
 ${guide.trim()}
 
-${IR_GUIDE}
+${v8 ? IR_GUIDE_8(ws) : IR_GUIDE}
 
 ## How your work is tested
 
-The harness runs many randomly generated trials. One trial builds a fresh system and executes a sequence of
+${
+  v8
+    ? `The harness runs many randomly generated trials. One trial builds a fresh system and executes a sequence of
+commands and queries on it. During each one the outside world answers with values the harness chooses. After
+each one, what the system answered and what it did to the outside world (in order) must match the specification
+exactly. If they do not, you will be asked again with a minimal counterexample: the shortest sequence that shows
+the difference, each step with the answers the outside world gave and the events of the specification that
+happened.`
+    : `The harness runs many randomly generated trials. One trial builds a fresh system and executes a sequence of
 several commands on it. Before each command the harness chooses new query answers. After each command, the
 current state and the effects the system performed during that command (including their order) must match the
 specification exactly. If they do not, you will be asked again with a minimal counterexample: the shortest
 sequence of commands that shows the difference. In a counterexample, \`data\` is what the component should be
-remembering before that command, and \`case\` is the condition that holds.
+remembering before that command, and \`case\` is the condition that holds.`
+}
 `;
 
 const TITLES: Record<Phase, string> = {
@@ -314,18 +370,19 @@ export function renderRequest(
   // incremental: すでにある本番コードを、仕様の変更に合わせて直す。
   // others: 同じ本番コードを共有する、ほかのコンポーネントの IR の場所
   // partFiles: 含む部品のコード（使うだけで、書き換えない）
-  options: { incremental?: boolean; others?: string[]; partFiles?: string[] } = {},
+  options: { incremental?: boolean; others?: string[]; partFiles?: string[]; irVersion?: number } = {},
   // Stage 1 が下した、節の判断（無ければ Stage 0）
   decided?: RequestSections,
 ): string {
   const incremental = options.incremental ?? false;
   const sections = decided ?? requestSectionsStage0({ phase, attempt, hasFeedback: feedback !== undefined, others: (options.others ?? []).length, partFiles: (options.partFiles ?? []).length });
+  const v8 = options.irVersion === 8;
   const body =
     phase === "design"
-      ? design(target, ws, guide, incremental)
+      ? design(target, ws, guide, incremental, v8)
       : phase === "wiring"
-        ? wiring(target, ws, incremental)
-        : implementation(target, ws, guide, incremental);
+        ? wiring(target, ws, incremental, v8)
+        : implementation(target, ws, guide, incremental, v8);
   // 1回目の依頼に載るのは、エージェントを呼ぶ前に、いまのコードを採点した結果
   const previous =
     sections.feedback === "none" || !feedback
@@ -344,6 +401,6 @@ export function renderRequest(
   const contained =
     !sections.contained
       ? ""
-      : `\n## Components this one contains\n\nThe specification lists in \`model.parts\` the components this one contains. Their production code already exists and has been verified on its own. Use it as it is, through its exported API; read it to learn that API:\n\n${partFiles.map((path) => `- \`${path}\``).join("\n")}\n\nDo not change these files: a change is undone and the attempt is rejected. Your code is what connects the outside (\`model.routes\`, if present) to them.\n`;
+      : `\n## Components this one contains\n\nThe specification lists in \`${v8 ? "contains" : "model.parts"}\` the components this one contains. Their production code already exists and has been verified on its own. Use it as it is, through its exported API; read it to learn that API:\n\n${partFiles.map((path) => `- \`${path}\``).join("\n")}\n\nDo not change these files: a change is undone and the attempt is rejected. Your code is what connects the outside (\`${v8 ? "routes" : "model.routes"}\`, if present) to them.\n`;
   return `# ${TITLES[phase]} (attempt ${attempt})\n\n${body}${system}${contained}${renderAssets(assets)}${previous}`;
 }

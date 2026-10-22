@@ -8,6 +8,48 @@ import type { Ir } from "../generate.ts";
 import { describeUnobservable, observability, selfCheck, unreachedCases } from "../runtime.ts";
 import { graphCheck, loadJudges, mutationVerdict, references, runStage1 } from "../stage1.ts";
 import { typecheckSpecs } from "../typecheck.ts";
+import { loadProgram } from "../v1/load.ts";
+import { checkSpec, isV1Specs, prepare } from "../v1/prepare.ts";
+import { problemText } from "../v1/read.ts";
+
+// 1.0 の書き方の仕様 (DSL.md §17)
+async function compileV1(dir: string, values: { drafts?: boolean; component?: string }): Promise<void> {
+  const { program, components } = loadProgram(dir, { drafts: values.drafts });
+  const names = values.component === undefined ? components : [values.component];
+  const irs: Record<string, unknown> = {};
+  const checks: (() => Promise<void>)[] = [];
+  const shown = new Set<string>();
+  // 読み取りの誤り (構文) は、どのコンポーネントのものでもあるので、一度だけ出す
+  for (const p of program.problems.filter((p) => p.code === "syntax")) {
+    console.error(problemText(p));
+    shown.add(problemText(p));
+    process.exitCode = 1;
+  }
+  for (const name of names) {
+    const { ir, problems } = prepare(dir, name, { drafts: values.drafts });
+    const tag = names.length > 1 ? `${name}: ` : "";
+    for (const p of problems) {
+      const text = problemText(p);
+      if (shown.has(text)) continue;
+      shown.add(text);
+      console.error(`${p.severity}[${p.code}] ${tag}${text.slice(text.indexOf("]") + 2)}`);
+      if (p.severity === "error") process.exitCode = 1;
+    }
+    irs[name] = ir;
+    checks.push(async () => {
+      if (!ir || problems.some((p) => p.severity === "error")) return;
+      const checked = await checkSpec(ir);
+      for (const p of checked.problems) console.error(`${p.severity}[${p.code}] ${tag}${p.where}: ${p.message}`);
+      if (checked.problems.length > 0) process.exitCode = 1;
+      for (const w of checked.warnings) console.error(`${tag}${w}`);
+    });
+  }
+  const typeErrors = typecheckSpecs(dir, { drafts: values.drafts });
+  for (const e of typeErrors) console.error(`error[type-error] ${e.file}: ${e.message}`);
+  if (typeErrors.length > 0) process.exitCode = 1;
+  process.stdout.write(stableStringify(names.length === 1 ? irs[names[0]] ?? null : irs));
+  if (process.exitCode !== 1) for (const check of checks) await check();
+}
 
 export const summary = "仕様を検査して、IR を標準出力に出す";
 export const usage = `clp compile [<specs-dir>] [--component <name>] [--drafts]
@@ -22,13 +64,15 @@ export const usage = `clp compile [<specs-dir>] [--component <name>] [--drafts]
                        （clp interpret が、LLM の書いた解釈を確かめるときに使う）`;
 
 export async function main(args: string[]): Promise<void> {
-const { values, positionals } = parseArgs({
+const parsed = parseArgs({
   args,
   // strict-added: 解釈が足した語彙が使われていなければ誤りにする（clp interpret が、LLM の書いた解釈を確かめるときに使う）
   options: { drafts: { type: "boolean", default: false }, component: { type: "string" }, "strict-added": { type: "boolean", default: false } },
   allowPositionals: true,
 });
+const { values, positionals } = parsed;
 const dir = resolve(process.cwd(), positionals[0] ?? "specs");
+if (isV1Specs(dir)) return compileV1(dir, values);
 const all = await listComponents(dir, { drafts: values.drafts });
 const names = values.component === undefined ? all : [values.component];
 

@@ -9,7 +9,10 @@ import type { Asset } from "./assets.ts";
 import type { Violation } from "./check.ts";
 import { stableStringify } from "./extract.ts";
 import { FILES, TEST_DIR } from "./generate.ts";
-import type { Ir } from "./generate.ts";
+import type { AnyIr as Ir } from "./generate.ts";
+import { isIr8 } from "./generate.ts";
+import { specView } from "./v1/generate.ts";
+import { decisionValues8 } from "./v1/values.ts";
 import { decisionValues, judge, judgeEvents } from "./mutation.ts";
 import { gateVerdict, judgeDecided } from "./stage1.ts";
 import { changedFileStage0, mutationSiteStage0, partFileStage0, removedInputStage0, sandboxFileStage0, testsStage0, wiringStage0 } from "./rules.ts";
@@ -148,6 +151,7 @@ export function entryGate(ctx: GateContext, phase: Phase, attempt: number, feedb
       incremental: ctx.incremental,
       others: visibleOthers(ctx).map((other) => other.ws.paths.ir),
       partFiles: ctx.partFiles ?? [],
+      irVersion: ctx.ir.irVersion,
     }, sections),
   };
   for (const asset of assets) if (asset.kind === "file") inputs[`${ASSETS_DIR}/${asset.name}`] = asset.content;
@@ -158,8 +162,13 @@ export function entryGate(ctx: GateContext, phase: Phase, attempt: number, feedb
       : ctx.target.generate.adapterSkeleton(ws, ctx.ir);
   } else {
     inputs[ws.paths.ir] = stableStringify(ctx.ir);
+    // 1.0: IR の読み下し (spec view)。実装するエージェントは式を見る
+    if (isIr8(ctx.ir)) inputs[specViewPath(ws.paths.ir)] = specView(ctx.ir);
     // ほかのコンポーネントの仕様。配線の段階には渡さない（配線は、どの仕様も見ない）
-    for (const other of visibleOthers(ctx)) inputs[other.ws.paths.ir] = stableStringify(other.ir);
+    for (const other of visibleOthers(ctx)) {
+      inputs[other.ws.paths.ir] = stableStringify(other.ir);
+      if (isIr8(other.ir)) inputs[specViewPath(other.ws.paths.ir)] = specView(other.ir);
+    }
   }
   // 本番コード: 設計の段階ではやり直しのときの前回の成果、以降の段階では骨組み
   for (const rel of sourceFiles(ws)) inputs[rel] = readFileSync(join(ws.root, rel), "utf8");
@@ -183,6 +192,9 @@ export function entryGate(ctx: GateContext, phase: Phase, attempt: number, feedb
 
   return { dir, phase, inputs, toolchain, env: scrubEnv(process.env, hidden) };
 }
+
+// IR の読み下しを置く場所（作業場所の中だけ。出力先には書かない）
+export const specViewPath = (irPath: string) => irPath.replace(/ir\.json$/, "spec.md");
 
 // 設計と実装の段階に IR を見せる、ほかのコンポーネント。含む部品のものは見せない
 const visibleOthers = (ctx: GateContext) => ctx.others.filter((other) => !(ctx.parts ?? []).includes(other.name));
@@ -235,7 +247,7 @@ function runVerify(ctx: GateContext, unit: { ws: Workspace; seed: number; runs?:
 function specSentencesIn(ctx: GateContext, files: string[]): Violation[] {
   const existing = ctx.baseline;
   const { ir } = ctx;
-  const sentences = new Set<string>([
+  const sentences = isIr8(ir) ? new Set<string>(Object.values(ir.notes ?? {})) : new Set<string>([
     ...Object.values(ir.decisions).flatMap((decision) => Object.keys(decision.rows)),
     ...Object.values(ir.descriptions ?? {}),
     ...ir.behaviors.flatMap((behavior) => [
@@ -247,6 +259,7 @@ function specSentencesIn(ctx: GateContext, files: string[]): Violation[] {
     ...Object.values(ir.model?.calculations ?? {}).map((calculation) => calculation.description),
     ...(ir.model?.invariants ?? []),
   ]);
+  if (isIr8(ir)) for (const sentence of [...sentences]) if (sentence.length < 8) sentences.delete(sentence);
   sentences.delete("otherwise");
   const violations: Violation[] = [];
   for (const rel of files) {
@@ -480,7 +493,7 @@ async function judgeOutput(
 
   // ミューテーション: 本番コードを壊して PBT が落ちることを確かめる。合否の基準はゲート (judge) が持つ
   if (!ctx.mutation) return { ...ran };
-  const values = decisionValues(ctx.ir);
+  const values = isIr8(ctx.ir) ? decisionValues8(ctx.ir) : decisionValues(ctx.ir);
   // 壊す範囲の判定は、4つの事実だけで決まる。壊す処理は同期なので、事実の組み合わせすべてについて、前もって判定を下しておく
   const breaks = new Map<string, boolean>();
   for (const bits of [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]) {

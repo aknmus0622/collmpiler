@@ -158,6 +158,15 @@ export const typescriptTarget: Target = {
 - \`teardownIsolation()\`: discard the system.
 - \`restartSystem()\` (only if the contract has it): stop the production system and start a new instance on the
   same \`ports.storage\`, connected to the same \`ports\`. Keep nothing from the old instance.`,
+    adapterGuide8: `- \`setupIsolation(ports)\`: build a fresh production system in its initial state, giving it dependencies that
+  forward to \`ports\`. Where the production code expects a value in a different form than \`ports\` provides (a
+  date instead of a number, a differently named result), translate here.
+- \`executeCommand(command)\`: call the production code for that command with its input, and return what it
+  answers (translating its form if needed).
+- \`executeQuery(query)\` (only if the contract has it): call the production code that answers that query.
+- \`teardownIsolation()\`: discard the system.
+- \`restartSystem()\` (only if the contract has it): stop the production system and start a new instance on the
+  same \`ports.storage\`, connected to the same \`ports\`. Keep nothing from the old instance.`,
     adapterImports: `The adapter may import only \`${importPath(ws.paths.adapter, ws.paths.contract)}\` and production files under \`${dirFrom(ws.paths.adapter, ws.src)}\`.`,
     signatureErrorExample: `"x is not a function"`,
   }),
