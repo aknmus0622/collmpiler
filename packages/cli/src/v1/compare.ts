@@ -10,7 +10,7 @@ import type { Ir8 } from "./ir.ts";
 import { Simulation, entryName, literalsOf, stepArbitrary, MAX_STEPS } from "./pbt.ts";
 import type { Observed8, RawStep, Step8 } from "./pbt.ts";
 
-export type Seen = Observed8 | { error: string } | { skipped: true };
+export type Seen = Observed8 | { error: string } | { skipped: true; instead?: string; seen?: Observed8 };
 export type Difference8 = { command: string; aspect: string; steps: Step8[]; first: Seen; other: Seen };
 
 const isObserved = (seen: Seen): seen is Observed8 => "effects" in seen;
@@ -20,7 +20,10 @@ function advance(sim: Simulation, raw: RawStep): { name: string; seen: Seen; ali
   try {
     if (raw.restart) sim.restart();
     const planned = sim.step(raw);
-    return planned ? { name, seen: planned.expected, alive: true } : { name, seen: { skipped: true }, alive: true };
+    if (!planned) return { name, seen: { skipped: true }, alive: true };
+    // outside the spec, so another entry ran in its place: which one, and what it did
+    if (planned.entry !== sim.entries[raw.entry]) return { name, seen: { skipped: true, instead: planned.step.name, seen: planned.expected }, alive: true };
+    return { name, seen: planned.expected, alive: true };
   } catch (error) {
     if (error instanceof SpecError) return { name, seen: { error: error.message }, alive: false };
     throw error;

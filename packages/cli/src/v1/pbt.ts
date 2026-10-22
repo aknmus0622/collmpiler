@@ -170,6 +170,13 @@ export type RawStep = {
   deltas: Record<string, number>;
   failures: Record<string, unknown>;
   restart: boolean;
+  /**
+   * Parameters drawn for every entry, and where to start looking: when the chosen entry is outside the spec in the
+   * current state (`requires`), the step runs the next entry, from \`fallback\` on, that is inside it (what 0.3 did by
+   * choosing among the enabled commands). Without it, deep states were rarely reached in a few steps.
+   */
+  alternatives?: Record<string, unknown>[];
+  fallback?: number;
   /** A step of a fixed trace (an example, or a trace Alloy found): the answers of the outside world as given, promises already kept. */
   fixed?: true;
 };
@@ -196,12 +203,14 @@ export function fixedSteps(ir: Ir8, trace: TraceStep[]): RawStep[] | undefined {
 export function stepArbitrary(ir: Ir8, hints: Hints = literalsOf(ir)): fc.Arbitrary<RawStep> {
   const entries = entriesOf(ir);
   const outside = outsideQueries(ir);
+  const paramsOf = (entry: Entry) => fc.record(Object.fromEntries(Object.entries(entry.params).map(([k, t]) => [k, arbitraryOf(t, hints)])));
   const choose = fc.oneof(
     ...entries.map((entry, index) => ({
       weight: entry.kind === "command" ? 3 : 1,
-      arbitrary: fc.record({ entry: fc.constant(index), params: fc.record(Object.fromEntries(Object.entries(entry.params).map(([k, t]) => [k, arbitraryOf(t, hints)]))) }),
+      arbitrary: fc.record({ entry: fc.constant(index), params: paramsOf(entry) }),
     })),
   );
+  const alternatives = fc.tuple(...entries.map(paramsOf));
   const answers = fc.record(
     Object.fromEntries(outside.map(({ id, port }) => [id, Object.keys(port.params).length > 0 ? fc.func(arbitraryOf(port.result, hints)) : arbitraryOf(port.result, hints)])),
   );
@@ -213,13 +222,15 @@ export function stepArbitrary(ir: Ir8, hints: Hints = literalsOf(ir)): fc.Arbitr
     Object.fromEntries(outside.filter(({ port }) => port.mayFail).map(({ id, port }) => [id, Object.keys(port.params).length > 0 ? fc.func(failing) : failing])),
   );
   const restart = restartsIn(ir) ? fc.integer({ min: 0, max: 5 }).map((n) => n === 0) : fc.constant(false);
-  return fc.record({ choice: choose, answers, deltas, failures, restart }).map(({ choice, answers: a, deltas: d, failures: f, restart: r }) => ({
+  return fc.record({ choice: choose, answers, deltas, failures, restart, alternatives, fallback: fc.nat(entries.length - 1) }).map(({ choice, answers: a, deltas: d, failures: f, restart: r, alternatives: others, fallback }) => ({
     entry: choice.entry,
     params: choice.params,
     answers: a,
     deltas: d,
     failures: f,
     restart: r,
+    alternatives: others,
+    fallback,
   }));
 }
 
@@ -347,10 +358,22 @@ export class Simulation {
   }
   /** One step. Undefined when the step is outside the spec (`requires` does not hold). A spec error is thrown, with the steps so far. */
   step(raw: RawStep): Planned | undefined {
+    const drawn = stepAnswers(this.ir, raw, this.memory, this.atoms);
+    const first = this.tryEntry(raw.entry, raw.params, drawn);
+    if (first || !raw.alternatives) return first;
+    const n = this.entries.length;
+    for (let k = 0; k < n; k++) {
+      const index = ((raw.fallback ?? 0) + k) % n;
+      if (index === raw.entry) continue;
+      const planned = this.tryEntry(index, raw.alternatives[index] ?? {}, drawn);
+      if (planned) return planned;
+    }
+    return undefined;
+  }
+  private tryEntry(index: number, params: Record<string, unknown>, { answers, asked }: { answers: Answers; asked: Record<string, unknown> }): Planned | undefined {
     const ir = this.ir;
-    const entry = this.entries[raw.entry];
-    const args = Object.fromEntries(Object.entries(entry.params).map(([k, t]) => [k, resolveRaw(raw.params[k], t, this.atoms)]));
-    const { answers, asked } = stepAnswers(ir, raw, this.memory, this.atoms);
+    const entry = this.entries[index];
+    const args = Object.fromEntries(Object.entries(entry.params).map(([k, t]) => [k, resolveRaw(params[k], t, this.atoms)]));
     const name = entryName(ir, entry.qualified);
     let output: unknown;
     let effects: Effect[] = [];

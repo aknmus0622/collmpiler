@@ -52,7 +52,7 @@ export function typecheck(cwd: string, files: string[]): Violation[] {
 }
 
 // 仕様のディレクトリを型チェックする。ファイルの選び方は loadSpecs と同じ
-export function typecheckSpecs(specsDir: string, options: { drafts?: boolean } = {}): Violation[] {
+export function typecheckSpecs(specsDir: string, options: { drafts?: boolean; only?: string[] } = {}): Violation[] {
   requireSpecsDir(specsDir);
   const all = (readdirSync(specsDir, { recursive: true }) as string[])
     .filter((file) => file.endsWith(".ts") && !file.endsWith(".d.ts"))
@@ -61,7 +61,7 @@ export function typecheckSpecs(specsDir: string, options: { drafts?: boolean } =
   const files = options.drafts
     ? all.filter((file) => !replaced.has(file))
     : all.filter((file) => !file.endsWith(DRAFT_SUFFIX));
-  return typecheck(specsDir, files);
+  return typecheck(specsDir, options.only ? files.filter((file) => options.only!.includes(file.split(sep).join("/"))) : files);
 }
 
 export const formatTypeErrors = (violations: Violation[]) =>

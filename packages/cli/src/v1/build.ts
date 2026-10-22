@@ -21,6 +21,51 @@ import type { T } from "./types.ts";
 type TE = { e: Expr; t: T };
 const BAD: TE = { e: null, t: "any" };
 const lit = (value: string): Expr => ["lit", value];
+/** The state fields a conjunction fixes to a constant: `this.status === "DESIGN"`. */
+function knownState(conjuncts: Expr[]): Map<string, unknown> {
+  const known = new Map<string, unknown>();
+  const visit = (e: Expr) => {
+    if (!Array.isArray(e)) return;
+    if (e[0] === "and") return e.slice(1).forEach((x) => visit(x as Expr));
+    if (e[0] !== "=") return;
+    const [a, b] = [e[1], e[2]] as Expr[];
+    const field = (x: Expr) => (Array.isArray(x) && x[0] === "state" ? (x[1] as string) : undefined);
+    const constant = (x: Expr) => (Array.isArray(x) && x[0] === "lit" ? { v: x[1] } : typeof x === "number" || typeof x === "boolean" ? { v: x } : undefined);
+    const [f, c] = field(a) !== undefined ? [field(a), constant(b)] : [field(b), constant(a)];
+    if (f !== undefined && c) known.set(f, c.v);
+  };
+  conjuncts.forEach(visit);
+  return known;
+}
+
+/** The expression with comparisons of known state fields decided, and what they decide folded (`ite`, `and`, `or`, `not`). */
+function foldKnown(e: Expr, known: Map<string, unknown>): Expr {
+  if (known.size === 0 || !Array.isArray(e)) return e;
+  const op = e[0];
+  if (op === "lit" || op === "state" || op === "var") return e;
+  const args = e.slice(1).map((x) => (Array.isArray(x) ? foldKnown(x as unknown as Expr, known) : typeof x === "object" && x !== null ? Object.fromEntries(Object.entries(x).map(([k, v]) => [k, foldKnown(v as Expr, known)])) : x));
+  const constant = (x: unknown) => (Array.isArray(x) && x[0] === "lit" ? { v: x[1] } : typeof x === "number" || typeof x === "boolean" ? { v: x } : undefined);
+  if (op === "=") {
+    const [a, b] = args as Expr[];
+    const side = (x: Expr) => (Array.isArray(x) && x[0] === "state" && known.has(x[1] as string) ? { v: known.get(x[1] as string) } : constant(x));
+    const [x, y] = [side(a), side(b)];
+    if (x && y && (Array.isArray(a) && a[0] === "state" ? true : Array.isArray(b) && b[0] === "state")) return x.v === y.v;
+  }
+  if (op === "not" && typeof args[0] === "boolean") return !args[0];
+  if (op === "ite" && typeof args[0] === "boolean") return (args[0] ? args[1] : args[2]) as Expr;
+  if (op === "and") {
+    if (args.some((x) => x === false)) return false;
+    const rest = args.filter((x) => x !== true) as Expr[];
+    return rest.length === 0 ? true : rest.length === 1 ? rest[0] : (["and", ...rest] as unknown as Expr);
+  }
+  if (op === "or") {
+    if (args.some((x) => x === true)) return true;
+    const rest = args.filter((x) => x !== false) as Expr[];
+    return rest.length === 0 ? false : rest.length === 1 ? rest[0] : (["or", ...rest] as unknown as Expr);
+  }
+  return [op, ...args] as unknown as Expr;
+}
+
 const and = (parts: Expr[]): Expr => (parts.length === 0 ? true : parts.length === 1 ? parts[0] : ["and", ...parts]);
 const not = (e: Expr): Expr => (Array.isArray(e) && e[0] === "not" ? (e[1] as Expr) : ["not", e]);
 
@@ -441,8 +486,22 @@ export class Builder {
       const count = (names.get(base) ?? 0) + 1;
       names.set(base, count);
       const name = `${entry.name}.${count === 1 && base !== "case" ? base : `${base}${count}`}`;
-      const event: Event = { command: entry.name, guard: and(path.guard), assign: Object.fromEntries(path.assign), calls: path.calls };
-      if (path.output) event.output = path.output.e;
+      // what `requires` and the guard fix about the state before the step folds the conditions that ask it again (a
+      // fragment shared by several commands branches on the state; in each command, only one branch can run)
+      const known = knownState([...requires, ...path.guard]);
+      const event: Event = {
+        command: entry.name,
+        guard: and(path.guard),
+        assign: Object.fromEntries([...path.assign].map(([field, value]) => [field, foldKnown(value, known)])),
+        calls: path.calls.flatMap((call) => {
+          const when = call.when === undefined ? undefined : foldKnown(call.when, known);
+          if (when === false) return [];
+          const args = Object.fromEntries(Object.entries(call.args).map(([k, v]) => [k, foldKnown(v, known)]));
+          const { when: _, ...rest } = call;
+          return [{ ...rest, args, ...(when === undefined || when === true ? {} : { when }) }];
+        }),
+      };
+      if (path.output) event.output = foldKnown(path.output.e, known);
       b.ir.events[name] = event;
       eventNames.push(name);
     }

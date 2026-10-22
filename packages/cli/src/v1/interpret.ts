@@ -364,7 +364,7 @@ function check(specsDir: string, components: string[], drafts: boolean): { probl
         [process.cwd(), specsDir]
           .reduce((output, path) => output.split(path).join("."), `${run.stderr ?? ""}${run.error?.message ?? ""}`)
           .split("\n")
-          .filter((line) => line.trim() !== "" && !line.includes("ExperimentalWarning") && !line.includes("--trace-warnings"))
+          .filter((line) => line.trim() !== "" && !line.includes("ExperimentalWarning") && !line.includes("--trace-warnings") && !line.startsWith("注意: Stage 1"))
           .join("\n"),
       );
     }
@@ -575,7 +575,8 @@ export async function interpret8(options: InterpretOptions8): Promise<InterpretR
     const copy = mkdtempSync(join(dirname(specsDir), ".tmp-clp-interpret-"));
     try {
       for (const file of readdirSync(specsDir, { recursive: true }) as string[]) {
-        if (!file.endsWith(".ts") || file.endsWith(DRAFT_SUFFIX) || file === rel(specsDir, target.final)) continue;
+        // the other components' drafts stay (the first session was checked with them); this one's do not
+        if (!file.endsWith(".ts") || file === rel(specsDir, target.draft) || file === rel(specsDir, target.final)) continue;
         mkdirSync(dirname(join(copy, file)), { recursive: true });
         cpSync(join(specsDir, file), join(copy, file));
       }

@@ -190,3 +190,27 @@ test("2つの解釈の比べ合い: 振る舞いの違う所を、コマンド�
   const differences = await compare8(a!, b!, { seed: 1 });
   assert.deepEqual(differences.map((d) => `${d.command}:${d.aspect}`), ["Add:output", "Count:output"]);
 });
+
+const PHASES = `import { does, init, requires, service } from "@clp/core/v1";
+export const P = service("段階を進める", {
+  state: { phase: init<"A" | "B" | "C">("A") },
+  commands: {
+    ToB() { requires(this.phase === "A"); const said = this.phase === "A" ? "from-a" : "elsewhere"; this.phase = "B"; return said; },
+    ToC() { requires(this.phase === "B"); this.phase = "C"; return "c"; },
+    Back() { requires(this.phase === "C"); this.phase = "A"; return "back"; },
+  },
+});
+`;
+
+test("読み取り: requires で決まる状態を問う条件は、その場で畳み込まれる（通らない枝の値は IR に残らない）", () => {
+  const { ir, problems } = compile(specs({ "p.component.ts": PHASES }), "p");
+  assert.deepEqual(problems.map(problemText), []);
+  assert.deepEqual(ir!.components.p.events!["ToB.otherwise"].output, ["lit", "from-a"]);
+});
+
+test("PBT: 範囲外 (requires) のコマンドを引いた手は、実行できるほかのコマンドに回す（深い状態にも届く）", async () => {
+  const { ir } = compile(specs({ "p.component.ts": PHASES }), "p");
+  const checked = await selfCheck8(ir!, { seed: 1, numRuns: 50 });
+  assert.equal(checked.ok, true);
+  assert.ok(checked.ok && (checked.coverage.events["p.Back.otherwise"] ?? 0) > 0);
+});

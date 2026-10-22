@@ -106,7 +106,8 @@ function differs(original: Ir8, mutant: Ir8, raw: RawStep[]): Shown {
       return "shows";
     }
     const seen = (v: unknown) => (v === "outside" ? v : (v as { expected: unknown }).expected);
-    if ((x === "outside") !== (y === "outside")) precondition = true;
+    const ran = (v: unknown) => (v === "outside" ? v : (v as { entry: { qualified: string } }).entry.qualified);
+    if (ran(x) !== ran(y)) precondition = true;
     else if (!isDeepStrictEqual(seen(x), seen(y))) return "shows";
   }
   return precondition ? "precondition" : "none";

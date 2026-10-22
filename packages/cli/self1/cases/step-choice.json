@@ -1,0 +1,458 @@
+{
+ "about": "Cases for the step-choice grading component (SELF_HOSTING.md §10.3, R3), in the 1.0 form: each case is a kind of question (`variant`, an index into VARIANTS in packages/cli/src/v1/agreement.ts, when there are several) and its input. Inputs only: the expected answers are what Stage 0 (packages/cli/src/choose.ts) decides. Kept by people: add a case when a disagreement is found or a function is never executed.",
+ "irVersion": 8,
+ "cases": [
+  {
+   "input": {
+    "names": [],
+    "holding": []
+   }
+  },
+  {
+   "input": {
+    "names": [
+     "a"
+    ],
+    "holding": []
+   }
+  },
+  {
+   "input": {
+    "names": [
+     "a",
+     "b"
+    ],
+    "holding": [
+     "a"
+    ]
+   }
+  },
+  {
+   "input": {
+    "names": [
+     "c",
+     "d"
+    ],
+    "holding": [
+     "c",
+     "d"
+    ]
+   }
+  },
+  {
+   "input": {
+    "names": [
+     "d",
+     "c",
+     "b"
+    ],
+    "holding": []
+   }
+  },
+  {
+   "input": {
+    "names": [
+     "d"
+    ],
+    "holding": []
+   }
+  },
+  {
+   "input": {
+    "names": [
+     "a",
+     "b"
+    ],
+    "holding": []
+   }
+  },
+  {
+   "input": {
+    "names": [
+     "a",
+     "d",
+     "c",
+     "b"
+    ],
+    "holding": [
+     "d"
+    ]
+   }
+  },
+  {
+   "input": {
+    "names": [
+     "c",
+     "a",
+     "d",
+     "b"
+    ],
+    "holding": [
+     "d"
+    ]
+   }
+  },
+  {
+   "input": {
+    "names": [
+     "d",
+     "b",
+     "c",
+     "a"
+    ],
+    "holding": [
+     "d",
+     "a"
+    ]
+   }
+  },
+  {
+   "input": {
+    "names": [
+     "b"
+    ],
+    "holding": []
+   }
+  },
+  {
+   "input": {
+    "names": [
+     "d"
+    ],
+    "holding": [
+     "d"
+    ]
+   }
+  },
+  {
+   "input": {
+    "names": [
+     "c"
+    ],
+    "holding": []
+   }
+  },
+  {
+   "input": {
+    "names": [
+     "d",
+     "b",
+     "c"
+    ],
+    "holding": [
+     "d",
+     "b",
+     "c"
+    ]
+   }
+  },
+  {
+   "input": {
+    "names": [
+     "b",
+     "d",
+     "c"
+    ],
+    "holding": [
+     "c"
+    ]
+   }
+  },
+  {
+   "input": {
+    "names": [
+     "a",
+     "d"
+    ],
+    "holding": []
+   }
+  },
+  {
+   "input": {
+    "names": [
+     "c",
+     "a",
+     "b"
+    ],
+    "holding": [
+     "c"
+    ]
+   }
+  },
+  {
+   "input": {
+    "names": [
+     "b",
+     "a",
+     "d"
+    ],
+    "holding": [
+     "b",
+     "a",
+     "d"
+    ]
+   }
+  },
+  {
+   "input": {
+    "names": [
+     "b",
+     "a"
+    ],
+    "holding": [
+     "b",
+     "a"
+    ]
+   }
+  },
+  {
+   "input": {
+    "names": [
+     "a",
+     "d"
+    ],
+    "holding": [
+     "a"
+    ]
+   }
+  },
+  {
+   "input": {
+    "names": [
+     "b",
+     "c",
+     "d",
+     "a"
+    ],
+    "holding": [
+     "c"
+    ]
+   }
+  },
+  {
+   "input": {
+    "names": [
+     "a",
+     "c"
+    ],
+    "holding": [
+     "a"
+    ]
+   }
+  },
+  {
+   "input": {
+    "names": [
+     "a",
+     "b"
+    ],
+    "holding": [
+     "b"
+    ]
+   }
+  },
+  {
+   "input": {
+    "names": [
+     "d",
+     "a",
+     "b"
+    ],
+    "holding": [
+     "d"
+    ]
+   }
+  },
+  {
+   "input": {
+    "names": [
+     "d",
+     "c",
+     "b"
+    ],
+    "holding": [
+     "b"
+    ]
+   }
+  },
+  {
+   "input": {
+    "names": [
+     "d",
+     "a"
+    ],
+    "holding": []
+   }
+  },
+  {
+   "input": {
+    "names": [
+     "c",
+     "a"
+    ],
+    "holding": [
+     "c",
+     "a"
+    ]
+   }
+  },
+  {
+   "input": {
+    "names": [
+     "b",
+     "d"
+    ],
+    "holding": [
+     "b",
+     "d"
+    ]
+   }
+  },
+  {
+   "input": {
+    "names": [
+     "b",
+     "c"
+    ],
+    "holding": [
+     "b",
+     "c"
+    ]
+   }
+  },
+  {
+   "input": {
+    "names": [
+     "a"
+    ],
+    "holding": [
+     "a"
+    ]
+   }
+  },
+  {
+   "input": {
+    "names": [
+     "a",
+     "c"
+    ],
+    "holding": []
+   }
+  },
+  {
+   "input": {
+    "names": [
+     "c",
+     "b",
+     "d"
+    ],
+    "holding": [
+     "c",
+     "b",
+     "d"
+    ]
+   }
+  },
+  {
+   "input": {
+    "names": [
+     "a",
+     "c",
+     "d"
+    ],
+    "holding": [
+     "a"
+    ]
+   }
+  },
+  {
+   "input": {
+    "names": [
+     "d",
+     "a"
+    ],
+    "holding": [
+     "d",
+     "a"
+    ]
+   }
+  },
+  {
+   "input": {
+    "names": [
+     "b",
+     "a",
+     "d",
+     "c"
+    ],
+    "holding": []
+   }
+  },
+  {
+   "input": {
+    "names": [
+     "d",
+     "a",
+     "b",
+     "c"
+    ],
+    "holding": [
+     "d",
+     "c"
+    ]
+   }
+  },
+  {
+   "input": {
+    "names": [
+     "d",
+     "c"
+    ],
+    "holding": []
+   }
+  },
+  {
+   "input": {
+    "names": [
+     "c"
+    ],
+    "holding": [
+     "c"
+    ]
+   }
+  },
+  {
+   "input": {
+    "names": [
+     "d",
+     "a"
+    ],
+    "holding": [
+     "d"
+    ]
+   }
+  },
+  {
+   "input": {
+    "names": [
+     "a",
+     "c",
+     "d",
+     "b"
+    ],
+    "holding": []
+   }
+  },
+  {
+   "input": {
+    "names": [
+     "d",
+     "b",
+     "c",
+     "a"
+    ],
+    "holding": []
+   }
+  }
+ ]
+}

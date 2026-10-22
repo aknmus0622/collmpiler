@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { parseArgs } from "node:util";
 import { extract, stableStringify, whereOf } from "../extract.ts";
 import { graphDiagnostics, providedData } from "../graph.ts";
@@ -11,6 +11,24 @@ import { typecheckSpecs } from "../typecheck.ts";
 import { loadProgram } from "../v1/load.ts";
 import { checkSpec, isV1Specs, prepare } from "../v1/prepare.ts";
 import { problemText } from "../v1/read.ts";
+import type { Program } from "../v1/read.ts";
+
+/** The files of the named components (Layer 1 and interpretation, drafts included), and what they import relatively. */
+function filesOf(program: Program, names: string[]): Set<string> {
+  const files = new Set<string>();
+  const visit = (file: string) => {
+    const module = program.modules.get(file);
+    const actual = module?.file ?? file;
+    if (files.has(actual)) return;
+    files.add(actual);
+    for (const i of module?.imports ?? []) if (i.from.startsWith(".")) visit(join(dirname(actual), i.from));
+  };
+  for (const unit of program.units.filter((unit) => names.includes(unit.id))) {
+    visit(unit.file);
+    if (unit.interpretation) visit(unit.interpretation.file);
+  }
+  return files;
+}
 
 // 1.0 の書き方の仕様 (DSL.md §17)
 async function compileV1(dir: string, values: { drafts?: boolean; component?: string }): Promise<void> {
@@ -19,8 +37,11 @@ async function compileV1(dir: string, values: { drafts?: boolean; component?: st
   const irs: Record<string, unknown> = {};
   const checks: (() => Promise<void>)[] = [];
   const shown = new Set<string>();
+  // コンポーネントを指定したときは、そのファイルと、そこから相対 import でたどれるファイルだけを検査する
+  // (同じディレクトリで別のコンポーネントの下書きを作っている最中でも、その誤りに巻き込まれない)
+  const files = values.component === undefined ? undefined : filesOf(program, names);
   // 読み取りの誤り (構文) は、どのコンポーネントのものでもあるので、一度だけ出す
-  for (const p of program.problems.filter((p) => p.code === "syntax")) {
+  for (const p of program.problems.filter((p) => p.code === "syntax" && (!files || !p.at || files.has(p.at.file)))) {
     console.error(problemText(p));
     shown.add(problemText(p));
     process.exitCode = 1;
@@ -44,7 +65,7 @@ async function compileV1(dir: string, values: { drafts?: boolean; component?: st
       for (const w of checked.warnings) console.error(`${tag}${w}`);
     });
   }
-  const typeErrors = typecheckSpecs(dir, { drafts: values.drafts });
+  const typeErrors = typecheckSpecs(dir, { drafts: values.drafts, ...(files ? { only: [...files].map((file) => relative(resolve(dir), file).split(sep).join("/")) } : {}) });
   for (const e of typeErrors) console.error(`error[type-error] ${e.file}: ${e.message}`);
   if (typeErrors.length > 0) process.exitCode = 1;
   process.stdout.write(stableStringify(names.length === 1 ? irs[names[0]] ?? null : irs));

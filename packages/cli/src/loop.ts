@@ -14,7 +14,7 @@ import { isIr8 } from "./generate.ts";
 import { loadProgram } from "./v1/load.ts";
 import { checkSpec, isV1Specs, prepare } from "./v1/prepare.ts";
 import { boundary8, defaultRuns8 } from "./v1/runtime.ts";
-import { planContract8 } from "./v1/stage1.ts";
+import { R1_COMPONENTS8, planContract8, stage0HashOf8 } from "./v1/stage1.ts";
 import type { Ir8 } from "./v1/ir.ts";
 import { DEFAULT_GUIDE } from "./guide.ts";
 import { DRAFT_SUFFIX, listComponents, loadSpecs } from "./loader.ts";
@@ -215,7 +215,7 @@ export async function implement(options: ImplementOptions) {
   // 合格の記録は、これから確かめ直すので、いったん消す（途中で止まったときに、前の記録が残らないように）
   for (const unit of chosen) clearVerified(unit.ws);
   // R1: 採点の部品を作り直す実行では、採点の判断をすべて Stage 0 が下す（採点される側に、採点させない）
-  const gradingByStage0 = chosen.some((unit) => unit.name in R1_COMPONENTS);
+  const gradingByStage0 = chosen.some((unit) => unit.name in (isIr8(unit.ir) ? R1_COMPONENTS8 : R1_COMPONENTS));
   setGradingByStage0(gradingByStage0);
   try {
   for (const unit of chosen) {
@@ -257,7 +257,8 @@ export async function implement(options: ImplementOptions) {
   // Stage 0 と食い違えば書かない (R3)
   if (status === "pass" && oracle === "reviewed") {
     for (const unit of chosen) {
-      const r1 = unit.name in R1_COMPONENTS;
+      const v1 = isIr8(unit.ir);
+      const r1 = unit.name in (v1 ? R1_COMPONENTS8 : R1_COMPONENTS);
       if (r1) {
         const cases = runCases(specsDir, unit.ws, unit.name);
         for (const line of cases.unexecuted) log(`注意 (${unit.name}): 事例の集まりで一度も実行されない関数があります。事例を足してください: ${line}`);
@@ -266,7 +267,7 @@ export async function implement(options: ImplementOptions) {
           continue;
         }
       }
-      writeVerified(unit.ws, specsDir, unit.roots, { gradedBy: gradingByStage0 ? "stage0" : "stage1", ...(r1 ? { stage0: stage0HashOf(unit.name) } : {}) });
+      writeVerified(unit.ws, specsDir, unit.roots, { gradedBy: gradingByStage0 ? "stage0" : "stage1", ...(r1 ? { stage0: v1 ? stage0HashOf8(unit.name) : stage0HashOf(unit.name) } : {}) });
     }
   }
   // seed は、最初のコンポーネントのもの（コンポーネントが1つのときの、従来の形）
