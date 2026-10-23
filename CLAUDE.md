@@ -33,7 +33,9 @@ the one page a spec author needs. The code:
     `Simulation`, input generation, `check8` (fixed traces first: Alloy's shortest traces and the author's examples,
     then random sequences), `selfCheck8`, `checkExamples`, coverage. `decide.ts` — the log of Stage 0 decisions and
     `agree` (R4). `compare.ts` — comparing two interpretations. `mutants.ts` + `verdict.ts` — spec mutation.
-  - `load.ts` (`compile`, `compileChecked`, interpretation problems), `prepare.ts` (`prepare`, `checkSpec`: self-check,
+  - `supplement.ts` (what `clp run` writes into Layer 1: a person's answer to a review mark, in their own words,
+    appended to the sentence the mark is about; the only place Layer 1 is written),
+    `load.ts` (`compile`, `compileChecked`, interpretation problems), `prepare.ts` (`prepare`, `checkSpec`: self-check,
     examples, Alloy, spec mutation), `alloy.ts` + `traces.ts` (the Alloy 6 checker), `generate.ts` (contract, adapter
     skeleton, `verify.ts`, the English spec view `<name>.spec.md`), `runtime.ts` (`runPbt`, called by the generated
     `verify.ts`; `boundary8`), `interpret.ts` (`clp interpret` / `--accept`), `stage1.ts` (Stage 1: the self
@@ -42,11 +44,13 @@ the one page a spec author needs. The code:
     mutation gate may break), and the Stage 0 files of the self components (`overlay.ts`, `fills.ts`, `subset.ts`,
     `declared.ts`, `trace.ts`, `reported.ts`, `usage.ts`, `outcome.ts`).
 - `packages/cli/src/` — what does not depend on the notation: `bin/clp.ts` (loads only the chosen subcommand from
-  `commands/`: `compile`, `interpret`, `apply`, `verify`, internal `__compare`, `__cases`, `__agreement`; each exports
-  `summary`, `usage`, `main(args)`), `loop.ts` (the pipeline), `gates.ts`, `request.ts`, `strategy.ts`, `target.ts` +
-  `target-typescript.ts`, `layout.ts`, `check.ts` + `scan.ts`, `typecheck.ts`, `static-check.ts`, `mutation.ts`,
-  `assets.ts`, `guide.ts`, `verified.ts`, `generate.ts` (a thin shim over `v1/generate.ts`), and the Stage 0 files
-  shared with 0.3's self components (`rules.ts`, `observe.ts`, `choose.ts`, `promise.ts`, `candidates.ts`).
+  `commands/`: `run`, `compile`, `interpret`, `apply`, `verify`, internal `__compare`, `__cases`, `__agreement`; each
+  exports `summary`, `usage`, `main(args)`), `run.ts` (`clp run`: check → interpret → the person's answers → accept →
+  `implement`, started from the state of the specs and output, talking through `Talk`: a terminal or JSON lines),
+  `loop.ts` (the pipeline), `gates.ts`, `request.ts`, `strategy.ts`, `target.ts` + `target-typescript.ts`, `layout.ts`,
+  `check.ts` + `scan.ts`, `typecheck.ts`, `static-check.ts`, `mutation.ts`, `assets.ts`, `guide.ts`, `verified.ts`,
+  `generate.ts` (a thin shim over `v1/generate.ts`), and the Stage 0 files shared with 0.3's self components
+  (`rules.ts`, `observe.ts`, `choose.ts`, `promise.ts`, `candidates.ts`).
 - `examples/` — each complete in one directory (`specs/` by a person, `src/` by agents, `clp/` generated). Do not
   hand-edit `src/` to make verification pass; rerun the loop.
   - `checkout-ts/` — an order (decision tables, outside world, an external the interpretation declared). Most
@@ -61,8 +65,8 @@ the one page a spec author needs. The code:
   symlink to it): `specs/`, `src/` (by agents), `clp/` (test side and pass records), `cases/` (R3).
 - Tests: `packages/cli/test/` — `notation.test.ts` (reading, IR, oracle, PBT, comparison), `example.test.ts`,
   `features.test.ts`, `parts.test.ts`, `durable.test.ts`, `interpret.test.ts`, the pipeline tests (`loop`, `gates`,
-  `repeat`, `layout`, `components`, split so that `node --test` runs them in parallel), `cli.test.ts`, `stage.test.ts`
-  (self-hosting). They share `test/support.ts` (`harness(name)` gives each file its own work directory; never share
+  `repeat`, `layout`, `components`, split so that `node --test` runs them in parallel), `run.test.ts` (`clp run`),
+  `cli.test.ts`, `stage.test.ts` (self-hosting). They share `test/support.ts` (`harness(name)` gives each file its own work directory; never share
   one, a file's `after` hook deletes it; `restamp(dir)` renews stamps after a test edits Layer 1) and use
   `test/fixtures/scripted-agent.ts` as a stand-in LLM. A test must not edit a spec file and load it again from the
   same path: write the changed copy to a new directory.
@@ -79,6 +83,10 @@ node --test packages/cli/test/notation.test.ts        # one file
 CLP_ALLOY=off node --test ...                          # without the Alloy checker (faster; deep cases may then need PBT luck)
 pnpm -s clp compile examples/checkout-ts/specs         # read, type-check, check the specs; IR JSON on stdout, diagnostics on stderr
 (cd examples/checkout-ts && pnpm exec clp verify --out .)   # PBT against the example (--seed N --path P to replay)
+
+# Everything in one run: check, interpret, answer the review marks (accept / supplement Layer 1 / stop), accept,
+# apply. Starts from the state of the specs and output; --json for JSON lines, --yes to write supplements unasked.
+cd examples/checkout-ts && pnpm exec clp run --out . --agent 'claude -p "Read clp/REQUEST.md and carry out the request." --permission-mode acceptEdits'
 
 # Derive the interpretation of components whose prose has no content yet, or whose interpretation is stale.
 # Writes specs/<name>.interpretation.draft.ts; --sessions 2 (default) adds an independent interpretation and reports
@@ -140,7 +148,8 @@ spec/verification and places no constraints on the target system's architecture.
   it, make Layer 1 more precise and run `clp interpret`). Written in the same notation: it fills, never overrides
   (`overwrite`, `wrong-heading`), may declare an `external` the prose implies, and must leave no prose
   (`prose-left`). Its meaning is expressions, so the oracle is the IR itself: there are no meaning functions and
-  nothing of the spec runs as code.
+  nothing of the spec runs as code. The one place the framework writes Layer 1 is `clp run`'s supplement: the
+  person's own words, appended to a sentence after they confirm the diff; an LLM never writes Layer 1.
 - **The IR (version 8)** is the formal model: components with state, events (guard, assigns, calls, output),
   queries, conditions, calcs, decisions, properties, the outside world's promises, `notes` (the prose) and `trace`.
   Strings are `["lit", …]`; the IR does not depend on where something was written.

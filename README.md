@@ -53,6 +53,7 @@ pnpm clp --help
 
 | Command | What it does |
 | --- | --- |
+| `clp run` | all of the below in one run: check, interpret, ask you the open questions, accept, implement, verify |
 | `clp compile` | check the spec and print its IR |
 | `clp interpret` | have an LLM derive what the prose means; `--accept` puts it into use |
 | `clp apply` | bring the production code into agreement with the spec, by having an agent write it and verifying it |
@@ -86,6 +87,9 @@ pnpm exec clp interpret --accept
 # 3. Have an agent write the code, and verify it.
 pnpm exec clp apply --out . --agent 'claude -p "Read clp/REQUEST.md and carry out the request." --permission-mode acceptEdits'
 pnpm exec clp verify --out .
+
+# Or steps 2 and 3 in one run, answering the questions as they come:
+pnpm exec clp run --out . --agent 'claude -p "Read clp/REQUEST.md and carry out the request." --permission-mode acceptEdits'
 ```
 
 For now the directory has to be a package of this repository's workspace (`examples/*`): Node does not run

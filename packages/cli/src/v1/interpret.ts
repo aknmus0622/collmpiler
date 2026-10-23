@@ -252,7 +252,8 @@ a condition written inside a body with only its sentence (\`is.onLoan("…")\`),
 a sentence (\`does.rememberDue("…")\`). ${
     mode.update
       ? `The **interpretation** gives the content of every one of them. Layer 1 has changed since it was written: bring it up to
-date. **Change only what Layer 1 now requires**; leave every other entry exactly as it is.`
+date. **Change only what Layer 1 now requires**; leave every other entry exactly as it is. A \`// REVIEW:\` question that
+Layer 1 now answers is settled: remove it.`
       : `Your task is to write the **interpretation**: the content of every one of them, as expressions in the same notation.`
   } A person reviews it before it is used: it becomes the specification an implementation is verified against.
 

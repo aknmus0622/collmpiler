@@ -12,13 +12,17 @@ import type { Decl, Module } from "./syntax.ts";
 
 const INTERPRETATION_FILE = /\.interpretation(\.draft)?\.ts$/;
 
-function strip(value: unknown, inRow = false): unknown {
-  if (Array.isArray(value)) return value.map((v) => strip(v, inRow));
+function strip(value: unknown, mode: "plain" | "table" | "cells" = "plain"): unknown {
+  if (Array.isArray(value)) return value.map((v) => strip(v, mode));
   if (typeof value !== "object" || value === null) return value;
   const node = value as Record<string, unknown>;
-  // a constant in a decision row: only its kind counts
-  if (inRow && (node.k === "num" || node.k === "str" || node.k === "bool" || node.k === "null")) return { k: node.k };
-  return Object.fromEntries(Object.entries(node).filter(([key]) => key !== "at").map(([key, v]) => [key, strip(v, inRow)]));
+  // a constant in the cells of a decision row: only its kind counts
+  if (mode === "cells" && (node.k === "num" || node.k === "str" || node.k === "bool" || node.k === "null")) return { k: node.k };
+  // a row of a decision table: its condition counts as written (its sentence too), its cells do not
+  if (mode === "table" && node.k === "arr" && Array.isArray(node.items) && node.items.length === 2 && (node.items[1] as { k?: string }).k === "obj") {
+    return { k: "arr", items: [strip(node.items[0]), strip(node.items[1], "cells")] };
+  }
+  return Object.fromEntries(Object.entries(node).filter(([key]) => key !== "at").map(([key, v]) => [key, strip(v, mode)]));
 }
 
 export function layer1Hash(unit: Unit, program: Program): string {
@@ -30,7 +34,7 @@ export function layer1Hash(unit: Unit, program: Program): string {
     if (seen.has(key) || INTERPRETATION_FILE.test(module.file)) return;
     seen.add(key);
     const isDecisions = decl.k === "const" && decl.init.k === "call" && decl.init.callee.k === "id" && names.resolve(module, decl.init.callee.name).k === "core" && decl.init.callee.name === "decisions";
-    const body = isDecisions && decl.k === "const" && decl.init.k === "call" ? { ...decl, init: { ...decl.init, args: decl.init.args.map((a, i) => (i === 1 ? strip(a, true) : a)) } } : decl;
+    const body = isDecisions && decl.k === "const" && decl.init.k === "call" ? { ...decl, init: { ...decl.init, args: decl.init.args.map((a, i) => (i === 1 ? strip(a, "table") : a)) } } : decl;
     parts.push([decl.name, strip(body)]);
     // follow the names it uses
     const walk = (node: unknown) => {

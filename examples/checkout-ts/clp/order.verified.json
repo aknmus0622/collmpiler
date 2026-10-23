@@ -3,7 +3,7 @@
     "order.component.ts",
     "order.interpretation.ts"
   ],
-  "specs": "sha256:e4c76a1cfc17a24c17a7f146390d3dbea1b0d78725975d7d05b79ce36ace55bf",
+  "specs": "sha256:977f1771d80adf52c73b155d36db8c47a9d4a272a1bbfcddee1128ace5b286e0",
   "code": "sha256:26b15eaef05635e2147c9ef03982d72592f1213f3c5dbdffad8a9bb8998ea83f",
   "files": [
     "../src/dependencies.ts",

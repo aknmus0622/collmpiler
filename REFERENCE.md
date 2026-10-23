@@ -189,6 +189,25 @@ Run `clp interpret` (the interpretation of every changed component is updated fr
 answers, the outside world, routes, restarts) runs design, wiring and implementation; anything else is graded as it
 is and, if it fails, implemented again.
 
+## `clp run`: everything in one run
+
+`clp run --out . --agent "<command>"` checks, interprets, asks you the open questions, accepts, implements and
+verifies. Where it starts is read from the state of the specs and the output: a missing or stale interpretation is
+derived, a draft with open review marks is asked about, an accepted one goes on to `clp apply`. Stopped, it continues
+from where it stopped when run again. To each question (`REVIEW`) or difference (`REVIEW(clp)`) you answer:
+
+- **accept** the reading: the mark becomes `REVIEWED`; Layer 1 does not change;
+- **supplement**: your words are appended, as you wrote them, to the sentence of Layer 1 the question is about (the
+  entry the mark is in or above: `Return: "…"`, `is.onLoan("…")`, `does.x("…")`, a state field; the command a
+  difference names; the component's description when the entry is code or the mark is outside every entry). You see
+  the change as a diff before it is written (`--yes` skips this); then the interpretation is derived again;
+- **stop**: change Layer 1 yourself, then run again.
+
+This is the only place `clp` writes Layer 1, and only your words. `--json` makes it JSON lines: events on stdout
+(`step`, `question`, `confirm`, `diagnostic`, `end` with `result` `passed` / `stopped` / `failed`), answers on stdin
+(`{ "id": "q1", "answer": "supplement", "text": "…" }`, `{ "id": "c2", "answer": "yes" }`). Exit codes: 0 passed,
+1 failed, 3 stopped for you.
+
 ## Restarts and failing dependencies
 
 - `durable: true`: verification restarts the system between steps (one in six). The adapter gets `ports.storage`

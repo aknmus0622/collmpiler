@@ -13,6 +13,7 @@ if (major < 22 || (major === 22 && minor < 18)) {
 // サブコマンド。読み込むのは、選ばれたものだけ
 type Command = { main(args: string[]): Promise<void>; summary?: string; usage?: string };
 const COMMANDS: Record<string, () => Promise<Command>> = {
+  run: () => import("../src/commands/run.ts"),
   compile: () => import("../src/commands/compile.ts"),
   interpret: () => import("../src/commands/interpret.ts"),
   apply: () => import("../src/commands/apply.ts"),

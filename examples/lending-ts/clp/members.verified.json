@@ -3,7 +3,7 @@
     "library.component.ts",
     "library.interpretation.ts"
   ],
-  "specs": "sha256:d6fc220ea78002ad3c3f1f66e65cf2f674bdb55a05bd953be5810074079e5524",
+  "specs": "sha256:7ececf0bb9e9e13137375b3e529946fdf649ba1483f6c7bbc01414ae984fb3f9",
   "code": "sha256:4a6d78aac8671f045331432a3b34bd651aeef30f0eb459952e91d3eaa19f9e9f",
   "files": [
     "../src/fines/fines.ts",
