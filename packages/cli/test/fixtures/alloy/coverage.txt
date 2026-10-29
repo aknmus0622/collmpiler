@@ -1,0 +1,29 @@
+checkout-ts order: skipped: 仕様の中の数が 7 ビット (−64〜63) に収まりません。Alloy では確かめず、PBT に任せます
+library-ts loan: skipped: 仕様の中の数が 7 ビット (−64〜63) に収まりません。Alloy では確かめず、PBT に任せます
+lending-ts fines: commands: defined 1, reach 2
+lending-ts library: commands: defined 1, property 2, reach 18, requires 1
+lending-ts members: commands: reach 3
+todo-ts todo-api: skipped: 仕様の中の数が 7 ビット (−64〜63) に収まりません。Alloy では確かめず、PBT に任せます
+todo-ts todos: skipped: 仕様の中の数が 7 ビット (−64〜63) に収まりません。Alloy では確かめず、PBT に任せます
+todo-db-ts store: skipped: Alloy で書けないものがあります (型 {"list":{"record":{"key":"string","value":"json"}}})。Alloy では確かめず、PBT に任せます
+todo-db-ts todo-api: skipped: 仕様の中の数が 7 ビット (−64〜63) に収まりません。Alloy では確かめず、PBT に任せます
+todo-db-ts todos: skipped: 仕様の中の数が 7 ビット (−64〜63) に収まりません。Alloy では確かめず、PBT に任せます
+self checker-verdict: commands: none
+self fill-check: commands: none
+self fit-check: commands: none
+self gate-rules: commands: none
+self input-candidates: skipped: 仕様の中の数が 7 ビット (−64〜63) に収まりません。Alloy では確かめず、PBT に任せます
+self interpret-flow: commands: property 2, reach 35
+self mutation-judge: commands: reach 8
+self mutation-verdict: commands: property 1, reach 11
+self observation-compare: skipped: Alloy で書けないものがあります (型 {"list":{"atom":"Leaf"}})。Alloy では確かめず、PBT に任せます
+self outcome-apply: commands: none
+self overlay-check: commands: none
+self pipeline: skipped: Alloy で書けないものがあります (型 {"record":{"attemptsPerPhase":"int","rounds":"int","incremental":"bool","round":"int","attempt":"int"}})。Alloy では確かめず、PBT に任せます
+self promise-keeper: skipped: 仕様の中の数が 7 ビット (−64〜63) に収まりません。Alloy では確かめず、PBT に任せます
+self sentence-trace: commands: none
+self step-choice: skipped: Alloy で書けないものがあります (型 {"list":{"atom":"CaseName"}})。Alloy では確かめず、PBT に任せます
+self syntax-check: commands: none
+self text-plan: commands: none
+self type-check: commands: none
+self usage-check: commands: none

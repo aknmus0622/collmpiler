@@ -14,7 +14,7 @@
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ComponentIr, Expr, Ir8, TraceStep, Type } from "./ir.ts";
@@ -724,20 +724,54 @@ function definedness(e: unknown, cx: Ctx, context: string[] = []): { what: strin
 
 const ALLOY_VERSION = "6.2.0";
 const ALLOY_URL = `https://github.com/AlloyTools/org.alloytools.alloy/releases/download/v${ALLOY_VERSION}/org.alloytools.alloy.dist.jar`;
-/** Where the Alloy jar is: `CLP_ALLOY_JAR`, or the user's cache (downloaded once, `clp` asks for nothing else). */
+/** The jar of that release (GitHub does not publish a digest; this is the jar as downloaded on 2026-10-22 and again on 2026-10-29). */
+export const ALLOY_SHA256 = "6b8c1cb5bc93bedfc7c61435c4e1ab6e688a242dc702a394628d9a9801edb78d";
+
+const sha256Of = (file: string) => createHash("sha256").update(readFileSync(file)).digest("hex");
+/** Whether a jar is the pinned one (each file is hashed once per process). */
+const checkedJars = new Map<string, boolean>();
+export function isPinnedJar(file: string): boolean {
+  if (!checkedJars.has(file)) checkedJars.set(file, sha256Of(file) === ALLOY_SHA256);
+  return checkedJars.get(file)!;
+}
+
+/**
+ * Where the Alloy jar is: `CLP_ALLOY_JAR` (used as given, with a warning when it is not the pinned jar), or the user's
+ * cache (downloaded once and checked against the pinned hash; a jar that does not match is removed and never run).
+ */
 export function alloyJar(): string {
-  if (process.env.CLP_ALLOY_JAR) return process.env.CLP_ALLOY_JAR;
+  const given = process.env.CLP_ALLOY_JAR;
+  if (given) {
+    if (!isPinnedJar(given) && !warned.has(given)) {
+      warned.add(given);
+      console.error(`注意: CLP_ALLOY_JAR の jar (${given}) は、Alloy ${ALLOY_VERSION} の配布物とハッシュが違います (sha256 ${ALLOY_SHA256} のはず)`);
+    }
+    return given;
+  }
   const dir = join(process.env.XDG_CACHE_HOME ?? join(homedir(), ".cache"), "clp");
   const jar = join(dir, `alloy-${ALLOY_VERSION}.jar`);
-  if (existsSync(jar)) return jar;
-  mkdirSync(dir, { recursive: true });
-  const fetched = spawnSync("curl", ["-sfL", "-o", jar, ALLOY_URL], { encoding: "utf8", timeout: 300_000 });
-  if (fetched.status !== 0 || !existsSync(jar)) {
+  if (existsSync(jar)) {
+    if (isPinnedJar(jar)) return jar;
     rmSync(jar, { force: true });
+    checkedJars.delete(jar);
+  }
+  mkdirSync(dir, { recursive: true });
+  const partial = `${jar}.part`;
+  const fetched = spawnSync("curl", ["-sfL", "-o", partial, ALLOY_URL], { encoding: "utf8", timeout: 300_000 });
+  if (fetched.status !== 0 || !existsSync(partial)) {
+    rmSync(partial, { force: true });
     throw new Error(`Alloy ${ALLOY_VERSION} を取得できませんでした (${ALLOY_URL})。手元の jar を CLP_ALLOY_JAR で指定してください`);
   }
+  const got = sha256Of(partial);
+  if (got !== ALLOY_SHA256) {
+    rmSync(partial, { force: true });
+    throw new Error(`取得した Alloy の jar のハッシュが違います (sha256 ${got}、${ALLOY_SHA256} のはず)。使わずに消しました`);
+  }
+  renameSync(partial, jar);
+  checkedJars.set(jar, true);
   return jar;
 }
+const warned = new Set<string>();
 
 export function javaAvailable(): boolean {
   return spawnSync("java", ["-version"], { encoding: "utf8" }).status === 0;
@@ -829,12 +863,15 @@ const EMITTER = createHash("sha256").update(readFileSync(new URL(import.meta.url
 
 /** Runs the checker on an IR, with a cache keyed by the IR and the analysis (the result is a function of both). */
 export function checkWithAlloy(ir: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): CheckResult {
-  // the key covers how the module is written, too (this file), so a fix here is never hidden by an old result
-  const key = createHash("sha256").update(stableStringify8({ ir, analysis, checker: alloy6.name, emitter: EMITTER })).digest("hex");
+  const { files, commands, skipped } = alloy6.emit(ir, analysis);
+  // the key covers the module as written (whatever file of the emitter changed it), how results are read back (this
+  // file) and the Alloy release, so a fix is never hidden by an old result
+  const key = createHash("sha256")
+    .update(stableStringify8({ ir, analysis, checker: alloy6.name, module: files, reader: EMITTER, alloy: ALLOY_SHA256 }))
+    .digest("hex");
   const cacheDir = join(process.env.XDG_CACHE_HOME ?? join(homedir(), ".cache"), "clp", "alloy-results");
   const cached = join(cacheDir, `${key}.json`);
   if (existsSync(cached)) return JSON.parse(readFileSync(cached, "utf8")) as CheckResult;
-  const { files, commands, skipped } = alloy6.emit(ir, analysis);
   const raw = alloy6.run(files);
   if (files["spec.als"] && !raw.receipt) {
     return { checker: alloy6.name, skipped: [...skipped, `Alloy を実行できませんでした: ${raw.output.trim().slice(-800)}`], verdicts: [] };

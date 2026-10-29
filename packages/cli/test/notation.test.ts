@@ -14,7 +14,7 @@ import { contract8, specView } from "../src/v1/generate.ts";
 import { repoRoot } from "./support.ts";
 
 // The 1.0 notation (DSL.md §17): reading, IR version 8, the oracle, the PBT and the comparison of interpretations.
-// Alloy is not used here (alloy.test.ts runs it).
+// Alloy is not used here (alloy.test.ts writes its modules and runs it).
 process.env.CLP_ALLOY = "off";
 
 const lending = join(repoRoot, "examples/lending-ts/specs");
