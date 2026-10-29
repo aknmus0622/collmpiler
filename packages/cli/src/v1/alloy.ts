@@ -82,7 +82,60 @@ type Ctx = {
   missing?: Set<string>;
   /** How the spec's numbers are written (replaced by small ones in the same order when they do not fit). */
   ints?: Ints;
+  /** Lists in the state, as sets of slots (`<id>.<field>`); the names bound to a slot, and the list it is of. */
+  lists?: Map<string, ListInfo>;
+  slotVars?: Map<string, string>;
+  /** Strings carry their length and their trimmed form (the spec uses `length` or `trim`). */
+  stringOps?: boolean;
 };
+
+/**
+ * A list in the state (DSL.md §17.20, E): the checks never look at its order (an operation that does is out of the
+ * profile), so it is a set of slots, each holding one element in mutable fields (`v` for an element that is not a
+ * record). Two equal elements are two slots, so counting them is exact.
+ */
+type ListInfo = { slot: string; fields: Record<string, Type>; record: boolean };
+const elemField = (key: string, k: string) => `e_${safe(key)}_${safe(k)}`;
+/** The list a collection expression ranges over (a list field, or a filter of one). */
+function listOf(coll: unknown, cx: Ctx): string | undefined {
+  if (!Array.isArray(coll)) return undefined;
+  if (coll[0] === "state") {
+    const key = `${cx.component}.${coll[1]}`;
+    return cx.lists?.has(key) ? key : undefined;
+  }
+  if (coll[0] === "filter") return listOf(coll[1], cx);
+  return undefined;
+}
+/**
+ * Parameters with records taken apart (DSL.md §17.20, E): a record given to a command is its fields, one parameter
+ * each (`body.title`), so no record is ever compared as a whole. A field that is itself a record is left as it is (and
+ * cannot be declared).
+ */
+function flatParams(params: Record<string, Type>): Record<string, Type> {
+  const out: Record<string, Type> = {};
+  for (const [p, t] of Object.entries(params)) {
+    if (typeof t === "object" && "record" in t) for (const [k, kt] of Object.entries(t.record)) out[`${p}.${k}`] = kt;
+    else out[p] = t;
+  }
+  return out;
+}
+/** The arguments of a call, for the parameters taken apart. */
+const argTerms = (params: Record<string, Type>, args: Record<string, unknown>, cx: Ctx): string[] =>
+  Object.keys(flatParams(params)).map((p) => (p.includes(".") ? fieldTerm(args[p.split(".")[0]], p.slice(p.indexOf(".") + 1), cx) : term(args[p], cx)));
+/** A field of a record that is not in a list: of a record written out, of a parameter taken apart, of an answer read. */
+function fieldTerm(inner: unknown, k: string, cx: Ctx): string {
+  if (Array.isArray(inner)) {
+    if (inner[0] === "record") return term((inner[1] as Record<string, unknown>)[k], cx);
+    if (inner[0] === "var" && cx.vars.has(`${inner[1]}.${k}`)) return cx.vars.get(`${inner[1]}.${k}`)!;
+    if (inner[0] === "outputOf") {
+      const [, id, command, args] = inner as [string, string, string, Record<string, unknown>];
+      if (cx.missing?.has(`out:${id}.${command}.${k}`) || cx.missing?.has(`out:${id}.${command}`)) return unsupported(`${id}.${command} の答えの ${k}`);
+      return `${outFun(id, command)}_${safe(k)}[${argTerms(cx.ir.components[id].commands![command].params, args, cx).join(", ")}]`;
+    }
+  }
+  return unsupported("組のフィールド");
+}
+const slotOf = (e: unknown, cx: Ctx): string | undefined => (Array.isArray(e) && e[0] === "var" ? cx.slotVars?.get(e[1] as string) : undefined);
 
 /** A number of the spec as written in the module. */
 function intTerm(n: number, ints: Ints | undefined): string {
@@ -95,7 +148,8 @@ function sigOf(t: Type): string {
   if (t === "int") return "Int";
   if (t === "bool") return "Bool";
   if (t === "string") return "Str";
-  if (t === "json") return unsupported("JSON の値");
+  // a JSON value the checks only pass on and compare: a number, a string, a truth value, or an atom with nothing inside
+  if (t === "json") return JSON_VALUE;
   if ("enum" in t) {
     if (t.enum.every((v) => typeof v === "string")) return "Str";
     if (t.enum.every((v) => typeof v === "number")) return "Int";
@@ -105,8 +159,11 @@ function sigOf(t: Type): string {
   if ("optional" in t) return sigOf(t.optional);
   return unsupported(`型 ${JSON.stringify(t)}`);
 }
+const JSON_VALUE = "(Json + Int + Str + Bool)";
 /** A field or parameter declaration: `one X`, `lone X`, `set X`, `K -> lone V`. */
 function declOf(t: Type): string {
+  // null is a JSON value too
+  if (t === "json") return `lone ${JSON_VALUE}`;
   if (typeof t === "object" && "optional" in t) return `lone ${sigOf(t.optional)}`;
   if (typeof t === "object" && "set" in t) return `set ${sigOf(t.set)}`;
   if (typeof t === "object" && "map" in t) return `${sigOf(t.map[0])} -> lone ${sigOf(t.map[1])}`;
@@ -152,6 +209,8 @@ function formula(e: Expr | unknown, cx: Ctx): string {
     case "ite":
       return `(${f(a[0])} implies ${f(a[1])} else ${f(a[2])})`;
     case "=":
+      // two records are equal by their fields; two slots are equal only when they are the same slot
+      if ([a[0], a[1]].some((x) => { const key = slotOf(x, cx); return key !== undefined && cx.lists!.get(key)!.record; })) return unsupported("組どうしの比較");
       return isBoolExpr(a[0], cx) ? `(${f(a[0])} iff ${f(a[1])})` : `(${t(a[0])} = ${t(a[1])})`;
     case "<":
     case "<=":
@@ -235,6 +294,9 @@ function bind(coll: unknown, binders: string[], cx: Ctx): { decls: string; vars:
   }
   const [x] = binders;
   vars.set(x, `b_${safe(x)}`);
+  const list = listOf(coll, cx);
+  if (list !== undefined) cx.slotVars?.set(x, list);
+  else cx.slotVars?.delete(x);
   return { decls: `b_${safe(x)}: ${c}`, vars };
 }
 function typeOfColl(coll: unknown, cx: Ctx): "set" | "map" {
@@ -242,7 +304,7 @@ function typeOfColl(coll: unknown, cx: Ctx): "set" | "map" {
     if (coll[0] === "state") {
       const t = cx.ir.components[cx.component].state?.[coll[1] as string];
       if (t && typeof t === "object" && "map" in t) return "map";
-      if (t && typeof t === "object" && "list" in t) unsupported("並び (List)");
+      if (t && typeof t === "object" && "list" in t && listOf(coll, cx) === undefined) unsupported("並び (List)");
       return "set";
     }
     if (["override", "dsub", "emptyMap"].includes(coll[0] as string)) return "map";
@@ -281,8 +343,24 @@ function term(e: Expr | unknown, cx: Ctx): string {
       const name = cx.strings.get(a[0]) ?? unsupported(`文字列 ${a[0]}`);
       return name;
     }
-    case "var":
-      return cx.vars.get(a[0] as string) ?? unsupported(`名前 ${String(a[0])}`);
+    case "var": {
+      const name = cx.vars.get(a[0] as string) ?? unsupported(`名前 ${String(a[0])}`);
+      const key = slotOf(e, cx);
+      if (key === undefined) return name;
+      // an element of a list: its value (a record is read through its fields)
+      if (cx.lists!.get(key)!.record) return unsupported("並びの要素の組そのもの");
+      return `(${name}.${elemField(key, "v")})`;
+    }
+    case "len": {
+      if (listOf(a[0], cx) === undefined) return unsupported("並び (List) の長さ");
+      return `#${t(a[0])}`;
+    }
+    case "strlen":
+      if (!cx.stringOps) return unsupported("文字列の長さ");
+      return `(${t(a[0])}.len)`;
+    case "trim":
+      if (!cx.stringOps) return unsupported("文字列の trim");
+      return `(${t(a[0])}.trimmed)`;
     case "state":
       if (cx.missing?.has(`state:${cx.component}.${a[0]}`)) return unsupported(`状態 ${cx.component}.${a[0]} (その型)`);
       return `(${comp(cx.component)}.${field(cx.component, a[0] as string)}${cx.primed ? "'" : ""})`;
@@ -374,6 +452,8 @@ function term(e: Expr | unknown, cx: Ctx): string {
     }
     case "field": {
       const [inner, column] = a as [unknown, string];
+      const key = slotOf(inner, cx);
+      if (key !== undefined) return `(${cx.vars.get((inner as string[])[1])}.${elemField(key, column)})`;
       if (Array.isArray(inner) && inner[0] === "decide") {
         const [, name, args] = inner as [string, string, Record<string, unknown>];
         const table = cx.ir.components[cx.component].decisions?.[name] ?? unsupported(`決定表 ${name}`);
@@ -388,7 +468,7 @@ function term(e: Expr | unknown, cx: Ctx): string {
         }
         return lets.length ? `(let ${lets.join(", ")} | ${body})` : body;
       }
-      return unsupported("組のフィールド");
+      return fieldTerm(inner, column, cx);
     }
     case "ask": {
       const [id, port, args] = a as [string, string, Record<string, unknown>];
@@ -400,7 +480,7 @@ function term(e: Expr | unknown, cx: Ctx): string {
         const params = Object.keys(def.params);
         if (params.length === 0) return env;
         if (params.length > 1) return unsupported("引数が2つ以上ある外の世界の問い合わせ");
-        return `(${term(args[params[0]], cx)}.${env})`;
+        return `(${term(args[params[0]], cx)}.(${env}))`;
       }
       const query = target.queries?.[port] ?? unsupported(`問い合わせ ${id}.${port}`);
       const outer = { ...cx };
@@ -413,7 +493,8 @@ function term(e: Expr | unknown, cx: Ctx): string {
     case "outputOf": {
       const [id, command, args] = a as [string, string, Record<string, unknown>];
       if (cx.missing?.has(`out:${id}.${command}`)) return unsupported(`${id}.${command} の答え`);
-      return `${outFun(id, command)}[${Object.keys(cx.ir.components[id].commands![command].params).map((p) => term(args[p], cx)).join(", ")}]`;
+      if (typeof cx.ir.components[id].commands![command].output === "object" && "record" in (cx.ir.components[id].commands![command].output as object)) return unsupported(`${id}.${command} の答えの組そのもの`);
+      return `${outFun(id, command)}[${argTerms(cx.ir.components[id].commands![command].params, args, cx).join(", ")}]`;
     }
     default:
       return unsupported(`演算 ${op}`);
@@ -426,6 +507,20 @@ const commandPred = (id: string, command: string) => `cmd_${safe(id)}_${safe(com
 const unchanged = (id: string) => `same_${safe(id)}`;
 
 // --- The module ---
+
+const usesStringOps = (ir: Ir8): boolean => JSON.stringify(ir.components).includes('["strlen",') || JSON.stringify(ir.components).includes('["trim",');
+/** The string constants of the module: the spec's, and with `length` / `trim`, the empty string and every constant trimmed. */
+function stringsOf(ir: Ir8): string[] {
+  const found = literalStrings(ir);
+  if (!usesStringOps(ir)) return found;
+  return [...new Set([...found, "", ...found.map((s) => s.trim())])].sort();
+}
+/** The integers of the module (the lengths of the string constants are constants too, when lengths are compared). */
+function moduleInts(ir: Ir8, fixed?: number) {
+  const relevance = relevanceOf(ir);
+  if (usesStringOps(ir)) for (const s of stringsOf(ir)) relevance.numbers.add([...s].length).add(0);
+  return { relevance, made: intsOf(relevance, fixed) };
+}
 
 function literalStrings(ir: Ir8): string[] {
   const found = new Set<string>();
@@ -447,22 +542,95 @@ export function renderAlloy(header: string, commands: CommandInfo[], scope: (inf
   return `${header}${commands.map((info) => `${info.kind === "reach" ? "run" : "check"} ${info.name} { ${info.body} } ${scope(info)}`).join("\n")}\n`;
 }
 
-export function emitAlloy(ir: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { text: string; header: string; bitwidth: number; commands: CommandInfo[]; skipped: string[] } {
+export function emitAlloy(ir: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { text: string; header: string; bitwidth: number; commands: CommandInfo[]; skipped: string[]; constants?: number } {
   const skipped: string[] = [];
   // only what the checks look at is kept, and its numbers made to fit (abstraction.ts)
-  const relevance = relevanceOf(ir);
-  const made = intsOf(relevance, analysis.bitwidth);
+  const { relevance, made } = moduleInts(ir, analysis.bitwidth);
   if ("reason" in made) return { text: "", header: "", bitwidth: 0, commands: [], skipped: [made.reason] };
   const ints = made;
   const bitwidth = ints.bitwidth;
-  const strings = new Map(literalStrings(ir).map((s, i) => [s, `str_${i}`]));
-  const lines: string[] = [`module spec`, ``, `abstract sig Bool {}`, `one sig True, False extends Bool {}`, `sig Str {}`];
+  const stringOps = usesStringOps(ir);
+  const strings = new Map(stringsOf(ir).map((s, i) => [s, `str_${i}`]));
+  const lines: string[] = [`module spec`, ``, `abstract sig Bool {}`, `one sig True, False extends Bool {}`, stringOps ? `sig Str { len: one Int, trimmed: one Str }` : `sig Str {}`, `sig Json {}`];
   if (strings.size) lines.push(`one sig ${[...strings.values()].join(", ")} extends Str {}`);
+  if (stringOps) {
+    // what every string is (its trimmed form is trimmed, no longer than it; only the empty string has length 0), and what each constant is
+    const facts = [`all s: Str | s.len >= 0 and s.trimmed.trimmed = s.trimmed and s.trimmed.len <= s.len and (s.len = 0 iff s = ${strings.get("")})`];
+    for (const [text, name] of strings) facts.push(`${name}.len = ${intTerm([...text].length, ints)} and ${name}.trimmed = ${strings.get(text.trim())}`);
+    lines.push(`fact strings { ${facts.join(" and ")} }`);
+  }
   for (const s of ir.sorts) lines.push(`sig ${sort(s)} {}`);
   const internal = Object.entries(ir.components).filter(([, c]) => !c.external);
+  // lists in the state, as sets of slots
+  const lists = new Map<string, ListInfo>();
+  for (const [id, c] of internal) {
+    for (const [f, t] of Object.entries(c.state ?? {})) {
+      if (typeof t !== "object" || !("list" in t)) continue;
+      const elem = t.list;
+      const record = typeof elem === "object" && "record" in elem;
+      lists.set(`${id}.${f}`, { slot: `Slot_${safe(id)}_${safe(f)}`, fields: record ? (elem as { record: Record<string, Type> }).record : { v: elem }, record });
+    }
+  }
+  const slotVars = new Map<string, string>();
   // what cannot be declared is left out, and whatever reads it is left out with it (DSL.md §17.20)
   const missing = new Set<string>();
-  const cx0 = (component: string, vars = new Map<string, string>()): Ctx => ({ ir, component, vars, strings, missing, ints });
+  const cx0 = (component: string, vars = new Map<string, string>()): Ctx => ({ ir, component, vars, strings, missing, ints, lists, slotVars, stringOps });
+  /** The slots of a list keep what they hold (all of them, or all but `except`). */
+  const slotsKept = (key: string, except?: string) =>
+    Object.keys(lists.get(key)!.fields)
+      .map((k) => `(all s: ${lists.get(key)!.slot}${except ? ` - (${except})` : ""} | s.${elemField(key, k)}' = s.${elemField(key, k)})`)
+      .join(" and ");
+  /** A state field stays as it is. */
+  const same = (id: string, f: string) => {
+    const now = `${comp(id)}.${field(id, f)}`;
+    return lists.has(`${id}.${f}`) ? `${now}' = ${now} and ${slotsKept(`${id}.${f}`)}` : `${now}' = ${now}`;
+  };
+  /** A list field written: the operations on lists the checks can follow (a filter, a map, appending, a choice between them). */
+  const listWritten = (id: string, f: string, e: unknown, cx: Ctx): string => {
+    const key = `${id}.${f}`;
+    const info = lists.get(key)!;
+    const now = `${comp(id)}.${field(id, f)}`;
+    const isThis = (x: unknown) => Array.isArray(x) && x[0] === "state" && x[1] === f;
+    if (!Array.isArray(e)) return unsupported("並びへの代入");
+    if (isThis(e)) return same(id, f);
+    if (e[0] === "ite") return `(${formula(e[1], cx)} implies (${listWritten(id, f, e[2], cx)}) else (${listWritten(id, f, e[3], cx)}))`;
+    if (e[0] === "filter" && isThis(e[1])) return `${now}' = ${term(e, cx)} and ${slotsKept(key)}`;
+    // a field of the element an expression gives (a record, a record with fields changed, a choice, the element itself)
+    const elementField = (x: unknown, k: string, inner: Ctx): string => {
+      if (!info.record) return term(x, inner);
+      if (Array.isArray(x)) {
+        if (x[0] === "record") return term((x[1] as Record<string, unknown>)[k], inner);
+        if (x[0] === "with") return k in (x[2] as Record<string, unknown>) ? term((x[2] as Record<string, unknown>)[k], inner) : elementField(x[1], k, inner);
+        if (x[0] === "ite") return `(${formula(x[1], inner)} => ${elementField(x[2], k, inner)} else ${elementField(x[3], k, inner)})`;
+        if (x[0] === "var" && slotOf(x, inner) === key) return `(${inner.vars.get(x[1] as string)}.${elemField(key, k)})`;
+      }
+      return unsupported("並びの要素の組");
+    };
+    if (e[0] === "map" && isThis(e[1])) {
+      const [binder] = e[2] as string[];
+      const { decls, vars } = bind(e[1], [binder], cx);
+      const inner = { ...cx, vars };
+      const b = vars.get(binder)!;
+      const fields = Object.keys(info.fields).map((k) => `${b}.${elemField(key, k)}' = ${elementField(e[3], k, inner)}`);
+      return `${now}' = ${now} and (all ${decls} | ${fields.join(" and ")}) and ${slotsKept(key, now)}`;
+    }
+    if (e[0] === "concat" && isThis(e[1]) && Array.isArray(e[2]) && e[2][0] === "list") {
+      const items = (e[2] as unknown[]).slice(1);
+      if (items.length === 0) return same(id, f);
+      const fresh = items.map((_, i) => `n_${i}`);
+      const holds = items.flatMap((item, i) => Object.keys(info.fields).map((k) => `${fresh[i]}.${elemField(key, k)}' = ${elementField(item, k, cx)}`));
+      return `(some ${fresh.length > 1 ? "disj " : ""}${fresh.join(", ")}: ${info.slot} - ${now} | ${now}' = ${now} + ${fresh.join(" + ")} and ${holds.join(" and ")} and ${slotsKept(key, fresh.join(" + "))})`;
+    }
+    // a list written out: exactly that many slots, holding those elements
+    if (e[0] === "list") {
+      const items = (e as unknown[]).slice(1);
+      if (items.length === 0) return `no ${now}' and ${slotsKept(key)}`;
+      const fresh = items.map((_, i) => `n_${i}`);
+      const holds = items.flatMap((item, i) => Object.keys(info.fields).map((k) => `${fresh[i]}.${elemField(key, k)}' = ${elementField(item, k, cx)}`));
+      return `(some ${fresh.length > 1 ? "disj " : ""}${fresh.join(", ")}: ${info.slot} | ${now}' = ${fresh.join(" + ")} and ${holds.join(" and ")} and ${slotsKept(key, fresh.join(" + "))})`;
+    }
+    return unsupported(`並びへの代入 (${e[0]})`);
+  };
   // a state field no check reads (only answers and the outside world do) is not declared; writing it is left out
   for (const [id, c] of internal) for (const f of Object.keys(c.state ?? {})) if (!relevance.fields.has(`${id}.${f}`)) missing.add(`state:${id}.${f}`);
   /** Whether an expression the checks do not need can still be written as it is (its numbers fit, unreplaced). */
@@ -493,14 +661,56 @@ export function emitAlloy(ir: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { tex
   };
   for (const [id, c] of internal) {
     for (const [name, def] of Object.entries(c.commands ?? {})) {
-      if (declare(`params:${id}.${name}`, () => Object.values(def.params).map(declOf).join()) === undefined) dropCommand(id, name);
+      if (declare(`params:${id}.${name}`, () => Object.values(flatParams(def.params)).map(declOf).join()) === undefined) dropCommand(id, name);
     }
   }
   const entries = entriesOf(ir).filter((e) => e.kind === "command" && !missing.has(`cmd:${e.qualified}`));
+  /** The entries that may ask a query of the outside world (through what they call, and the named parts they read): more is safe. */
+  const entriesAsking = (id: string, port: string): string[] => {
+    const needle = JSON.stringify(["ask", id, port]).slice(0, -1);
+    const named = new Set<string>();
+    // names whose bodies ask it (conditions, calculations, decisions, queries), to a fixed point
+    for (let before = -1; before !== named.size; ) {
+      before = named.size;
+      for (const [cid, c] of Object.entries(ir.components)) {
+        const bodies: [string, unknown][] = [
+          ...Object.entries(c.conditions ?? {}).map(([n, x]) => [`["cond","${n}"`, x] as [string, unknown]),
+          ...Object.entries(c.calcs ?? {}).map(([n, x]) => [`["calc","${n}"`, x] as [string, unknown]),
+          ...Object.entries(c.decisions ?? {}).map(([n, x]) => [`["decide","${n}"`, x] as [string, unknown]),
+          ...Object.entries(c.queries ?? {}).map(([n, x]) => [`["ask","${cid}","${n}"`, x] as [string, unknown]),
+        ];
+        for (const [key, body] of bodies) {
+          const text = JSON.stringify(body);
+          if (text.includes(needle) || [...named].some((n) => text.includes(n))) named.add(key);
+        }
+      }
+    }
+    const asks = (x: unknown) => {
+      const text = JSON.stringify(x);
+      return text.includes(needle) || [...named].some((n) => text.includes(n));
+    };
+    const commandAsks = (cid: string, name: string, seen = new Set<string>()): boolean => {
+      if (seen.has(`${cid}.${name}`)) return false;
+      seen.add(`${cid}.${name}`);
+      const c = ir.components[cid];
+      return (c.commands?.[name]?.events ?? []).some((e) => asks(c.events![e]) || c.events![e].calls.some((call) => !ir.components[call.component]?.external && commandAsks(call.component, call.command, seen)));
+    };
+    return entries.filter((e) => commandAsks(e.component, e.name)).map((e) => e.qualified);
+  };
   try {
     // state
     for (const [id, c] of internal) {
-      const fields = Object.entries(c.state ?? {}).flatMap(([f, t]) => (missing.has(`state:${id}.${f}`) ? [] : (declare(`state:${id}.${f}`, () => `var ${field(id, f)}: ${declOf(t)}`) ?? [])));
+      const fields = Object.entries(c.state ?? {}).flatMap(([f, t]) => {
+        if (missing.has(`state:${id}.${f}`)) return [];
+        const list = lists.get(`${id}.${f}`);
+        if (list) {
+          const slot = declare(`state:${id}.${f}`, () => `sig ${list.slot} { ${Object.entries(list.fields).map(([k, kt]) => `var ${elemField(`${id}.${f}`, k)}: ${declOf(kt).replace(/^one /, "lone ")}`).join(", ")} }`);
+          if (slot === undefined) return [];
+          lines.push(slot);
+          return [`var ${field(id, f)}: set ${list.slot}`];
+        }
+        return declare(`state:${id}.${f}`, () => `var ${field(id, f)}: ${declOf(t)}`) ?? [];
+      });
       lines.push(`one sig ${comp(id)} {${fields.length ? ` ${fields.join(", ")} ` : ""}}`);
     }
     // the outside world: one answer per step for each query (a function of the arguments, for one with a parameter)
@@ -521,18 +731,40 @@ export function emitAlloy(ir: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { tex
         if (typing) envFacts.push(`always (${typing})`);
         if (q.mayFail) envFields.push(`var ${name}_failed: lone Bool`);
         if (q.promise === "increasing") envFacts.push(`always (Env.${name}' >= Env.${name})`);
-        if (q.promise === "fresh") envFacts.push(`always (all v: Env.${name} | after always Env.${name} != v)`);
+        // fresh: never an answer given before, at a step that may ask it (the stand-in remembers what it answered)
+        if (q.promise === "fresh") {
+          const askers = entriesAsking(id, port);
+          envFields.push(`var ${name}_used: set ${sigOf(q.result)}`);
+          envFacts.push(`no Env.${name}_used`);
+          // (`some`: a step without an event is in every set)
+          const asks = askers.length ? `(some Step.event and Step.event in (${askers.map(entry).join(" + ")}))` : "(no Bool)";
+          envFacts.push(`always (${asks} implies (Env.${name} not in Env.${name}_used and Env.${name}_used' = Env.${name}_used + Env.${name}) else Env.${name}_used' = Env.${name}_used)`);
+        }
       }
     }
     lines.push(`one sig Env {${envFields.length ? ` ${envFields.join(", ")} ` : ""}}`);
     // which entry happened, and with what (to read traces back)
-    const stepFields = [`var event: lone Entry`, ...entries.flatMap((e) => Object.entries(e.params).map(([p, t]) => `var ${stepField(e.qualified, p)}: lone ${sigOf(t)}`))];
+    // with lengths, a string input's length and trimmed form are recorded too (Alloy reports only what changes in time)
+    const companions = (e: (typeof entries)[number]) =>
+      stringOps
+        ? Object.entries(flatParams(e.params))
+            .filter(([, t]) => t === "string")
+            .flatMap(([p]) => [
+              { name: stepField(e.qualified, `${p}__len`), sig: "Int", of: `${param(p)}.len` },
+              { name: stepField(e.qualified, `${p}__trim`), sig: "Str", of: `${param(p)}.trimmed` },
+              { name: stepField(e.qualified, `${p}__trimlen`), sig: "Int", of: `${param(p)}.trimmed.len` },
+            ])
+        : [];
+    const stepFields = [
+      `var event: lone Entry`,
+      ...entries.flatMap((e) => [...Object.entries(flatParams(e.params)).map(([p, t]) => `var ${stepField(e.qualified, p)}: lone ${sigOf(t)}`), ...companions(e).map((c) => `var ${c.name}: lone ${c.sig}`)]),
+    ];
     lines.push(`abstract sig Entry {}`);
     if (entries.length) lines.push(`one sig ${entries.map((e) => entry(e.qualified)).join(", ")} extends Entry {}`);
     lines.push(`one sig Step { ${stepFields.join(", ")} }`);
     // named conditions as predicates are inlined (with let); outputs of commands called by others as functions
     for (const [id, c] of internal) {
-      lines.push(`pred ${unchanged(id)} { ${declared(id, c).map((f) => `${comp(id)}.${field(id, f)}' = ${comp(id)}.${field(id, f)}`).join(" and ") || "some Bool"} }`);
+      lines.push(`pred ${unchanged(id)} { ${declared(id, c).map((f) => same(id, f)).join(" and ") || "some Bool"} }`);
     }
     const touchedBy = (id: string, command: string, seen = new Set<string>()): Set<string> => {
       const found = new Set<string>([id]);
@@ -546,52 +778,29 @@ export function emitAlloy(ir: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { tex
       }
       return found;
     };
-    // the parts a command may touch (itself and every part it calls, transitively)
+    // the answers other components read, before any event that reads them
     for (const [id, c] of internal) {
       for (const [name, def] of Object.entries(c.commands ?? {})) {
         if (missing.has(`cmd:${id}.${name}`)) continue;
-        const vars = new Map(Object.keys(def.params).map((p) => [p, param(p)]));
-        const decls = Object.entries(def.params).map(([p, t]) => `${param(p)}: ${declOf(t).replace(/^one /, "")}`);
-        // each event (one that cannot be written is left out, and said so)
-        for (const eventName of def.events) {
-          const written = declare(`event:${id}.${eventName}`, () => {
-          const event = c.events![eventName];
-          const cx = cx0(id, vars);
-          const body: string[] = [formula(event.guard, cx)];
-          for (const f of declared(id, c)) {
-            body.push(f in event.assign ? `${comp(id)}.${field(id, f)}' = ${term(event.assign[f], cx)}` : `${comp(id)}.${field(id, f)}' = ${comp(id)}.${field(id, f)}`);
-          }
-          // calls of parts in the same step; a part not called stays as it is
-          // a part called only under a condition stays as it is otherwise, and so does every part it would call;
-          // a part the command may touch but this event does not call stays as it is
-          const sameAll = (ids: Iterable<string>) => [...ids].map(unchanged).join(" and ") || "some Bool";
-          const covered = new Set<string>([id]);
-          for (const call of event.calls) {
-            if (ir.components[call.component]?.external) continue;
-            if (missing.has(`cmd:${call.component}.${call.command}`)) unsupported(`${call.component}.${call.command} の引数`);
-            const target = ir.components[call.component].commands![call.command];
-            const args = Object.keys(target.params).map((p) => term(call.args[p], cx)).join(", ");
-            const reach = touchedBy(call.component, call.command);
-            for (const x of reach) covered.add(x);
-            const when = call.when === undefined ? undefined : formula(call.when, cx);
-            body.push(when === undefined ? `${commandPred(call.component, call.command)}[${args}]` : `(${when} implies ${commandPred(call.component, call.command)}[${args}] else (${sameAll(reach)}))`);
-          }
-          const untouched = [...touchedBy(id, name)].filter((x) => !covered.has(x));
-          if (untouched.length) body.push(sameAll(untouched));
-          return `pred ${eventPred(id, eventName)}[${decls.join(", ")}] {\n  ${body.join("\n  ")}\n}`;
-          });
-          if (written === undefined) dropped.add(`${id}.${eventName}`);
-          else lines.push(written);
-        }
-        const kept = def.events.filter((e) => !dropped.has(`${id}.${e}`));
-        const typing = typingOfParams(def.params, strings, ints);
-        const requires = def.requires === undefined ? undefined : declare(`requires:${id}.${name}`, () => formula(def.requires!, cx0(id, vars)));
-        // a requires that cannot be written: the command is left out
-        const happens = kept.length === 0 || (def.requires !== undefined && requires === undefined) ? "(no Bool)" : `(${kept.map((e) => `${eventPred(id, e)}[${Object.keys(def.params).map(param).join(", ")}]`).join(" or ")})`;
-        if (happens === "(no Bool)") for (const e of def.events) dropped.add(`${id}.${e}`);
-        lines.push(`pred ${commandPred(id, name)}[${decls.join(", ")}] {\n  ${[typing, requires].filter(Boolean).map((x) => `${x} and `).join("")}${happens}\n}`);
+        const vars = new Map(Object.keys(flatParams(def.params)).map((p) => [p, param(p)]));
+        const decls = Object.entries(flatParams(def.params)).map(([p, t]) => `${param(p)}: ${declOf(t).replace(/^one /, "")}`);
         // the answer, when another component reads it
-        if (def.output && relevance.outputs.has(`${id}.${name}`)) {
+        // a record answer: one function per field
+        if (def.output && relevance.outputs.has(`${id}.${name}`) && typeof def.output === "object" && "record" in def.output) {
+          for (const [k, kt] of Object.entries(def.output.record)) {
+            const fun = declare(`out:${id}.${name}.${k}`, () => {
+              const cx = cx0(id, vars);
+              const outs = def.events.map((e) => c.events![e]);
+              let body = "";
+              for (let i = outs.length - 1; i >= 0; i--) {
+                const value = outs[i].output === undefined || outs[i].output === null ? "none" : fieldTerm(outs[i].output, k, cx);
+                body = i === outs.length - 1 ? value : `(${formula(outs[i].guard, cx)} => ${value} else ${body})`;
+              }
+              return `fun ${outFun(id, name)}_${safe(k)}[${decls.join(", ")}]: ${declOf(kt).replace(/^one /, "")} { ${body} }`;
+            });
+            if (fun !== undefined) lines.push(fun);
+          }
+        } else if (def.output && relevance.outputs.has(`${id}.${name}`)) {
           const fun = declare(`out:${id}.${name}`, () => {
             const outs = def.events.map((e) => c.events![e]);
             const cx = cx0(id, vars);
@@ -606,20 +815,68 @@ export function emitAlloy(ir: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { tex
         }
       }
     }
+    // the parts a command may touch (itself and every part it calls, transitively)
+    for (const [id, c] of internal) {
+      for (const [name, def] of Object.entries(c.commands ?? {})) {
+        if (missing.has(`cmd:${id}.${name}`)) continue;
+        const vars = new Map(Object.keys(flatParams(def.params)).map((p) => [p, param(p)]));
+        const decls = Object.entries(flatParams(def.params)).map(([p, t]) => `${param(p)}: ${declOf(t).replace(/^one /, "")}`);
+        // each event (one that cannot be written is left out, and said so)
+        for (const eventName of def.events) {
+          const written = declare(`event:${id}.${eventName}`, () => {
+          const event = c.events![eventName];
+          const cx = cx0(id, vars);
+          const body: string[] = [formula(event.guard, cx)];
+          for (const f of declared(id, c)) {
+            if (!(f in event.assign)) body.push(same(id, f));
+            else if (lists.has(`${id}.${f}`)) body.push(listWritten(id, f, event.assign[f], cx));
+            else body.push(`${comp(id)}.${field(id, f)}' = ${term(event.assign[f], cx)}`);
+          }
+          // calls of parts in the same step; a part not called stays as it is
+          // a part called only under a condition stays as it is otherwise, and so does every part it would call;
+          // a part the command may touch but this event does not call stays as it is
+          const sameAll = (ids: Iterable<string>) => [...ids].map(unchanged).join(" and ") || "some Bool";
+          const covered = new Set<string>([id]);
+          for (const call of event.calls) {
+            if (ir.components[call.component]?.external) continue;
+            if (missing.has(`cmd:${call.component}.${call.command}`)) unsupported(`${call.component}.${call.command} の引数`);
+            const target = ir.components[call.component].commands![call.command];
+            const args = argTerms(target.params, call.args, cx).join(", ");
+            const reach = touchedBy(call.component, call.command);
+            for (const x of reach) covered.add(x);
+            const when = call.when === undefined ? undefined : formula(call.when, cx);
+            body.push(when === undefined ? `${commandPred(call.component, call.command)}[${args}]` : `(${when} implies ${commandPred(call.component, call.command)}[${args}] else (${sameAll(reach)}))`);
+          }
+          const untouched = [...touchedBy(id, name)].filter((x) => !covered.has(x));
+          if (untouched.length) body.push(sameAll(untouched));
+          return `pred ${eventPred(id, eventName)}[${decls.join(", ")}] {\n  ${body.join("\n  ")}\n}`;
+          });
+          if (written === undefined) dropped.add(`${id}.${eventName}`);
+          else lines.push(written);
+        }
+        const kept = def.events.filter((e) => !dropped.has(`${id}.${e}`));
+        const typing = typingOfParams(flatParams(def.params), strings, ints);
+        const requires = def.requires === undefined ? undefined : declare(`requires:${id}.${name}`, () => formula(def.requires!, cx0(id, vars)));
+        // a requires that cannot be written: the command is left out
+        const happens = kept.length === 0 || (def.requires !== undefined && requires === undefined) ? "(no Bool)" : `(${kept.map((e) => `${eventPred(id, e)}[${Object.keys(flatParams(def.params)).map(param).join(", ")}]`).join(" or ")})`;
+        if (happens === "(no Bool)") for (const e of def.events) dropped.add(`${id}.${e}`);
+        lines.push(`pred ${commandPred(id, name)}[${decls.join(", ")}] {\n  ${[typing, requires].filter(Boolean).map((x) => `${x} and `).join("")}${happens}\n}`);
+      }
+    }
     // the parts each entry may touch: all others stay unchanged
     const steps: string[] = [];
     for (const e of entries) {
       const touched = touchedBy(e.component, e.name);
-      const params = Object.entries(e.params);
+      const params = Object.entries(flatParams(e.params));
       const decls = params.map(([p, t]) => `${param(p)}: ${declOf(t).replace(/^one /, "")}`);
-      const record = [`Step.event = ${entry(e.qualified)}`, ...params.map(([p]) => `Step.${stepField(e.qualified, p)} = ${param(p)}`)];
+      const record = [`Step.event = ${entry(e.qualified)}`, ...params.map(([p]) => `Step.${stepField(e.qualified, p)} = ${param(p)}`), ...companions(e).map((c) => `Step.${c.name} = ${c.of}`)];
       const others = internal.filter(([id]) => !touched.has(id)).map(([id]) => `${unchanged(id)}`);
-      const otherFields = entries.flatMap((x) => (x === e ? [] : Object.keys(x.params).map((p) => `no Step.${stepField(x.qualified, p)}`)));
+      const otherFields = entries.flatMap((x) => (x === e ? [] : [...Object.keys(flatParams(x.params)).map((p) => `no Step.${stepField(x.qualified, p)}`), ...companions(x).map((c) => `no Step.${c.name}`)]));
       const inner = [`${commandPred(e.component, e.name)}[${params.map(([p]) => param(p)).join(", ")}]`, ...record, ...others, ...otherFields].join(" and ");
       steps.push(params.length ? `(some ${decls.join(", ")} | ${inner})` : `(${inner})`);
     }
-    const stutter = [...internal.map(([id]) => unchanged(id)), "no Step.event", ...entries.flatMap((x) => Object.keys(x.params).map((p) => `no Step.${stepField(x.qualified, p)}`))].join(" and ");
-    const init = internal.flatMap(([id, c]) => Object.entries(c.init ?? {}).filter(([f]) => !missing.has(`state:${id}.${f}`)).map(([f, e]) => (Array.isArray(e) && (e[0] === "emptySet" || e[0] === "emptyMap") ? `no ${comp(id)}.${field(id, f)}` : `${comp(id)}.${field(id, f)} = ${term(e, cx0(id))}`)));
+    const stutter = [...internal.map(([id]) => unchanged(id)), "no Step.event", ...entries.flatMap((x) => [...Object.keys(flatParams(x.params)).map((p) => `no Step.${stepField(x.qualified, p)}`), ...companions(x).map((c) => `no Step.${c.name}`)])].join(" and ");
+    const init = internal.flatMap(([id, c]) => Object.entries(c.init ?? {}).filter(([f]) => !missing.has(`state:${id}.${f}`)).map(([f, e]) => (Array.isArray(e) && (e[0] === "emptySet" || e[0] === "emptyMap" || (e[0] === "list" && e.length === 1)) ? `no ${comp(id)}.${field(id, f)}` : `${comp(id)}.${field(id, f)} = ${term(e, cx0(id))}`)));
     lines.push(`fact initial_values { ${init.join(" and ") || "some Bool"} }`);
     lines.push(`fact transitions { always (${[`(${stutter})`, ...steps].join("\n  or ")}) }`);
     for (const f of envFacts) lines.push(`fact { ${f} }`);
@@ -664,13 +921,13 @@ export function emitAlloy(ir: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { tex
     }
     // queries (DSL.md §17.20): every value read is defined, and every case of the answer is given for some input
     for (const [query, def] of Object.entries(c.queries ?? {})) {
-      const decls = tryBody(() => Object.entries(def.params).map(([p, t]) => `${param(p)}: ${declOf(t).replace(/^one /, "")}`).join(", "));
+      const decls = tryBody(() => Object.entries(flatParams(def.params)).map(([p, t]) => `${param(p)}: ${declOf(t).replace(/^one /, "")}`).join(", "));
       if (decls === undefined) continue;
-      const vars = new Map(Object.keys(def.params).map((p) => [p, param(p)]));
-      const exhaustive = stateless && Object.values(def.params).every(finiteType);
+      const vars = new Map(Object.keys(flatParams(def.params)).map((p) => [p, param(p)]));
+      const exhaustive = stateless && Object.values(flatParams(def.params)).every(finiteType);
       const requires = def.requires === undefined ? undefined : tryBody(() => formula(def.requires!, cx0(id, vars)));
       if (def.requires !== undefined && requires === undefined) continue;
-      const pre = [typingOfParams(def.params, strings, ints), requires].filter(Boolean);
+      const pre = [typingOfParams(flatParams(def.params), strings, ints), requires].filter(Boolean);
       const some = (inner: string) => `eventually (${decls ? `some ${decls} | ` : ""}${[...pre, inner].join(" and ")})`;
       for (const obligation of relevance.asked.has(`${id}.${query}`) || writable(def.is) ? definedness(def.is, cx0(id, vars)) : []) {
         const under = [...pre, ...obligation.context].join(" and ") || "some Bool";
@@ -685,12 +942,12 @@ export function emitAlloy(ir: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { tex
     }
     for (const [command, def] of Object.entries(c.commands ?? {})) {
       if (missing.has(`cmd:${id}.${command}`)) continue;
-      const vars = new Map(Object.keys(def.params).map((p) => [p, param(p)]));
-      const decls = Object.entries(def.params).map(([p, t]) => `${param(p)}: ${declOf(t).replace(/^one /, "")}`);
+      const vars = new Map(Object.keys(flatParams(def.params)).map((p) => [p, param(p)]));
+      const decls = Object.entries(flatParams(def.params)).map(([p, t]) => `${param(p)}: ${declOf(t).replace(/^one /, "")}`);
       const quantify = (inner: string) => (decls.length ? `always (all ${decls.join(", ")} | ${inner})` : `always (${inner})`);
       // what the inputs may be (their types) and what the command requires: every obligation is read under both
       const requires =
-        [typingOfParams(def.params, strings, ints), def.requires === undefined ? undefined : tryBody(() => formula(def.requires!, cx0(id, vars)))].filter(Boolean).join(" and ") || undefined;
+        [typingOfParams(flatParams(def.params), strings, ints), def.requires === undefined ? undefined : tryBody(() => formula(def.requires!, cx0(id, vars)))].filter(Boolean).join(" and ") || undefined;
       for (const eventName of def.events) {
         if (dropped.has(`${id}.${eventName}`)) continue;
         const event = c.events![eventName];
@@ -729,7 +986,7 @@ export function emitAlloy(ir: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { tex
         if (!entries.some((e) => e.qualified === qualified)) continue;
         const reachBody = tryBody(() => {
           const inner = `${requires ? `${requires} and ` : ""}${guard}`;
-          return `eventually (${decls.length ? `some ${decls.join(", ")} | ` : ""}Step.event = ${entry(qualified)} and ${[...Object.keys(def.params).map((p) => `Step.${stepField(qualified, p)} = ${param(p)}`), inner].join(" and ")})`;
+          return `eventually (${decls.length ? `some ${decls.join(", ")} | ` : ""}Step.event = ${entry(qualified)} and ${[...Object.keys(flatParams(def.params)).map((p) => `Step.${stepField(qualified, p)} = ${param(p)}`), inner].join(" and ")})`;
         });
         if (reachBody) add("reach", `${id}.${eventName}`, reachBody, `${id}.${eventName}`);
         // each row of a decision table the event reads: a trace where the event happens with that row chosen
@@ -746,7 +1003,7 @@ export function emitAlloy(ir: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { tex
                 return i === r ? when : `not ${when}`;
               });
               const inner = `${requires ? `${requires} and ` : ""}${guard} and ${chosen.join(" and ")}`;
-              return `eventually (${decls.length ? `some ${decls.join(", ")} | ` : ""}Step.event = ${entry(qualified)} and ${[...Object.keys(def.params).map((p) => `Step.${stepField(qualified, p)} = ${param(p)}`), inner].join(" and ")})`;
+              return `eventually (${decls.length ? `some ${decls.join(", ")} | ` : ""}Step.event = ${entry(qualified)} and ${[...Object.keys(flatParams(def.params)).map((p) => `Step.${stepField(qualified, p)} = ${param(p)}`), inner].join(" and ")})`;
             });
             if (body) add("reach", `${id}.${eventName}@${table}[${r}]`, body, `${id}.${eventName}`);
             // a row whose values the event remembers: they show later, so also a trace that goes on to each call
@@ -759,7 +1016,7 @@ export function emitAlloy(ir: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { tex
           if (call.when === undefined) continue;
           const body = tryBody(() => {
             const inner = `${requires ? `${requires} and ` : ""}${guard} and ${formula(call.when!, cx0(id, vars))}`;
-            return `eventually (${decls.length ? `some ${decls.join(", ")} | ` : ""}Step.event = ${entry(qualified)} and ${[...Object.keys(def.params).map((p) => `Step.${stepField(qualified, p)} = ${param(p)}`), inner].join(" and ")})`;
+            return `eventually (${decls.length ? `some ${decls.join(", ")} | ` : ""}Step.event = ${entry(qualified)} and ${[...Object.keys(flatParams(def.params)).map((p) => `Step.${stepField(qualified, p)} = ${param(p)}`), inner].join(" and ")})`;
           });
           if (body) add("reach", `${id}.${eventName}+${call.component}.${call.command}`, body, `${id}.${eventName}`);
           if (body) callSteps.push({ name: `${id}.${eventName}+${call.component}.${call.command}`, step: body.slice("eventually ".length), event: `${id}.${eventName}` });
@@ -767,15 +1024,19 @@ export function emitAlloy(ir: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { tex
       }
     }
   }
+  // the module has a trace at all (facts that contradict each other would make every property hold and nothing happen)
+  commands.push({ name: SANE, kind: "reach", what: "(模型に手順がある)", body: "some Bool" });
   for (const row of rowSteps) {
     for (const call of callSteps) add("reach", `${row.name}→${call.name}`, `eventually (${row.step} and after eventually ${call.step})`, call.event);
   }
   const header = `${lines.join("\n")}\n`;
-  const text = renderAlloy(header, commands, (info) => scopeOf(info, analysis, bitwidth, analysis.atoms));
-  return { text, header, bitwidth, commands, skipped };
+  const text = renderAlloy(header, commands, (info) => scopeOf(info, analysis, bitwidth, analysis.atoms, analysis.traceSteps, strings.size));
+  return { text, header, bitwidth, commands, skipped, constants: strings.size };
 }
-const scopeOf = (info: CommandInfo, analysis: Analysis, bitwidth: number, atoms: number, maxSteps = analysis.traceSteps) =>
-  `for ${atoms} but ${bitwidth} Int, ${info.kind === "reach" ? `1..${maxSteps}` : analysis.steps} steps`;
+const SANE = "sane";
+// strings: the constants are atoms of their own, so the scope of strings is that many more
+const scopeOf = (info: CommandInfo, analysis: Analysis, bitwidth: number, atoms: number, maxSteps = analysis.traceSteps, constants = 0) =>
+  `for ${atoms} but ${bitwidth} Int, ${atoms + constants} Str, ${info.kind === "reach" ? `1..${maxSteps}` : analysis.steps} steps`;
 
 /** The cases of an answer: each branch of its `ite`s and each row of a decision table it reads, with the conditions that choose it. */
 type Case = { label?: string; path: ((cx: Ctx) => string)[] };
@@ -959,12 +1220,32 @@ function runAlloy(text: string): { receipt?: { commands: Record<string, { soluti
 function traceOf(instances: { values: Record<string, Record<string, string[][]>> }[], ir: Ir8, untilEvent?: string): TraceStep[] {
   const entries = entriesOf(ir).filter((e) => e.kind === "command");
   const atom = (name: string) => name.replace(/^(.*)\$(\d+)$/, (_, base: string, n: string) => `${base.replace(/^s_/, "")}-a${n}`);
-  const strings = new Map(literalStrings(ir).map((s, i) => [`str_${i}$0`, s]));
+  const strings = new Map(stringsOf(ir).map((s, i) => [`str_${i}$0`, s]));
   // numbers Alloy chose, as values of the spec (they were replaced by small ones when they did not fit)
-  const made = intsOf(relevanceOf(ir));
+  const { made } = moduleInts(ir);
   const int = (raw: string) => ("reason" in made ? Number(raw) : made.concrete(Number(raw)));
+  // a string Alloy chose: with lengths, one of its length whose trimmed form is the one Alloy chose (letters, then spaces)
+  const stringOf = (raw: string, step?: Record<string, string[][]>, at?: string): string => {
+    if (strings.has(raw)) return strings.get(raw)!;
+    const recorded = (suffix: string) => (step && at ? step[`${at}__${suffix}`]?.[0]?.[0] : undefined);
+    const length = recorded("len");
+    if (length === undefined) return atom(raw);
+    const trimmed = recorded("trim");
+    const letter = "abcdefghijklmnopqrstuvwxyz"[Number(/\$(\d+)$/.exec(raw)?.[1] ?? 0) % 26];
+    const core = trimmed !== undefined && strings.has(trimmed) ? strings.get(trimmed)! : letter.repeat(Math.max(int(recorded("trimlen") ?? "0"), 0));
+    return core.padEnd(int(length), " ");
+  };
+  let current: Record<string, string[][]> | undefined;
+  let currentField: string | undefined;
   const value = (raw: string, type: Type): unknown => {
     if (type === "int") return int(raw);
+    if (type === "string") return stringOf(raw, current, currentField);
+    if (type === "json") {
+      if (strings.has(raw)) return strings.get(raw);
+      if (/^-?\d+$/.test(raw)) return int(raw);
+      if (/^(True|False)\$/.test(raw)) return raw.startsWith("True");
+      return atom(raw).replace(/^Json-/, "json-");
+    }
     if (type === "bool") return raw.startsWith("True");
     if (typeof type === "object" && "optional" in type) return value(raw, type.optional);
     if (typeof type === "object" && "enum" in type && type.enum.every((v) => typeof v === "number")) return int(raw);
@@ -978,7 +1259,15 @@ function traceOf(instances: { values: Record<string, Record<string, string[][]>>
     if (!event) continue;
     const e = entries.find((x) => entry(x.qualified) === event.replace(/\$\d+$/, ""));
     if (!e) continue;
-    const params = Object.fromEntries(Object.entries(e.params).map(([p, t]) => [p, value(step[stepField(e.qualified, p)]?.[0]?.[0] ?? "", t)]));
+    const read = (p: string, t: Type) => {
+      current = step;
+      currentField = stepField(e.qualified, p);
+      return value(step[stepField(e.qualified, p)]?.[0]?.[0] ?? "", t);
+    };
+    const params = Object.fromEntries(
+      Object.entries(e.params).map(([p, t]) => [p, typeof t === "object" && "record" in t ? Object.fromEntries(Object.entries(t.record).map(([k, kt]) => [k, read(`${p}.${k}`, kt)])) : read(p, t)]),
+    );
+    current = undefined;
     const env = instance.values.Env$0 ?? {};
     const answers: Record<string, unknown> = {};
     for (const [id, c] of Object.entries(ir.components)) {
@@ -1041,12 +1330,19 @@ export function checkWithAlloy(ir: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): 
     return { checker: alloy6.name, skipped: [...skipped, `Alloy を実行できませんでした: ${raw.output.trim().slice(-800)}`], verdicts: [] };
   }
   let verdicts = alloy6.read(raw, commands, ir);
+  // a module without a single trace is the framework's mistake: none of its verdicts says anything
+  const sane = verdicts.find((v) => v.command === SANE);
+  verdicts = verdicts.filter((v) => v.command !== SANE);
+  if (sane && sane.status !== "reached") {
+    const result: CheckResult = { checker: alloy6.name, skipped: [...skipped, "Alloy の模型に手順が1つもありません (写し方の誤り)。Alloy の結果は使わず、PBT に任せます"], verdicts: [] };
+    return result;
+  }
   // events not reached in the small scope: searched for again, with more atoms and longer traces
-  const missed = verdicts.filter((v) => v.kind === "reach" && v.status === "unreachable").map((v) => v.command);
+  const missed = verdicts.filter((v) => v.kind === "reach" && v.status === "unreachable" && v.command !== SANE).map((v) => v.command);
   if (missed.length > 0) {
-    const { header, bitwidth } = emitAlloy(ir, analysis);
+    const { header, bitwidth, constants } = emitAlloy(ir, analysis);
     const again = commands.filter((c) => missed.includes(c.name));
-    const wide = alloy6.run({ "spec.als": renderAlloy(header, again, (info) => scopeOf(info, analysis, bitwidth, analysis.wideAtoms, analysis.maxTraceSteps)) });
+    const wide = alloy6.run({ "spec.als": renderAlloy(header, again, (info) => scopeOf(info, analysis, bitwidth, analysis.wideAtoms, analysis.maxTraceSteps, constants)) });
     if (wide.receipt) {
       const found = new Map(alloy6.read(wide, again, ir).map((v) => [v.command, v]));
       verdicts = verdicts.map((v) => found.get(v.command) ?? v);

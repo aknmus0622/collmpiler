@@ -3,6 +3,7 @@ module spec
 abstract sig Bool {}
 one sig True, False extends Bool {}
 sig Str {}
+sig Json {}
 one sig str_0, str_1 extends Str {}
 sig s_MemberId {}
 one sig c_members { var f_members_members: set s_MemberId }
@@ -33,6 +34,7 @@ fact initial_values { no c_members.f_members_members }
 fact transitions { always ((same_members and no Step.event and no Step.x_members_Extend_member and no Step.x_members_Register_member)
   or (some p_member: s_MemberId | cmd_members_Extend[p_member] and Step.event = k_members_Extend and Step.x_members_Extend_member = p_member and no Step.x_members_Register_member)
   or (some p_member: s_MemberId | cmd_members_Register[p_member] and Step.event = k_members_Register and Step.x_members_Register_member = p_member and no Step.x_members_Extend_member)) }
-run c0 { eventually (some p_member: s_MemberId | Step.event = k_members_Register and Step.x_members_Register_member = p_member and (some Bool)) } for 3 but 4 Int, 1..8 steps
-run c1 { eventually (some p_member: s_MemberId | Step.event = k_members_Extend and Step.x_members_Extend_member = p_member and (not (p_member in (c_members.f_members_members)))) } for 3 but 4 Int, 1..8 steps
-run c2 { eventually (some p_member: s_MemberId | Step.event = k_members_Extend and Step.x_members_Extend_member = p_member and (p_member in (c_members.f_members_members))) } for 3 but 4 Int, 1..8 steps
+run c0 { eventually (some p_member: s_MemberId | Step.event = k_members_Register and Step.x_members_Register_member = p_member and (some Bool)) } for 3 but 4 Int, 5 Str, 1..8 steps
+run c1 { eventually (some p_member: s_MemberId | Step.event = k_members_Extend and Step.x_members_Extend_member = p_member and (not (p_member in (c_members.f_members_members)))) } for 3 but 4 Int, 5 Str, 1..8 steps
+run c2 { eventually (some p_member: s_MemberId | Step.event = k_members_Extend and Step.x_members_Extend_member = p_member and (p_member in (c_members.f_members_members))) } for 3 but 4 Int, 5 Str, 1..8 steps
+run sane { some Bool } for 3 but 4 Int, 5 Str, 1..8 steps

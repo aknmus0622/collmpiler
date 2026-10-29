@@ -4,10 +4,12 @@
 // What only reaches an answer or an argument sent to the outside world is the PBT's to compare, so the module leaves
 // it out: a state field read nowhere else, the answer of a command no other component reads.
 //
-// Numbers: when the relevant numbers do not fit Alloy's integers and they are only compared (no arithmetic, no
-// counting), they are replaced by small numbers in the same order: an order-preserving embedding that fixes every
-// constant. Between two constants with integers between them there are two values; below the smallest and above the
-// largest, the rest of Alloy's range. The embedding is checked over Alloy's whole range every time it is made.
+// Numbers: when the relevant numbers do not fit Alloy's integers and they are only compared (no arithmetic), they are
+// replaced by small numbers in the same order: an order-preserving embedding that fixes every constant. Numbers near
+// zero (within WINDOW) stay as they are, so a count (never more than the atoms of the scope) is compared with the
+// constants it is compared with in the spec; beyond, between two constants with integers between them there is one
+// value, and none where there is no integer between them. The embedding is checked over Alloy's whole range every time
+// it is made.
 
 import type { ComponentIr, Ir8, Type } from "./ir.ts";
 
@@ -16,6 +18,8 @@ export type Relevance = { fields: Set<string>; outputs: Set<string>; asked: Set<
 
 const ARITHMETIC = new Set(["+", "-", "*", "div", "mod", "neg", "abs", "sum"]);
 const COUNTING = new Set(["card", "count", "len", "strlen"]);
+/** Numbers kept as they are: counts never exceed the atoms of the scope (6 at most), so they stay inside. */
+export const WINDOW = 8;
 
 export function relevanceOf(ir: Ir8): Relevance {
   const internal = Object.entries(ir.components).filter(([, c]) => !c.external);
@@ -163,27 +167,32 @@ export function intsOf(relevance: Relevance, fixed?: number): Ints | { reason: s
   const identity = (bitwidth: number): Ints => ({ bitwidth, toAlloy: (n) => n, concrete: (v) => v, embedded: false });
   if (fixed) return identity(fixed);
   if (bitsFor(max) <= MAX_BITWIDTH) return identity(bitsFor(max));
-  if (relevance.arithmetic.length > 0 || relevance.counting.length > 0) {
-    return { reason: `仕様の中の数が 7 ビット (−64〜63) に収まらず、計算 (${[...relevance.arithmetic, ...relevance.counting].join(", ")}) に使われています。Alloy では確かめず、PBT に任せます` };
+  if (relevance.arithmetic.length > 0) {
+    return { reason: `仕様の中の数が 7 ビット (−64〜63) に収まらず、計算 (${relevance.arithmetic.join(", ")}) に使われています。Alloy では確かめず、PBT に任せます` };
   }
-  // ranks: one step between constants with no integer between them, two (one value between) otherwise
-  const ranks: number[] = [];
-  numbers.forEach((n, i) => ranks.push(i === 0 ? 0 : ranks[i - 1] + (n - numbers[i - 1] > 1 ? 2 : 1)));
-  const shift = -Math.floor(ranks[ranks.length - 1] / 2);
-  const images = ranks.map((r) => r + shift);
-  // room for at least two values below the smallest constant and above the largest
+  // anchors: the constants and the ends of the window, each with its image. Inside the window a number is itself;
+  // outside, one step to a constant with no integer between, two (one value between) otherwise
+  const anchors = [...new Set([...numbers, -WINDOW, WINDOW])].sort((a, b) => a - b);
+  const images = new Array<number>(anchors.length);
+  const at = anchors.indexOf(-WINDOW);
+  for (let i = at; i < anchors.length; i++) images[i] = anchors[i] <= WINDOW ? anchors[i] : images[i - 1] + (anchors[i] - anchors[i - 1] > 1 ? 2 : 1);
+  for (let i = at - 1; i >= 0; i--) images[i] = images[i + 1] - (anchors[i + 1] - anchors[i] > 1 ? 2 : 1);
+  // room for at least two values beyond the outermost constants
   const bitwidth = bitsFor(Math.max(Math.abs(images[0] - 2), Math.abs(images[images.length - 1] + 2)));
   if (bitwidth > MAX_BITWIDTH) return { reason: `仕様の中の比べる定数が多すぎて、Alloy の数 (7 ビット) に並べられません。Alloy では確かめず、PBT に任せます` };
-  const image = new Map(numbers.map((n, i) => [n, images[i]]));
+  const image = new Map(anchors.map((n, i) => [n, images[i]]));
+  const last = anchors.length - 1;
   const ints: Ints = {
     bitwidth,
     embedded: true,
-    toAlloy: (n) => image.get(n),
+    toAlloy: (n) => image.get(n) ?? (Math.abs(n) <= WINDOW ? n : undefined),
     concrete(v) {
-      if (v <= images[0]) return numbers[0] - (images[0] - v);
-      if (v >= images[images.length - 1]) return numbers[numbers.length - 1] + (v - images[images.length - 1]);
+      if (v <= images[0]) return anchors[0] - (images[0] - v);
+      if (v >= images[last]) return anchors[last] + (v - images[last]);
       const i = images.findIndex((x, k) => x <= v && v < images[k + 1]);
-      return v === images[i] ? numbers[i] : numbers[i] + 1;
+      if (v === images[i]) return anchors[i];
+      // a stretch kept as it is (the window), or the one value between two constants
+      return images[i + 1] - images[i] === anchors[i + 1] - anchors[i] ? anchors[i] + (v - images[i]) : anchors[i] + 1;
     },
   };
   checkEmbedding(ints, numbers);
@@ -202,6 +211,7 @@ export function checkEmbedding(ints: Ints, numbers: number[]): void {
   }
   for (const n of numbers) {
     const v = ints.toAlloy(n)!;
+    if (ints.embedded && Math.abs(n) <= WINDOW && v !== n) throw new Error(`内部の誤り: 0 の近くの数 ${n} が置き換わっています`);
     if (v <= low || v >= high) throw new Error(`内部の誤り: 定数 ${n} が Alloy の数の端にあります`);
     if (ints.concrete(v) !== n) throw new Error(`内部の誤り: 定数 ${n} が戻りません`);
   }

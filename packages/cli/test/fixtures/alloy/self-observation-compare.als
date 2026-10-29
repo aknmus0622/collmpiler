@@ -3,6 +3,7 @@ module spec
 abstract sig Bool {}
 one sig True, False extends Bool {}
 sig Str {}
+sig Json {}
 one sig str_0 extends Str {}
 sig s_Leaf {}
 one sig c_observation_compare {}
@@ -34,6 +35,7 @@ fact transitions { always ((same_observation_compare and no Step.event and no St
   or (some p_leaf: s_Leaf | cmd_observation_compare_Actual[p_leaf] and Step.event = k_observation_compare_Actual and Step.x_observation_compare_Actual_leaf = p_leaf and no Step.x_observation_compare_Begin_answers and no Step.x_observation_compare_Begin_answered and no Step.x_observation_compare_Expected_leaf)
   or (some p_answers: Bool, p_answered: Bool | cmd_observation_compare_Begin[p_answers, p_answered] and Step.event = k_observation_compare_Begin and Step.x_observation_compare_Begin_answers = p_answers and Step.x_observation_compare_Begin_answered = p_answered and no Step.x_observation_compare_Actual_leaf and no Step.x_observation_compare_Expected_leaf)
   or (some p_leaf: s_Leaf | cmd_observation_compare_Expected[p_leaf] and Step.event = k_observation_compare_Expected and Step.x_observation_compare_Expected_leaf = p_leaf and no Step.x_observation_compare_Actual_leaf and no Step.x_observation_compare_Begin_answers and no Step.x_observation_compare_Begin_answered)) }
-run c0 { eventually (some p_answers: Bool, p_answered: Bool | Step.event = k_observation_compare_Begin and Step.x_observation_compare_Begin_answers = p_answers and Step.x_observation_compare_Begin_answered = p_answered and (some Bool)) } for 3 but 4 Int, 1..8 steps
-run c1 { eventually (some p_leaf: s_Leaf | Step.event = k_observation_compare_Expected and Step.x_observation_compare_Expected_leaf = p_leaf and (some Bool)) } for 3 but 4 Int, 1..8 steps
-run c2 { eventually (some p_leaf: s_Leaf | Step.event = k_observation_compare_Actual and Step.x_observation_compare_Actual_leaf = p_leaf and (some Bool)) } for 3 but 4 Int, 1..8 steps
+run c0 { eventually (some p_answers: Bool, p_answered: Bool | Step.event = k_observation_compare_Begin and Step.x_observation_compare_Begin_answers = p_answers and Step.x_observation_compare_Begin_answered = p_answered and (some Bool)) } for 3 but 4 Int, 4 Str, 1..8 steps
+run c1 { eventually (some p_leaf: s_Leaf | Step.event = k_observation_compare_Expected and Step.x_observation_compare_Expected_leaf = p_leaf and (some Bool)) } for 3 but 4 Int, 4 Str, 1..8 steps
+run c2 { eventually (some p_leaf: s_Leaf | Step.event = k_observation_compare_Actual and Step.x_observation_compare_Actual_leaf = p_leaf and (some Bool)) } for 3 but 4 Int, 4 Str, 1..8 steps
+run sane { some Bool } for 3 but 4 Int, 4 Str, 1..8 steps

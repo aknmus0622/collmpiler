@@ -53,12 +53,15 @@ test("Alloy の数: 比べるだけの大きな数は、順序を保った小さ
   const ints = intsOf(relevance([0, 9999, 10000, 1000000]));
   assert.ok(!("reason" in ints));
   assert.ok(ints.embedded && ints.bitwidth <= 7);
-  // 9999 と 10000 の間には整数が無いので、Alloy でも間に値を置かない。ほかの定数の間には、1 つ置く
+  // 0 の近く (±8) はそのまま。9999 と 10000 の間には整数が無いので、Alloy でも間に値を置かない。ほかの定数の間には、1 つ置く
   const [a, b, c, d] = [0, 9999, 10000, 1000000].map((n) => ints.toAlloy(n)!);
-  assert.deepEqual([b - a, c - b, d - c], [2, 1, 2]);
+  assert.equal(a, 0);
+  assert.deepEqual([b - 8, c - b, d - c], [2, 1, 2]);
   assert.equal(ints.concrete(a + 1), 1);
   assert.equal(ints.concrete(c + 1), 10001);
   assert.equal(ints.concrete(a - 3), -3);
+  // 数を数えた結果 (原子の数を超えない) は、0 の近くの定数とそのまま比べられる
+  assert.equal(ints.concrete(5), 5);
   // 計算に使われる数は置き換えない
   assert.match((intsOf(relevance([0, 10000], ["*"])) as { reason: string }).reason, /計算 \(\*\)/);
   // 収まる数は、そのまま
@@ -105,6 +108,26 @@ test("Alloy を実際に動かす: 問い合わせだけの部品は、答えの
     const result = checkWithAlloy(ir!);
     assert.equal(result.verdicts.length, 6);
     for (const verdict of result.verdicts) assert.deepEqual([verdict.kind, verdict.status, verdict.bound], ["reach", "reached", "exhaustive"], verdict.what);
+  } finally {
+    if (saved === undefined) delete process.env.CLP_ALLOY_JAR;
+    else process.env.CLP_ALLOY_JAR = saved;
+  }
+});
+
+test("Alloy を実際に動かす: 並びと文字列の長さ。100 文字の境目の両側の手順が、その長さの文字列で戻る (todo)", (t) => {
+  const jar = process.env.CLP_ALLOY_JAR ?? join(process.env.XDG_CACHE_HOME ?? join(homedir(), ".cache"), "clp", "alloy-6.2.0.jar");
+  if (!javaAvailable() || !existsSync(jar)) return t.skip("Java か Alloy の jar がありません");
+  const { ir } = compile(join(repoRoot, "examples/todo-ts/specs"), "todos");
+  const saved = process.env.CLP_ALLOY_JAR;
+  process.env.CLP_ALLOY_JAR = jar;
+  try {
+    const result = checkWithAlloy(ir!);
+    assert.deepEqual(result.skipped ?? [], []);
+    for (const verdict of result.verdicts) assert.ok(verdict.status === "holds" || verdict.status === "reached", JSON.stringify(verdict));
+    const title = (what: string) => String(result.verdicts.find((v) => v.what === what)?.trace?.at(-1)?.params.title);
+    assert.ok(title("todos.Add.case2").length > 100 && title("todos.Add.case2").trim() !== "");
+    assert.ok(title("todos.Add.otherwise").length <= 100 && title("todos.Add.otherwise").trim() !== "");
+    assert.equal(title("todos.Add.case1").trim(), "");
   } finally {
     if (saved === undefined) delete process.env.CLP_ALLOY_JAR;
     else process.env.CLP_ALLOY_JAR = saved;
