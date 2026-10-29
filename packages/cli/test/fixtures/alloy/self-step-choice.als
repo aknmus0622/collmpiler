@@ -5,6 +5,9 @@ one sig True, False extends Bool {}
 sig Str {}
 sig Json {}
 sig s_CaseName {}
+abstract sig s_num0 {}
+one sig s_num0_0, s_num0_1, s_num0_2, s_num0_3, s_num0_4, s_num0_5 extends s_num0 {}
+fun next_num0: s_num0 -> s_num0 { s_num0_0 -> s_num0_1 + s_num0_1 -> s_num0_2 + s_num0_2 -> s_num0_3 + s_num0_3 -> s_num0_4 + s_num0_4 -> s_num0_5 }
 sig Slot_step_choice_hits { var e_step_choice_hits_v: lone s_CaseName }
 one sig c_step_choice { var f_step_choice_hits: set Slot_step_choice_hits }
 one sig Env { var env_oracle_Holds: s_CaseName -> one Bool }

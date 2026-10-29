@@ -47,7 +47,16 @@ test("Alloy: 例と self の部品ごとに、何を確かめるか (飛ばす�
   expect("coverage.txt", `${lines.join("\n")}\n`);
 });
 
-const relevance = (numbers: number[], arithmetic: string[] = []): Relevance => ({ fields: new Set(), outputs: new Set(), asked: new Set(), numbers: new Set(numbers), arithmetic, counting: [] });
+const relevance = (numbers: number[], arithmetic: string[] = []): Relevance => ({
+  fields: new Set(),
+  outputs: new Set(),
+  asked: new Set(),
+  numbers: new Set(numbers),
+  arithmetic,
+  counting: [],
+  literalsAt: new WeakMap(),
+  arithmeticAt: new Set(),
+});
 
 test("Alloy の数: 比べるだけの大きな数は、順序を保った小さな数に置き換え、戻すと同じ値になる", () => {
   const ints = intsOf(relevance([0, 9999, 10000, 1000000]));
@@ -76,6 +85,11 @@ test("Alloy に渡すもの: 答えと外の世界にしか流れない計算は
   assert.ok(found.fields.has("order.price") && found.fields.has("order.status"));
   assert.ok(!found.fields.has("order.amountPaid"));
   assert.deepEqual(found.arithmetic, []);
+  // 比べるだけの値段は、Alloy の数ではなく、定数の順に並べた原子の鎖になる (大きな数は模型に残らない)
+  const { text } = emitAlloy(ir!);
+  assert.match(text, /var f_order_price: one s_num0/);
+  assert.match(text, /fun next_num0: s_num0 -> s_num0/);
+  assert.doesNotMatch(text, /10000|1000000/);
 });
 
 test("Alloy の jar: 固定したハッシュと違う jar は、その jar と分かる。CLP_ALLOY_JAR はそのまま使う (違えば警告)", () => {

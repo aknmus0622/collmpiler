@@ -7,6 +7,18 @@ sig Json {}
 one sig str_0, str_1, str_2, str_3, str_4, str_5, str_6, str_7, str_8, str_9, str_10, str_11 extends Str {}
 fact strings { all s: Str | s.len >= 0 and s.trimmed.trimmed = s.trimmed and s.trimmed.len <= s.len and (s.len = 0 iff s = str_0) and str_0.len = 0 and str_0.trimmed = str_0 and str_1.len = 3 and str_1.trimmed = str_1 and str_2.len = 12 and str_2.trimmed = str_2 and str_3.len = 9 and str_3.trimmed = str_3 and str_4.len = 7 and str_4.trimmed = str_4 and str_5.len = 7 and str_5.trimmed = str_5 and str_6.len = 4 and str_6.trimmed = str_6 and str_7.len = 7 and str_7.trimmed = str_7 and str_8.len = 9 and str_8.trimmed = str_8 and str_9.len = 4 and str_9.trimmed = str_9 and str_10.len = 7 and str_10.trimmed = str_10 and str_11.len = 11 and str_11.trimmed = str_11 }
 sig s_TodoId {}
+abstract sig s_num0 {}
+one sig s_num0_0, s_num0_1, s_num0_2, s_num0_3, s_num0_4, s_num0_5 extends s_num0 {}
+fun next_num0: s_num0 -> s_num0 { s_num0_0 -> s_num0_1 + s_num0_1 -> s_num0_2 + s_num0_2 -> s_num0_3 + s_num0_3 -> s_num0_4 + s_num0_4 -> s_num0_5 }
+abstract sig s_num1 {}
+one sig s_num1_0, s_num1_1, s_num1_2, s_num1_3, s_num1_4, s_num1_5 extends s_num1 {}
+fun next_num1: s_num1 -> s_num1 { s_num1_0 -> s_num1_1 + s_num1_1 -> s_num1_2 + s_num1_2 -> s_num1_3 + s_num1_3 -> s_num1_4 + s_num1_4 -> s_num1_5 }
+abstract sig s_num2 {}
+one sig s_num2_0, s_num2_1, s_num2_2, s_num2_3, s_num2_4, s_num2_5 extends s_num2 {}
+fun next_num2: s_num2 -> s_num2 { s_num2_0 -> s_num2_1 + s_num2_1 -> s_num2_2 + s_num2_2 -> s_num2_3 + s_num2_3 -> s_num2_4 + s_num2_4 -> s_num2_5 }
+abstract sig s_num3 {}
+one sig s_num3_0, s_num3_1, s_num3_2, s_num3_3, s_num3_4, s_num3_5 extends s_num3 {}
+fun next_num3: s_num3 -> s_num3 { s_num3_0 -> s_num3_1 + s_num3_1 -> s_num3_2 + s_num3_2 -> s_num3_3 + s_num3_3 -> s_num3_4 + s_num3_4 -> s_num3_5 }
 one sig c_todo_api {}
 one sig c_todos {}
 sig Slot_store_entries { var e_store_entries_key: lone Str, var e_store_entries_value: lone (Json + Int + Str + Bool) }

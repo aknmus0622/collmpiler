@@ -12,7 +12,7 @@ self checker-verdict: commands: reach 7
 self fill-check: commands: reach 8
 self fit-check: commands: reach 19
 self gate-rules: commands: reach 23
-self input-candidates: commands: none; skipped: 仕様の中の数が 7 ビット (−64〜63) に収まらず、計算 (+) に使われています。Alloy では確かめず、PBT に任せます
+self input-candidates: commands: reach 10
 self interpret-flow: commands: property 2, reach 36
 self mutation-judge: commands: reach 9
 self mutation-verdict: commands: property 1, reach 12

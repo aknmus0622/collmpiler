@@ -33,9 +33,9 @@ pred cmd_store_Delete[p_key: Str] {
 fact initial_values { no c_store.f_store_entries }
 fact transitions { always ((same_store and no Step.event and no Step.x_store_Delete_key and no Step.x_store_Put_key and no Step.x_store_Put_data)
   or (some p_key: Str | cmd_store_Delete[p_key] and Step.event = k_store_Delete and Step.x_store_Delete_key = p_key and no Step.x_store_Put_key and no Step.x_store_Put_data)
-  or (some p_key: Str, p_data: lone (Json + Int + Str + Bool) | cmd_store_Put[p_key, p_data] and Step.event = k_store_Put and Step.x_store_Put_key = p_key and Step.x_store_Put_data = p_data and no Step.x_store_Delete_key)) }
+  or (some p_key: Str | ((some p_data: (Json + Int + Str + Bool) | cmd_store_Put[p_key, p_data] and Step.event = k_store_Put and Step.x_store_Put_key = p_key and Step.x_store_Put_data = p_data and no Step.x_store_Delete_key) or (let p_data = none | cmd_store_Put[p_key, p_data] and Step.event = k_store_Put and Step.x_store_Put_key = p_key and Step.x_store_Put_data = p_data and no Step.x_store_Delete_key)))) }
 check c0 { (always (all b_e: (c_store.f_store_entries) | (#{ b_f: (c_store.f_store_entries) | ((b_f.e_store_entries_key) = (b_e.e_store_entries_key)) } = 1))) } for 3 but 4 Int, 5 Str, 6 steps
-run c1 { eventually (some p_key: Str, p_data: lone (Json + Int + Str + Bool) | Step.event = k_store_Put and Step.x_store_Put_key = p_key and Step.x_store_Put_data = p_data and (some Bool)) } for 3 but 4 Int, 5 Str, 1..8 steps
+run c1 { eventually (some p_key: Str | ((some p_data: (Json + Int + Str + Bool) | Step.event = k_store_Put and Step.x_store_Put_key = p_key and Step.x_store_Put_data = p_data and (some Bool)) or (let p_data = none | Step.event = k_store_Put and Step.x_store_Put_key = p_key and Step.x_store_Put_data = p_data and (some Bool)))) } for 3 but 4 Int, 5 Str, 1..8 steps
 run c2 { eventually (some p_key: Str | Step.event = k_store_Delete and Step.x_store_Delete_key = p_key and (not (some b_e: (c_store.f_store_entries) | ((b_e.e_store_entries_key) = p_key)))) } for 3 but 4 Int, 5 Str, 1..8 steps
 run c3 { eventually (some p_key: Str | Step.event = k_store_Delete and Step.x_store_Delete_key = p_key and (some b_e: (c_store.f_store_entries) | ((b_e.e_store_entries_key) = p_key))) } for 3 but 4 Int, 5 Str, 1..8 steps
 run sane { some Bool } for 3 but 4 Int, 5 Str, 1..8 steps

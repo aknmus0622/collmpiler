@@ -20,7 +20,7 @@ import { join } from "node:path";
 import type { ComponentIr, Expr, Ir8, TraceStep, Type } from "./ir.ts";
 import { entriesOf, entryName } from "./pbt.ts";
 import { stableStringify8 } from "./generate.ts";
-import { intsOf, relevanceOf } from "./abstraction.ts";
+import { chainAtom, prepareNumbers, relevanceOf } from "./abstraction.ts";
 import type { Ints } from "./abstraction.ts";
 
 // --- The checker interface (DSL.md §17.12) ---
@@ -170,9 +170,14 @@ function declOf(t: Type): string {
   return `one ${sigOf(t)}`;
 }
 
+/** The successor along a chain of number atoms. */
+const chainNext = (chain: string) => `next_${chain}`;
+
 /** What a value of an enumerated type may be (Alloy declares it as any `Str` or `Int`): a formula, or undefined. */
 function typingOf(name: string, t: Type, strings: Map<string, string>, ints?: Ints): string | undefined {
   if (typeof t === "object" && "optional" in t) return typingOf(name, t.optional, strings, ints);
+  // numbers of an enumeration, as atoms of a chain
+  if (typeof t === "object" && "atom" in t && "among" in t) return `${name} in (${(t as { among: number[] }).among.map((i) => chainAtom(t.atom, i)).join(" + ")})`;
   if (typeof t !== "object" || !("enum" in t)) return undefined;
   if (t.enum.every((v) => typeof v === "string")) return `${name} in (${t.enum.map((v) => strings.get(v as string)!).join(" + ")})`;
   if (t.enum.every((v) => typeof v === "number")) return `${name} in (${t.enum.map((v) => intTerm(v as number, ints)).join(" + ")})`;
@@ -184,6 +189,21 @@ const typingOfParams = (params: Record<string, Type>, strings: Map<string, strin
     .flatMap(([p, t]) => typingOf(name(p), t, strings, ints) ?? [])
     .join(" and ");
 const finiteType = (t: Type): boolean => t === "bool" || (typeof t === "object" && (("enum" in t) || ("optional" in t && finiteType(t.optional))));
+
+/**
+ * A quantifier over inputs. An input that may be null (`p: lone X`) is two cases, a value and null: quantifying over
+ * `lone` is higher-order, and Alloy cannot solve it under a temporal operator.
+ */
+function quant(q: "some" | "all", decls: string[] | string, body: string): string {
+  const list = typeof decls === "string" ? (decls === "" ? [] : decls.split(", ")) : decls;
+  const plain = list.filter((d) => !/: lone /.test(d));
+  let inner = body;
+  for (const d of list.filter((d) => /: lone /.test(d))) {
+    const [name, type] = d.split(/: lone /);
+    inner = q === "some" ? `((some ${name}: ${type} | ${inner}) or (let ${name} = none | ${inner}))` : `((all ${name}: ${type} | ${inner}) and (let ${name} = none | ${inner}))`;
+  }
+  return plain.length ? `(${q} ${plain.join(", ")} | ${inner})` : `(${inner})`;
+}
 
 // --- Expressions ---
 
@@ -219,6 +239,14 @@ function formula(e: Expr | unknown, cx: Ctx): string {
       return `(${t(a[0])} ${op} ${t(a[1])})`;
     case "in":
       return `(${t(a[0])} in ${t(a[1])})`;
+    case "ord<":
+      return `(${t(a[2])} in ${t(a[1])}.^${chainNext(a[0] as string)})`;
+    case "ord<=":
+      return `(${t(a[2])} in ${t(a[1])}.*${chainNext(a[0] as string)})`;
+    case "ord>":
+      return `(${t(a[1])} in ${t(a[2])}.^${chainNext(a[0] as string)})`;
+    case "ord>=":
+      return `(${t(a[1])} in ${t(a[2])}.*${chainNext(a[0] as string)})`;
     case "failed":
       return `(some ${failedOf(a[0], cx)})`;
     case "always":
@@ -274,7 +302,7 @@ function isBoolExpr(e: unknown, cx: Ctx): boolean {
   if (typeof e === "boolean") return true;
   if (!Array.isArray(e)) return false;
   const op = e[0];
-  if (["and", "or", "not", "implies", "<", "<=", ">", ">=", "in", "failed", "cond", "some", "every"].includes(op)) return true;
+  if (["and", "or", "not", "implies", "<", "<=", ">", ">=", "ord<", "ord<=", "ord>", "ord>=", "in", "failed", "cond", "some", "every"].includes(op)) return true;
   if (op === "=") return true;
   if (op === "state") return isBoolType(cx.ir.components[cx.component].state?.[e[1] as string]);
   return false;
@@ -350,6 +378,15 @@ function term(e: Expr | unknown, cx: Ctx): string {
       // an element of a list: its value (a record is read through its fields)
       if (cx.lists!.get(key)!.record) return unsupported("並びの要素の組そのもの");
       return `(${name}.${elemField(key, "v")})`;
+    }
+    // a number of a sort written as a chain of atoms, and comparisons along the chain
+    case "ord":
+      return chainAtom(a[0] as string, a[1] as number);
+    case "ordmin":
+    case "ordmax": {
+      const [chain, x, y] = a as [string, unknown, unknown];
+      const before = `(${t(y)} in ${t(x)}.^${chainNext(chain)})`;
+      return op === "ordmin" ? `(${before} => ${t(x)} else ${t(y)})` : `(${before} => ${t(y)} else ${t(x)})`;
     }
     case "len": {
       if (listOf(a[0], cx) === undefined) return unsupported("並び (List) の長さ");
@@ -444,6 +481,10 @@ function term(e: Expr | unknown, cx: Ctx): string {
     case "some":
     case "every":
     case "failed":
+    case "ord<":
+    case "ord<=":
+    case "ord>":
+    case "ord>=":
       return `(${formula(e, cx)} => True else False)`;
     case "calc": {
       const [name, args] = a as [string, Record<string, unknown>];
@@ -515,11 +556,10 @@ function stringsOf(ir: Ir8): string[] {
   if (!usesStringOps(ir)) return found;
   return [...new Set([...found, "", ...found.map((s) => s.trim())])].sort();
 }
-/** The integers of the module (the lengths of the string constants are constants too, when lengths are compared). */
-function moduleInts(ir: Ir8, fixed?: number) {
-  const relevance = relevanceOf(ir);
-  if (usesStringOps(ir)) for (const s of stringsOf(ir)) relevance.numbers.add([...s].length).add(0);
-  return { relevance, made: intsOf(relevance, fixed) };
+/** The IR as the module is written from it: its numbers made to fit, sort by sort (the lengths of the string constants are numbers too, when lengths are compared). */
+function prepared(ir: Ir8, fixed?: number) {
+  const lengths = usesStringOps(ir) ? stringsOf(ir).map((s) => [...s].length) : [];
+  return prepareNumbers(ir, relevanceOf(ir), lengths, fixed);
 }
 
 function literalStrings(ir: Ir8): string[] {
@@ -542,13 +582,15 @@ export function renderAlloy(header: string, commands: CommandInfo[], scope: (inf
   return `${header}${commands.map((info) => `${info.kind === "reach" ? "run" : "check"} ${info.name} { ${info.body} } ${scope(info)}`).join("\n")}\n`;
 }
 
-export function emitAlloy(ir: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { text: string; header: string; bitwidth: number; commands: CommandInfo[]; skipped: string[]; constants?: number } {
+export function emitAlloy(spec: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { text: string; header: string; bitwidth: number; commands: CommandInfo[]; skipped: string[]; constants?: number } {
   const skipped: string[] = [];
-  // only what the checks look at is kept, and its numbers made to fit (abstraction.ts)
-  const { relevance, made } = moduleInts(ir, analysis.bitwidth);
+  // only what the checks look at is kept, and its numbers made to fit (abstraction.ts, sorts.ts)
+  const made = prepared(spec, analysis.bitwidth);
   if ("reason" in made) return { text: "", header: "", bitwidth: 0, commands: [], skipped: [made.reason] };
-  const ints = made;
-  const bitwidth = ints.bitwidth;
+  const ir = made.ir;
+  const relevance = relevanceOf(ir);
+  const bitwidth = made.bitwidth;
+  const ints: Ints = { bitwidth, embedded: made.embedded, toAlloy: (n) => n, concrete: (v) => v };
   const stringOps = usesStringOps(ir);
   const strings = new Map(stringsOf(ir).map((s, i) => [s, `str_${i}`]));
   const lines: string[] = [`module spec`, ``, `abstract sig Bool {}`, `one sig True, False extends Bool {}`, stringOps ? `sig Str { len: one Int, trimmed: one Str }` : `sig Str {}`, `sig Json {}`];
@@ -556,10 +598,17 @@ export function emitAlloy(ir: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { tex
   if (stringOps) {
     // what every string is (its trimmed form is trimmed, no longer than it; only the empty string has length 0), and what each constant is
     const facts = [`all s: Str | s.len >= 0 and s.trimmed.trimmed = s.trimmed and s.trimmed.len <= s.len and (s.len = 0 iff s = ${strings.get("")})`];
-    for (const [text, name] of strings) facts.push(`${name}.len = ${intTerm([...text].length, ints)} and ${name}.trimmed = ${strings.get(text.trim())}`);
+    for (const [text, name] of strings) facts.push(`${name}.len = ${intTerm(made.length([...text].length), ints)} and ${name}.trimmed = ${strings.get(text.trim())}`);
     lines.push(`fact strings { ${facts.join(" and ")} }`);
   }
   for (const s of ir.sorts) lines.push(`sig ${sort(s)} {}`);
+  // the sorts of numbers only compared: chains of atoms, in the order of the numbers they stand for
+  const chained = new Set(made.chains.map((c) => c.name));
+  for (const chain of made.chains) {
+    const atoms = chain.values.map((_, i) => chainAtom(chain.name, i));
+    lines.push(`abstract sig ${sort(chain.name)} {}`, `one sig ${atoms.join(", ")} extends ${sort(chain.name)} {}`);
+    lines.push(`fun ${chainNext(chain.name)}: ${sort(chain.name)} -> ${sort(chain.name)} { ${atoms.slice(1).map((a, i) => `${atoms[i]} -> ${a}`).join(" + ") || "none -> none"} }`);
+  }
   const internal = Object.entries(ir.components).filter(([, c]) => !c.external);
   // lists in the state, as sets of slots
   const lists = new Map<string, ListInfo>();
@@ -730,7 +779,10 @@ export function emitAlloy(ir: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { tex
         const typing = typingOf(answers, q.result, strings, ints);
         if (typing) envFacts.push(`always (${typing})`);
         if (q.mayFail) envFields.push(`var ${name}_failed: lone Bool`);
-        if (q.promise === "increasing") envFacts.push(`always (Env.${name}' >= Env.${name})`);
+        if (q.promise === "increasing") {
+          const r = typeof q.result === "object" && "optional" in q.result ? q.result.optional : q.result;
+          envFacts.push(typeof r === "object" && "atom" in r && chained.has(r.atom) ? `always (Env.${name}' in Env.${name}.*${chainNext(r.atom)})` : `always (Env.${name}' >= Env.${name})`);
+        }
         // fresh: never an answer given before, at a step that may ask it (the stand-in remembers what it answered)
         if (q.promise === "fresh") {
           const askers = entriesAsking(id, port);
@@ -873,7 +925,7 @@ export function emitAlloy(ir: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { tex
       const others = internal.filter(([id]) => !touched.has(id)).map(([id]) => `${unchanged(id)}`);
       const otherFields = entries.flatMap((x) => (x === e ? [] : [...Object.keys(flatParams(x.params)).map((p) => `no Step.${stepField(x.qualified, p)}`), ...companions(x).map((c) => `no Step.${c.name}`)]));
       const inner = [`${commandPred(e.component, e.name)}[${params.map(([p]) => param(p)).join(", ")}]`, ...record, ...others, ...otherFields].join(" and ");
-      steps.push(params.length ? `(some ${decls.join(", ")} | ${inner})` : `(${inner})`);
+      steps.push(quant("some", decls, inner));
     }
     const stutter = [...internal.map(([id]) => unchanged(id)), "no Step.event", ...entries.flatMap((x) => [...Object.keys(flatParams(x.params)).map((p) => `no Step.${stepField(x.qualified, p)}`), ...companions(x).map((c) => `no Step.${c.name}`)])].join(" and ");
     const init = internal.flatMap(([id, c]) => Object.entries(c.init ?? {}).filter(([f]) => !missing.has(`state:${id}.${f}`)).map(([f, e]) => (Array.isArray(e) && (e[0] === "emptySet" || e[0] === "emptyMap" || (e[0] === "list" && e.length === 1)) ? `no ${comp(id)}.${field(id, f)}` : `${comp(id)}.${field(id, f)} = ${term(e, cx0(id))}`)));
@@ -928,10 +980,10 @@ export function emitAlloy(ir: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { tex
       const requires = def.requires === undefined ? undefined : tryBody(() => formula(def.requires!, cx0(id, vars)));
       if (def.requires !== undefined && requires === undefined) continue;
       const pre = [typingOfParams(flatParams(def.params), strings, ints), requires].filter(Boolean);
-      const some = (inner: string) => `eventually (${decls ? `some ${decls} | ` : ""}${[...pre, inner].join(" and ")})`;
+      const some = (inner: string) => `eventually ${quant("some", decls, [...pre, inner].join(" and "))}`;
       for (const obligation of relevance.asked.has(`${id}.${query}`) || writable(def.is) ? definedness(def.is, cx0(id, vars)) : []) {
         const under = [...pre, ...obligation.context].join(" and ") || "some Bool";
-        add("defined", `${id}.${query}: ${obligation.what}`, decls ? `always (all ${decls} | ${under} implies ${obligation.holds})` : `always (${under} implies ${obligation.holds})`, undefined, exhaustive);
+        add("defined", `${id}.${query}: ${obligation.what}`, `always ${quant("all", decls, `${under} implies ${obligation.holds}`)}`, undefined, exhaustive);
       }
       const cases = casesOf(def.is, c);
       if (cases.length < 2) continue;
@@ -944,7 +996,7 @@ export function emitAlloy(ir: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { tex
       if (missing.has(`cmd:${id}.${command}`)) continue;
       const vars = new Map(Object.keys(flatParams(def.params)).map((p) => [p, param(p)]));
       const decls = Object.entries(flatParams(def.params)).map(([p, t]) => `${param(p)}: ${declOf(t).replace(/^one /, "")}`);
-      const quantify = (inner: string) => (decls.length ? `always (all ${decls.join(", ")} | ${inner})` : `always (${inner})`);
+      const quantify = (inner: string) => `always ${quant("all", decls, inner)}`;
       // what the inputs may be (their types) and what the command requires: every obligation is read under both
       const requires =
         [typingOfParams(flatParams(def.params), strings, ints), def.requires === undefined ? undefined : tryBody(() => formula(def.requires!, cx0(id, vars)))].filter(Boolean).join(" and ") || undefined;
@@ -986,7 +1038,7 @@ export function emitAlloy(ir: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { tex
         if (!entries.some((e) => e.qualified === qualified)) continue;
         const reachBody = tryBody(() => {
           const inner = `${requires ? `${requires} and ` : ""}${guard}`;
-          return `eventually (${decls.length ? `some ${decls.join(", ")} | ` : ""}Step.event = ${entry(qualified)} and ${[...Object.keys(flatParams(def.params)).map((p) => `Step.${stepField(qualified, p)} = ${param(p)}`), inner].join(" and ")})`;
+          return `eventually ${quant("some", decls, `Step.event = ${entry(qualified)} and ${[...Object.keys(flatParams(def.params)).map((p) => `Step.${stepField(qualified, p)} = ${param(p)}`), inner].join(" and ")}`)}`;
         });
         if (reachBody) add("reach", `${id}.${eventName}`, reachBody, `${id}.${eventName}`);
         // each row of a decision table the event reads: a trace where the event happens with that row chosen
@@ -1003,7 +1055,7 @@ export function emitAlloy(ir: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { tex
                 return i === r ? when : `not ${when}`;
               });
               const inner = `${requires ? `${requires} and ` : ""}${guard} and ${chosen.join(" and ")}`;
-              return `eventually (${decls.length ? `some ${decls.join(", ")} | ` : ""}Step.event = ${entry(qualified)} and ${[...Object.keys(flatParams(def.params)).map((p) => `Step.${stepField(qualified, p)} = ${param(p)}`), inner].join(" and ")})`;
+              return `eventually ${quant("some", decls, `Step.event = ${entry(qualified)} and ${[...Object.keys(flatParams(def.params)).map((p) => `Step.${stepField(qualified, p)} = ${param(p)}`), inner].join(" and ")}`)}`;
             });
             if (body) add("reach", `${id}.${eventName}@${table}[${r}]`, body, `${id}.${eventName}`);
             // a row whose values the event remembers: they show later, so also a trace that goes on to each call
@@ -1016,7 +1068,7 @@ export function emitAlloy(ir: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { tex
           if (call.when === undefined) continue;
           const body = tryBody(() => {
             const inner = `${requires ? `${requires} and ` : ""}${guard} and ${formula(call.when!, cx0(id, vars))}`;
-            return `eventually (${decls.length ? `some ${decls.join(", ")} | ` : ""}Step.event = ${entry(qualified)} and ${[...Object.keys(flatParams(def.params)).map((p) => `Step.${stepField(qualified, p)} = ${param(p)}`), inner].join(" and ")})`;
+            return `eventually ${quant("some", decls, `Step.event = ${entry(qualified)} and ${[...Object.keys(flatParams(def.params)).map((p) => `Step.${stepField(qualified, p)} = ${param(p)}`), inner].join(" and ")}`)}`;
           });
           if (body) add("reach", `${id}.${eventName}+${call.component}.${call.command}`, body, `${id}.${eventName}`);
           if (body) callSteps.push({ name: `${id}.${eventName}+${call.component}.${call.command}`, step: body.slice("eventually ".length), event: `${id}.${eventName}` });
@@ -1222,8 +1274,11 @@ function traceOf(instances: { values: Record<string, Record<string, string[][]>>
   const atom = (name: string) => name.replace(/^(.*)\$(\d+)$/, (_, base: string, n: string) => `${base.replace(/^s_/, "")}-a${n}`);
   const strings = new Map(stringsOf(ir).map((s, i) => [`str_${i}$0`, s]));
   // numbers Alloy chose, as values of the spec (they were replaced by small ones when they did not fit)
-  const { made } = moduleInts(ir);
-  const int = (raw: string) => ("reason" in made ? Number(raw) : made.concrete(Number(raw)));
+  const made = prepared(ir);
+  // a number Alloy chose for a place, as a value of the spec (its sort's numbers were replaced by small ones when they did not fit)
+  let place = "";
+  const int = (raw: string) => ("reason" in made ? Number(raw) : made.concrete(place, raw));
+  const lengthOf = (raw: string) => ("reason" in made ? Number(raw) : made.concreteLength(Number(raw)));
   // a string Alloy chose: with lengths, one of its length whose trimmed form is the one Alloy chose (letters, then spaces)
   const stringOf = (raw: string, step?: Record<string, string[][]>, at?: string): string => {
     if (strings.has(raw)) return strings.get(raw)!;
@@ -1232,8 +1287,8 @@ function traceOf(instances: { values: Record<string, Record<string, string[][]>>
     if (length === undefined) return atom(raw);
     const trimmed = recorded("trim");
     const letter = "abcdefghijklmnopqrstuvwxyz"[Number(/\$(\d+)$/.exec(raw)?.[1] ?? 0) % 26];
-    const core = trimmed !== undefined && strings.has(trimmed) ? strings.get(trimmed)! : letter.repeat(Math.max(int(recorded("trimlen") ?? "0"), 0));
-    return core.padEnd(int(length), " ");
+    const core = trimmed !== undefined && strings.has(trimmed) ? strings.get(trimmed)! : letter.repeat(Math.max(lengthOf(recorded("trimlen") ?? "0"), 0));
+    return core.padEnd(lengthOf(length), " ");
   };
   let current: Record<string, string[][]> | undefined;
   let currentField: string | undefined;
@@ -1260,6 +1315,7 @@ function traceOf(instances: { values: Record<string, Record<string, string[][]>>
     const e = entries.find((x) => entry(x.qualified) === event.replace(/\$\d+$/, ""));
     if (!e) continue;
     const read = (p: string, t: Type) => {
+      place = `param:${e.component}.${e.name}.${p}`;
       current = step;
       currentField = stepField(e.qualified, p);
       return value(step[stepField(e.qualified, p)]?.[0]?.[0] ?? "", t);
@@ -1274,8 +1330,16 @@ function traceOf(instances: { values: Record<string, Record<string, string[][]>>
       for (const [port, q] of Object.entries(c.external?.queries ?? {})) {
         const raw = env[envField(`${id}.${port}`)];
         if (!raw?.length) continue;
-        if (Object.keys(q.params).length === 0) answers[`${id}.${port}`] = value(raw[0][0], q.result);
-        else answers[`${id}.${port}`] = raw.map(([k, v]) => ({ key: value(k, Object.values(q.params)[0]), value: value(v, q.result) }));
+        const answer = (x: string) => {
+          place = `env:${id}.${port}`;
+          return value(x, q.result);
+        };
+        const key = (x: string) => {
+          place = `envp:${id}.${port}.${Object.keys(q.params)[0]}`;
+          return value(x, Object.values(q.params)[0]);
+        };
+        if (Object.keys(q.params).length === 0) answers[`${id}.${port}`] = answer(raw[0][0]);
+        else answers[`${id}.${port}`] = raw.map(([k, v]) => ({ key: key(k), value: answer(v) }));
         if (env[`${envField(`${id}.${port}`)}_failed`]?.length) answers[`${id}.${port}`] = "(failed)";
       }
     }
