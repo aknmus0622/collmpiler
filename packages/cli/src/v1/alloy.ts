@@ -159,7 +159,8 @@ function sigOf(t: Type): string {
   if ("optional" in t) return sigOf(t.optional);
   return unsupported(`型 ${JSON.stringify(t)}`);
 }
-const JSON_VALUE = "(Json + Int + Str + Bool)";
+// (a number of a sort written as a chain is an atom under Num)
+const JSON_VALUE = "(Json + Int + Str + Bool + Num)";
 /** A field or parameter declaration: `one X`, `lone X`, `set X`, `K -> lone V`. */
 function declOf(t: Type): string {
   // null is a JSON value too
@@ -388,6 +389,24 @@ function term(e: Expr | unknown, cx: Ctx): string {
       const before = `(${t(y)} in ${t(x)}.^${chainNext(chain)})`;
       return op === "ordmin" ? `(${before} => ${t(x)} else ${t(y)})` : `(${before} => ${t(y)} else ${t(x)})`;
     }
+    // a count as an atom of its chain: the most k (up to the last atom, "that many or more") with k distinct members
+    case "ordcount": {
+      const [chain, top, inner] = a as [string, number, unknown[]];
+      const [what, ...args] = inner as [string, ...unknown[]];
+      let set: string;
+      if (what === "count") {
+        const [coll, binders, body] = args as [unknown, string[], unknown];
+        const { decls, vars } = bind(coll, binders, cx);
+        set = `{ ${decls} | ${formula(body, { ...cx, vars })} }`;
+      } else {
+        if (what === "len" && listOf(args[0], cx) === undefined) return unsupported("並び (List) の長さ");
+        set = t(args[0]);
+      }
+      const atLeast = (k: number) => (k === 1 ? `(some ${set})` : `(some disj ${Array.from({ length: k }, (_, i) => `n${i}`).join(", ")}: ${set} | some Bool)`);
+      let value = chainAtom(chain, 0);
+      for (let k = 1; k <= top; k++) value = `(${atLeast(k)} => ${chainAtom(chain, k)} else ${value})`;
+      return value;
+    }
     case "len": {
       if (listOf(a[0], cx) === undefined) return unsupported("並び (List) の長さ");
       return `#${t(a[0])}`;
@@ -593,12 +612,16 @@ export function emitAlloy(spec: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { t
   const ints: Ints = { bitwidth, embedded: made.embedded, toAlloy: (n) => n, concrete: (v) => v };
   const stringOps = usesStringOps(ir);
   const strings = new Map(stringsOf(ir).map((s, i) => [s, `str_${i}`]));
-  const lines: string[] = [`module spec`, ``, `abstract sig Bool {}`, `one sig True, False extends Bool {}`, stringOps ? `sig Str { len: one Int, trimmed: one Str }` : `sig Str {}`, `sig Json {}`];
+  const lines: string[] = [`module spec`, ``, `abstract sig Bool {}`, `one sig True, False extends Bool {}`, `abstract sig Num {}`, stringOps ? `sig Str { len: one ${made.lengthSig}, trimmed: one Str }` : `sig Str {}`, `sig Json {}`];
   if (strings.size) lines.push(`one sig ${[...strings.values()].join(", ")} extends Str {}`);
   if (stringOps) {
     // what every string is (its trimmed form is trimmed, no longer than it; only the empty string has length 0), and what each constant is
-    const facts = [`all s: Str | s.len >= 0 and s.trimmed.trimmed = s.trimmed and s.trimmed.len <= s.len and (s.len = 0 iff s = ${strings.get("")})`];
-    for (const [text, name] of strings) facts.push(`${name}.len = ${intTerm(made.length([...text].length), ints)} and ${name}.trimmed = ${strings.get(text.trim())}`);
+    // (lengths as a chain of atoms: "no shorter than" is along the chain)
+    const chain = made.chains.find((c) => `s_${c.name}` === made.lengthSig);
+    const atLeast = (longer: string, shorter: string) => (chain ? `${longer} in ${shorter}.*${chainNext(chain.name)}` : `${longer} >= ${shorter}`);
+    const zero = made.length(0);
+    const facts = [`all s: Str | ${atLeast("s.len", zero)} and s.trimmed.trimmed = s.trimmed and ${atLeast("s.len", "s.trimmed.len")} and (s.len = ${zero} iff s = ${strings.get("")})`];
+    for (const [text, name] of strings) facts.push(`${name}.len = ${made.length([...text].length)} and ${name}.trimmed = ${strings.get(text.trim())}`);
     lines.push(`fact strings { ${facts.join(" and ")} }`);
   }
   for (const s of ir.sorts) lines.push(`sig ${sort(s)} {}`);
@@ -606,7 +629,7 @@ export function emitAlloy(spec: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { t
   const chained = new Set(made.chains.map((c) => c.name));
   for (const chain of made.chains) {
     const atoms = chain.values.map((_, i) => chainAtom(chain.name, i));
-    lines.push(`abstract sig ${sort(chain.name)} {}`, `one sig ${atoms.join(", ")} extends ${sort(chain.name)} {}`);
+    lines.push(`abstract sig ${sort(chain.name)} extends Num {}`, `one sig ${atoms.join(", ")} extends ${sort(chain.name)} {}`);
     lines.push(`fun ${chainNext(chain.name)}: ${sort(chain.name)} -> ${sort(chain.name)} { ${atoms.slice(1).map((a, i) => `${atoms[i]} -> ${a}`).join(" + ") || "none -> none"} }`);
   }
   const internal = Object.entries(ir.components).filter(([, c]) => !c.external);
@@ -802,9 +825,9 @@ export function emitAlloy(spec: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { t
         ? Object.entries(flatParams(e.params))
             .filter(([, t]) => t === "string")
             .flatMap(([p]) => [
-              { name: stepField(e.qualified, `${p}__len`), sig: "Int", of: `${param(p)}.len` },
+              { name: stepField(e.qualified, `${p}__len`), sig: made.lengthSig, of: `${param(p)}.len` },
               { name: stepField(e.qualified, `${p}__trim`), sig: "Str", of: `${param(p)}.trimmed` },
-              { name: stepField(e.qualified, `${p}__trimlen`), sig: "Int", of: `${param(p)}.trimmed.len` },
+              { name: stepField(e.qualified, `${p}__trimlen`), sig: made.lengthSig, of: `${param(p)}.trimmed.len` },
             ])
         : [];
     const stepFields = [
@@ -1278,7 +1301,7 @@ function traceOf(instances: { values: Record<string, Record<string, string[][]>>
   // a number Alloy chose for a place, as a value of the spec (its sort's numbers were replaced by small ones when they did not fit)
   let place = "";
   const int = (raw: string) => ("reason" in made ? Number(raw) : made.concrete(place, raw));
-  const lengthOf = (raw: string) => ("reason" in made ? Number(raw) : made.concreteLength(Number(raw)));
+  const lengthOf = (raw: string) => ("reason" in made ? Number(raw) : made.concreteLength(raw));
   // a string Alloy chose: with lengths, one of its length whose trimmed form is the one Alloy chose (letters, then spaces)
   const stringOf = (raw: string, step?: Record<string, string[][]>, at?: string): string => {
     if (strings.has(raw)) return strings.get(raw)!;
@@ -1297,6 +1320,7 @@ function traceOf(instances: { values: Record<string, Record<string, string[][]>>
     if (type === "string") return stringOf(raw, current, currentField);
     if (type === "json") {
       if (strings.has(raw)) return strings.get(raw);
+      if (/^s_num\d+_\d+\$/.test(raw)) return int(raw);
       if (/^-?\d+$/.test(raw)) return int(raw);
       if (/^(True|False)\$/.test(raw)) return raw.startsWith("True");
       return atom(raw).replace(/^Json-/, "json-");

@@ -2,21 +2,28 @@ module spec
 
 abstract sig Bool {}
 one sig True, False extends Bool {}
+abstract sig Num {}
 sig Str {}
 sig Json {}
 one sig str_0, str_1, str_2, str_3, str_4, str_5, str_6, str_7, str_8, str_9, str_10, str_11, str_12, str_13, str_14, str_15, str_16, str_17, str_18, str_19, str_20, str_21, str_22, str_23, str_24, str_25, str_26, str_27, str_28, str_29, str_30, str_31, str_32, str_33, str_34, str_35 extends Str {}
-abstract sig s_num0 {}
-one sig s_num0_0, s_num0_1, s_num0_2, s_num0_3, s_num0_4, s_num0_5 extends s_num0 {}
-fun next_num0: s_num0 -> s_num0 { s_num0_0 -> s_num0_1 + s_num0_1 -> s_num0_2 + s_num0_2 -> s_num0_3 + s_num0_3 -> s_num0_4 + s_num0_4 -> s_num0_5 }
-abstract sig s_num1 {}
-one sig s_num1_0, s_num1_1, s_num1_2, s_num1_3, s_num1_4, s_num1_5 extends s_num1 {}
-fun next_num1: s_num1 -> s_num1 { s_num1_0 -> s_num1_1 + s_num1_1 -> s_num1_2 + s_num1_2 -> s_num1_3 + s_num1_3 -> s_num1_4 + s_num1_4 -> s_num1_5 }
-abstract sig s_num2 {}
-one sig s_num2_0, s_num2_1, s_num2_2, s_num2_3, s_num2_4, s_num2_5 extends s_num2 {}
-fun next_num2: s_num2 -> s_num2 { s_num2_0 -> s_num2_1 + s_num2_1 -> s_num2_2 + s_num2_2 -> s_num2_3 + s_num2_3 -> s_num2_4 + s_num2_4 -> s_num2_5 }
-abstract sig s_num3 {}
-one sig s_num3_0, s_num3_1, s_num3_2, s_num3_3, s_num3_4, s_num3_5 extends s_num3 {}
-fun next_num3: s_num3 -> s_num3 { s_num3_0 -> s_num3_1 + s_num3_1 -> s_num3_2 + s_num3_2 -> s_num3_3 + s_num3_3 -> s_num3_4 + s_num3_4 -> s_num3_5 }
+abstract sig s_num0 extends Num {}
+one sig s_num0_0, s_num0_1 extends s_num0 {}
+fun next_num0: s_num0 -> s_num0 { s_num0_0 -> s_num0_1 }
+abstract sig s_num1 extends Num {}
+one sig s_num1_0, s_num1_1 extends s_num1 {}
+fun next_num1: s_num1 -> s_num1 { s_num1_0 -> s_num1_1 }
+abstract sig s_num2 extends Num {}
+one sig s_num2_0, s_num2_1, s_num2_2, s_num2_3 extends s_num2 {}
+fun next_num2: s_num2 -> s_num2 { s_num2_0 -> s_num2_1 + s_num2_1 -> s_num2_2 + s_num2_2 -> s_num2_3 }
+abstract sig s_num3 extends Num {}
+one sig s_num3_0, s_num3_1, s_num3_2, s_num3_3 extends s_num3 {}
+fun next_num3: s_num3 -> s_num3 { s_num3_0 -> s_num3_1 + s_num3_1 -> s_num3_2 + s_num3_2 -> s_num3_3 }
+abstract sig s_num4 extends Num {}
+one sig s_num4_0, s_num4_1, s_num4_2, s_num4_3 extends s_num4 {}
+fun next_num4: s_num4 -> s_num4 { s_num4_0 -> s_num4_1 + s_num4_1 -> s_num4_2 + s_num4_2 -> s_num4_3 }
+abstract sig s_num5 extends Num {}
+one sig s_num5_0, s_num5_1, s_num5_2, s_num5_3 extends s_num5 {}
+fun next_num5: s_num5 -> s_num5 { s_num5_0 -> s_num5_1 + s_num5_1 -> s_num5_2 + s_num5_2 -> s_num5_3 }
 one sig c_text_plan {}
 one sig Env {}
 abstract sig Entry {}

@@ -2,10 +2,11 @@ module spec
 
 abstract sig Bool {}
 one sig True, False extends Bool {}
+abstract sig Num {}
 sig Str {}
 sig Json {}
 one sig str_0, str_1, str_2, str_3, str_4, str_5, str_6, str_7 extends Str {}
-abstract sig s_num0 {}
+abstract sig s_num0 extends Num {}
 one sig s_num0_0, s_num0_1, s_num0_2, s_num0_3, s_num0_4 extends s_num0 {}
 fun next_num0: s_num0 -> s_num0 { s_num0_0 -> s_num0_1 + s_num0_1 -> s_num0_2 + s_num0_2 -> s_num0_3 + s_num0_3 -> s_num0_4 }
 one sig c_loan { var f_loan_status: one Str, var f_loan_daysUntilDue: one Int }

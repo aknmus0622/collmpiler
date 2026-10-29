@@ -2,6 +2,7 @@ module spec
 
 abstract sig Bool {}
 one sig True, False extends Bool {}
+abstract sig Num {}
 sig Str {}
 sig Json {}
 one sig str_0 extends Str {}

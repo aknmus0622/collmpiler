@@ -2,12 +2,19 @@ module spec
 
 abstract sig Bool {}
 one sig True, False extends Bool {}
+abstract sig Num {}
 sig Str {}
 sig Json {}
 sig s_CaseName {}
-abstract sig s_num0 {}
-one sig s_num0_0, s_num0_1, s_num0_2, s_num0_3, s_num0_4, s_num0_5 extends s_num0 {}
-fun next_num0: s_num0 -> s_num0 { s_num0_0 -> s_num0_1 + s_num0_1 -> s_num0_2 + s_num0_2 -> s_num0_3 + s_num0_3 -> s_num0_4 + s_num0_4 -> s_num0_5 }
+abstract sig s_num0 extends Num {}
+one sig s_num0_0, s_num0_1 extends s_num0 {}
+fun next_num0: s_num0 -> s_num0 { s_num0_0 -> s_num0_1 }
+abstract sig s_num1 extends Num {}
+one sig s_num1_0, s_num1_1, s_num1_2 extends s_num1 {}
+fun next_num1: s_num1 -> s_num1 { s_num1_0 -> s_num1_1 + s_num1_1 -> s_num1_2 }
+abstract sig s_num2 extends Num {}
+one sig s_num2_0, s_num2_1, s_num2_2, s_num2_3, s_num2_4, s_num2_5, s_num2_6, s_num2_7 extends s_num2 {}
+fun next_num2: s_num2 -> s_num2 { s_num2_0 -> s_num2_1 + s_num2_1 -> s_num2_2 + s_num2_2 -> s_num2_3 + s_num2_3 -> s_num2_4 + s_num2_4 -> s_num2_5 + s_num2_5 -> s_num2_6 + s_num2_6 -> s_num2_7 }
 sig Slot_step_choice_hits { var e_step_choice_hits_v: lone s_CaseName }
 one sig c_step_choice { var f_step_choice_hits: set Slot_step_choice_hits }
 one sig Env { var env_oracle_Holds: s_CaseName -> one Bool }
@@ -33,9 +40,9 @@ fact initial_values { no c_step_choice.f_step_choice_hits }
 fact transitions { always ((same_step_choice and no Step.event and no Step.x_step_choice_Case_name)
   or (cmd_step_choice_BeginCases[] and Step.event = k_step_choice_BeginCases and no Step.x_step_choice_Case_name)
   or (some p_name: s_CaseName | cmd_step_choice_Case[p_name] and Step.event = k_step_choice_Case and Step.x_step_choice_Case_name = p_name)) }
-run c0 { eventually ((#(c_step_choice.f_step_choice_hits) = 0)) } for 3 but 4 Int, 3 Str, 1..8 steps
-run c1 { eventually ((not (#(c_step_choice.f_step_choice_hits) = 0)) and (#(c_step_choice.f_step_choice_hits) = 1)) } for 3 but 4 Int, 3 Str, 1..8 steps
-run c2 { eventually ((not (#(c_step_choice.f_step_choice_hits) = 0)) and (not (#(c_step_choice.f_step_choice_hits) = 1))) } for 3 but 4 Int, 3 Str, 1..8 steps
+run c0 { eventually ((((some (c_step_choice.f_step_choice_hits)) => s_num0_1 else s_num0_0) = s_num0_0)) } for 3 but 4 Int, 3 Str, 1..8 steps
+run c1 { eventually ((not (((some (c_step_choice.f_step_choice_hits)) => s_num0_1 else s_num0_0) = s_num0_0)) and (((some disj n0, n1: (c_step_choice.f_step_choice_hits) | some Bool) => s_num1_2 else ((some (c_step_choice.f_step_choice_hits)) => s_num1_1 else s_num1_0)) = s_num1_1)) } for 3 but 4 Int, 3 Str, 1..8 steps
+run c2 { eventually ((not (((some (c_step_choice.f_step_choice_hits)) => s_num0_1 else s_num0_0) = s_num0_0)) and (not (((some disj n0, n1: (c_step_choice.f_step_choice_hits) | some Bool) => s_num1_2 else ((some (c_step_choice.f_step_choice_hits)) => s_num1_1 else s_num1_0)) = s_num1_1))) } for 3 but 4 Int, 3 Str, 1..8 steps
 run c3 { eventually (Step.event = k_step_choice_BeginCases and (some Bool)) } for 3 but 4 Int, 3 Str, 1..8 steps
 run c4 { eventually (some p_name: s_CaseName | Step.event = k_step_choice_Case and Step.x_step_choice_Case_name = p_name and (some Bool)) } for 3 but 4 Int, 3 Str, 1..8 steps
 run sane { some Bool } for 3 but 4 Int, 3 Str, 1..8 steps

@@ -24,8 +24,12 @@ export type Sorts = {
   arithmetic: Set<number>;
   /** Sorts that hold numbers (a number written, or a place of a numeric type). */
   numeric: Set<number>;
-  /** Sorts of counts and lengths (Alloy gives them as integers). */
+  /** Sorts of counts (never more than the atoms of the scope; Alloy gives them as integers). */
   counting: Set<number>;
+  /** The sort a count gives (`card`, `len`, `count`), by the array it is written as. */
+  countOf(e: unknown[]): number | undefined;
+  /** How many places (state fields, inputs, answers, elements of a collection) hold values of a sort, at most `cap`. */
+  variables(sort: number, cap: number): number;
   /** The sort of what a comparison, `min` or `max` compares (by the array it is written as). */
   compared(e: unknown[]): number | undefined;
   find(n: number): number;
@@ -110,9 +114,11 @@ export function sortsOf(ir: Ir8, relevance: Relevance): Sorts {
   };
   const scopeOf = (id: string, prefix: string, params: Record<string, Type>): Scope => ({ id, vars: new Map(Object.entries(params).map(([p, t]) => [p, place(`${prefix}.${p}`, t)])) });
 
-  const counted = (): Val => {
+  const counts = new Map<unknown[], Val>();
+  const counted = (e: unknown[]): Val => {
     const v = fresh();
     countingNodes.push(v.n);
+    counts.set(e, v);
     return v;
   };
   const of = (e: unknown, s: Scope): Val | undefined => {
@@ -244,7 +250,7 @@ export function sortsOf(ir: Ir8, relevance: Relevance): Sorts {
         return fresh();
       case "count":
         binding(a[0], a[1] as string[], a[2]);
-        return counted();
+        return counted(e);
       case "map": {
         const { body } = binding(a[0], a[1] as string[], a[2]);
         const v = fresh();
@@ -259,7 +265,7 @@ export function sortsOf(ir: Ir8, relevance: Relevance): Sorts {
       case "len":
       case "card":
         all();
-        return counted();
+        return counted(e);
       case "strlen":
         all();
         return { n: stringLength.n };
@@ -385,7 +391,18 @@ export function sortsOf(ir: Ir8, relevance: Relevance): Sorts {
 
   const arithmetic = new Set(marked.map((v) => find(v.n)));
   const numeric = new Set(numericNodes.map(find));
-  const counting = new Set([...countingNodes, stringLengthNode].map(find));
+  const counting = new Set(countingNodes.map(find));
+  void stringLengthNode;
+  // the places of each sort, a collection's elements counted as many
+  const variablesOf = new Map<number, number>();
+  const tally = (v: Val | undefined, many: boolean) => {
+    if (!v) return;
+    const sort = find(v.n);
+    variablesOf.set(sort, (variablesOf.get(sort) ?? 0) + (many ? Infinity : 1));
+    for (const field of v.fields?.values() ?? []) tally(field, many);
+    tally(v.elem, true);
+  };
+  for (const v of places.values()) tally(v, false);
   return {
     literal: (holder, key) => {
       const v = literals.get(holder)?.get(key);
@@ -409,6 +426,11 @@ export function sortsOf(ir: Ir8, relevance: Relevance): Sorts {
     arithmetic,
     numeric,
     counting,
+    countOf: (e) => {
+      const v = counts.get(e);
+      return v === undefined ? undefined : find(v.n);
+    },
+    variables: (sort, cap) => Math.min(cap, Math.max(1, variablesOf.get(sort) ?? 1)),
     compared: (e) => {
       const v = comparisons.get(e);
       return v === undefined ? undefined : find(v.n);

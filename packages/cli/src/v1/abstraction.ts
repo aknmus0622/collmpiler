@@ -271,10 +271,17 @@ export function checkEmbedding(ints: Ints, numbers: number[]): void {
 
 /**
  * A sort whose numbers are only compared (DSL.md §17.20): written as a chain of named atoms in the same order as its
- * constants, with one atom between two constants that have integers between them and two beyond each end. No integer
- * of Alloy is left for it.
+ * constants. Between two constants with integers between them, and beyond each end, as many atoms as there are places
+ * holding values of the sort (at most SLOTS): a trace never needs more distinct values there than that. No integer of
+ * Alloy is left for it.
+ *
+ * A count only compared with small constants is a chain too, from 0 to the largest constant and one more, the last atom
+ * meaning "that many or more": counting is a homomorphism of monoids, and comparing with constants up to K sees only
+ * its value cut at K + 1.
  */
-export type Chain = { name: string; values: number[] };
+export type Chain = { name: string; values: number[]; count?: boolean };
+/** Values put between and beyond constants (data independence: as many as values of the sort that can meet). */
+const SLOTS = 4;
 
 /** The IR as the module is written from it: its numbers made to fit sort by sort (sorts.ts). */
 export type Prepared = {
@@ -284,9 +291,10 @@ export type Prepared = {
   embedded: boolean;
   /** A number Alloy chose for a place (see `Sorts.place`), or an atom of a chain, as a value of the spec. */
   concrete(place: string, v: string): number;
-  /** A string's length as written in the module, and one Alloy chose as the spec's. */
-  length(n: number): number;
-  concreteLength(v: number): number;
+  /** A string's length as written in the module, the signature lengths are of, and one Alloy chose as the spec's. */
+  length(n: number): string;
+  lengthSig: string;
+  concreteLength(v: string): number;
   /** The sorts written as chains of atoms. */
   chains: Chain[];
 };
@@ -354,25 +362,50 @@ export function prepareNumbers(ir: Ir8, relevance: Relevance, lengths: number[] 
     // not known: all numbers as one sort, as before the sorts
     const made = intsOf(relevance, fixed);
     if ("reason" in made) return made;
-    return { ir, bitwidth: made.bitwidth, embedded: made.embedded, concrete: (_, v) => made.concrete(Number(v)), length: (n) => made.toAlloy(n) ?? n, concreteLength: (v) => made.concrete(v), chains: [] };
+    return {
+      ir,
+      bitwidth: made.bitwidth,
+      embedded: made.embedded,
+      concrete: (_, v) => made.concrete(Number(v)),
+      length: (n) => intText(made.toAlloy(n) ?? n),
+      lengthSig: "Int",
+      concreteLength: (v) => made.concrete(Number(v)),
+      chains: [],
+    };
   }
   // a sort only compared becomes a chain of atoms; the others stay integers, made to fit on their own
   const chainOf = new Map<number, { chain: Chain; index: Map<number, number> }>();
   const ints = new Map<number, Ints>();
-  for (const sort of [...sorts.numeric].sort((a, b) => a - b)) {
-    if (!sorts.arithmetic.has(sort) && !sorts.counting.has(sort) && fixed === undefined) {
-      const constants = [...(bySort.get(sort) ?? [])].sort((a, b) => a - b);
+  for (const sort of [...new Set([...sorts.numeric, ...(lengths.length ? [sorts.stringLength] : [])])].sort((a, b) => a - b)) {
+    const constants = [...(bySort.get(sort) ?? [])].sort((a, b) => a - b);
+    if (!sorts.arithmetic.has(sort) && fixed === undefined) {
       const values: number[] = [];
-      if (constants.length === 0) values.push(0, 1, 2, 3, 4, 5);
-      else {
-        values.push(constants[0] - 2, constants[0] - 1);
-        constants.forEach((n, i) => {
-          values.push(n);
-          if (i + 1 < constants.length && constants[i + 1] - n > 1) values.push(n + 1);
-        });
-        values.push(constants[constants.length - 1] + 1, constants[constants.length - 1] + 2);
+      let count = false;
+      if (sorts.counting.has(sort)) {
+        // a count: 0 to the largest constant, then "one more or more"; only when the constants are small and not negative
+        if (constants.some((n) => n < 0 || n > WINDOW - 1)) {
+          const made = intsOf({ ...relevance, numbers: new Set(constants), arithmetic: [] }, fixed);
+          if ("reason" in made) return made;
+          ints.set(sort, made);
+          continue;
+        }
+        const top = Math.max(0, ...constants) + 1;
+        for (let n = 0; n <= top; n++) values.push(n);
+        count = true;
+      } else {
+        const k = sorts.variables(sort, SLOTS);
+        const run = (from: number, step: number, n: number) => Array.from({ length: n }, (_, i) => from + step * (i + 1));
+        if (constants.length === 0) values.push(...run(-1, 1, Math.max(k, 2) * 2));
+        else {
+          values.push(...run(constants[0], -1, k).reverse());
+          constants.forEach((n, i) => {
+            values.push(n);
+            if (i + 1 < constants.length) values.push(...run(n, 1, Math.min(k, constants[i + 1] - n - 1)));
+          });
+          values.push(...run(constants[constants.length - 1], 1, k));
+        }
       }
-      const chain = { name: `num${chainOf.size}`, values };
+      const chain: Chain = { name: `num${chainOf.size}`, values, ...(count ? { count } : {}) };
       chainOf.set(sort, { chain, index: new Map(values.map((v, i) => [v, i])) });
       continue;
     }
@@ -396,10 +429,12 @@ export function prepareNumbers(ir: Ir8, relevance: Relevance, lengths: number[] 
     const i = sort === undefined ? undefined : ints.get(sort);
     return i?.embedded ? i.concrete(Number(raw)) : Number(raw);
   };
-  const length = (n: number) => ints.get(sorts.stringLength)?.toAlloy(n) ?? n;
-  const concreteLength = (v: number) => concreteOf(sorts.stringLength, String(v));
+  const lengthChain = chainOf.get(sorts.stringLength);
+  const length = (n: number) => (lengthChain ? chainAtom(lengthChain.chain.name, lengthChain.index.get(n)!) : intText(ints.get(sorts.stringLength)?.toAlloy(n) ?? n));
+  const lengthSig = lengthChain ? `s_${lengthChain.chain.name}` : "Int";
+  const concreteLength = (v: string) => concreteOf(sorts.stringLength, v);
   const chains = [...chainOf.values()].map(({ chain }) => chain);
-  if (!embedded) return { ir, bitwidth, embedded, concrete: (_, v) => Number(v), length, concreteLength, chains };
+  if (!embedded) return { ir, bitwidth, embedded, concrete: (_, v) => Number(v), length, lengthSig, concreteLength, chains };
   // the IR with every number the checks read replaced: by a chain's atom, or by its sort's integer
   const image = (sort: number | undefined, n: number): unknown => {
     const chain = sort === undefined ? undefined : chainOf.get(sort);
@@ -411,6 +446,10 @@ export function prepareNumbers(ir: Ir8, relevance: Relevance, lengths: number[] 
   const rewrite = (x: unknown): unknown => {
     if (Array.isArray(x)) {
       if (x[0] === "lit") return x;
+      // a count of a sort written as a chain: the chain's atom for how many there are (cut at its last)
+      const counted = x[0] === "card" || x[0] === "len" || x[0] === "count" ? sorts.countOf(x) : undefined;
+      const countChain = counted === undefined ? undefined : chainOf.get(counted);
+      if (countChain) return ["ordcount", countChain.chain.name, countChain.chain.values.length - 1, x.map((v) => rewrite(v))];
       const items = x.map((v, i) => (typeof v === "number" && relevance.literalsAt.get(x)?.has(i) ? image(sorts.literal(x, i), v) : rewrite(v)));
       // a comparison of a chain's values: along the chain
       const compared = typeof x[0] === "string" && x[0] in ORDERED ? sorts.compared(x) : undefined;
@@ -452,8 +491,10 @@ export function prepareNumbers(ir: Ir8, relevance: Relevance, lengths: number[] 
     for (const [name, cond] of Object.entries(c.conditions ?? {})) cond.params = Object.fromEntries(Object.entries(cond.params).map(([p, t]) => [p, retype(`cond:${id}.${name}.${p}`, t)]));
     for (const [name, table] of Object.entries(c.decisions ?? {})) table.params = Object.fromEntries(Object.entries(table.params).map(([p, t]) => [p, retype(`dparam:${id}.${name}.${p}`, t)]));
   }
-  return { ir: { ...ir, components }, bitwidth, embedded, concrete: (place, v) => concreteOf(sorts.place(place), v), length, concreteLength, chains };
+  return { ir: { ...ir, components }, bitwidth, embedded, concrete: (place, v) => concreteOf(sorts.place(place), v), length, lengthSig, concreteLength, chains };
 }
+
+const intText = (n: number) => (n < 0 ? `minus[0, ${-n}]` : String(n));
 
 /** A chain is in the order of the numbers it stands for, and has no atom between two consecutive integers. */
 export function checkChains(chains: { chain: Chain; index: Map<number, number> }[]): void {

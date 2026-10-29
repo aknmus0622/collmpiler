@@ -138,7 +138,8 @@ test("Alloy を実際に動かす: 並びと文字列の長さ。100 文字の�
     const result = checkWithAlloy(ir!);
     assert.deepEqual(result.skipped ?? [], []);
     for (const verdict of result.verdicts) assert.ok(verdict.status === "holds" || verdict.status === "reached", JSON.stringify(verdict));
-    const title = (what: string) => String(result.verdicts.find((v) => v.what === what)?.trace?.at(-1)?.params.title);
+    // the title of the step that reaches the case (a trace may go on after it)
+    const title = (what: string) => String(result.verdicts.find((v) => v.what === what)?.trace?.findLast((step) => step.event === "Add")?.params.title);
     assert.ok(title("todos.Add.case2").length > 100 && title("todos.Add.case2").trim() !== "");
     assert.ok(title("todos.Add.otherwise").length <= 100 && title("todos.Add.otherwise").trim() !== "");
     assert.equal(title("todos.Add.case1").trim(), "");
