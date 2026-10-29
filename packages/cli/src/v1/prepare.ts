@@ -18,7 +18,7 @@ import type { Trial, Unobservable } from "./verdict.ts";
 import { reportedStage0 } from "./reported.ts";
 import type { VerdictFacts } from "./reported.ts";
 import { decided } from "./decide.ts";
-import { javaAvailable } from "./alloy.ts";
+import { DEFAULT_ANALYSIS, javaAvailable } from "./alloy.ts";
 import type { Expr } from "./syntax.ts";
 
 /** Whether a spec directory is written in the 1.0 notation (a file imports `@clp/core`). */
@@ -104,8 +104,16 @@ export async function checkSpec(ir: Ir8, options: { runs?: number; judge?: (tria
     const { severity, code } = report({ kind: verdict.kind, status: verdict.status });
     if (verdict.kind === "reach") {
       if (verdict.status === "reached") reached.add(verdict.what);
-      if (severity === "warning" && code === "unreached-case") warnings.push(`warning[unreached-case] ${verdict.what}: Alloy で探した範囲 (原子は種類ごとに 6 個、12 ステップまで) では、この場合に至る手順がありません。この場合の結果は検証されません`);
-      if (severity === "warning" && code === "out-of-range") warnings.push(`warning[out-of-range] ${verdict.what}: Alloy では確かめられませんでした`);
+      if (severity === "warning" && code === "unreached-case") {
+        warnings.push(
+          verdict.bound === "exhaustive"
+            ? `warning[unreached-case] ${verdict.what}: どの入力でも、この場合には当たりません (Alloy ですべての入力を確かめました)。この場合は仕様の中で使われていません`
+            : `warning[unreached-case] ${verdict.what}: Alloy で探した範囲 (原子は種類ごとに ${DEFAULT_ANALYSIS.wideAtoms} 個、${DEFAULT_ANALYSIS.maxTraceSteps} ステップまで) では、この場合に至る手順がありません。この場合の結果は検証されません`,
+        );
+      }
+      if (severity === "warning" && code === "out-of-range") {
+        warnings.push(`warning[out-of-range] ${verdict.what}: Alloy では確かめられませんでした${verdict.bound === "partial" ? " (一部のイベントを除いて確かめたので、ほかの手順で届くかもしれません)" : ""}`);
+      }
       continue;
     }
     if (severity === "warning") warnings.push(`warning[${code}] ${verdict.what}: Alloy では確かめられませんでした`);

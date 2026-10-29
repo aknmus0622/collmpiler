@@ -38,7 +38,7 @@ test("Alloy: 例と self の部品ごとに、何を確かめるか (飛ばす�
         .sort()
         .map(([k, n]) => `${k} ${n}`)
         .join(", ");
-      lines.push(`${label(dir)} ${component}: ${emitted.skipped.length ? `skipped: ${emitted.skipped.join(" / ")}` : `commands: ${kinds || "none"}`}`);
+      lines.push(`${label(dir)} ${component}: commands: ${kinds || "none"}${emitted.skipped.length ? `; skipped: ${emitted.skipped.join(" / ")}` : ""}`);
       if (emitted.commands.length > 0) expect(`${label(dir)}-${component}.als`, emitted.text);
     }
   }
@@ -62,6 +62,22 @@ test("Alloy の jar: 固定したハッシュと違う jar は、その jar と�
     assert.match(ALLOY_SHA256, /^[0-9a-f]{64}$/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("Alloy を実際に動かす: 問い合わせだけの部品は、答えのどの場合にも当たる入力があることを、すべての入力で確かめる", (t) => {
+  const jar = process.env.CLP_ALLOY_JAR ?? join(process.env.XDG_CACHE_HOME ?? join(homedir(), ".cache"), "clp", "alloy-6.2.0.jar");
+  if (!javaAvailable() || !existsSync(jar)) return t.skip("Java か Alloy の jar がありません");
+  const { ir } = compile(join(repoRoot, "packages/cli/self/specs"), "checker-verdict");
+  const saved = process.env.CLP_ALLOY_JAR;
+  process.env.CLP_ALLOY_JAR = jar;
+  try {
+    const result = checkWithAlloy(ir!);
+    assert.equal(result.verdicts.length, 6);
+    for (const verdict of result.verdicts) assert.deepEqual([verdict.kind, verdict.status, verdict.bound], ["reach", "reached", "exhaustive"], verdict.what);
+  } finally {
+    if (saved === undefined) delete process.env.CLP_ALLOY_JAR;
+    else process.env.CLP_ALLOY_JAR = saved;
   }
 });
 
