@@ -1,18 +1,18 @@
-checkout-ts order: commands: none; skipped: 仕様の中の数が 7 ビット (−64〜63) に収まりません。Alloy では確かめず、PBT に任せます
-library-ts loan: commands: none; skipped: 仕様の中の数が 7 ビット (−64〜63) に収まりません。Alloy では確かめず、PBT に任せます
+checkout-ts order: commands: property 1, reach 13
+library-ts loan: commands: property 1, reach 24
 lending-ts fines: commands: defined 2, reach 4
 lending-ts library: commands: defined 2, property 2, reach 20, requires 1
 lending-ts members: commands: reach 3
-todo-ts todo-api: commands: none; skipped: 仕様の中の数が 7 ビット (−64〜63) に収まりません。Alloy では確かめず、PBT に任せます
-todo-ts todos: commands: none; skipped: 仕様の中の数が 7 ビット (−64〜63) に収まりません。Alloy では確かめず、PBT に任せます
+todo-ts todo-api: commands: none; skipped: 仕様の中の数が 7 ビット (−64〜63) に収まらず、計算 (len, strlen) に使われています。Alloy では確かめず、PBT に任せます
+todo-ts todos: commands: none; skipped: 仕様の中の数が 7 ビット (−64〜63) に収まらず、計算 (len, strlen) に使われています。Alloy では確かめず、PBT に任せます
 todo-db-ts store: commands: none; skipped: store.Delete.case1 を除いて確かめます (並び (List)) / store.Delete.otherwise を除いて確かめます (並び (List)) / store.Put.otherwise を除いて確かめます (JSON の値) / 並び (List)
-todo-db-ts todo-api: commands: none; skipped: 仕様の中の数が 7 ビット (−64〜63) に収まりません。Alloy では確かめず、PBT に任せます
-todo-db-ts todos: commands: none; skipped: 仕様の中の数が 7 ビット (−64〜63) に収まりません。Alloy では確かめず、PBT に任せます
+todo-db-ts todo-api: commands: none; skipped: 仕様の中の数が 7 ビット (−64〜63) に収まらず、計算 (len, strlen) に使われています。Alloy では確かめず、PBT に任せます
+todo-db-ts todos: commands: none; skipped: 仕様の中の数が 7 ビット (−64〜63) に収まらず、計算 (len, strlen) に使われています。Alloy では確かめず、PBT に任せます
 self checker-verdict: commands: reach 6
 self fill-check: commands: reach 7
 self fit-check: commands: reach 18
 self gate-rules: commands: reach 22
-self input-candidates: commands: none; skipped: 仕様の中の数が 7 ビット (−64〜63) に収まりません。Alloy では確かめず、PBT に任せます
+self input-candidates: commands: none; skipped: 仕様の中の数が 7 ビット (−64〜63) に収まらず、計算 (+, len) に使われています。Alloy では確かめず、PBT に任せます
 self interpret-flow: commands: property 2, reach 35
 self mutation-judge: commands: reach 8
 self mutation-verdict: commands: property 1, reach 11
@@ -20,7 +20,7 @@ self observation-compare: commands: reach 3
 self outcome-apply: commands: reach 4
 self overlay-check: commands: reach 7
 self pipeline: commands: reach 19; skipped: pipeline.DesignChecked.otherwise を除いて確かめます (組のフィールド) / pipeline.ImplementationChecked.otherwise を除いて確かめます (組のフィールド) / pipeline.WiringChecked.case1 を除いて確かめます (組のフィールド) / pipeline.WiringChecked.otherwise を除いて確かめます (組のフィールド) / 組のフィールド / 組のフィールド
-self promise-keeper: commands: none; skipped: 仕様の中の数が 7 ビット (−64〜63) に収まりません。Alloy では確かめず、PBT に任せます
+self promise-keeper: commands: reach 7; skipped: promise-keeper.UsedNumber.otherwise を除いて確かめます (状態 promise-keeper.freshDrawn (その型)) / promise-keeper.UsedText.otherwise を除いて確かめます (状態 promise-keeper.freshDrawn (その型)) / 状態 promise-keeper.freshDrawn (その型) / 状態 promise-keeper.freshDrawn (その型) / 状態 promise-keeper.freshDrawn (その型) / 状態 promise-keeper.freshDrawn (その型)
 self sentence-trace: commands: reach 9
 self step-choice: commands: reach 2; skipped: 演算 len / 演算 len / 演算 len
 self syntax-check: commands: reach 14

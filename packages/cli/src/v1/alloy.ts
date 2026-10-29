@@ -20,6 +20,8 @@ import { join } from "node:path";
 import type { ComponentIr, Expr, Ir8, TraceStep, Type } from "./ir.ts";
 import { entriesOf, entryName } from "./pbt.ts";
 import { stableStringify8 } from "./generate.ts";
+import { intsOf, relevanceOf } from "./abstraction.ts";
+import type { Ints } from "./abstraction.ts";
 
 // --- The checker interface (DSL.md §17.12) ---
 
@@ -78,7 +80,16 @@ type Ctx = {
   primed?: boolean;
   /** What the module could not declare (`state:<id>.<field>`, `env:<id>.<port>`, `out:<id>.<command>`): reading it is out of the profile. */
   missing?: Set<string>;
+  /** How the spec's numbers are written (replaced by small ones in the same order when they do not fit). */
+  ints?: Ints;
 };
+
+/** A number of the spec as written in the module. */
+function intTerm(n: number, ints: Ints | undefined): string {
+  const v = ints ? ints.toAlloy(n) : n;
+  if (v === undefined) return unsupported(`数 ${n}`);
+  return v < 0 ? `minus[0, ${-v}]` : String(v);
+}
 
 function sigOf(t: Type): string {
   if (t === "int") return "Int";
@@ -103,17 +114,17 @@ function declOf(t: Type): string {
 }
 
 /** What a value of an enumerated type may be (Alloy declares it as any `Str` or `Int`): a formula, or undefined. */
-function typingOf(name: string, t: Type, strings: Map<string, string>): string | undefined {
-  if (typeof t === "object" && "optional" in t) return typingOf(name, t.optional, strings);
+function typingOf(name: string, t: Type, strings: Map<string, string>, ints?: Ints): string | undefined {
+  if (typeof t === "object" && "optional" in t) return typingOf(name, t.optional, strings, ints);
   if (typeof t !== "object" || !("enum" in t)) return undefined;
   if (t.enum.every((v) => typeof v === "string")) return `${name} in (${t.enum.map((v) => strings.get(v as string)!).join(" + ")})`;
-  if (t.enum.every((v) => typeof v === "number")) return `${name} in (${t.enum.map((v) => ((v as number) < 0 ? `minus[0, ${-(v as number)}]` : String(v))).join(" + ")})`;
+  if (t.enum.every((v) => typeof v === "number")) return `${name} in (${t.enum.map((v) => intTerm(v as number, ints)).join(" + ")})`;
   return undefined;
 }
 /** The typing of parameters, as a conjunction ("" when there is nothing to say). */
-const typingOfParams = (params: Record<string, Type>, strings: Map<string, string>, name: (p: string) => string = param) =>
+const typingOfParams = (params: Record<string, Type>, strings: Map<string, string>, ints?: Ints, name: (p: string) => string = param) =>
   Object.entries(params)
-    .flatMap(([p, t]) => typingOf(name(p), t, strings) ?? [])
+    .flatMap(([p, t]) => typingOf(name(p), t, strings, ints) ?? [])
     .join(" and ");
 const finiteType = (t: Type): boolean => t === "bool" || (typeof t === "object" && (("enum" in t) || ("optional" in t && finiteType(t.optional))));
 
@@ -258,7 +269,7 @@ function failedOf(ask: unknown, cx: Ctx): string {
 
 /** An expression as an Alloy term (a value). */
 function term(e: Expr | unknown, cx: Ctx): string {
-  if (typeof e === "number") return e < 0 ? `minus[0, ${-e}]` : String(e);
+  if (typeof e === "number") return intTerm(e, cx.ints);
   if (typeof e === "boolean") return e ? "True" : "False";
   if (e === null) return "none";
   if (!Array.isArray(e)) return unsupported(`値 ${JSON.stringify(e)}`);
@@ -431,22 +442,6 @@ function literalStrings(ir: Ir8): string[] {
   return [...found].sort();
 }
 
-function bitwidthOf(ir: Ir8, analysis: Analysis): number | undefined {
-  if (analysis.bitwidth) return analysis.bitwidth;
-  let max = 3;
-  const walk = (x: unknown) => {
-    if (typeof x === "number") max = Math.max(max, Math.abs(x));
-    else if (Array.isArray(x)) {
-      if (x[0] === "lit") return;
-      x.forEach(walk);
-    } else if (typeof x === "object" && x !== null) Object.values(x).forEach(walk);
-  };
-  walk(Object.values(ir.components).map((c) => [c.init, c.events, c.queries, c.conditions, c.calcs, c.decisions, c.properties, c.commands]));
-  // the largest constant and its sign; an overflow is excluded from the instances (-n), not wrapped around
-  const needed = Math.ceil(Math.log2(max + 1)) + 1;
-  return needed <= 7 ? Math.max(needed, 4) : undefined;
-}
-
 /** The module and its commands, with the scope of each command. */
 export function renderAlloy(header: string, commands: CommandInfo[], scope: (info: CommandInfo) => string): string {
   return `${header}${commands.map((info) => `${info.kind === "reach" ? "run" : "check"} ${info.name} { ${info.body} } ${scope(info)}`).join("\n")}\n`;
@@ -454,8 +449,12 @@ export function renderAlloy(header: string, commands: CommandInfo[], scope: (inf
 
 export function emitAlloy(ir: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { text: string; header: string; bitwidth: number; commands: CommandInfo[]; skipped: string[] } {
   const skipped: string[] = [];
-  const bitwidth = bitwidthOf(ir, analysis);
-  if (bitwidth === undefined) return { text: "", header: "", bitwidth: 0, commands: [], skipped: ["仕様の中の数が 7 ビット (−64〜63) に収まりません。Alloy では確かめず、PBT に任せます"] };
+  // only what the checks look at is kept, and its numbers made to fit (abstraction.ts)
+  const relevance = relevanceOf(ir);
+  const made = intsOf(relevance, analysis.bitwidth);
+  if ("reason" in made) return { text: "", header: "", bitwidth: 0, commands: [], skipped: [made.reason] };
+  const ints = made;
+  const bitwidth = ints.bitwidth;
   const strings = new Map(literalStrings(ir).map((s, i) => [s, `str_${i}`]));
   const lines: string[] = [`module spec`, ``, `abstract sig Bool {}`, `one sig True, False extends Bool {}`, `sig Str {}`];
   if (strings.size) lines.push(`one sig ${[...strings.values()].join(", ")} extends Str {}`);
@@ -463,7 +462,16 @@ export function emitAlloy(ir: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { tex
   const internal = Object.entries(ir.components).filter(([, c]) => !c.external);
   // what cannot be declared is left out, and whatever reads it is left out with it (DSL.md §17.20)
   const missing = new Set<string>();
-  const cx0 = (component: string, vars = new Map<string, string>()): Ctx => ({ ir, component, vars, strings, missing });
+  const cx0 = (component: string, vars = new Map<string, string>()): Ctx => ({ ir, component, vars, strings, missing, ints });
+  // a state field no check reads (only answers and the outside world do) is not declared; writing it is left out
+  for (const [id, c] of internal) for (const f of Object.keys(c.state ?? {})) if (!relevance.fields.has(`${id}.${f}`)) missing.add(`state:${id}.${f}`);
+  /** Whether an expression the checks do not need can still be written as it is (its numbers fit, unreplaced). */
+  const writable = (x: unknown): boolean => {
+    if (ints.embedded) return false;
+    const limit = 2 ** (bitwidth - 1);
+    const walk = (y: unknown): boolean => (typeof y === "number" ? Math.abs(y) < limit : Array.isArray(y) ? y[0] === "lit" || y.every(walk) : y && typeof y === "object" ? Object.values(y).every(walk) : true);
+    return walk(x);
+  };
   const declared = (id: string, c: ComponentIr) => Object.keys(c.state ?? {}).filter((f) => !missing.has(`state:${id}.${f}`));
   /** Events left out (something in them cannot be written); a module without them checks fewer behaviours. */
   const dropped = new Set<string>();
@@ -492,7 +500,7 @@ export function emitAlloy(ir: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { tex
   try {
     // state
     for (const [id, c] of internal) {
-      const fields = Object.entries(c.state ?? {}).flatMap(([f, t]) => declare(`state:${id}.${f}`, () => `var ${field(id, f)}: ${declOf(t)}`) ?? []);
+      const fields = Object.entries(c.state ?? {}).flatMap(([f, t]) => (missing.has(`state:${id}.${f}`) ? [] : (declare(`state:${id}.${f}`, () => `var ${field(id, f)}: ${declOf(t)}`) ?? [])));
       lines.push(`one sig ${comp(id)} {${fields.length ? ` ${fields.join(", ")} ` : ""}}`);
     }
     // the outside world: one answer per step for each query (a function of the arguments, for one with a parameter)
@@ -509,7 +517,7 @@ export function emitAlloy(ir: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { tex
         if (decl === undefined) continue;
         envFields.push(decl);
         const answers = params.length === 0 ? `Env.${name}` : `univ.(Env.${name})`;
-        const typing = typingOf(answers, q.result, strings);
+        const typing = typingOf(answers, q.result, strings, ints);
         if (typing) envFacts.push(`always (${typing})`);
         if (q.mayFail) envFields.push(`var ${name}_failed: lone Bool`);
         if (q.promise === "increasing") envFacts.push(`always (Env.${name}' >= Env.${name})`);
@@ -576,13 +584,14 @@ export function emitAlloy(ir: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { tex
           else lines.push(written);
         }
         const kept = def.events.filter((e) => !dropped.has(`${id}.${e}`));
-        const typing = typingOfParams(def.params, strings);
+        const typing = typingOfParams(def.params, strings, ints);
         const requires = def.requires === undefined ? undefined : declare(`requires:${id}.${name}`, () => formula(def.requires!, cx0(id, vars)));
         // a requires that cannot be written: the command is left out
         const happens = kept.length === 0 || (def.requires !== undefined && requires === undefined) ? "(no Bool)" : `(${kept.map((e) => `${eventPred(id, e)}[${Object.keys(def.params).map(param).join(", ")}]`).join(" or ")})`;
         if (happens === "(no Bool)") for (const e of def.events) dropped.add(`${id}.${e}`);
         lines.push(`pred ${commandPred(id, name)}[${decls.join(", ")}] {\n  ${[typing, requires].filter(Boolean).map((x) => `${x} and `).join("")}${happens}\n}`);
-        if (def.output) {
+        // the answer, when another component reads it
+        if (def.output && relevance.outputs.has(`${id}.${name}`)) {
           const fun = declare(`out:${id}.${name}`, () => {
             const outs = def.events.map((e) => c.events![e]);
             const cx = cx0(id, vars);
@@ -661,9 +670,9 @@ export function emitAlloy(ir: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { tex
       const exhaustive = stateless && Object.values(def.params).every(finiteType);
       const requires = def.requires === undefined ? undefined : tryBody(() => formula(def.requires!, cx0(id, vars)));
       if (def.requires !== undefined && requires === undefined) continue;
-      const pre = [typingOfParams(def.params, strings), requires].filter(Boolean);
+      const pre = [typingOfParams(def.params, strings, ints), requires].filter(Boolean);
       const some = (inner: string) => `eventually (${decls ? `some ${decls} | ` : ""}${[...pre, inner].join(" and ")})`;
-      for (const obligation of definedness(def.is, cx0(id, vars))) {
+      for (const obligation of relevance.asked.has(`${id}.${query}`) || writable(def.is) ? definedness(def.is, cx0(id, vars)) : []) {
         const under = [...pre, ...obligation.context].join(" and ") || "some Bool";
         add("defined", `${id}.${query}: ${obligation.what}`, decls ? `always (all ${decls} | ${under} implies ${obligation.holds})` : `always (${under} implies ${obligation.holds})`, undefined, exhaustive);
       }
@@ -681,7 +690,7 @@ export function emitAlloy(ir: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { tex
       const quantify = (inner: string) => (decls.length ? `always (all ${decls.join(", ")} | ${inner})` : `always (${inner})`);
       // what the inputs may be (their types) and what the command requires: every obligation is read under both
       const requires =
-        [typingOfParams(def.params, strings), def.requires === undefined ? undefined : tryBody(() => formula(def.requires!, cx0(id, vars)))].filter(Boolean).join(" and ") || undefined;
+        [typingOfParams(def.params, strings, ints), def.requires === undefined ? undefined : tryBody(() => formula(def.requires!, cx0(id, vars)))].filter(Boolean).join(" and ") || undefined;
       for (const eventName of def.events) {
         if (dropped.has(`${id}.${eventName}`)) continue;
         const event = c.events![eventName];
@@ -690,8 +699,11 @@ export function emitAlloy(ir: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { tex
         // every key read is there: guards are read with the requires, the rest under the guard
         for (const [where, expr, under] of [
           ["guard", event.guard, requires],
-          ...Object.entries(event.assign).map(([f, e]) => [`this.${f}`, e, requires ? `${requires} and ${guard}` : guard] as const),
-          ...(event.output !== undefined ? [["output", event.output, requires ? `${requires} and ${guard}` : guard] as const] : []),
+          // what only answers or the outside world read is checked here only when it can be written as it is
+          ...Object.entries(event.assign)
+            .filter(([f, e]) => relevance.fields.has(`${id}.${f}`) || writable(e))
+            .map(([f, e]) => [`this.${f}`, e, requires ? `${requires} and ${guard}` : guard] as const),
+          ...(event.output !== undefined && (relevance.outputs.has(`${id}.${command}`) || writable(event.output)) ? [["output", event.output, requires ? `${requires} and ${guard}` : guard] as const] : []),
         ] as [string, Expr, string | undefined][]) {
           for (const obligation of definedness(expr, cx0(id, vars))) {
             add("defined", `${id}.${eventName} の ${where}: ${obligation.what}`, quantify(`${[under, ...obligation.context].filter(Boolean).join(" and ") || "some Bool"} implies ${obligation.holds}`));
@@ -721,7 +733,9 @@ export function emitAlloy(ir: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { tex
         });
         if (reachBody) add("reach", `${id}.${eventName}`, reachBody, `${id}.${eventName}`);
         // each row of a decision table the event reads: a trace where the event happens with that row chosen
-        const remembered = new Set(decisionsIn({ ...event, guard: true, output: undefined, calls: [] }, c).map(([table]) => table));
+        // (remembered: written to a field the checks read; a field only answers or the outside world read does not count)
+        const kept = Object.fromEntries(Object.entries(event.assign).filter(([f]) => relevance.fields.has(`${id}.${f}`)));
+        const remembered = new Set(decisionsIn({ ...event, assign: kept, guard: true, output: undefined, calls: [] }, c).map(([table]) => table));
         for (const [table, args] of decisionsIn(event, c)) {
           const rows = c.decisions![table].rows;
           rows.forEach((_, r) => {
@@ -946,11 +960,14 @@ function traceOf(instances: { values: Record<string, Record<string, string[][]>>
   const entries = entriesOf(ir).filter((e) => e.kind === "command");
   const atom = (name: string) => name.replace(/^(.*)\$(\d+)$/, (_, base: string, n: string) => `${base.replace(/^s_/, "")}-a${n}`);
   const strings = new Map(literalStrings(ir).map((s, i) => [`str_${i}$0`, s]));
+  // numbers Alloy chose, as values of the spec (they were replaced by small ones when they did not fit)
+  const made = intsOf(relevanceOf(ir));
+  const int = (raw: string) => ("reason" in made ? Number(raw) : made.concrete(Number(raw)));
   const value = (raw: string, type: Type): unknown => {
-    if (type === "int") return Number(raw);
+    if (type === "int") return int(raw);
     if (type === "bool") return raw.startsWith("True");
     if (typeof type === "object" && "optional" in type) return value(raw, type.optional);
-    if (typeof type === "object" && "enum" in type && type.enum.every((v) => typeof v === "number")) return Number(raw);
+    if (typeof type === "object" && "enum" in type && type.enum.every((v) => typeof v === "number")) return int(raw);
     if (strings.has(raw)) return strings.get(raw);
     return atom(raw);
   };

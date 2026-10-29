@@ -4,12 +4,12 @@ abstract sig Bool {}
 one sig True, False extends Bool {}
 sig Str {}
 one sig str_0, str_1, str_2, str_3, str_4, str_5, str_6, str_7, str_8, str_9, str_10, str_11, str_12, str_13, str_14, str_15, str_16, str_17, str_18, str_19, str_20, str_21 extends Str {}
-one sig c_interpret_flow { var f_interpret_flow_status: one Str, var f_interpret_flow_sessionCount: lone Int, var f_interpret_flow_attemptLimit: lone Int, var f_interpret_flow_runningSession: lone Int, var f_interpret_flow_runningAttempt: lone Int, var f_interpret_flow_startsFromCurrent: lone Bool, var f_interpret_flow_acceptedInRound: one Bool, var f_interpret_flow_failedInRound: one Bool }
+one sig c_interpret_flow { var f_interpret_flow_status: one Str, var f_interpret_flow_sessionCount: lone Int, var f_interpret_flow_attemptLimit: lone Int, var f_interpret_flow_runningSession: lone Int, var f_interpret_flow_runningAttempt: lone Int, var f_interpret_flow_acceptedInRound: one Bool, var f_interpret_flow_failedInRound: one Bool }
 one sig Env {}
 abstract sig Entry {}
 one sig k_interpret_flow_Compared, k_interpret_flow_Consider, k_interpret_flow_ConsiderAccepting, k_interpret_flow_CurrentChecked, k_interpret_flow_DraftChecked, k_interpret_flow_EndRound, k_interpret_flow_NoMoreComponents, k_interpret_flow_SessionChecked, k_interpret_flow_Start, k_interpret_flow_StartAccepting extends Entry {}
 one sig Step { var event: lone Entry, var x_interpret_flow_Compared_ok: lone Bool, var x_interpret_flow_Consider_hasCurrent: lone Bool, var x_interpret_flow_ConsiderAccepting_hasDraft: lone Bool, var x_interpret_flow_ConsiderAccepting_hasInterpretation: lone Bool, var x_interpret_flow_ConsiderAccepting_openReviews: lone Int, var x_interpret_flow_ConsiderAccepting_stampCurrent: lone Bool, var x_interpret_flow_CurrentChecked_passed: lone Bool, var x_interpret_flow_DraftChecked_passed: lone Bool, var x_interpret_flow_SessionChecked_outcome: lone Str, var x_interpret_flow_SessionChecked_hasModel: lone Bool, var x_interpret_flow_Start_sessions: lone Int, var x_interpret_flow_Start_maxAttempts: lone Int }
-pred same_interpret_flow { c_interpret_flow.f_interpret_flow_status' = c_interpret_flow.f_interpret_flow_status and c_interpret_flow.f_interpret_flow_sessionCount' = c_interpret_flow.f_interpret_flow_sessionCount and c_interpret_flow.f_interpret_flow_attemptLimit' = c_interpret_flow.f_interpret_flow_attemptLimit and c_interpret_flow.f_interpret_flow_runningSession' = c_interpret_flow.f_interpret_flow_runningSession and c_interpret_flow.f_interpret_flow_runningAttempt' = c_interpret_flow.f_interpret_flow_runningAttempt and c_interpret_flow.f_interpret_flow_startsFromCurrent' = c_interpret_flow.f_interpret_flow_startsFromCurrent and c_interpret_flow.f_interpret_flow_acceptedInRound' = c_interpret_flow.f_interpret_flow_acceptedInRound and c_interpret_flow.f_interpret_flow_failedInRound' = c_interpret_flow.f_interpret_flow_failedInRound }
+pred same_interpret_flow { c_interpret_flow.f_interpret_flow_status' = c_interpret_flow.f_interpret_flow_status and c_interpret_flow.f_interpret_flow_sessionCount' = c_interpret_flow.f_interpret_flow_sessionCount and c_interpret_flow.f_interpret_flow_attemptLimit' = c_interpret_flow.f_interpret_flow_attemptLimit and c_interpret_flow.f_interpret_flow_runningSession' = c_interpret_flow.f_interpret_flow_runningSession and c_interpret_flow.f_interpret_flow_runningAttempt' = c_interpret_flow.f_interpret_flow_runningAttempt and c_interpret_flow.f_interpret_flow_acceptedInRound' = c_interpret_flow.f_interpret_flow_acceptedInRound and c_interpret_flow.f_interpret_flow_failedInRound' = c_interpret_flow.f_interpret_flow_failedInRound }
 pred ev_interpret_flow_Start_otherwise[p_sessions: Int, p_maxAttempts: Int] {
   (some Bool)
   c_interpret_flow.f_interpret_flow_status' = str_3
@@ -17,7 +17,6 @@ pred ev_interpret_flow_Start_otherwise[p_sessions: Int, p_maxAttempts: Int] {
   c_interpret_flow.f_interpret_flow_attemptLimit' = p_maxAttempts
   c_interpret_flow.f_interpret_flow_runningSession' = c_interpret_flow.f_interpret_flow_runningSession
   c_interpret_flow.f_interpret_flow_runningAttempt' = c_interpret_flow.f_interpret_flow_runningAttempt
-  c_interpret_flow.f_interpret_flow_startsFromCurrent' = c_interpret_flow.f_interpret_flow_startsFromCurrent
   c_interpret_flow.f_interpret_flow_acceptedInRound' = c_interpret_flow.f_interpret_flow_acceptedInRound
   c_interpret_flow.f_interpret_flow_failedInRound' = c_interpret_flow.f_interpret_flow_failedInRound
 }
@@ -31,7 +30,6 @@ pred ev_interpret_flow_Consider_otherwise[p_hasCurrent: Bool] {
   c_interpret_flow.f_interpret_flow_attemptLimit' = c_interpret_flow.f_interpret_flow_attemptLimit
   c_interpret_flow.f_interpret_flow_runningSession' = ((p_hasCurrent = True) => (c_interpret_flow.f_interpret_flow_runningSession) else 1)
   c_interpret_flow.f_interpret_flow_runningAttempt' = ((p_hasCurrent = True) => (c_interpret_flow.f_interpret_flow_runningAttempt) else 1)
-  c_interpret_flow.f_interpret_flow_startsFromCurrent' = ((p_hasCurrent = True) => (c_interpret_flow.f_interpret_flow_startsFromCurrent) else False)
   c_interpret_flow.f_interpret_flow_acceptedInRound' = c_interpret_flow.f_interpret_flow_acceptedInRound
   c_interpret_flow.f_interpret_flow_failedInRound' = c_interpret_flow.f_interpret_flow_failedInRound
 }
@@ -45,7 +43,6 @@ pred ev_interpret_flow_CurrentChecked_otherwise[p_passed: Bool] {
   c_interpret_flow.f_interpret_flow_attemptLimit' = c_interpret_flow.f_interpret_flow_attemptLimit
   c_interpret_flow.f_interpret_flow_runningSession' = ((p_passed = True) => (c_interpret_flow.f_interpret_flow_runningSession) else 1)
   c_interpret_flow.f_interpret_flow_runningAttempt' = ((p_passed = True) => (c_interpret_flow.f_interpret_flow_runningAttempt) else 1)
-  c_interpret_flow.f_interpret_flow_startsFromCurrent' = ((p_passed = True) => (c_interpret_flow.f_interpret_flow_startsFromCurrent) else True)
   c_interpret_flow.f_interpret_flow_acceptedInRound' = c_interpret_flow.f_interpret_flow_acceptedInRound
   c_interpret_flow.f_interpret_flow_failedInRound' = c_interpret_flow.f_interpret_flow_failedInRound
 }
@@ -59,7 +56,6 @@ pred ev_interpret_flow_NoMoreComponents_otherwise[] {
   c_interpret_flow.f_interpret_flow_attemptLimit' = c_interpret_flow.f_interpret_flow_attemptLimit
   c_interpret_flow.f_interpret_flow_runningSession' = c_interpret_flow.f_interpret_flow_runningSession
   c_interpret_flow.f_interpret_flow_runningAttempt' = c_interpret_flow.f_interpret_flow_runningAttempt
-  c_interpret_flow.f_interpret_flow_startsFromCurrent' = c_interpret_flow.f_interpret_flow_startsFromCurrent
   c_interpret_flow.f_interpret_flow_acceptedInRound' = c_interpret_flow.f_interpret_flow_acceptedInRound
   c_interpret_flow.f_interpret_flow_failedInRound' = c_interpret_flow.f_interpret_flow_failedInRound
 }
@@ -73,7 +69,6 @@ pred ev_interpret_flow_SessionChecked_otherwise[p_outcome: Str, p_hasModel: Bool
   c_interpret_flow.f_interpret_flow_attemptLimit' = c_interpret_flow.f_interpret_flow_attemptLimit
   c_interpret_flow.f_interpret_flow_runningSession' = (((not (p_outcome = str_16)) and ((c_interpret_flow.f_interpret_flow_runningAttempt) < (c_interpret_flow.f_interpret_flow_attemptLimit))) => (c_interpret_flow.f_interpret_flow_runningSession) else (((not (p_outcome = str_16)) and ((c_interpret_flow.f_interpret_flow_runningSession) = 1)) => (c_interpret_flow.f_interpret_flow_runningSession) else (((c_interpret_flow.f_interpret_flow_runningSession) = 1) => ((((c_interpret_flow.f_interpret_flow_sessionCount) = 1) or (not (p_hasModel = True))) => (c_interpret_flow.f_interpret_flow_runningSession) else 2) else ((p_outcome = str_16) => (c_interpret_flow.f_interpret_flow_runningSession) else (((c_interpret_flow.f_interpret_flow_runningSession) < (c_interpret_flow.f_interpret_flow_sessionCount)) => plus[(c_interpret_flow.f_interpret_flow_runningSession), 1] else (c_interpret_flow.f_interpret_flow_runningSession))))))
   c_interpret_flow.f_interpret_flow_runningAttempt' = (((not (p_outcome = str_16)) and ((c_interpret_flow.f_interpret_flow_runningAttempt) < (c_interpret_flow.f_interpret_flow_attemptLimit))) => plus[(c_interpret_flow.f_interpret_flow_runningAttempt), 1] else (((not (p_outcome = str_16)) and ((c_interpret_flow.f_interpret_flow_runningSession) = 1)) => (c_interpret_flow.f_interpret_flow_runningAttempt) else (((c_interpret_flow.f_interpret_flow_runningSession) = 1) => ((((c_interpret_flow.f_interpret_flow_sessionCount) = 1) or (not (p_hasModel = True))) => (c_interpret_flow.f_interpret_flow_runningAttempt) else 1) else ((p_outcome = str_16) => (c_interpret_flow.f_interpret_flow_runningAttempt) else (((c_interpret_flow.f_interpret_flow_runningSession) < (c_interpret_flow.f_interpret_flow_sessionCount)) => 1 else (c_interpret_flow.f_interpret_flow_runningAttempt))))))
-  c_interpret_flow.f_interpret_flow_startsFromCurrent' = c_interpret_flow.f_interpret_flow_startsFromCurrent
   c_interpret_flow.f_interpret_flow_acceptedInRound' = c_interpret_flow.f_interpret_flow_acceptedInRound
   c_interpret_flow.f_interpret_flow_failedInRound' = c_interpret_flow.f_interpret_flow_failedInRound
 }
@@ -87,7 +82,6 @@ pred ev_interpret_flow_Compared_otherwise[p_ok: Bool] {
   c_interpret_flow.f_interpret_flow_attemptLimit' = c_interpret_flow.f_interpret_flow_attemptLimit
   c_interpret_flow.f_interpret_flow_runningSession' = (((c_interpret_flow.f_interpret_flow_runningSession) < (c_interpret_flow.f_interpret_flow_sessionCount)) => plus[(c_interpret_flow.f_interpret_flow_runningSession), 1] else (c_interpret_flow.f_interpret_flow_runningSession))
   c_interpret_flow.f_interpret_flow_runningAttempt' = (((c_interpret_flow.f_interpret_flow_runningSession) < (c_interpret_flow.f_interpret_flow_sessionCount)) => 1 else (c_interpret_flow.f_interpret_flow_runningAttempt))
-  c_interpret_flow.f_interpret_flow_startsFromCurrent' = c_interpret_flow.f_interpret_flow_startsFromCurrent
   c_interpret_flow.f_interpret_flow_acceptedInRound' = c_interpret_flow.f_interpret_flow_acceptedInRound
   c_interpret_flow.f_interpret_flow_failedInRound' = c_interpret_flow.f_interpret_flow_failedInRound
 }
@@ -101,7 +95,6 @@ pred ev_interpret_flow_StartAccepting_otherwise[] {
   c_interpret_flow.f_interpret_flow_attemptLimit' = c_interpret_flow.f_interpret_flow_attemptLimit
   c_interpret_flow.f_interpret_flow_runningSession' = c_interpret_flow.f_interpret_flow_runningSession
   c_interpret_flow.f_interpret_flow_runningAttempt' = c_interpret_flow.f_interpret_flow_runningAttempt
-  c_interpret_flow.f_interpret_flow_startsFromCurrent' = c_interpret_flow.f_interpret_flow_startsFromCurrent
   c_interpret_flow.f_interpret_flow_acceptedInRound' = False
   c_interpret_flow.f_interpret_flow_failedInRound' = False
 }
@@ -115,7 +108,6 @@ pred ev_interpret_flow_ConsiderAccepting_otherwise[p_hasDraft: Bool, p_hasInterp
   c_interpret_flow.f_interpret_flow_attemptLimit' = c_interpret_flow.f_interpret_flow_attemptLimit
   c_interpret_flow.f_interpret_flow_runningSession' = c_interpret_flow.f_interpret_flow_runningSession
   c_interpret_flow.f_interpret_flow_runningAttempt' = c_interpret_flow.f_interpret_flow_runningAttempt
-  c_interpret_flow.f_interpret_flow_startsFromCurrent' = c_interpret_flow.f_interpret_flow_startsFromCurrent
   c_interpret_flow.f_interpret_flow_acceptedInRound' = c_interpret_flow.f_interpret_flow_acceptedInRound
   c_interpret_flow.f_interpret_flow_failedInRound' = (((not (p_hasDraft = True)) and (not (p_hasInterpretation = True))) => True else ((p_openReviews > 0) => True else (c_interpret_flow.f_interpret_flow_failedInRound)))
 }
@@ -129,7 +121,6 @@ pred ev_interpret_flow_DraftChecked_otherwise[p_passed: Bool] {
   c_interpret_flow.f_interpret_flow_attemptLimit' = c_interpret_flow.f_interpret_flow_attemptLimit
   c_interpret_flow.f_interpret_flow_runningSession' = c_interpret_flow.f_interpret_flow_runningSession
   c_interpret_flow.f_interpret_flow_runningAttempt' = c_interpret_flow.f_interpret_flow_runningAttempt
-  c_interpret_flow.f_interpret_flow_startsFromCurrent' = c_interpret_flow.f_interpret_flow_startsFromCurrent
   c_interpret_flow.f_interpret_flow_acceptedInRound' = ((p_passed = True) => True else (c_interpret_flow.f_interpret_flow_acceptedInRound))
   c_interpret_flow.f_interpret_flow_failedInRound' = ((p_passed = True) => (c_interpret_flow.f_interpret_flow_failedInRound) else True)
 }
@@ -143,14 +134,13 @@ pred ev_interpret_flow_EndRound_otherwise[] {
   c_interpret_flow.f_interpret_flow_attemptLimit' = c_interpret_flow.f_interpret_flow_attemptLimit
   c_interpret_flow.f_interpret_flow_runningSession' = c_interpret_flow.f_interpret_flow_runningSession
   c_interpret_flow.f_interpret_flow_runningAttempt' = c_interpret_flow.f_interpret_flow_runningAttempt
-  c_interpret_flow.f_interpret_flow_startsFromCurrent' = c_interpret_flow.f_interpret_flow_startsFromCurrent
   c_interpret_flow.f_interpret_flow_acceptedInRound' = ((((c_interpret_flow.f_interpret_flow_failedInRound) = True) and ((c_interpret_flow.f_interpret_flow_acceptedInRound) = True)) => False else (c_interpret_flow.f_interpret_flow_acceptedInRound))
   c_interpret_flow.f_interpret_flow_failedInRound' = ((((c_interpret_flow.f_interpret_flow_failedInRound) = True) and ((c_interpret_flow.f_interpret_flow_acceptedInRound) = True)) => False else (c_interpret_flow.f_interpret_flow_failedInRound))
 }
 pred cmd_interpret_flow_EndRound[] {
   ((c_interpret_flow.f_interpret_flow_status) = str_1) and (ev_interpret_flow_EndRound_otherwise[])
 }
-fact initial_values { c_interpret_flow.f_interpret_flow_status = str_5 and c_interpret_flow.f_interpret_flow_sessionCount = none and c_interpret_flow.f_interpret_flow_attemptLimit = none and c_interpret_flow.f_interpret_flow_runningSession = none and c_interpret_flow.f_interpret_flow_runningAttempt = none and c_interpret_flow.f_interpret_flow_startsFromCurrent = none and c_interpret_flow.f_interpret_flow_acceptedInRound = False and c_interpret_flow.f_interpret_flow_failedInRound = False }
+fact initial_values { c_interpret_flow.f_interpret_flow_status = str_5 and c_interpret_flow.f_interpret_flow_sessionCount = none and c_interpret_flow.f_interpret_flow_attemptLimit = none and c_interpret_flow.f_interpret_flow_runningSession = none and c_interpret_flow.f_interpret_flow_runningAttempt = none and c_interpret_flow.f_interpret_flow_acceptedInRound = False and c_interpret_flow.f_interpret_flow_failedInRound = False }
 fact transitions { always ((same_interpret_flow and no Step.event and no Step.x_interpret_flow_Compared_ok and no Step.x_interpret_flow_Consider_hasCurrent and no Step.x_interpret_flow_ConsiderAccepting_hasDraft and no Step.x_interpret_flow_ConsiderAccepting_hasInterpretation and no Step.x_interpret_flow_ConsiderAccepting_openReviews and no Step.x_interpret_flow_ConsiderAccepting_stampCurrent and no Step.x_interpret_flow_CurrentChecked_passed and no Step.x_interpret_flow_DraftChecked_passed and no Step.x_interpret_flow_SessionChecked_outcome and no Step.x_interpret_flow_SessionChecked_hasModel and no Step.x_interpret_flow_Start_sessions and no Step.x_interpret_flow_Start_maxAttempts)
   or (some p_ok: Bool | cmd_interpret_flow_Compared[p_ok] and Step.event = k_interpret_flow_Compared and Step.x_interpret_flow_Compared_ok = p_ok and no Step.x_interpret_flow_Consider_hasCurrent and no Step.x_interpret_flow_ConsiderAccepting_hasDraft and no Step.x_interpret_flow_ConsiderAccepting_hasInterpretation and no Step.x_interpret_flow_ConsiderAccepting_openReviews and no Step.x_interpret_flow_ConsiderAccepting_stampCurrent and no Step.x_interpret_flow_CurrentChecked_passed and no Step.x_interpret_flow_DraftChecked_passed and no Step.x_interpret_flow_SessionChecked_outcome and no Step.x_interpret_flow_SessionChecked_hasModel and no Step.x_interpret_flow_Start_sessions and no Step.x_interpret_flow_Start_maxAttempts)
   or (some p_hasCurrent: Bool | cmd_interpret_flow_Consider[p_hasCurrent] and Step.event = k_interpret_flow_Consider and Step.x_interpret_flow_Consider_hasCurrent = p_hasCurrent and no Step.x_interpret_flow_Compared_ok and no Step.x_interpret_flow_ConsiderAccepting_hasDraft and no Step.x_interpret_flow_ConsiderAccepting_hasInterpretation and no Step.x_interpret_flow_ConsiderAccepting_openReviews and no Step.x_interpret_flow_ConsiderAccepting_stampCurrent and no Step.x_interpret_flow_CurrentChecked_passed and no Step.x_interpret_flow_DraftChecked_passed and no Step.x_interpret_flow_SessionChecked_outcome and no Step.x_interpret_flow_SessionChecked_hasModel and no Step.x_interpret_flow_Start_sessions and no Step.x_interpret_flow_Start_maxAttempts)

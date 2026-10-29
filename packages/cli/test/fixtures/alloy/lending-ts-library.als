@@ -44,7 +44,6 @@ pred ev_library_Borrow_otherwise[p_member: s_MemberId, p_book: s_BookId] {
 pred cmd_library_Borrow[p_member: s_MemberId, p_book: s_BookId] {
   (ev_library_Borrow_notMember[p_member, p_book] or ev_library_Borrow_unpaid[p_member, p_book] or ev_library_Borrow_onLoan[p_member, p_book] or ev_library_Borrow_atLimit[p_member, p_book] or ev_library_Borrow_otherwise[p_member, p_book])
 }
-fun out_library_Borrow[p_member: s_MemberId, p_book: s_BookId]: Str { ((let l_member = p_member | (not ((let l_member = l_member | ((l_member in (c_members.f_members_members)) => True else False)) = True))) => str_3 else (((not (let l_member = p_member | (not ((let l_member = l_member | ((l_member in (c_members.f_members_members)) => True else False)) = True)))) and (let l_member = p_member | ((let l_member = l_member | ((l_member in ((c_fines.f_fines_owed).univ)) => (l_member.(c_fines.f_fines_owed)) else 0)) > 0))) => str_7 else (((not (let l_member = p_member | (not ((let l_member = l_member | ((l_member in (c_members.f_members_members)) => True else False)) = True)))) and (not (let l_member = p_member | ((let l_member = l_member | ((l_member in ((c_fines.f_fines_owed).univ)) => (l_member.(c_fines.f_fines_owed)) else 0)) > 0))) and (let l_book = p_book | (l_book in ((c_library.f_library_lentTo).univ)))) => str_5 else (((not (let l_member = p_member | (not ((let l_member = l_member | ((l_member in (c_members.f_members_members)) => True else False)) = True)))) and (not (let l_member = p_member | ((let l_member = l_member | ((l_member in ((c_fines.f_fines_owed).univ)) => (l_member.(c_fines.f_fines_owed)) else 0)) > 0))) and (not (let l_book = p_book | (l_book in ((c_library.f_library_lentTo).univ)))) and (let l_member = p_member | (#{ b__: (c_library.f_library_lentTo).univ | ((b__.(c_library.f_library_lentTo)) = l_member) } >= (let l_member = l_member | (((let l_member = l_member | ((l_member in (c_members.f_members_extended)) => True else False)) = True) => 3 else 2))))) => str_2 else str_1)))) }
 pred ev_library_Return_otherwise[p_book: s_BookId] {
   (not (p_book in ((c_library.f_library_lentTo).univ)))
   c_library.f_library_lentTo' = c_library.f_library_lentTo
@@ -60,7 +59,6 @@ pred ev_library_Return_case1[p_book: s_BookId] {
 pred cmd_library_Return[p_book: s_BookId] {
   (ev_library_Return_otherwise[p_book] or ev_library_Return_case1[p_book])
 }
-fun out_library_Return[p_book: s_BookId]: Str { ((not (p_book in ((c_library.f_library_lentTo).univ))) => str_4 else str_6) }
 pred ev_fines_Charge_otherwise[p_member: s_MemberId, p_days: Int] {
   (some Bool)
   c_fines.f_fines_owed' = ((c_fines.f_fines_owed) ++ p_member -> plus[((p_member in ((c_fines.f_fines_owed).univ)) => (p_member.(c_fines.f_fines_owed)) else 0), mul[p_days, 10]])
@@ -96,7 +94,6 @@ pred ev_members_Extend_case1[p_member: s_MemberId] {
 pred cmd_members_Extend[p_member: s_MemberId] {
   (ev_members_Extend_otherwise[p_member] or ev_members_Extend_case1[p_member])
 }
-fun out_members_Extend[p_member: s_MemberId]: Str { ((not (p_member in (c_members.f_members_members))) => str_3 else str_0) }
 fact initial_values { no c_library.f_library_lentTo and no c_library.f_library_dueOf and no c_fines.f_fines_owed and no c_members.f_members_members and no c_members.f_members_extended }
 fact transitions { always ((same_library and same_fines and same_members and no Step.event and no Step.x_library_Borrow_member and no Step.x_library_Borrow_book and no Step.x_library_Return_book and no Step.x_fines_Pay_member and no Step.x_members_Extend_member and no Step.x_members_Register_member)
   or (some p_member: s_MemberId, p_book: s_BookId | cmd_library_Borrow[p_member, p_book] and Step.event = k_library_Borrow and Step.x_library_Borrow_member = p_member and Step.x_library_Borrow_book = p_book and same_fines and same_members and no Step.x_library_Return_book and no Step.x_fines_Pay_member and no Step.x_members_Extend_member and no Step.x_members_Register_member)

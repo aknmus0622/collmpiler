@@ -4,6 +4,8 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { ALLOY_SHA256, alloyJar, checkWithAlloy, emitAlloy, isPinnedJar, javaAvailable } from "../src/v1/alloy.ts";
+import { checkEmbedding, intsOf, relevanceOf } from "../src/v1/abstraction.ts";
+import type { Relevance } from "../src/v1/abstraction.ts";
 import { compile, loadProgram } from "../src/v1/load.ts";
 import { repoRoot } from "./support.ts";
 
@@ -43,6 +45,34 @@ test("Alloy: 例と self の部品ごとに、何を確かめるか (飛ばす�
     }
   }
   expect("coverage.txt", `${lines.join("\n")}\n`);
+});
+
+const relevance = (numbers: number[], arithmetic: string[] = []): Relevance => ({ fields: new Set(), outputs: new Set(), asked: new Set(), numbers: new Set(numbers), arithmetic, counting: [] });
+
+test("Alloy の数: 比べるだけの大きな数は、順序を保った小さな数に置き換え、戻すと同じ値になる", () => {
+  const ints = intsOf(relevance([0, 9999, 10000, 1000000]));
+  assert.ok(!("reason" in ints));
+  assert.ok(ints.embedded && ints.bitwidth <= 7);
+  // 9999 と 10000 の間には整数が無いので、Alloy でも間に値を置かない。ほかの定数の間には、1 つ置く
+  const [a, b, c, d] = [0, 9999, 10000, 1000000].map((n) => ints.toAlloy(n)!);
+  assert.deepEqual([b - a, c - b, d - c], [2, 1, 2]);
+  assert.equal(ints.concrete(a + 1), 1);
+  assert.equal(ints.concrete(c + 1), 10001);
+  assert.equal(ints.concrete(a - 3), -3);
+  // 計算に使われる数は置き換えない
+  assert.match((intsOf(relevance([0, 10000], ["*"])) as { reason: string }).reason, /計算 \(\*\)/);
+  // 収まる数は、そのまま
+  assert.equal((intsOf(relevance([0, 30])) as { embedded: boolean }).embedded, false);
+  // 順序を保たない置き換えは、作った時点で分かる
+  assert.throws(() => checkEmbedding({ bitwidth: 4, embedded: true, toAlloy: (n) => n, concrete: (v) => (v === 2 ? 0 : v) }, [0]), /順序を保ちません/);
+});
+
+test("Alloy に渡すもの: 答えと外の世界にしか流れない計算は捨てる (checkout の請求額)", () => {
+  const { ir } = compile(join(repoRoot, "examples/checkout-ts/specs"), "order");
+  const found = relevanceOf(ir!);
+  assert.ok(found.fields.has("order.price") && found.fields.has("order.status"));
+  assert.ok(!found.fields.has("order.amountPaid"));
+  assert.deepEqual(found.arithmetic, []);
 });
 
 test("Alloy の jar: 固定したハッシュと違う jar は、その jar と分かる。CLP_ALLOY_JAR はそのまま使う (違えば警告)", () => {
