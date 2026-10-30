@@ -32,6 +32,16 @@ export type Sorts = {
   variables(sort: number, cap: number): number;
   /** The sort of what a comparison, `min` or `max` compares (by the array it is written as). */
   compared(e: unknown[]): number | undefined;
+  /** Every comparison (`=`, `<`, …, `min`, `max`) the checks read, with the sort it compares. */
+  comparisons(): [unknown[], number][];
+  /** The operations the checks read (`+`, `-`, `*`, `div`, `mod`, `neg`, `abs`): the sort of the result, and of each operand (a number written: itself). */
+  operations: { e: unknown[]; op: string; sort: number; operands: ({ sort: number } | { literal: number })[] }[];
+  /** Sorts a `sum` adds up. */
+  summed: Set<number>;
+  /** The sort of an expression's value (by the array it is written as), when it is a number. */
+  sortOf(e: unknown[]): number | undefined;
+  /** Every expression read, and every place with its parts (`state:<id>.<f>.#v`, …), with its sort. */
+  members(): { nodes: [unknown[], number][]; places: [string, number][] };
   find(n: number): number;
 };
 
@@ -98,6 +108,11 @@ export function sortsOf(ir: Ir8, relevance: Relevance): Sorts {
     return at.get(key)!;
   };
   const marked: Val[] = [];
+  const summed: Val[] = [];
+  const operations: { e: unknown[]; op: string; result: Val; operands: (Val | number)[] }[] = [];
+  const operationOf = new Map<unknown[], { result: Val; operands: Val[] }>();
+  /** Every expression read, with its value's shape (the sort of a number). */
+  const valueOf = new Map<unknown[], Val>();
 
   type Scope = { id: string; vars: Map<string, Val> };
   const memo = new Set<string>();
@@ -122,6 +137,11 @@ export function sortsOf(ir: Ir8, relevance: Relevance): Sorts {
     return v;
   };
   const of = (e: unknown, s: Scope): Val | undefined => {
+    const v = ofNode(e, s);
+    if (Array.isArray(e) && v) valueOf.set(e, v);
+    return v;
+  };
+  const ofNode = (e: unknown, s: Scope): Val | undefined => {
     if (typeof e === "number") {
       const v = fresh();
       numericNodes.push(v.n);
@@ -184,17 +204,34 @@ export function sortsOf(ir: Ir8, relevance: Relevance): Sorts {
       case "??":
       case "min":
       case "max":
+      case "nonNull": {
+        const v = all().reduce<Val | undefined>((x, y) => unify(x, y), undefined) ?? fresh();
+        if (op === "min" || op === "max") comparisons.set(e, v);
+        return v;
+      }
+      // a computed value is of a sort of its own: what it is computed from need not meet it (a day minus a day is a
+      // number of days, not a day). The sorts are linked by the operation (their numbers are computed together)
       case "+":
       case "-":
       case "*":
       case "div":
       case "mod":
       case "neg":
-      case "abs":
-      case "nonNull": {
-        const v = all().reduce<Val | undefined>((x, y) => unify(x, y), undefined) ?? fresh();
-        if (ARITHMETIC.has(op) && relevance.arithmeticAt.has(e)) marked.push(v);
-        if (op === "min" || op === "max") comparisons.set(e, v);
+      case "abs": {
+        const operands = all().map((v) => v ?? fresh());
+        // one expression written once and read in two places (a constant used twice) is one operation
+        const seen = operationOf.get(e);
+        if (seen) {
+          operands.forEach((v, i) => unify(v, seen.operands[i]));
+          return seen.result;
+        }
+        const v = fresh();
+        numericNodes.push(v.n);
+        operationOf.set(e, { result: v, operands });
+        if (relevance.arithmeticAt.has(e)) {
+          marked.push(v, ...operands);
+          operations.push({ e, op, result: v, operands: a.map((x, i) => (typeof x === "number" ? x : operands[i])) });
+        }
         return v;
       }
       case "record":
@@ -259,7 +296,10 @@ export function sortsOf(ir: Ir8, relevance: Relevance): Sorts {
       }
       case "sum": {
         const { body } = binding(a[0], a[1] as string[], a[2]);
-        if (relevance.arithmeticAt.has(e) && body) marked.push(body);
+        if (relevance.arithmeticAt.has(e) && body) {
+          marked.push(body);
+          summed.push(body);
+        }
         return body ?? fresh();
       }
       case "len":
@@ -300,6 +340,17 @@ export function sortsOf(ir: Ir8, relevance: Relevance): Sorts {
       case "emptySet":
       case "emptyMap":
         return fresh();
+      // a map with each value changed (clock.ts: times moved by how far the clock moved)
+      case "mapv": {
+        const m = of(a[0], s) ?? fresh();
+        const vars = new Map(s.vars);
+        vars.set(a[1] as string, fieldOf(m, "#v"));
+        const body = of(a[2], { ...s, vars });
+        const v = fresh();
+        unify(fieldOf(v, "#k"), fieldOf(m, "#k"));
+        unify(fieldOf(v, "#v"), body);
+        return v;
+      }
       case "cond":
       case "calc": {
         const [name, args] = a as [string, Record<string, unknown>];
@@ -382,6 +433,12 @@ export function sortsOf(ir: Ir8, relevance: Relevance): Sorts {
         }
       }
     }
+    // events of no command (clock.ts: the times of the state moving with the clock)
+    const inCommands = new Set(Object.values(c.commands ?? {}).flatMap((def) => def.events));
+    for (const [name, event] of Object.entries(c.events ?? {})) {
+      if (inCommands.has(name)) continue;
+      for (const f of Object.keys(event.assign)) unify(place(`state:${id}.${f}`, c.state?.[f]), at(event.assign, f, { id, vars: new Map() }));
+    }
     for (const [name, q] of Object.entries(c.queries ?? {})) {
       const s = scopeOf(id, `qparam:${id}.${name}`, q.params);
       of(q.requires, s);
@@ -434,6 +491,24 @@ export function sortsOf(ir: Ir8, relevance: Relevance): Sorts {
     compared: (e) => {
       const v = comparisons.get(e);
       return v === undefined ? undefined : find(v.n);
+    },
+    comparisons: () => [...comparisons].map(([e, v]) => [e, find(v.n)]),
+    operations: operations.map(({ e, op, result, operands }) => ({ e, op, sort: find(result.n), operands: operands.map((x) => (typeof x === "number" ? { literal: x } : { sort: find(x.n) })) })),
+    summed: new Set(summed.map((v) => find(v.n))),
+    sortOf: (e) => {
+      const v = valueOf.get(e);
+      return v === undefined ? undefined : find(v.n);
+    },
+    members: () => {
+      const named: [string, number][] = [];
+      const walk = (name: string, v: Val, depth: number) => {
+        named.push([name, find(v.n)]);
+        if (depth > 6) return;
+        for (const [k, f] of v.fields ?? []) walk(`${name}.${k}`, f, depth + 1);
+        if (v.elem) walk(`${name}.#elem`, v.elem, depth + 1);
+      };
+      for (const [name, v] of places) walk(name, v, 0);
+      return { nodes: [...valueOf].map(([e, v]) => [e, find(v.n)]), places: named };
     },
     find,
   };

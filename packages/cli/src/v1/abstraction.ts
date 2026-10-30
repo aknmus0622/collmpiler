@@ -13,6 +13,10 @@
 
 import type { ComponentIr, Ir8, Type } from "./ir.ts";
 import { sortsOf } from "./sorts.ts";
+import { boundsOf } from "./bounds.ts";
+import type { Interval } from "./bounds.ts";
+import { classesOf } from "./classes.ts";
+import type { Table } from "./classes.ts";
 
 /** What the module needs of the IR: the state fields and command answers it must keep. */
 export type Relevance = {
@@ -279,7 +283,16 @@ export function checkEmbedding(ints: Ints, numbers: number[]): void {
  * meaning "that many or more": counting is a homomorphism of monoids, and comparing with constants up to K sees only
  * its value cut at K + 1.
  */
-export type Chain = { name: string; values: number[]; count?: boolean };
+export type Chain = {
+  name: string;
+  /** The number each atom stands for (for a sort computed with: a number of its class, read back from traces). */
+  values: number[];
+  count?: boolean;
+  /** A sort computed with: the class of numbers each atom stands for (classes.ts). */
+  classes?: Interval[];
+};
+/** An operation of the checks as a table between chains: the chains of its operands that are not numbers written, and of its result. */
+export type OpTable = { name: string; from: string[]; to: string; entries: { args: number[]; results: number[] }[]; shift?: number };
 /** Values put between and beyond constants (data independence: as many as values of the sort that can meet). */
 const SLOTS = 4;
 
@@ -297,12 +310,23 @@ export type Prepared = {
   concreteLength(v: string): number;
   /** The sorts written as chains of atoms. */
   chains: Chain[];
+  /** The class of numbers an atom of a chain stands for (a sort computed with), for traces read back. */
+  classOf(raw: string): Interval | undefined;
+  /** The operations written as tables (an `["optab", name, …operands]` in the IR stands for one). */
+  tables: OpTable[];
+  /** Why sorts computed with kept Alloy's integers (one line per group of sorts). */
+  kept: string[];
+  /** Some table gives more than one class (`pred`): the module over-approximates, and its traces are run on the spec before they are reported. */
+  approximate: boolean;
 };
 
 /** The atom of a chain, as written in the module. */
 export const chainAtom = (chain: string, i: number) => `s_${chain}_${i}`;
 
-export function prepareNumbers(ir: Ir8, relevance: Relevance, lengths: number[] = [], fixed?: number): Prepared | { reason: string } {
+/** How numbers computed with are written: as classes (`CLP_ALLOY_CLASSES=off`: as Alloy's integers, as before). */
+export type NumberOptions = { steps?: number; classes?: boolean; operations?: "fun" | "pred" };
+
+export function prepareNumbers(ir: Ir8, relevance: Relevance, lengths: number[] = [], fixed?: number, options: NumberOptions = {}): Prepared | { reason: string } {
   const sorts = sortsOf(ir, relevance);
   const bySort = new Map<number, Set<number>>();
   const add = (sort: number, n: number) => {
@@ -371,12 +395,67 @@ export function prepareNumbers(ir: Ir8, relevance: Relevance, lengths: number[] 
       lengthSig: "Int",
       concreteLength: (v) => made.concrete(Number(v)),
       chains: [],
+      classOf: () => undefined,
+      tables: [],
+      kept: [],
+      approximate: false,
     };
   }
   // a sort only compared becomes a chain of atoms; the others stay integers, made to fit on their own
-  const chainOf = new Map<number, { chain: Chain; index: Map<number, number> }>();
+  const chainOf = new Map<number, { chain: Chain; index: { get(n: number): number | undefined } }>();
   const ints = new Map<number, Ints>();
+  // sorts computed with, linked by their operations into groups: each group as classes (classes.ts), or as integers
+  const tableOf = new Map<unknown[], Table>();
+  const kept: string[] = [];
+  let approximate = false;
+  if (fixed === undefined && options.classes !== false && process.env.CLP_ALLOY_CLASSES !== "off" && sorts.arithmetic.size > 0) {
+    const parent = new Map<number, number>();
+    const root = (x: number): number => {
+      while (parent.has(x) && parent.get(x) !== x) x = parent.get(x)!;
+      return x;
+    };
+    for (const o of sorts.operations) for (const x of o.operands) if ("sort" in x) parent.set(root(x.sort), root(o.sort));
+    const groups = new Map<number, Set<number>>();
+    for (const sort of sorts.arithmetic) groups.set(root(sort), (groups.get(root(sort)) ?? new Set()).add(sort));
+    const bounds = boundsOf(ir, options.steps ?? 12);
+    // what the spec says about how to write them (`analysis` of the component a place is in, and `classes<T>` of its type)
+    const { places } = sorts.members();
+    const said = (place: string) => {
+      const id = place.slice(place.indexOf(":") + 1).split(".")[0];
+      const analysis = ir.components[id]?.analysis;
+      const given = analysis?.classes?.find((c) => c.places.includes(place));
+      return { operations: given?.operations ?? analysis?.operations, points: given?.points ?? [] };
+    };
+    const pointsOf = new Map<number, number[]>();
+    const modeOf = new Map<number, "fun" | "pred">();
+    for (const [place, sort] of places) {
+      const { operations, points } = said(place);
+      if (points.length) pointsOf.set(sort, [...(pointsOf.get(sort) ?? []), ...points]);
+      if (operations === "fun" || (operations === "pred" && !modeOf.has(sort))) modeOf.set(sort, operations);
+    }
+    for (const group of groups.values()) {
+      const special = [...group].some((s) => sorts.counting.has(s) || s === sorts.stringLength || sorts.summed.has(s));
+      // `fun` when any of its places asks for it
+      const modes = [...group].map((s) => modeOf.get(s));
+      const mode = modes.includes("fun") ? "fun" : modes.includes("pred") ? "pred" : (options.operations ?? "pred");
+      const made = special ? { reason: "数えた結果や和と一緒に計算されています" } : classesOf(group, sorts, bounds, bySort, mode, pointsOf);
+      if ("reason" in made && mode === "fun") kept.push(`fun を指定した数を類に分けきれず、Alloy の整数で確かめます (${made.reason})`);
+      if ("reason" in made) {
+        if (mode !== "fun") kept.push(`数を類に分けられず、Alloy の整数で確かめます (${made.reason})`);
+        continue;
+      }
+      for (const sort of [...group].sort((a, b) => a - b)) {
+        const intervals = made.classes.get(sort)!;
+        const values = intervals.map((c) => (Number.isFinite(c[0]) ? c[0] : c[1]));
+        const chain: Chain = { name: `num${chainOf.size}`, values, classes: intervals };
+        chainOf.set(sort, { chain, index: { get: (n) => ((i) => (i < 0 ? undefined : i))(intervals.findIndex((c) => c[0] <= n && n <= c[1])) } });
+      }
+      for (const [e, table] of made.tables) tableOf.set(e, table);
+      if (!made.exact) approximate = true;
+    }
+  }
   for (const sort of [...new Set([...sorts.numeric, ...(lengths.length ? [sorts.stringLength] : [])])].sort((a, b) => a - b)) {
+    if (chainOf.has(sort)) continue;
     const constants = [...(bySort.get(sort) ?? [])].sort((a, b) => a - b);
     if (!sorts.arithmetic.has(sort) && fixed === undefined) {
       const values: number[] = [];
@@ -423,6 +502,8 @@ export function prepareNumbers(ir: Ir8, relevance: Relevance, lengths: number[] 
   const bitwidth = Math.max(4, ...[...ints.values()].map((i) => i.bitwidth));
   const embedded = chainOf.size > 0 || [...ints.values()].some((i) => i.embedded);
   const atomValue = new Map([...chainOf.values()].flatMap(({ chain }) => chain.values.map((v, i) => [chainAtom(chain.name, i), v] as const)));
+  const atomClass = new Map([...chainOf.values()].flatMap(({ chain }) => (chain.classes ?? []).map((c, i) => [chainAtom(chain.name, i), c] as const)));
+  const classOf = (raw: string) => atomClass.get(raw.replace(/\$\d+$/, ""));
   const concreteOf = (sort: number | undefined, raw: string) => {
     const atom = atomValue.get(raw.replace(/\$\d+$/, ""));
     if (atom !== undefined) return atom;
@@ -434,7 +515,21 @@ export function prepareNumbers(ir: Ir8, relevance: Relevance, lengths: number[] 
   const lengthSig = lengthChain ? `s_${lengthChain.chain.name}` : "Int";
   const concreteLength = (v: string) => concreteOf(sorts.stringLength, v);
   const chains = [...chainOf.values()].map(({ chain }) => chain);
-  if (!embedded) return { ir, bitwidth, embedded, concrete: (_, v) => Number(v), length, lengthSig, concreteLength, chains };
+  // the tables of the operations, named in the order they are met
+  const tables: OpTable[] = [];
+  const tableName = new Map<Table, string>();
+  const same = new Map<string, string>();
+  for (const table of tableOf.values()) {
+    const written = { from: table.from.map((s) => chainOf.get(s)!.chain.name), to: chainOf.get(table.to)!.chain.name, entries: table.entries, ...(table.shift !== undefined ? { shift: table.shift } : {}) };
+    // two operations with the same table share it
+    const key = JSON.stringify(written);
+    if (!same.has(key)) {
+      same.set(key, `op_${written.to}_${tables.length}`);
+      tables.push({ name: same.get(key)!, ...written });
+    }
+    tableName.set(table, same.get(key)!);
+  }
+  if (!embedded) return { ir, bitwidth, embedded, concrete: (_, v) => Number(v), length, lengthSig, concreteLength, chains, classOf, tables, kept, approximate };
   // the IR with every number the checks read replaced: by a chain's atom, or by its sort's integer
   const image = (sort: number | undefined, n: number): unknown => {
     const chain = sort === undefined ? undefined : chainOf.get(sort);
@@ -450,6 +545,14 @@ export function prepareNumbers(ir: Ir8, relevance: Relevance, lengths: number[] 
       const counted = x[0] === "card" || x[0] === "len" || x[0] === "count" ? sorts.countOf(x) : undefined;
       const countChain = counted === undefined ? undefined : chainOf.get(counted);
       if (countChain) return ["ordcount", countChain.chain.name, countChain.chain.values.length - 1, x.map((v) => rewrite(v))];
+      // an operation on classes: its table, applied to the operands that are not numbers written
+      const table = tableOf.get(x);
+      if (table) {
+        const operands = x.slice(1).filter((v) => typeof v !== "number").map((v) => rewrite(v));
+        if (table.shift !== undefined) return ["ordshift", chainOf.get(table.to)!.chain.name, table.shift, operands[0]];
+        // a table that gives more than one class: one of them, chosen at each step (alloy.ts)
+        return [table.entries.some((x) => x.results.length > 1) ? "optabp" : "optab", tableName.get(table)!, ...operands];
+      }
       const items = x.map((v, i) => (typeof v === "number" && relevance.literalsAt.get(x)?.has(i) ? image(sorts.literal(x, i), v) : rewrite(v)));
       // a comparison of a chain's values: along the chain
       const compared = typeof x[0] === "string" && x[0] in ORDERED ? sorts.compared(x) : undefined;
@@ -491,13 +594,16 @@ export function prepareNumbers(ir: Ir8, relevance: Relevance, lengths: number[] 
     for (const [name, cond] of Object.entries(c.conditions ?? {})) cond.params = Object.fromEntries(Object.entries(cond.params).map(([p, t]) => [p, retype(`cond:${id}.${name}.${p}`, t)]));
     for (const [name, table] of Object.entries(c.decisions ?? {})) table.params = Object.fromEntries(Object.entries(table.params).map(([p, t]) => [p, retype(`dparam:${id}.${name}.${p}`, t)]));
   }
-  return { ir: { ...ir, components }, bitwidth, embedded, concrete: (place, v) => concreteOf(sorts.place(place), v), length, lengthSig, concreteLength, chains };
+  // only the chains the module refers to (an operation's result is a sort of its own, often never written)
+  const written = JSON.stringify(components);
+  const used = chains.filter((c) => c === lengthChain?.chain || written.includes(`"${c.name}"`) || tables.some((t) => t.to === c.name || t.from.includes(c.name)));
+  return { ir: { ...ir, components }, bitwidth, embedded, concrete: (place, v) => concreteOf(sorts.place(place), v), length, lengthSig, concreteLength, chains: used, classOf, tables, kept, approximate };
 }
 
 const intText = (n: number) => (n < 0 ? `minus[0, ${-n}]` : String(n));
 
 /** A chain is in the order of the numbers it stands for, and has no atom between two consecutive integers. */
-export function checkChains(chains: { chain: Chain; index: Map<number, number> }[]): void {
+export function checkChains(chains: { chain: Chain }[]): void {
   for (const { chain } of chains) {
     chain.values.forEach((v, i) => {
       if (i > 0 && !(chain.values[i - 1] < v)) throw new Error(`内部の誤り: 数の鎖 ${chain.name} が順に並んでいません (${chain.values[i - 1]}, ${v})`);

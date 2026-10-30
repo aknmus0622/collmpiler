@@ -60,9 +60,18 @@ export function shapeProblems(ir: Ir8): string[] {
     bad(where, `型ではないもの ${JSON.stringify(t)} があります`);
   };
   const params = (p: Record<string, Type>, where: string) => Object.entries(p).forEach(([k, t]) => (NAME.test(k) ? type(t, `${where}.${k}`) : bad(where, `引数の名前 ${JSON.stringify(k)}`)));
-  const known = new Set(["external", "contains", "relies", "durable", "routes", "state", "init", "commands", "events", "queries", "conditions", "calcs", "decisions", "properties"]);
+  const known = new Set(["external", "contains", "relies", "durable", "routes", "state", "init", "commands", "events", "queries", "conditions", "calcs", "decisions", "properties", "analysis"]);
   for (const [id, c] of Object.entries(ir.components) as [string, ComponentIr][]) {
     for (const key of Object.keys(c)) if (!known.has(key)) bad(id, `知らない欄 "${key}" があります`);
+    // how the checker writes numbers: `fun` or `pred`, and the numbers of each type's places
+    const mode = (m: unknown, where: string) => m === undefined || m === "fun" || m === "pred" || bad(where, `operations は "fun" か "pred" です`);
+    if (c.analysis) {
+      mode(c.analysis.operations, `${id}.analysis`);
+      for (const given of c.analysis.classes ?? []) {
+        mode(given.operations, `${id}.analysis.${given.type}`);
+        if (!given.points.every(Number.isInteger)) bad(`${id}.analysis.${given.type}`, "数は整数です");
+      }
+    }
     for (const [f, t] of Object.entries(c.state ?? {})) type(t, `${id}.state.${f}`);
     for (const [f, e] of Object.entries(c.init ?? {})) expr(e, `${id}.init.${f}`);
     for (const [n, command] of Object.entries(c.commands ?? {})) {

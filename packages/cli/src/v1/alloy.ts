@@ -18,9 +18,11 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, w
 import { availableParallelism, homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ComponentIr, Expr, Ir8, TraceStep, Type } from "./ir.ts";
-import { entriesOf, entryName } from "./pbt.ts";
+import { Simulation, entriesOf, entryName, fixedSteps } from "./pbt.ts";
+import { SpecError } from "./eval.ts";
 import { stableStringify8 } from "./generate.ts";
 import { chainAtom, prepareNumbers, relevanceOf } from "./abstraction.ts";
+import { AGE_EVENT, isElapsed, relativeTime } from "./clock.ts";
 import { sliceOf } from "./slice.ts";
 import type { Keep, Uses } from "./slice.ts";
 import type { Ints } from "./abstraction.ts";
@@ -41,17 +43,24 @@ export type GeneratedFiles = Record<string, string>;
  * otherwise bounded by the scope of the analysis.
  */
 export type Bound = "exhaustive" | "partial";
+/**
+ * `replayed`: whether running the spec along the trace shows what the verdict says (a spec error on the way, or the
+ * event asked for); `unconfirmed`: a trace of a module that over-approximates (some operation written as `pred`) that
+ * running the spec does not show, so the verdict is not known (DSL.md §17.21, step 4).
+ */
 export type Verdict =
-  | { command: string; kind: "property" | "defined" | "requires"; status: "holds" | "broken" | "out-of-range"; what: string; trace?: TraceStep[]; bound?: Bound }
-  | { command: string; kind: "reach"; status: "reached" | "unreachable" | "out-of-range"; what: string; trace?: TraceStep[]; bound?: Bound };
-export type CheckResult = { checker: string; skipped?: string[]; verdicts: Verdict[] };
+  | { command: string; kind: "property" | "defined" | "requires"; status: "holds" | "broken" | "out-of-range"; what: string; trace?: TraceStep[]; bound?: Bound; replayed?: boolean; unconfirmed?: true }
+  | { command: string; kind: "reach"; status: "reached" | "unreachable" | "out-of-range"; what: string; trace?: TraceStep[]; bound?: Bound; replayed?: boolean; unconfirmed?: true };
+/** `notes`: numbers computed with that the module writes as Alloy's integers, and why (DSL.md §17.21). */
+export type CheckResult = { checker: string; skipped?: string[]; notes?: string[]; verdicts: Verdict[] };
 export interface Checker {
   name: string;
   emit(ir: Ir8, analysis: Analysis): { files: GeneratedFiles; commands: CommandInfo[]; skipped: string[] };
   run(files: GeneratedFiles): { output: string; receipt?: unknown };
   read(raw: { receipt?: unknown }, commands: CommandInfo[], ir: Ir8): Verdict[];
 }
-export type CommandInfo = { name: string; kind: Verdict["kind"]; what: string; event?: string; body: string; bound?: Bound; uses?: Uses };
+/** `query`: a question about a query's answer, which a trace of commands does not show (it is not run on the spec). */
+export type CommandInfo = { name: string; kind: Verdict["kind"]; what: string; event?: string; body: string; bound?: Bound; uses?: Uses; query?: true };
 
 // --- Names ---
 
@@ -89,6 +98,8 @@ type Ctx = {
   slotVars?: Map<string, string>;
   /** Strings carry their length and their trimmed form (the spec uses `length` or `trim`). */
   stringOps?: boolean;
+  /** Relations of a step that do not depend on what is bound (how values move with the clock), each written once: text → field of `Derived`. */
+  derived?: Map<string, string>;
 };
 
 /**
@@ -391,6 +402,35 @@ function term(e: Expr | unknown, cx: Ctx): string {
       const before = `(${t(y)} in ${t(x)}.^${chainNext(chain)})`;
       return op === "ordmin" ? `(${before} => ${t(x)} else ${t(y)})` : `(${before} => ${t(y)} else ${t(x)})`;
     }
+    // an operation on numbers written as classes (classes.ts): `x + c` along the chain, or the operation's table
+    case "ordshift": {
+      const [chain, shift, x] = a as [string, number, unknown];
+      return shift >= 0 ? `(${t(x)}${`.${chainNext(chain)}`.repeat(shift)})` : `(${`${chainNext(chain)}.`.repeat(-shift)}${t(x)})`;
+    }
+    // a map with each value changed: what each key maps to, given the value it had
+    case "mapv": {
+      const [m, binder, body, f] = a as [unknown, string, unknown, string];
+      const type = cx.ir.components[cx.component].state?.[f];
+      if (!type || typeof type !== "object" || !("map" in type)) return unsupported("値を変えた対応");
+      // (the map joined with the relation from each value to its new value: one relation over the values, not over the keys)
+      // (one that reads nothing bound, as the clock's tick: a field of the step, computed once)
+      const inner = { ...cx, vars: new Map([[binder, "v_"]]) };
+      let relation: string;
+      try {
+        relation = `{ v_: ${sigOf(type.map[1])}, w_: ${sigOf(type.map[1])} | w_ = ${term(body, inner)} }`;
+      } catch (error) {
+        if (!(error instanceof OutOfProfile)) throw error;
+        return `(${t(m)}).({ v_: ${sigOf(type.map[1])}, w_: ${sigOf(type.map[1])} | w_ = ${term(body, { ...cx, vars: new Map(cx.vars).set(binder, "v_") })} })`;
+      }
+      if (!cx.derived) return `(${t(m)}).(${relation})`;
+      if (!cx.derived.has(relation)) cx.derived.set(relation, `d${cx.derived.size}`);
+      return `(${t(m)}).(Derived.${cx.derived.get(relation)})`;
+    }
+    case "optab":
+    case "optabp": {
+      const [name, ...xs] = a as [string, ...unknown[]];
+      return xs.reduce<string>((applied, x) => `(${t(x)}).(${applied})`, op === "optabp" ? `Choice.ch_${name}` : name);
+    }
     // a count as an atom of its chain: the most k (up to the last atom, "that many or more") with k distinct members
     case "ordcount": {
       const [chain, top, inner] = a as [string, number, unknown[]];
@@ -563,6 +603,9 @@ function term(e: Expr | unknown, cx: Ctx): string {
   }
 }
 
+/** A union of many terms, as a balanced tree (Alloy's parser nests a long `a + b + …` as deep as it is long). */
+const union = (terms: string[]): string => (terms.length <= 32 ? terms.join(" + ") : `(${union(terms.slice(0, terms.length >> 1))}) + (${union(terms.slice(terms.length >> 1))})`);
+const ARITHMETIC_OPS = new Set(["+", "-", "*", "div", "mod", "neg", "abs", "sum"]);
 const outFun = (id: string, command: string) => `out_${safe(id)}_${safe(command)}`;
 const eventPred = (id: string, event: string) => `ev_${safe(id)}_${safe(event)}`;
 const commandPred = (id: string, command: string) => `cmd_${safe(id)}_${safe(command)}`;
@@ -580,7 +623,12 @@ function stringsOf(ir: Ir8): string[] {
 /** The IR as the module is written from it: its numbers made to fit, sort by sort (the lengths of the string constants are numbers too, when lengths are compared). */
 function prepared(ir: Ir8, fixed?: number) {
   const lengths = usesStringOps(ir) ? stringsOf(ir).map((s) => [...s].length) : [];
-  return prepareNumbers(ir, relevanceOf(ir), lengths, fixed);
+  // times of a clock as offsets from now (clock.ts), unless numbers stay Alloy's integers
+  const classes = fixed === undefined && process.env.CLP_ALLOY_CLASSES !== "off";
+  const timed = classes ? relativeTime(ir) : { ir };
+  // the ranges of numbers are read for the longest traces Alloy is asked for
+  const made = prepareNumbers(timed.ir, relevanceOf(timed.ir), lengths, fixed, { steps: DEFAULT_ANALYSIS.maxTraceSteps });
+  return "reason" in made ? made : { ...made, aging: timed.aging };
 }
 
 function literalStrings(ir: Ir8): string[] {
@@ -603,7 +651,7 @@ export function renderAlloy(header: string, commands: CommandInfo[], scope: (inf
   return `${header}${commands.map((info) => `${info.kind === "reach" ? "run" : "check"} ${info.name} { ${info.body} } ${scope(info)}`).join("\n")}\n`;
 }
 
-export function emitAlloy(spec: Ir8, analysis: Analysis = DEFAULT_ANALYSIS, keep?: Keep): { text: string; header: string; bitwidth: number; commands: CommandInfo[]; skipped: string[]; constants?: number } {
+export function emitAlloy(spec: Ir8, analysis: Analysis = DEFAULT_ANALYSIS, keep?: Keep): { text: string; header: string; bitwidth: number; commands: CommandInfo[]; skipped: string[]; constants?: number; approximate?: boolean; notes?: string[] } {
   const skipped: string[] = [];
   // only what the checks look at is kept, and its numbers made to fit (abstraction.ts, sorts.ts)
   const made = prepared(spec, analysis.bitwidth);
@@ -632,7 +680,27 @@ export function emitAlloy(spec: Ir8, analysis: Analysis = DEFAULT_ANALYSIS, keep
   for (const chain of made.chains) {
     const atoms = chain.values.map((_, i) => chainAtom(chain.name, i));
     lines.push(`abstract sig ${sort(chain.name)} extends Num {}`, `one sig ${atoms.join(", ")} extends ${sort(chain.name)} {}`);
-    lines.push(`fun ${chainNext(chain.name)}: ${sort(chain.name)} -> ${sort(chain.name)} { ${atoms.slice(1).map((a, i) => `${atoms[i]} -> ${a}`).join(" + ") || "none -> none"} }`);
+    lines.push(`fun ${chainNext(chain.name)}: ${sort(chain.name)} -> ${sort(chain.name)} { ${union(atoms.slice(1).map((a, i) => `${atoms[i]} -> ${a}`)) || "none -> none"} }`);
+  }
+  // the operations on classes, as tables from the operands' classes to the result's
+  // (a table that gives several classes for some operands, `pred`: at each step one of them is chosen, the same for the
+  // same operands, as `Choice`'s field)
+  const choices: string[] = [];
+  const choiceFacts: string[] = [];
+  for (const table of made.tables) {
+    if (table.shift !== undefined) continue;
+    const arrow = [...table.from, table.to].map(sort).join(" -> ");
+    const tuples = table.entries.flatMap((x) => x.results.map((r) => [...x.args.map((k, i) => chainAtom(table.from[i], k)), chainAtom(table.to, r)].join(" -> ")));
+    lines.push(`fun ${table.name}: ${arrow} { ${union(tuples) || [...table.from, table.to].map(() => "none").join(" -> ")} }`);
+    if (!table.entries.some((x) => x.results.length > 1)) continue;
+    choices.push(`var ch_${table.name}: ${[...table.from.map(sort), `lone ${sort(table.to)}`].join(" -> ")}`);
+    const args = table.from.map((_, i) => `a${i}`);
+    const applied = (rel: string) => args.reduce((r, a) => `${a}.(${r})`, rel);
+    choiceFacts.push(`always (Choice.ch_${table.name} in ${table.name} and (all ${args.map((a, i) => `${a}: ${sort(table.from[i])}`).join(", ")} | some ${applied(table.name)} implies one ${applied(`Choice.ch_${table.name}`)}))`);
+  }
+  if (choices.length) {
+    lines.push(`one sig Choice { ${choices.join(", ")} }`);
+    for (const f of choiceFacts) lines.push(`fact { ${f} }`);
   }
   const internal = Object.entries(ir.components).filter(([, c]) => !c.external);
   // lists in the state, as sets of slots
@@ -648,15 +716,18 @@ export function emitAlloy(spec: Ir8, analysis: Analysis = DEFAULT_ANALYSIS, keep
   const slotVars = new Map<string, string>();
   // what cannot be declared is left out, and whatever reads it is left out with it (DSL.md §17.20)
   const missing = new Set<string>();
-  const cx0 = (component: string, vars = new Map<string, string>()): Ctx => ({ ir, component, vars, strings, missing, ints, lists, slotVars, stringOps });
+  const derived = new Map<string, string>();
+  const cx0 = (component: string, vars = new Map<string, string>()): Ctx => ({ ir, component, vars, strings, missing, ints, lists, slotVars, stringOps, derived });
   /** The slots of a list keep what they hold (all of them, or all but `except`). */
   const slotsKept = (key: string, except?: string) =>
     Object.keys(lists.get(key)!.fields)
       .map((k) => `(all s: ${lists.get(key)!.slot}${except ? ` - (${except})` : ""} | s.${elemField(key, k)}' = s.${elemField(key, k)})`)
       .join(" and ");
-  /** A state field stays as it is. */
+  /** A state field stays as it is (a time moves with the clock: clock.ts). */
   const same = (id: string, f: string) => {
     const now = `${comp(id)}.${field(id, f)}`;
+    const aged = ir.components[id].events?.[AGE_EVENT]?.assign[f];
+    if (aged !== undefined) return `${now}' = ${term(aged, cx0(id))}`;
     return lists.has(`${id}.${f}`) ? `${now}' = ${now} and ${slotsKept(`${id}.${f}`)}` : `${now}' = ${now}`;
   };
   /** A list field written: the operations on lists the checks can follow (a filter, a map, appending, a choice between them). */
@@ -710,11 +781,20 @@ export function emitAlloy(spec: Ir8, analysis: Analysis = DEFAULT_ANALYSIS, keep
   // a module made for one question (slice.ts): only what it needs
   if (keep) for (const [id, c] of internal) for (const f of Object.keys(c.state ?? {})) if (!keep.fields.has(`${id}.${f}`)) missing.add(`state:${id}.${f}`);
   const sliced = (event: string) => keep !== undefined && !keep.events.has(event);
-  /** Whether an expression the checks do not need can still be written as it is (its numbers fit, unreplaced). */
+  /**
+   * Whether an expression the checks do not need can still be written as it is: its numbers fit, unreplaced; when some
+   * were replaced (atoms of chains, tables), it holds no number written and no operation on numbers left as it was.
+   */
   const writable = (x: unknown): boolean => {
-    if (ints.embedded) return false;
     const limit = 2 ** (bitwidth - 1);
-    const walk = (y: unknown): boolean => (typeof y === "number" ? Math.abs(y) < limit : Array.isArray(y) ? y[0] === "lit" || y.every(walk) : y && typeof y === "object" ? Object.values(y).every(walk) : true);
+    const walk = (y: unknown): boolean =>
+      typeof y === "number"
+        ? !ints.embedded && Math.abs(y) < limit
+        : Array.isArray(y)
+          ? y[0] === "lit" || (!(ints.embedded && ARITHMETIC_OPS.has(y[0] as string)) && y.every(walk))
+          : y && typeof y === "object"
+            ? Object.values(y).every(walk)
+            : true;
     return walk(x);
   };
   const declared = (id: string, c: ComponentIr) => Object.keys(c.state ?? {}).filter((f) => !missing.has(`state:${id}.${f}`));
@@ -797,7 +877,7 @@ export function emitAlloy(spec: Ir8, analysis: Analysis = DEFAULT_ANALYSIS, keep
       for (const [port, q] of Object.entries(c.external?.queries ?? {})) {
         const name = envField(`${id}.${port}`);
         const params = Object.values(q.params);
-        if (keep && !keep.env.has(`${id}.${port}`)) {
+        if (keep && !keep.env.has(`${id}.${port}`) && !isElapsed(q)) {
           missing.add(`env:${id}.${port}`);
           continue;
         }
@@ -981,9 +1061,9 @@ export function emitAlloy(spec: Ir8, analysis: Analysis = DEFAULT_ANALYSIS, keep
   const partial = dropped.size > 0;
   // a query of a component without state or outside world, over inputs of finite types: every input is tried
   const stateless = internal.every(([id, c]) => declared(id, c).length === 0) && Object.values(ir.components).every((c) => Object.keys(c.external?.queries ?? {}).length === 0);
-  const add = (kind: CommandInfo["kind"], what: string, body: string, event: string | undefined, uses: Uses, exhaustive = false) => {
+  const add = (kind: CommandInfo["kind"], what: string, body: string, event: string | undefined, uses: Uses, exhaustive = false, query = false) => {
     const bound: Bound | undefined = partial ? "partial" : exhaustive ? "exhaustive" : undefined;
-    commands.push({ name: `c${n++}`, kind, what, body, ...(event ? { event } : {}), ...(bound ? { bound } : {}), uses });
+    commands.push({ name: `c${n++}`, kind, what, body, ...(event ? { event } : {}), ...(bound ? { bound } : {}), uses, ...(query ? { query: true as const } : {}) });
   };
   // the events of a command a property names with `on`
   const onEvents = (id: string, x: unknown): string[] =>
@@ -1017,15 +1097,16 @@ export function emitAlloy(spec: Ir8, analysis: Analysis = DEFAULT_ANALYSIS, keep
       if (def.requires !== undefined && requires === undefined) continue;
       const pre = [typingOfParams(flatParams(def.params), strings, ints), requires].filter(Boolean);
       const some = (inner: string) => `eventually ${quant("some", decls, [...pre, inner].join(" and "))}`;
-      for (const obligation of relevance.asked.has(`${id}.${query}`) || writable(def.is) ? definedness(def.is, cx0(id, vars)) : []) {
+      // (a query no check reads: the keys it reads, where what decides that they are read can be written)
+      for (const obligation of definedness(def.is, cx0(id, vars)).filter((o) => relevance.asked.has(`${id}.${query}`) || o.sources.every(writable))) {
         const under = [...pre, ...obligation.context].join(" and ") || "some Bool";
-        add("defined", `${id}.${query}: ${obligation.what}`, `always ${quant("all", decls, `${under} implies ${obligation.holds}`)}`, undefined, { reads: [[id, [def.requires, def.is]]], events: [] }, exhaustive);
+        add("defined", `${id}.${query}: ${obligation.what}`, `always ${quant("all", decls, `${under} implies ${obligation.holds}`)}`, undefined, { reads: [[id, [def.requires, def.is]]], events: [] }, exhaustive, true);
       }
       const cases = casesOf(def.is, c);
       if (cases.length < 2) continue;
       cases.forEach((one, i) => {
         const body = tryBody(() => some(one.path.map((condition) => condition(cx0(id, vars))).join(" and ") || "some Bool"));
-        if (body) add("reach", `${id}.${query} の答え ${one.label ?? `${i + 1}/${cases.length}`}`, body, undefined, { reads: [[id, [def.requires, def.is]]], events: [] }, exhaustive);
+        if (body) add("reach", `${id}.${query} の答え ${one.label ?? `${i + 1}/${cases.length}`}`, body, undefined, { reads: [[id, [def.requires, def.is]]], events: [] }, exhaustive, true);
       });
     }
     for (const [command, def] of Object.entries(c.commands ?? {})) {
@@ -1136,9 +1217,14 @@ export function emitAlloy(spec: Ir8, analysis: Analysis = DEFAULT_ANALYSIS, keep
       });
     }
   }
+  if (derived.size) {
+    const sigOfRelation = (text: string) => /^\{ v_: (\S+), w_: (\S+) \|/.exec(text)!;
+    lines.push(`one sig Derived { ${[...derived].map(([text, name]) => `var ${name}: ${sigOfRelation(text)[1]} -> ${sigOfRelation(text)[2]}`).join(", ")} }`);
+    for (const [text, name] of derived) lines.push(`fact { always Derived.${name} = ${text} }`);
+  }
   const header = `${lines.join("\n")}\n`;
   const text = renderAlloy(header, commands, (info) => scopeOf(info, analysis, bitwidth, analysis.atoms, analysis.traceSteps, strings.size));
-  return { text, header, bitwidth, commands, skipped, constants: strings.size };
+  return { text, header, bitwidth, commands, skipped, constants: strings.size, ...(made.approximate ? { approximate: true } : {}), ...(made.kept.length ? { notes: made.kept } : {}) };
 }
 const SANE = "sane";
 // strings: the constants are atoms of their own, so the scope of strings is that many more
@@ -1235,35 +1321,36 @@ function decisionsIn(event: { guard: Expr; assign: Record<string, Expr>; output?
 }
 
 /** Places an expression reads a key of a map: each must be there, given what was checked before it (short-circuit). */
-function definedness(e: unknown, cx: Ctx, context: string[] = []): { what: string; holds: string; context: string[] }[] {
+/** `sources`: the expressions an obligation is written from (the map, the key, the conditions before it). */
+function definedness(e: unknown, cx: Ctx, context: string[] = [], sources: unknown[] = []): { what: string; holds: string; context: string[]; sources: unknown[] }[] {
   if (!Array.isArray(e)) return [];
   const [op, ...a] = e as [string, ...unknown[]];
-  const found: { what: string; holds: string; context: string[] }[] = [];
-  const sub = (x: unknown, more: string[] = []) => found.push(...definedness(x, cx, [...context, ...more]));
+  const found: { what: string; holds: string; context: string[]; sources: unknown[] }[] = [];
+  const sub = (x: unknown, more: string[] = [], from: unknown[] = []) => found.push(...definedness(x, cx, [...context, ...more], [...sources, ...from]));
   try {
     if (op === "apply") {
       sub(a[0]);
       sub(a[1]);
-      found.push({ what: `キー ${JSON.stringify(a[1])} が ${JSON.stringify(a[0])} にある`, holds: `(${term(a[1], cx)} in ${term(a[0], cx)}.univ)`, context });
+      found.push({ what: `キー ${JSON.stringify(a[1])} が ${JSON.stringify(a[0])} にある`, holds: `(${term(a[1], cx)} in ${term(a[0], cx)}.univ)`, context, sources: [...sources, a[0], a[1]] });
       return found;
     }
     if (op === "and") {
-      a.forEach((x, i) => sub(x, a.slice(0, i).map((y) => formula(y, cx))));
+      a.forEach((x, i) => sub(x, a.slice(0, i).map((y) => formula(y, cx)), a.slice(0, i)));
       return found;
     }
     if (op === "or") {
-      a.forEach((x, i) => sub(x, a.slice(0, i).map((y) => `not ${formula(y, cx)}`)));
+      a.forEach((x, i) => sub(x, a.slice(0, i).map((y) => `not ${formula(y, cx)}`), a.slice(0, i)));
       return found;
     }
     if (op === "implies") {
       sub(a[0]);
-      sub(a[1], [formula(a[0], cx)]);
+      sub(a[1], [formula(a[0], cx)], [a[0]]);
       return found;
     }
     if (op === "ite") {
       sub(a[0]);
-      sub(a[1], [formula(a[0], cx)]);
-      sub(a[2], [`not ${formula(a[0], cx)}`]);
+      sub(a[1], [formula(a[0], cx)], [a[0]]);
+      sub(a[2], [`not ${formula(a[0], cx)}`], [a[0]]);
       return found;
     }
     if (["some", "every", "count", "filter", "sum", "map", "find", "lit", "cond", "calc", "ask", "outputOf", "on"].includes(op)) return found;
@@ -1449,17 +1536,31 @@ function traceOf(instances: { values: Record<string, Record<string, string[][]>>
     return atom(raw);
   };
   const steps: TraceStep[] = [];
+  // a clock whose times are offsets from now (clock.ts): its answers are the sum of how far it moved, from 0
+  const aging = "reason" in made ? undefined : made.aging;
+  let today = 0;
   for (const instance of instances) {
     const step = instance.values.Step$0 ?? {};
     const event = step.event?.[0]?.[0];
+    const now = today;
+    if (aging) {
+      const moved = instance.values.Env$0?.[envField(aging.tick)]?.[0]?.[0];
+      place = `env:${aging.tick}`;
+      if (moved !== undefined) today += int(moved);
+    }
     if (!event) continue;
     const e = entries.find((x) => entry(x.qualified) === event.replace(/\$\d+$/, ""));
     if (!e) continue;
+    // a number of a class (classes.ts): other numbers of it, for running the trace again (`replays`)
+    const others: Record<string, number[]> = {};
     const read = (p: string, t: Type) => {
       place = `param:${e.component}.${e.name}.${p}`;
       current = step;
       currentField = stepField(e.qualified, p);
-      return value(step[stepField(e.qualified, p)]?.[0]?.[0] ?? "", t);
+      const raw = step[stepField(e.qualified, p)]?.[0]?.[0] ?? "";
+      const range = "reason" in made ? undefined : made.classOf(raw);
+      if (range && range[0] !== range[1] && !p.includes(".")) others[p] = numbersOf(range);
+      return value(raw, t);
     };
     const params = Object.fromEntries(
       Object.entries(e.params).map(([p, t]) => [p, typeof t === "object" && "record" in t ? Object.fromEntries(Object.entries(t.record).map(([k, kt]) => [k, read(`${p}.${k}`, kt)])) : read(p, t)]),
@@ -1484,7 +1585,10 @@ function traceOf(instances: { values: Record<string, Record<string, string[][]>>
         if (env[`${envField(`${id}.${port}`)}_failed`]?.length) answers[`${id}.${port}`] = "(failed)";
       }
     }
-    steps.push({ event: entryName(ir, e.qualified), params, ...(Object.keys(answers).length ? { answers } : {}) });
+    if (aging) answers[aging.clock] = now;
+    const traced: TraceStep = { event: entryName(ir, e.qualified), params, ...(Object.keys(answers).length ? { answers } : {}) };
+    if (Object.keys(others).length) alternatives.set(traced, others);
+    steps.push(traced);
     void untilEvent;
   }
   return steps;
@@ -1597,7 +1701,70 @@ export function checkWithAlloy(ir: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): 
       verdicts = verdicts.map((v) => found.get(v.command) ?? v);
     }
   }
-  return { checker: alloy6.name, ...(skipped.length ? { skipped } : {}), verdicts };
+  // every trace is run on the spec before it is reported: a module that over-approximates may find one the spec does
+  // not have, and then says nothing (DSL.md §17.21, step 4)
+  const infoOf = new Map(infos.map((i) => [i.name, i]));
+  verdicts = verdicts.map((v): Verdict => {
+    if (v.status !== "broken" && v.status !== "reached") return v;
+    const info = infoOf.get(v.command);
+    const replayed = !info?.query && v.trace !== undefined && replays(ir, v.kind, v.trace, info?.event);
+    if (info?.query && !full.approximate) return v;
+    if (!replayed && full.approximate) return { ...v, status: "out-of-range", replayed, unconfirmed: true } as Verdict;
+    return { ...v, replayed };
+  });
+  return { checker: alloy6.name, ...(skipped.length ? { skipped } : {}), ...(full.notes ? { notes: full.notes } : {}), verdicts };
+}
+
+/** Numbers of a step's parameters other than the one a trace gives (each of a class with more than one number). */
+const alternatives = new WeakMap<TraceStep, Record<string, number[]>>();
+/** A few numbers of a class: its ends (or near its end, when it has none) and between. */
+function numbersOf(range: readonly [number, number]): number[] {
+  const [lo, hi] = range;
+  if (Number.isFinite(lo) && Number.isFinite(hi)) return [...new Set([lo, hi, Math.floor((lo + hi) / 2), lo + 1, hi - 1])].filter((n) => n >= lo && n <= hi);
+  const end = Number.isFinite(lo) ? lo : hi;
+  const away = Number.isFinite(lo) ? 1 : -1;
+  return [end, end + away, end + 10 * away, end + 100 * away];
+}
+
+/**
+ * Whether running the spec along a trace Alloy found shows what Alloy said: a spec error on the way (a broken property,
+ * a key read that is not there, a part called outside its requires), or, for a reach question, the event it asked for.
+ * A trace of an over-approximation gives one number for each class: when it does not show it, other numbers of the
+ * same classes are tried (the ends, then a fixed sequence of choices).
+ */
+export function replays(ir: Ir8, kind: Verdict["kind"], trace: TraceStep[], event?: string): boolean {
+  if (replaysOnce(ir, kind, trace, event)) return true;
+  const open = trace.flatMap((step, i) => Object.entries(alternatives.get(step) ?? {}).map(([p, ns]) => ({ i, p, ns })));
+  if (open.length === 0) return false;
+  let seed = 1;
+  const pick = (ns: number[], attempt: number) => {
+    if (attempt === 0) return ns[0];
+    if (attempt === 1) return ns[1] ?? ns[0];
+    seed = (seed * 1103515245 + 12345) % 2147483648;
+    return ns[seed % ns.length];
+  };
+  for (let attempt = 0; attempt < 32; attempt++) {
+    const chosen = trace.map((step) => ({ ...step, params: { ...step.params } }));
+    for (const { i, p, ns } of open) chosen[i].params[p] = pick(ns, attempt);
+    if (replaysOnce(ir, kind, chosen, event)) return true;
+  }
+  return false;
+}
+function replaysOnce(ir: Ir8, kind: Verdict["kind"], trace: TraceStep[], event?: string): boolean {
+  const steps = fixedSteps(ir, trace);
+  if (!steps) return false;
+  const sim = new Simulation(ir);
+  try {
+    for (const raw of steps) {
+      const planned = sim.step(raw);
+      if (!planned) return false;
+      if (kind === "reach" && event !== undefined && planned.step.events.includes(event)) return true;
+    }
+  } catch (error) {
+    if (error instanceof SpecError) return kind !== "reach";
+    throw error;
+  }
+  return false;
 }
 
 export type { ComponentIr };

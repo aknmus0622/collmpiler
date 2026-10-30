@@ -2,11 +2,19 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "node:test";
-import { ALLOY_SHA256, alloyJar, atomsNeeded, checkWithAlloy, emitAlloy, isPinnedJar, javaAvailable } from "../src/v1/alloy.ts";
+import { after, test } from "node:test";
+import { ALLOY_SHA256, alloyJar, atomsNeeded, checkWithAlloy, emitAlloy, isPinnedJar, javaAvailable, replays } from "../src/v1/alloy.ts";
 import { checkEmbedding, intsOf, relevanceOf } from "../src/v1/abstraction.ts";
 import type { Relevance } from "../src/v1/abstraction.ts";
 import { compile, loadProgram } from "../src/v1/load.ts";
+import { layer1Hash } from "../src/v1/stamp.ts";
+import { problemText } from "../src/v1/read.ts";
+import { boundsOf } from "../src/v1/bounds.ts";
+import { MAX_STEPS, Simulation, sequences } from "../src/v1/pbt.ts";
+import { VMap, VSet } from "../src/v1/eval.ts";
+import type { World } from "../src/v1/eval.ts";
+import type { Type } from "../src/v1/ir.ts";
+import fc from "fast-check";
 import { repoRoot } from "./support.ts";
 
 // The Alloy checker (DSL.md §17.20). What is written for Alloy is compared with the expected modules, so a change in
@@ -58,6 +66,58 @@ const relevance = (numbers: number[], arithmetic: string[] = []): Relevance => (
   arithmeticAt: new Set(),
 });
 
+test("Alloy の数の範囲 (DSL.md §17.21): 仕様を実行して状態に入る数は、どれも bounds.ts が読んだ範囲に入る", () => {
+  // the numbers a value of a type holds, with the place each is at (`.field`, `.#elem`, `.#k`, `.#v`)
+  const numbersIn = (name: string, t: Type, v: unknown, out: [string, number][]) => {
+    if (v === null || v === undefined) return;
+    if (t === "int" || (typeof t === "object" && "enum" in t)) {
+      if (typeof v === "number") out.push([name, v]);
+      return;
+    }
+    if (typeof t !== "object") return;
+    if ("optional" in t) return numbersIn(name, t.optional, v, out);
+    if ("record" in t) for (const [k, kt] of Object.entries(t.record)) numbersIn(`${name}.${k}`, kt, (v as Record<string, unknown>)[k], out);
+    if ("list" in t) for (const x of v as unknown[]) numbersIn(`${name}.#elem`, t.list, x, out);
+    if ("set" in t) for (const x of (v as VSet).values()) numbersIn(`${name}.#elem`, t.set, x, out);
+    if ("map" in t) {
+      for (const [k, x] of (v as VMap).pairs()) {
+        numbersIn(`${name}.#k`, t.map[0], k, out);
+        numbersIn(`${name}.#v`, t.map[1], x, out);
+      }
+    }
+  };
+  let checked = 0;
+  for (const dir of SPECS) {
+    for (const component of loadProgram(join(repoRoot, dir)).components) {
+      const { ir } = compile(join(repoRoot, dir), component);
+      assert.ok(ir);
+      const bounds = boundsOf(ir, MAX_STEPS);
+      for (const raw of fc.sample(sequences(ir), { numRuns: 150, seed: 7 })) {
+        const sim = new Simulation(ir);
+        for (const step of raw) {
+          try {
+            sim.step(step);
+          } catch {
+            break;
+          }
+          const world = (sim as unknown as { world: World }).world;
+          const found: [string, number][] = [];
+          for (const [id, state] of Object.entries(world)) {
+            for (const [f, t] of Object.entries(ir.components[id].state ?? {})) numbersIn(`state:${id}.${f}`, t, state[f], found);
+          }
+          for (const [place, n] of found) {
+            const range = bounds.place(place);
+            assert.ok(range, `${component}: ${place} に範囲がありません (値 ${n})`);
+            assert.ok(range[0] <= n && n <= range[1], `${component}: ${place} の値 ${n} が範囲 [${range}] の外です (${sim.steps.map((s) => s.name).join(" → ")})`);
+            checked++;
+          }
+        }
+      }
+    }
+  }
+  assert.ok(checked > 1000, `確かめた値が少なすぎます (${checked})`);
+});
+
 test("Alloy の数: 比べるだけの大きな数は、順序を保った小さな数に置き換え、戻すと同じ値になる", () => {
   const ints = intsOf(relevance([0, 9999, 10000, 1000000]));
   assert.ok(!("reason" in ints));
@@ -87,9 +147,127 @@ test("Alloy に渡すもの: 答えと外の世界にしか流れない計算は
   assert.deepEqual(found.arithmetic, []);
   // 比べるだけの値段は、Alloy の数ではなく、定数の順に並べた原子の鎖になる (大きな数は模型に残らない)
   const { text } = emitAlloy(ir!);
-  assert.match(text, /var f_order_price: one s_num0/);
-  assert.match(text, /fun next_num0: s_num0 -> s_num0/);
+  const chain = /var f_order_price: one s_(num\d+)/.exec(text)?.[1];
+  assert.ok(chain, text);
+  assert.match(text, new RegExp(`fun next_${chain}: s_${chain} -> s_${chain}`));
   assert.doesNotMatch(text, /10000|1000000/);
+});
+
+// --- Int をなくす (DSL.md §17.21) ---
+
+const tmp = join(import.meta.dirname, ".tmp-alloy");
+mkdirSync(tmp, { recursive: true });
+after(() => rmSync(tmp, { recursive: true, force: true }));
+function specs(files: Record<string, string>): string {
+  const dir = mkdtempSync(join(tmp, "s-"));
+  for (const [name, text] of Object.entries(files)) writeFileSync(join(dir, name), text);
+  return dir;
+}
+/** The declarations and computations of numbers the module writes as Alloy's integers. */
+const intsIn = (text: string) => [...text.matchAll(/[:>] *(?:lone |one |set )?Int\b|plus\[|minus\[|mul\[|div\[|rem\[/g)].length;
+
+test("Alloy の数: どの部品の模型にも Alloy の整数が残らない (比べる・足す・時計・変数どうしの計算は、類の鎖とその表)", () => {
+  const left: string[] = [];
+  for (const dir of SPECS) {
+    for (const component of loadProgram(join(repoRoot, dir)).components) {
+      const { ir } = compile(join(repoRoot, dir), component);
+      const emitted = emitAlloy(ir!);
+      if (intsIn(emitted.text) > 0) left.push(`${component} (${emitted.notes?.join(" / ") ?? ""})`);
+    }
+  }
+  assert.deepEqual(left, []);
+  // 試行回数の +1 は鎖に沿った next、時計は今からのずれ、延滞料の和は表 (fun)
+  const flow = emitAlloy(compile(join(repoRoot, "packages/cli/self/specs"), "mutation-verdict").ir!).text;
+  assert.match(flow, /f_mutation_verdict_extra' = .*\(\(c_mutation_verdict\.f_mutation_verdict_extra\)\.next_num0\)/);
+  const library = emitAlloy(compile(join(repoRoot, "examples/lending-ts/specs"), "library").ir!);
+  assert.match(library.text, /var env_clock___tick: one s_num\d+/);
+  assert.doesNotMatch(library.text, /env_clock_Today/);
+  assert.ok(!library.approximate);
+  // library-ts の残り日数 (残り − 日数) は類に分けきれず、既定の pred で過大近似になる
+  const loan = emitAlloy(compile(join(repoRoot, "examples/library-ts/specs"), "loan").ir!);
+  assert.ok(loan.approximate);
+  assert.match(loan.text, /one sig Choice \{ var ch_op_/);
+});
+
+test("Alloy の数: analysis で fun を指定すると、類に分けきれない数は Alloy の整数で確かめ、そう知らせる", () => {
+  const { ir } = compile(join(repoRoot, "examples/library-ts/specs"), "loan");
+  ir!.components.loan.analysis = { operations: "fun" };
+  const emitted = emitAlloy(ir!);
+  assert.ok(!emitted.approximate);
+  assert.ok(intsIn(emitted.text) > 0);
+  assert.match(emitted.notes!.join("\n"), /fun を指定した数を類に分けきれず、Alloy の整数で確かめます/);
+});
+
+const DAYS = `import { classes, init, requires, service } from "@clp/core";
+import type { Int } from "@clp/core";
+export type Days = Int;
+export const Stock = service("在庫の日数", {
+  state: { left: init<Days>(10), used: init<{ total: Days }>({ total: 0 }) },
+  commands: {
+    Use(days: Days) {
+      requires(days >= 1 && days <= 2);
+      this.left = this.left - days;
+    },
+  },
+  ANALYSIS
+});
+`;
+
+test("analysis (DSL.md §17.21): Layer 1 の operations と classes<T> は、型 T の状態と引数の場所として IR に入る。解釈は Layer 1 が書いていないときだけ書ける", () => {
+  const written = specs({ "stock.component.ts": DAYS.replace("ANALYSIS", 'analysis: { operations: "fun", classes: [classes<Days>([0, -3], { operations: "pred" })] },') });
+  const { ir, problems } = compile(written, "stock");
+  assert.deepEqual(problems.filter((p) => p.severity === "error").map(problemText), []);
+  assert.deepEqual(ir!.components.stock.analysis, {
+    operations: "fun",
+    classes: [{ type: "Days", places: ["param:stock.Use.days", "state:stock.left", "state:stock.used.total"], points: [0, -3], operations: "pred" }],
+  });
+  // 書き方の誤り
+  const wrong = specs({ "stock.component.ts": DAYS.replace("ANALYSIS", 'analysis: { operations: "exact" },') });
+  assert.match(compile(wrong, "stock").problems.map(problemText).join("\n"), /error\[syntax\] Stock\.analysis/);
+  // Layer 1 が書いたものを解釈は書き換えられない。書いていなければ、解釈が補える
+  const interpretation = `import { interpretation } from "@clp/core";
+import { Stock } from "./stock.component.ts";
+export const StockInterpretation = interpretation(Stock, { analysis: { operations: "pred" } });
+`;
+  const both = specs({ "stock.component.ts": DAYS.replace("ANALYSIS", 'analysis: { operations: "fun" },'), "stock.interpretation.ts": interpretation });
+  assert.match(compile(both, "stock").problems.map(problemText).join("\n"), /error\[overwrite\] Stock\.analysis/);
+  const filled = specs({ "stock.component.ts": DAYS.replace("ANALYSIS", ""), "stock.interpretation.ts": interpretation });
+  assert.deepEqual(compile(filled, "stock").ir?.components.stock.analysis, { operations: "pred" });
+  // 意味を変えない設定なので、Layer 1 の印 (stamp) は変わらない
+  const hash = (dir: string) => {
+    const { program } = loadProgram(dir);
+    return layer1Hash(program.units.find((u) => u.id === "stock")!, program);
+  };
+  assert.equal(hash(written), hash(specs({ "stock.component.ts": DAYS.replace("ANALYSIS", "") })));
+});
+
+test("Alloy を実際に動かす: 反例は仕様で実行してから報告する。わざと誤りを入れた性質の反例は、仕様でも再現する (DSL.md §17.21 段4)", (t) => {
+  const jar = process.env.CLP_ALLOY_JAR ?? join(process.env.XDG_CACHE_HOME ?? join(homedir(), ".cache"), "clp", "alloy-6.2.0.jar");
+  if (!javaAvailable() || !existsSync(jar)) return t.skip("Java か Alloy の jar がありません");
+  // 残りは 0 を下回らない、と書いたが、使う日数の上限を確かめていない
+  const broken = specs({
+    "stock.component.ts": DAYS.replace("ANALYSIS", "").replace(
+      "  commands: {",
+      "  rules: { neverNegative() { return always(() => this.left >= 0); } },\n  commands: {",
+    ).replace('import { classes, init, requires, service } from "@clp/core";', 'import { always, init, requires, service } from "@clp/core";').replace("init<Days>(10)", "init<Days>(3)"),
+  });
+  const { ir, problems } = compile(broken, "stock");
+  assert.deepEqual(problems.filter((p) => p.severity === "error").map(problemText), []);
+  const saved = process.env.CLP_ALLOY_JAR;
+  process.env.CLP_ALLOY_JAR = jar;
+  try {
+    const result = checkWithAlloy(ir!);
+    const property = result.verdicts.find((v) => v.kind === "property")!;
+    assert.equal(property.status, "broken");
+    assert.equal(property.replayed, true);
+    // 最後の手順を除くと、仕様では誤りに至らない
+    assert.equal(replays(ir!, "property", property.trace!.slice(0, -1)), false);
+    // 届く問いの手順も、仕様で実行すると、そのイベントに至る
+    for (const v of result.verdicts.filter((x) => x.kind === "reach" && x.status === "reached")) assert.equal(v.replayed, true, v.what);
+  } finally {
+    if (saved === undefined) delete process.env.CLP_ALLOY_JAR;
+    else process.env.CLP_ALLOY_JAR = saved;
+  }
 });
 
 test("Alloy の原子の数: 一度に比べうる値の数 (1つの入力の引数 + 問いが量化する変数 + 1) が範囲より多ければ、その種類だけ増やす", () => {

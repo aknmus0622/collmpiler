@@ -74,6 +74,8 @@ export type Contents<S> = {
   routes?: Record<string, string>;
   /** Files and text attached to the agent's requests (not part of the meaning). */
   assets?: readonly Asset[];
+  /** How the formal checker writes the numbers it computes with (not part of the meaning; DSL.md §17.21). */
+  analysis?: Analysis;
   /** (Interpretation) which names each sentence of the description became: "part of a sentence": ["names"]. */
   trace?: Record<string, string | readonly string[]>;
 };
@@ -192,6 +194,21 @@ export const example = (text: string, steps: () => void): Example => marker(`${t
 export const expect = <T>(value: T) => ({ toBe: (expected: T) => void expected, toEqual: (expected: unknown) => void expected });
 
 // --- Assets ---
+
+/**
+ * How the formal checker (Alloy) writes numbers that are computed with: as classes of numbers, each operation a table
+ * between classes. `"fun"`: exactly (each table gives one class; the classes are made finer until it does, and a number
+ * that cannot be made exact stays an integer of Alloy). `"pred"` (the default): exactly when it can, otherwise an
+ * over-approximation (a table may give several classes), whose counterexamples are run on the spec before they are reported.
+ */
+export type Operations = "fun" | "pred";
+export type Analysis = { readonly operations?: Operations; readonly classes?: readonly Classes<unknown>[] };
+declare const CLASSES: unique symbol;
+export type Classes<T> = { readonly [CLASSES]?: T; readonly points: readonly number[]; readonly operations?: Operations };
+/** The numbers of a type that are classes of their own (where its values are split), and how its operations are written. */
+export function classes<T>(points: readonly number[], options: { operations?: Operations } = {}): Classes<T> {
+  return { points, ...options };
+}
 
 export type AssetPhase = "design" | "wiring" | "implementation";
 export type Asset = { readonly kind: "file" | "dir" | "text"; readonly path?: string; readonly text?: string; readonly phases?: readonly AssetPhase[] };

@@ -8,18 +8,6 @@ sig Json {}
 one sig str_0, str_1, str_2, str_3, str_4, str_5, str_6, str_7, str_8, str_9 extends Str {}
 fact strings { all s: Str | s.len in s_num5_1.*next_num5 and s.trimmed.trimmed = s.trimmed and s.len in s.trimmed.len.*next_num5 and (s.len = s_num5_1 iff s = str_0) and str_0.len = s_num5_1 and str_0.trimmed = str_0 and str_1.len = s_num5_3 and str_1.trimmed = str_1 and str_2.len = s_num5_10 and str_2.trimmed = str_2 and str_3.len = s_num5_8 and str_3.trimmed = str_3 and str_4.len = s_num5_6 and str_4.trimmed = str_4 and str_5.len = s_num5_4 and str_5.trimmed = str_5 and str_6.len = s_num5_6 and str_6.trimmed = str_6 and str_7.len = s_num5_8 and str_7.trimmed = str_7 and str_8.len = s_num5_4 and str_8.trimmed = str_8 and str_9.len = s_num5_6 and str_9.trimmed = str_9 }
 sig s_TodoId {}
-abstract sig s_num0 extends Num {}
-one sig s_num0_0, s_num0_1, s_num0_2, s_num0_3 extends s_num0 {}
-fun next_num0: s_num0 -> s_num0 { s_num0_0 -> s_num0_1 + s_num0_1 -> s_num0_2 + s_num0_2 -> s_num0_3 }
-abstract sig s_num1 extends Num {}
-one sig s_num1_0, s_num1_1, s_num1_2, s_num1_3 extends s_num1 {}
-fun next_num1: s_num1 -> s_num1 { s_num1_0 -> s_num1_1 + s_num1_1 -> s_num1_2 + s_num1_2 -> s_num1_3 }
-abstract sig s_num2 extends Num {}
-one sig s_num2_0, s_num2_1, s_num2_2, s_num2_3 extends s_num2 {}
-fun next_num2: s_num2 -> s_num2 { s_num2_0 -> s_num2_1 + s_num2_1 -> s_num2_2 + s_num2_2 -> s_num2_3 }
-abstract sig s_num3 extends Num {}
-one sig s_num3_0, s_num3_1, s_num3_2, s_num3_3 extends s_num3 {}
-fun next_num3: s_num3 -> s_num3 { s_num3_0 -> s_num3_1 + s_num3_1 -> s_num3_2 + s_num3_2 -> s_num3_3 }
 abstract sig s_num4 extends Num {}
 one sig s_num4_0, s_num4_1, s_num4_2 extends s_num4 {}
 fun next_num4: s_num4 -> s_num4 { s_num4_0 -> s_num4_1 + s_num4_1 -> s_num4_2 }

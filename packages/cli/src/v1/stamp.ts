@@ -22,6 +22,11 @@ function strip(value: unknown, mode: "plain" | "table" | "cells" = "plain"): unk
   if (mode === "table" && node.k === "arr" && Array.isArray(node.items) && node.items.length === 2 && (node.items[1] as { k?: string }).k === "obj") {
     return { k: "arr", items: [strip(node.items[0]), strip(node.items[1], "cells")] };
   }
+  // what the checker is told about numbers (`analysis`) does not change what the spec means
+  if (node.k === "obj" && Array.isArray(node.props)) {
+    const props = (node.props as { k?: string; key?: string; value?: { k?: string } }[]).filter((p) => !(p.k === "prop" && p.key === "analysis" && p.value?.k === "obj"));
+    return Object.fromEntries(Object.entries({ ...node, props }).filter(([key]) => key !== "at").map(([key, v]) => [key, strip(v, mode)]));
+  }
   return Object.fromEntries(Object.entries(node).filter(([key]) => key !== "at").map(([key, v]) => [key, strip(v, mode)]));
 }
 

@@ -79,7 +79,8 @@ export const Library = service("The library. It lends books, takes them back and
   may be a sentence: `Return: "..."`.
 - **Settings** (not headings): `durable: true` (what it remembers survives a restart), `routes` (how each command
   reaches it over HTTP: `{ Borrow: "POST /loans" }`), `assets` (`[file("docs/style.md"), dir("docs"), text("...")]`,
-  each with an optional `{ phases }`; attached to the agent's requests, never part of the spec's meaning).
+  each with an optional `{ phases }`; attached to the agent's requests, never part of the spec's meaning),
+  `analysis` (how the formal checker writes the numbers it computes with; see below).
 - **State** is declared with its type first: `Map<K, V>()` (each key at most one value), `Set<T>()`, `List<T>()`
   (only when order matters), `init<T>(value)` for a single value. Read and written with `this.`.
 - **Commands and queries are methods with typed parameters**; the parameter names are the input names. What a
@@ -219,6 +220,27 @@ This is the only place `clp` writes Layer 1, and only your words. `--json` makes
   happens with `failed(answer)`; reading a failed answer is a spec error. `failed` on a query that cannot fail is an
   error.
 
+## Numbers in the formal check (`analysis`)
+
+Alloy never sees the spec's integers. A number only compared becomes an atom of a chain in the order of the numbers;
+one that is computed with is split into **classes** (intervals of numbers, each an atom), and each operation becomes a
+table from the classes of its operands to the class of its result (`x + 1` is a step along the chain). The ranges
+come from `requires`, the initial values and the operations, for traces as long as Alloy looks at. A clock that
+promises `increasing` is read as distances from now: a due date is "how many days from today", and every remembered
+time moves back by the same amount when the clock moves.
+
+- `analysis: { operations: "pred" }` (the default): exact when the classes can be made exact, otherwise a table may
+  give several classes (an over-approximation). "Holds" is then still proven; a counterexample or a trace is run on
+  the spec first, and one that the spec does not show is a warning (`out-of-range`, "確かめられていません"), not an
+  error.
+- `analysis: { operations: "fun" }`: exact or nothing: numbers that cannot be split exactly (within 64 classes) are
+  checked as Alloy's integers instead, and `clp compile` says so (warning `alloy-int`).
+- `classes: [classes<Days>([0, -30], { operations: "fun" })]`: for the places declared with the type `Days`
+  (`type Days = Int`), the numbers that must be classes of their own, and that type's own `operations`.
+
+`analysis` belongs to Layer 1; the interpretation may write it only when Layer 1 does not. It does not change what the
+spec means, so it is not part of the stamp.
+
 ## What `clp compile` reports
 
 Every diagnostic is `severity[code] where: message`. The common ones:
@@ -235,5 +257,6 @@ Every diagnostic is `severity[code] where: message`. The common ones:
 | `spec-check` | running the spec alone failed (a property broken, a missing map key, no case applies); with the steps |
 | `unobservable-value` | a constant whose change shows nowhere: an unused column, a filler, an unreachable threshold |
 | `bad-failure`, `bad-promise` | `failed` on a query that cannot fail; a promise that cannot hold |
-| warning `out-of-range` | Alloy cannot check (part of) this component (numbers it computes with that do not fit, operations it cannot write); PBT still does |
+| warning `out-of-range` | Alloy cannot check (part of) this component (operations it cannot write), or a trace of an over-approximating module that the spec does not show; PBT still does |
+| warning `alloy-int` | numbers computed with that could not be split into classes (`fun` asked for, or never decided): checked as Alloy's integers |
 | warning `unused` | an outside-world port nobody uses |

@@ -368,7 +368,110 @@ export class Builder {
         if (problem === "embedded-unused") this.fail("sentence-unused", unit.exportName, `説明に埋め込んだ ${embedded.name} を、どの本体も使っていません`, embedded.at);
       }
     }
+    this.analysisOf(b);
     this.traceSentences(b);
+  }
+
+  // --- How the checker writes numbers (DSL.md §17.21) ---
+
+  /** `analysis: { operations, classes: [classes<T>([…], { operations })] }`: each type's places, found where they are declared. */
+  private analysisOf(b: Built) {
+    const unit = b.unit;
+    const given = unit.settings.analysis;
+    if (!given || given.expr.k !== "obj") return;
+    const module = given.layer === 2 && unit.interpretation ? unit.interpretation.module : unit.module;
+    const where = `${unit.exportName}.analysis`;
+    const bad = (at: Pos) => this.fail("syntax", where, 'analysis は { operations: "fun" | "pred", classes: [classes<型>([数, …], { operations })] } で書きます', at);
+    const modeOf = (e: Syn): "fun" | "pred" | undefined => (e.k === "str" && (e.value === "fun" || e.value === "pred") ? e.value : (bad(e.at), undefined));
+    const numberOf = (e: Syn): number | undefined => (e.k === "num" ? e.value : e.k === "unary" && e.op === "-" && e.expr.k === "num" ? -e.expr.value : undefined);
+    const analysis: NonNullable<ComponentIr["analysis"]> = {};
+    for (const prop of given.expr.props) {
+      if (prop.k !== "prop") {
+        bad(prop.at);
+        continue;
+      }
+      if (prop.key === "operations") {
+        const mode = modeOf(prop.value);
+        if (mode) analysis.operations = mode;
+      } else if (prop.key === "classes" && prop.value.k === "arr") {
+        for (const item of prop.value.items) {
+          const callee = item.k === "call" && item.callee.k === "id" ? this.names.resolve(module, item.callee.name) : undefined;
+          if (item.k !== "call" || callee?.k !== "core" || callee.name !== "classes" || item.typeArgs.length !== 1 || item.args[0]?.k !== "arr") {
+            bad(item.at);
+            continue;
+          }
+          const points = item.args[0].items.map(numberOf);
+          if (points.some((p) => p === undefined)) {
+            bad(item.at);
+            continue;
+          }
+          const type = item.typeArgs[0];
+          const key = this.aliasKey(type, module);
+          if (!key || type.k !== "tref") {
+            this.fail("bad-type", where, "classes<型> の型は、type で名前を付けた数の型です (type Days = Int)", item.at);
+            continue;
+          }
+          let operations: "fun" | "pred" | undefined;
+          const options = item.args[1];
+          if (options?.k === "obj") {
+            for (const o of options.props) {
+              if (o.k === "prop" && o.key === "operations") operations = modeOf(o.value);
+              else bad(o.at);
+            }
+          } else if (options) bad(options.at);
+          const places = this.placesOf(unit, key);
+          if (places.length === 0) this.fail("unknown-name", where, `型 ${type.name} の値を持つ状態や引数がありません`, item.at);
+          (analysis.classes ??= []).push({ type: type.name, places, points: points as number[], ...(operations ? { operations } : {}) });
+        }
+      } else bad(prop.at);
+    }
+    b.ir.analysis = analysis;
+  }
+  /** The declaration a type written by name refers to (`<file>#<name>`), when it is one the spec declares with `type`. */
+  private aliasKey(node: TypeNode, module: Module): string | undefined {
+    if (node.k !== "tref") return undefined;
+    const sym = this.names.resolve(module, node.name);
+    return sym.k === "type" ? `${sym.module.file}#${sym.decl.name}` : undefined;
+  }
+  /** The places (as bounds.ts and sorts.ts name them) declared with a type: state fields and their parts, parameters of commands and queries. */
+  private placesOf(unit: Unit, key: string): string[] {
+    const found: string[] = [];
+    const walk = (node: TypeNode | undefined, name: string, module: Module, depth = 0): void => {
+      if (!node || depth > 8) return;
+      if (node.k === "tref") {
+        if (this.aliasKey(node, module) === key) {
+          found.push(name);
+          return;
+        }
+        const sym = this.names.resolve(module, node.name);
+        if (sym.k === "type") return walk(sym.decl.type, name, sym.module, depth + 1);
+        if (sym.k === "core" && (sym.name === "Map" || sym.name === "SpecMap")) {
+          walk(node.args[0], `${name}.#k`, module, depth + 1);
+          walk(node.args[1], `${name}.#v`, module, depth + 1);
+        } else if (sym.k === "core" || node.name === "Array" || node.name === "ReadonlyArray") walk(node.args[0], `${name}.#elem`, module, depth + 1);
+      } else if (node.k === "tunion") for (const t of node.types) walk(t, name, module, depth + 1);
+      else if (node.k === "tarray") walk(node.of, `${name}.#elem`, module, depth + 1);
+      else if (node.k === "tobj") for (const field of node.fields) walk(field.type, `${name}.${field.name}`, module, depth + 1);
+    };
+    for (const entry of this.entriesUnder(unit, "state")) {
+      const value = entry.value;
+      if (value?.k !== "call" || value.callee.k !== "id") continue;
+      const module = this.moduleOf(unit, entry);
+      const sym = this.names.resolve(module, value.callee.name);
+      const name = `state:${unit.id}.${entry.name}`;
+      if (sym.k !== "core") continue;
+      if (sym.name === "Map") {
+        walk(value.typeArgs[0], `${name}.#k`, module);
+        walk(value.typeArgs[1], `${name}.#v`, module);
+      } else if (sym.name === "Set" || sym.name === "List") walk(value.typeArgs[0], `${name}.#elem`, module);
+      else walk(value.typeArgs[0], name, module);
+    }
+    for (const [heading, prefix] of [["commands", "param"], ["queries", "qparam"]] as const) {
+      for (const entry of this.entriesUnder(unit, heading)) {
+        for (const param of entry.method?.params ?? []) walk(param.type, `${prefix}:${unit.id}.${entry.name}.${param.name}`, this.moduleOf(unit, entry));
+      }
+    }
+    return [...new Set(found)].sort();
   }
 
   // Sentence tracing (DSL.md §17.8 ④): when the interpretation adds commands or queries Layer 1 did not name, they can

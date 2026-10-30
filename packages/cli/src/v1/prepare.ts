@@ -100,6 +100,8 @@ export async function checkSpec(ir: Ir8, options: { runs?: number; judge?: (tria
   for (const skipped of formal?.skipped ?? []) {
     if (report({ kind: "skipped", status: "skipped" }).severity === "warning") warnings.push(`warning[out-of-range] ${ir.root}: ${skipped}`);
   }
+  // numbers the module could not write as classes: checked with Alloy's integers (bounded), said so
+  for (const note of formal?.notes ?? []) warnings.push(`warning[alloy-int] ${ir.root}: ${note}`);
   for (const verdict of formal?.verdicts ?? []) {
     const { severity, code } = report({ kind: verdict.kind, status: verdict.status });
     if (verdict.kind === "reach") {
@@ -112,11 +114,21 @@ export async function checkSpec(ir: Ir8, options: { runs?: number; judge?: (tria
         );
       }
       if (severity === "warning" && code === "out-of-range") {
-        warnings.push(`warning[out-of-range] ${verdict.what}: Alloy では確かめられませんでした${verdict.bound === "partial" ? " (一部のイベントを除いて確かめたので、ほかの手順で届くかもしれません)" : ""}`);
+        warnings.push(
+          verdict.unconfirmed
+            ? `warning[out-of-range] ${verdict.what}: Alloy が見つけた手順 (数を類に分けて過大に近似した模型) を仕様で実行しても、この場合に至りませんでした。確かめられていません`
+            : `warning[out-of-range] ${verdict.what}: Alloy では確かめられませんでした${verdict.bound === "partial" ? " (一部のイベントを除いて確かめたので、ほかの手順で届くかもしれません)" : ""}`,
+        );
       }
       continue;
     }
-    if (severity === "warning") warnings.push(`warning[${code}] ${verdict.what}: Alloy では確かめられませんでした`);
+    if (severity === "warning") {
+      warnings.push(
+        verdict.unconfirmed
+          ? `warning[${code}] ${verdict.what}: Alloy の反例 (数を類に分けて過大に近似した模型) を仕様で実行しても再現しませんでした。確かめられていません${shown(verdict.trace)}`
+          : `warning[${code}] ${verdict.what}: Alloy では確かめられませんでした`,
+      );
+    }
     if (severity !== "error") continue;
     const message =
       verdict.kind === "property"
@@ -124,7 +136,9 @@ export async function checkSpec(ir: Ir8, options: { runs?: number; judge?: (tria
         : verdict.kind === "defined"
           ? `${verdict.what} とは限りません（無いキーを読む手順があります）`
           : `${verdict.what}、その requires が成り立たない手順があります`;
-    problems.push({ severity: "error", code, where: ir.root, message: message + shown(verdict.trace) });
+    // (a trace of an exact module that running the spec does not show would be the framework's mistake in writing it)
+    const unreplayed = verdict.replayed === false ? "\n  (この手順を仕様で実行しても再現しません。Alloy への写し方の誤りかもしれません)" : "";
+    problems.push({ severity: "error", code, where: ir.root, message: message + shown(verdict.trace) + unreplayed });
   }
   // spec mutation: every constant the mutation gate breaks must show in what the spec answers or sends
   if (problems.length === 0) {

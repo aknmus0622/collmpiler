@@ -12,9 +12,6 @@ fun next_num0: s_num0 -> s_num0 { s_num0_0 -> s_num0_1 }
 abstract sig s_num1 extends Num {}
 one sig s_num1_0, s_num1_1, s_num1_2 extends s_num1 {}
 fun next_num1: s_num1 -> s_num1 { s_num1_0 -> s_num1_1 + s_num1_1 -> s_num1_2 }
-abstract sig s_num2 extends Num {}
-one sig s_num2_0, s_num2_1, s_num2_2, s_num2_3, s_num2_4, s_num2_5, s_num2_6, s_num2_7 extends s_num2 {}
-fun next_num2: s_num2 -> s_num2 { s_num2_0 -> s_num2_1 + s_num2_1 -> s_num2_2 + s_num2_2 -> s_num2_3 + s_num2_3 -> s_num2_4 + s_num2_4 -> s_num2_5 + s_num2_5 -> s_num2_6 + s_num2_6 -> s_num2_7 }
 sig Slot_step_choice_hits { var e_step_choice_hits_v: lone s_CaseName }
 one sig c_step_choice { var f_step_choice_hits: set Slot_step_choice_hits }
 one sig Env { var env_oracle_Holds: s_CaseName -> one Bool }

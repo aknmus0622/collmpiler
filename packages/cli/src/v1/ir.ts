@@ -56,6 +56,12 @@ export type ComponentIr = {
   calcs?: Record<string, { params: Params; result: Type; is: Expr }>;
   decisions?: Record<string, { params: Params; result: Type; rows: { when: Expr; then: Record<string, Expr> }[] }>;
   properties?: Record<string, { kind: "invariant" | "temporal"; is: Expr }>;
+  /**
+   * How the formal checker writes the numbers it computes with (not part of the meaning; DSL.md §17.21): `fun` (exactly,
+   * or as Alloy's integers) or `pred` (exactly when it can, otherwise over-approximated), for the component and for the
+   * places of a type, with the numbers of that type that are classes of their own.
+   */
+  analysis?: { operations?: "fun" | "pred"; classes?: { type: string; places: string[]; points: number[]; operations?: "fun" | "pred" }[] };
 };
 
 /** A step of an example or a trace: an event of some component (`library.Borrow`), its arguments, and what it answers. */

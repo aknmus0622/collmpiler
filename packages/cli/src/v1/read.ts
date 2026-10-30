@@ -29,7 +29,7 @@ export const problemText = (p: Problem) => `${p.severity}[${p.code}] ${p.where =
 export type UnitKind = "service" | "external" | "decisions" | "condition" | "calc";
 export const HEADINGS = ["state", "commands", "queries", "rules", "examples", "conditions", "calcs", "decisions", "components", "does"] as const;
 export type Heading = (typeof HEADINGS)[number];
-const SETTINGS = ["durable", "routes", "assets"] as const;
+const SETTINGS = ["durable", "routes", "assets", "analysis"] as const;
 
 /** Who wrote an entry. */
 export type Layer = 1 | 2;
@@ -61,7 +61,8 @@ export type Unit = {
   entries: Map<string, Entry>;
   /** Headings Layer 1 wrote (a command or query heading written there is closed to new entries). */
   layer1Headings: Set<Heading>;
-  settings: { durable?: true; routes?: Record<string, string>; assets?: Expr };
+  /** `analysis`: how the formal checker writes numbers (DSL.md §17.21), from Layer 1, or from the interpretation when Layer 1 says nothing. */
+  settings: { durable?: true; routes?: Record<string, string>; assets?: Expr; analysis?: { expr: Expr; layer: Layer } };
   /** External: the ports. */
   ports?: { queries: Map<string, { params: Param[]; ret?: TypeNode; promise: Expr | undefined; at: Pos }>; commands: Map<string, { params: Param[]; at: Pos }> };
   /** Decision tables, named conditions and calculations: the parameters and the body. */
@@ -276,6 +277,13 @@ function readHeadings(unit: Unit, contents: Extract<Expr, { k: "obj" }>, layer: 
       continue;
     }
     if ((SETTINGS as readonly string[]).includes(prop.key) && prop.k === "prop") {
+      // how the checker writes numbers: the interpretation may say it when Layer 1 does not
+      if (prop.key === "analysis") {
+        if (prop.value.k !== "obj") problems.push({ severity: "error", code: "syntax", where: where(unit, "analysis"), message: "analysis は { operations: \"fun\" | \"pred\", classes: [classes<型>([数, …])] } で書きます", at: prop.at });
+        else if (layer === 2 && unit.settings.analysis?.layer === 1) problems.push({ severity: "error", code: "overwrite", where: where(unit, "analysis"), message: "analysis は Layer 1 が書いています。解釈は書き換えられません", at: prop.at });
+        else unit.settings.analysis = { expr: prop.value, layer };
+        continue;
+      }
       if (layer === 2) {
         problems.push({ severity: "error", code: "overwrite", where: where(unit, prop.key), message: `${prop.key} は Layer 1 だけが書けます`, at: prop.at });
         continue;

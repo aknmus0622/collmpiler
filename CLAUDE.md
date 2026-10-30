@@ -36,7 +36,12 @@ the one page a spec author needs. The code:
   - `supplement.ts` (what `clp run` writes into Layer 1: a person's answer to a review mark, in their own words,
     appended to the sentence the mark is about; the only place Layer 1 is written),
     `load.ts` (`compile`, `compileChecked`, interpretation problems), `prepare.ts` (`prepare`, `checkSpec`: self-check,
-    examples, Alloy, spec mutation), `alloy.ts` + `traces.ts` (the Alloy 6 checker), `generate.ts` (contract, adapter
+    examples, Alloy, spec mutation), `alloy.ts` + `traces.ts` (the Alloy 6 checker;
+    numbers never reach it as integers: `abstraction.ts` / `sorts.ts` make compared numbers chains of atoms,
+    `bounds.ts` reads the ranges (intervals), `classes.ts` splits numbers computed with into classes with an exact
+    table per operation (`fun`) or, failing that, an over-approximating one (`pred`, the default; its traces are run on
+    the spec before they are reported), `clock.ts` reads an `increasing` clock's times as offsets from now;
+    `CLP_ALLOY_CLASSES=off` writes them as Alloy's integers, as before; DSL.md §17.21), `generate.ts` (contract, adapter
     skeleton, `verify.ts`, the English spec view `<name>.spec.md`), `runtime.ts` (`runPbt`, called by the generated
     `verify.ts`; `boundary8`), `interpret.ts` (`clp interpret` / `--accept`), `stage1.ts` (Stage 1: the self
     components, `GLUE`, `deciders8`, R1, `runCases`), `agreement.ts` (`clp __agreement`, the 1.0 R3 cases),
