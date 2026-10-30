@@ -1237,7 +1237,9 @@ const scopeOf = (info: CommandInfo, analysis: Analysis, bitwidth: number, atoms:
 /**
  * How many atoms of each kind a question needs at least (data independence): values of a kind compared at once are at
  * most the inputs of that kind one command takes, and the variables of that kind the question quantifies over; one more
- * for a value that is none of them. More than the scope's atoms only makes the check stronger.
+ * for a value that is none of them. A question that reads how many of a kind there are against a limit needs the limit's
+ * worth of them besides the inputs (`count >= 3` with a fourth to ask about). More than the scope's atoms only makes the
+ * check stronger.
  */
 export function atomsNeeded(ir: Ir8, info: CommandInfo): Record<string, number> {
   const inputs = new Map<string, number>();
@@ -1260,7 +1262,61 @@ export function atomsNeeded(ir: Ir8, info: CommandInfo): Record<string, number> 
   }
   const needed: Record<string, number> = {};
   for (const kind of new Set([...inputs.keys(), ...bound.keys()])) needed[kind] = (inputs.get(kind) ?? 0) + (bound.get(kind) ?? 0) + 1;
+  for (const [kind, limit] of limitsRead(ir, info.uses, kindOf)) {
+    const n = limit + (inputs.get(kind) ?? 0);
+    if (n <= DEFAULT_ANALYSIS.wideAtoms) needed[kind] = Math.max(needed[kind] ?? 0, n);
+  }
   return needed;
+}
+
+/** The kinds a question counts against a limit (`count(...) >= n`, reading through conditions), with how many of them the comparison needs to come out true. */
+function limitsRead(ir: Ir8, uses: Uses | undefined, kindOf: (t: Type) => string | undefined): Map<string, number> {
+  const limits = new Map<string, number>();
+  /** The most a number can be, when it is written in the spec: a constant, or a column of a decision table. */
+  const most = (e: unknown, id: string): number | undefined => {
+    if (typeof e === "number") return e;
+    if (!Array.isArray(e)) return undefined;
+    if (e[0] === "ite") {
+      const [x, y] = [most(e[2], id), most(e[3], id)];
+      return x === undefined || y === undefined ? undefined : Math.max(x, y);
+    }
+    if (e[0] === "field" && Array.isArray(e[1]) && e[1][0] === "decide") {
+      const cells = (ir.components[id]?.decisions?.[e[1][1] as string]?.rows ?? []).map((row) => (row.then as Record<string, unknown>)?.[e[2] as string]);
+      return cells.length > 0 && cells.every((x) => typeof x === "number") ? Math.max(...(cells as number[])) : undefined;
+    }
+    return undefined;
+  };
+  /** The kind of what a count counts: the entries of a set or of a map in the state. */
+  const counted = (e: unknown, id: string): string | undefined => {
+    if (!Array.isArray(e) || !["count", "card", "len"].includes(e[0] as string)) return undefined;
+    const from = Array.isArray(e[1]) && e[1][0] === "dom" ? e[1][1] : e[1];
+    if (!Array.isArray(from) || from[0] !== "state") return undefined;
+    const t = ir.components[id]?.state?.[from[1] as string];
+    if (typeof t !== "object" || t === null) return undefined;
+    return "map" in t ? kindOf(t.map[0]) : "set" in t ? kindOf(t.set) : undefined;
+  };
+  const seen = new Set<string>();
+  const walk = (x: unknown, id: string): void => {
+    if (!Array.isArray(x)) {
+      if (x && typeof x === "object") for (const v of Object.values(x)) walk(v, id);
+      return;
+    }
+    if (typeof x[0] === "string" && x[0] === "lit") return;
+    if (["<", "<=", ">", ">="].includes(x[0] as string)) {
+      for (const [count, limit, strict] of [[x[1], x[2], x[0] === ">" || x[0] === "<="], [x[2], x[1], x[0] === "<" || x[0] === ">="]] as [unknown, unknown, boolean][]) {
+        const kind = counted(count, id);
+        const n = most(limit, id);
+        if (kind !== undefined && n !== undefined) limits.set(kind, Math.max(limits.get(kind) ?? 0, n + (strict ? 1 : 0)));
+      }
+    }
+    if (x[0] === "cond" && !seen.has(`${id}.${x[1]}`)) {
+      seen.add(`${id}.${x[1]}`);
+      walk(ir.components[id]?.conditions?.[x[1] as string]?.is, id);
+    }
+    x.forEach((y) => walk(y, id));
+  };
+  for (const [id, x] of uses?.reads ?? []) walk(x, id);
+  return limits;
 }
 
 /** The cases of an answer: each branch of its `ite`s and each row of a decision table it reads, with the conditions that choose it. */

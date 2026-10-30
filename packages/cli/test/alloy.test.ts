@@ -277,6 +277,17 @@ test("Alloy の原子の数: 一度に比べうる値の数 (1つの入力の引
   assert.equal(atomsNeeded(ir!, notes).Str, 5);
 });
 
+test("Alloy の原子の数: 上限と比べて数える種類は、上限ぶんと入力のぶんだけ増やす (届くのに範囲が足りない問いを、広げて探し直さない)", () => {
+  const { ir } = compile(join(repoRoot, "examples/lending-ts/specs"), "library");
+  const { commands } = emitAlloy(ir!);
+  const limit = commands.find((c) => c.kind === "reach" && c.event === "library.Borrow.atLimit");
+  assert.ok(limit);
+  assert.equal(atomsNeeded(ir!, limit).s_BookId, 4);
+  const other = commands.find((c) => c.kind === "reach" && c.event === "library.Return.case1");
+  assert.ok(other);
+  assert.notEqual(atomsNeeded(ir!, other).s_BookId, 4);
+});
+
 test("Alloy の jar: 固定したハッシュと違う jar は、その jar と分かる。CLP_ALLOY_JAR はそのまま使う (違えば警告)", () => {
   const dir = mkdtempSync(join(tmpdir(), "clp-jar-"));
   try {
