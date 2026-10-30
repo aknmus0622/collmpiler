@@ -21,6 +21,8 @@ import type { ComponentIr, Expr, Ir8, TraceStep, Type } from "./ir.ts";
 import { entriesOf, entryName } from "./pbt.ts";
 import { stableStringify8 } from "./generate.ts";
 import { chainAtom, prepareNumbers, relevanceOf } from "./abstraction.ts";
+import { sliceOf } from "./slice.ts";
+import type { Keep, Uses } from "./slice.ts";
 import type { Ints } from "./abstraction.ts";
 
 // --- The checker interface (DSL.md §17.12) ---
@@ -49,7 +51,7 @@ export interface Checker {
   run(files: GeneratedFiles): { output: string; receipt?: unknown };
   read(raw: { receipt?: unknown }, commands: CommandInfo[], ir: Ir8): Verdict[];
 }
-export type CommandInfo = { name: string; kind: Verdict["kind"]; what: string; event?: string; body: string; bound?: Bound };
+export type CommandInfo = { name: string; kind: Verdict["kind"]; what: string; event?: string; body: string; bound?: Bound; uses?: Uses };
 
 // --- Names ---
 
@@ -601,7 +603,7 @@ export function renderAlloy(header: string, commands: CommandInfo[], scope: (inf
   return `${header}${commands.map((info) => `${info.kind === "reach" ? "run" : "check"} ${info.name} { ${info.body} } ${scope(info)}`).join("\n")}\n`;
 }
 
-export function emitAlloy(spec: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { text: string; header: string; bitwidth: number; commands: CommandInfo[]; skipped: string[]; constants?: number } {
+export function emitAlloy(spec: Ir8, analysis: Analysis = DEFAULT_ANALYSIS, keep?: Keep): { text: string; header: string; bitwidth: number; commands: CommandInfo[]; skipped: string[]; constants?: number } {
   const skipped: string[] = [];
   // only what the checks look at is kept, and its numbers made to fit (abstraction.ts, sorts.ts)
   const made = prepared(spec, analysis.bitwidth);
@@ -705,6 +707,9 @@ export function emitAlloy(spec: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { t
   };
   // a state field no check reads (only answers and the outside world do) is not declared; writing it is left out
   for (const [id, c] of internal) for (const f of Object.keys(c.state ?? {})) if (!relevance.fields.has(`${id}.${f}`)) missing.add(`state:${id}.${f}`);
+  // a module made for one question (slice.ts): only what it needs
+  if (keep) for (const [id, c] of internal) for (const f of Object.keys(c.state ?? {})) if (!keep.fields.has(`${id}.${f}`)) missing.add(`state:${id}.${f}`);
+  const sliced = (event: string) => keep !== undefined && !keep.events.has(event);
   /** Whether an expression the checks do not need can still be written as it is (its numbers fit, unreplaced). */
   const writable = (x: unknown): boolean => {
     if (ints.embedded) return false;
@@ -792,6 +797,10 @@ export function emitAlloy(spec: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { t
       for (const [port, q] of Object.entries(c.external?.queries ?? {})) {
         const name = envField(`${id}.${port}`);
         const params = Object.values(q.params);
+        if (keep && !keep.env.has(`${id}.${port}`)) {
+          missing.add(`env:${id}.${port}`);
+          continue;
+        }
         const decl = declare(`env:${id}.${port}`, () => {
           if (params.length > 1) unsupported(`引数が2つ以上ある外の世界の問い合わせ ${id}.${port}`);
           return params.length === 0 ? `var ${name}: ${declOf(q.result)}` : `var ${name}: ${sigOf(params[0])} -> ${declOf(q.result).replace(/^one /, "one ")}`;
@@ -898,6 +907,7 @@ export function emitAlloy(spec: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { t
         const decls = Object.entries(flatParams(def.params)).map(([p, t]) => `${param(p)}: ${declOf(t).replace(/^one /, "")}`);
         // each event (one that cannot be written is left out, and said so)
         for (const eventName of def.events) {
+          if (sliced(`${id}.${eventName}`)) continue;
           const written = declare(`event:${id}.${eventName}`, () => {
           const event = c.events![eventName];
           const cx = cx0(id, vars);
@@ -929,12 +939,12 @@ export function emitAlloy(spec: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { t
           if (written === undefined) dropped.add(`${id}.${eventName}`);
           else lines.push(written);
         }
-        const kept = def.events.filter((e) => !dropped.has(`${id}.${e}`));
+        const kept = def.events.filter((e) => !dropped.has(`${id}.${e}`) && !sliced(`${id}.${e}`));
         const typing = typingOfParams(flatParams(def.params), strings, ints);
         const requires = def.requires === undefined ? undefined : declare(`requires:${id}.${name}`, () => formula(def.requires!, cx0(id, vars)));
         // a requires that cannot be written: the command is left out
         const happens = kept.length === 0 || (def.requires !== undefined && requires === undefined) ? "(no Bool)" : `(${kept.map((e) => `${eventPred(id, e)}[${Object.keys(flatParams(def.params)).map(param).join(", ")}]`).join(" or ")})`;
-        if (happens === "(no Bool)") for (const e of def.events) dropped.add(`${id}.${e}`);
+        if (happens === "(no Bool)") for (const e of def.events) if (!sliced(`${id}.${e}`)) dropped.add(`${id}.${e}`);
         lines.push(`pred ${commandPred(id, name)}[${decls.join(", ")}] {\n  ${[typing, requires].filter(Boolean).map((x) => `${x} and `).join("")}${happens}\n}`);
       }
     }
@@ -971,13 +981,16 @@ export function emitAlloy(spec: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { t
   const partial = dropped.size > 0;
   // a query of a component without state or outside world, over inputs of finite types: every input is tried
   const stateless = internal.every(([id, c]) => declared(id, c).length === 0) && Object.values(ir.components).every((c) => Object.keys(c.external?.queries ?? {}).length === 0);
-  const add = (kind: CommandInfo["kind"], what: string, body: string, event?: string, exhaustive = false) => {
+  const add = (kind: CommandInfo["kind"], what: string, body: string, event: string | undefined, uses: Uses, exhaustive = false) => {
     const bound: Bound | undefined = partial ? "partial" : exhaustive ? "exhaustive" : undefined;
-    commands.push({ name: `c${n++}`, kind, what, body, ...(event ? { event } : {}), ...(bound ? { bound } : {}) });
+    commands.push({ name: `c${n++}`, kind, what, body, ...(event ? { event } : {}), ...(bound ? { bound } : {}), uses });
   };
+  // the events of a command a property names with `on`
+  const onEvents = (id: string, x: unknown): string[] =>
+    Array.isArray(x) ? [...(x[0] === "on" ? (ir.components[id].commands?.[x[1] as string]?.events ?? []).map((e) => `${id}.${e}`) : []), ...x.flatMap((y) => onEvents(id, y))] : [];
   // decision rows remembered by an event, and calls made only under a condition (as the inside of `eventually`)
-  const rowSteps: { name: string; step: string }[] = [];
-  const callSteps: { name: string; step: string; event: string }[] = [];
+  const rowSteps: { name: string; step: string; uses: Uses }[] = [];
+  const callSteps: { name: string; step: string; event: string; uses: Uses }[] = [];
   const tryBody = (make: () => string): string | undefined => {
     try {
       return make();
@@ -992,7 +1005,7 @@ export function emitAlloy(spec: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { t
   for (const [id, c] of internal) {
     for (const [name, property] of Object.entries(c.properties ?? {})) {
       const body = tryBody(() => formula(property.is, cx0(id)));
-      if (body) add("property", `${id}.${name}`, body);
+      if (body) add("property", `${id}.${name}`, body, undefined, { reads: [[id, property.is]], events: onEvents(id, property.is) });
     }
     // queries (DSL.md §17.20): every value read is defined, and every case of the answer is given for some input
     for (const [query, def] of Object.entries(c.queries ?? {})) {
@@ -1006,13 +1019,13 @@ export function emitAlloy(spec: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { t
       const some = (inner: string) => `eventually ${quant("some", decls, [...pre, inner].join(" and "))}`;
       for (const obligation of relevance.asked.has(`${id}.${query}`) || writable(def.is) ? definedness(def.is, cx0(id, vars)) : []) {
         const under = [...pre, ...obligation.context].join(" and ") || "some Bool";
-        add("defined", `${id}.${query}: ${obligation.what}`, `always ${quant("all", decls, `${under} implies ${obligation.holds}`)}`, undefined, exhaustive);
+        add("defined", `${id}.${query}: ${obligation.what}`, `always ${quant("all", decls, `${under} implies ${obligation.holds}`)}`, undefined, { reads: [[id, [def.requires, def.is]]], events: [] }, exhaustive);
       }
       const cases = casesOf(def.is, c);
       if (cases.length < 2) continue;
       cases.forEach((one, i) => {
         const body = tryBody(() => some(one.path.map((condition) => condition(cx0(id, vars))).join(" and ") || "some Bool"));
-        if (body) add("reach", `${id}.${query} の答え ${one.label ?? `${i + 1}/${cases.length}`}`, body, undefined, exhaustive);
+        if (body) add("reach", `${id}.${query} の答え ${one.label ?? `${i + 1}/${cases.length}`}`, body, undefined, { reads: [[id, [def.requires, def.is]]], events: [] }, exhaustive);
       });
     }
     for (const [command, def] of Object.entries(c.commands ?? {})) {
@@ -1038,7 +1051,10 @@ export function emitAlloy(spec: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { t
           ...(event.output !== undefined && (relevance.outputs.has(`${id}.${command}`) || writable(event.output)) ? [["output", event.output, requires ? `${requires} and ${guard}` : guard] as const] : []),
         ] as [string, Expr, string | undefined][]) {
           for (const obligation of definedness(expr, cx0(id, vars))) {
-            add("defined", `${id}.${eventName} の ${where}: ${obligation.what}`, quantify(`${[under, ...obligation.context].filter(Boolean).join(" and ") || "some Bool"} implies ${obligation.holds}`));
+            add("defined", `${id}.${eventName} の ${where}: ${obligation.what}`, quantify(`${[under, ...obligation.context].filter(Boolean).join(" and ") || "some Bool"} implies ${obligation.holds}`), undefined, {
+              reads: [[id, [def.requires, event.guard, expr]]],
+              events: [],
+            });
           }
         }
         // a part is called only with arguments its requires accepts
@@ -1053,7 +1069,15 @@ export function emitAlloy(spec: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { t
             const check = withArgs(callee.requires!, callee.params, args, cx, formula, { ...cx, component: call.component });
             return quantify(`(${requires ? `${requires} and ` : ""}${guard}${when}) implies ${check}`);
           });
-          if (body) add("requires", `${id}.${eventName} が ${call.component}.${call.command} を呼ぶとき`, body);
+          if (body) {
+            add("requires", `${id}.${eventName} が ${call.component}.${call.command} を呼ぶとき`, body, undefined, {
+              reads: [
+                [id, [def.requires, event.guard, call.when, call.args]],
+                [call.component, callee.requires],
+              ],
+              events: [],
+            });
+          }
         }
         // the event can happen (for an entry: a trace that drives it, for the PBT to replay; a part's command is
         // reached through the entries that call it)
@@ -1063,7 +1087,8 @@ export function emitAlloy(spec: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { t
           const inner = `${requires ? `${requires} and ` : ""}${guard}`;
           return `eventually ${quant("some", decls, `Step.event = ${entry(qualified)} and ${[...Object.keys(flatParams(def.params)).map((p) => `Step.${stepField(qualified, p)} = ${param(p)}`), inner].join(" and ")}`)}`;
         });
-        if (reachBody) add("reach", `${id}.${eventName}`, reachBody, `${id}.${eventName}`);
+        const reached: Uses = { reads: [[id, [def.requires, event.guard]]], events: [`${id}.${eventName}`] };
+        if (reachBody) add("reach", `${id}.${eventName}`, reachBody, `${id}.${eventName}`, reached);
         // each row of a decision table the event reads: a trace where the event happens with that row chosen
         // (remembered: written to a field the checks read; a field only answers or the outside world read does not count)
         const kept = Object.fromEntries(Object.entries(event.assign).filter(([f]) => relevance.fields.has(`${id}.${f}`)));
@@ -1080,10 +1105,11 @@ export function emitAlloy(spec: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { t
               const inner = `${requires ? `${requires} and ` : ""}${guard} and ${chosen.join(" and ")}`;
               return `eventually ${quant("some", decls, `Step.event = ${entry(qualified)} and ${[...Object.keys(flatParams(def.params)).map((p) => `Step.${stepField(qualified, p)} = ${param(p)}`), inner].join(" and ")}`)}`;
             });
-            if (body) add("reach", `${id}.${eventName}@${table}[${r}]`, body, `${id}.${eventName}`);
+            const row: Uses = { reads: [...reached.reads, [id, ["decide", table, args]]], events: reached.events };
+            if (body) add("reach", `${id}.${eventName}@${table}[${r}]`, body, `${id}.${eventName}`, row);
             // a row whose values the event remembers: they show later, so also a trace that goes on to each call
             // made only under a condition (a due date, then a late return that charges a fee)
-            if (body && remembered.has(table)) rowSteps.push({ name: `${id}.${eventName}@${table}[${r}]`, step: body.slice("eventually ".length) });
+            if (body && remembered.has(table)) rowSteps.push({ name: `${id}.${eventName}@${table}[${r}]`, step: body.slice("eventually ".length), uses: row });
           });
         }
         // a call made only under a condition: a trace where it is made
@@ -1093,8 +1119,9 @@ export function emitAlloy(spec: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { t
             const inner = `${requires ? `${requires} and ` : ""}${guard} and ${formula(call.when!, cx0(id, vars))}`;
             return `eventually ${quant("some", decls, `Step.event = ${entry(qualified)} and ${[...Object.keys(flatParams(def.params)).map((p) => `Step.${stepField(qualified, p)} = ${param(p)}`), inner].join(" and ")}`)}`;
           });
-          if (body) add("reach", `${id}.${eventName}+${call.component}.${call.command}`, body, `${id}.${eventName}`);
-          if (body) callSteps.push({ name: `${id}.${eventName}+${call.component}.${call.command}`, step: body.slice("eventually ".length), event: `${id}.${eventName}` });
+          const called: Uses = { reads: [...reached.reads, [id, call.when]], events: reached.events };
+          if (body) add("reach", `${id}.${eventName}+${call.component}.${call.command}`, body, `${id}.${eventName}`, called);
+          if (body) callSteps.push({ name: `${id}.${eventName}+${call.component}.${call.command}`, step: body.slice("eventually ".length), event: `${id}.${eventName}`, uses: called });
         }
       }
     }
@@ -1102,7 +1129,12 @@ export function emitAlloy(spec: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): { t
   // the module has a trace at all (facts that contradict each other would make every property hold and nothing happen)
   commands.push({ name: SANE, kind: "reach", what: "(模型に手順がある)", body: "some Bool" });
   for (const row of rowSteps) {
-    for (const call of callSteps) add("reach", `${row.name}→${call.name}`, `eventually (${row.step} and after eventually ${call.step})`, call.event);
+    for (const call of callSteps) {
+      add("reach", `${row.name}→${call.name}`, `eventually (${row.step} and after eventually ${call.step})`, call.event, {
+        reads: [...row.uses.reads, ...call.uses.reads],
+        events: [...row.uses.events, ...call.uses.events],
+      });
+    }
   }
   const header = `${lines.join("\n")}\n`;
   const text = renderAlloy(header, commands, (info) => scopeOf(info, analysis, bitwidth, analysis.atoms, analysis.traceSteps, strings.size));
@@ -1289,32 +1321,38 @@ export function useAlloyJobs(value: string | undefined): void {
 }
 
 /**
- * Runs a module. Its questions (the `check` / `run` lines at its end) are independent of each other, so they are split
- * into groups, each with the whole module before them, and the groups run in separate processes at the same time; the
- * answers are put back together by the questions' names.
+ * Runs modules. The questions of a module (the `check` / `run` lines at its end) are independent of each other, so they
+ * are split into groups, each with the whole module before them, and the groups run in separate processes, as many at
+ * a time as `alloyJobs`; the answers are put back together by the questions' names (unique across the modules).
  */
-function runAlloy(text: string): { receipt?: Receipt; output: string } {
-  const lines = text.trimEnd().split("\n");
-  const first = lines.findIndex((line) => /^(check|run) /.test(line));
-  const header = first < 0 ? lines : lines.slice(0, first);
-  const questions = first < 0 ? [] : lines.slice(first);
-  // each process reads and translates the whole module again: a group is worth it only with several questions in it
-  const groups = Math.min(alloyJobs(), Math.max(1, Math.ceil(questions.length / QUESTIONS_PER_PROCESS)));
-  const texts = Array.from({ length: groups }, (_, g) => [...header, ...questions.filter((_, i) => i % groups === g)].join("\n") + "\n");
+function runAlloy(texts: string[]): { receipt?: Receipt; output: string } {
+  const chunks = texts.flatMap((text) => {
+    const lines = text.trimEnd().split("\n");
+    const first = lines.findIndex((line) => /^(check|run) /.test(line));
+    const header = first < 0 ? lines : lines.slice(0, first);
+    const questions = first < 0 ? [] : lines.slice(first);
+    // each process reads and translates the whole module again: a group is worth it only with several questions in it
+    const groups = Math.max(1, Math.ceil(questions.length / QUESTIONS_PER_PROCESS));
+    return Array.from({ length: groups }, (_, g) => [...header, ...questions.filter((_, i) => i % groups === g)].join("\n") + "\n");
+  });
   const dir = mkdtempSync(join(tmpdir(), "clp-alloy-"));
   try {
-    const files = texts.map((t, g) => {
+    const files = chunks.map((t, g) => {
       const file = join(dir, `spec-${g}.als`);
       writeFileSync(file, t);
       return file;
     });
     const java = (file: string, solver: string[]) => ["-Djava.awt.headless=true", "-jar", alloyJar(), "exec", "-f", "-q", "-t", "json", "-o", `${file}.out`, "-n", ...solver, file];
-    // a native solver when the platform has one (several times faster), SAT4J otherwise
-    if (files.length === 1) spawnSync("java", java(files[0], ["-s", "glucose"]), { encoding: "utf8", timeout: 1_800_000, stdio: ["ignore", "ignore", "pipe"] });
-    else {
-      const quoted = (x: string) => `'${x.replaceAll("'", `'\\''`)}'`;
-      const script = files.map((f) => `java ${java(f, ["-s", "glucose"]).map(quoted).join(" ")} > ${quoted(`${f}.log`)} 2>&1 &`).join("\n") + "\nwait\n";
-      spawnSync("sh", ["-c", script], { encoding: "utf8", timeout: 1_800_000 });
+    const quoted = (x: string) => `'${x.replaceAll("'", `'\\''`)}'`;
+    // a native solver when the platform has one (several times faster), SAT4J otherwise; as many at a time as allowed
+    const jobs = alloyJobs();
+    for (let at = 0; at < files.length; at += jobs) {
+      const wave = files.slice(at, at + jobs);
+      if (wave.length === 1) spawnSync("java", java(wave[0], ["-s", "glucose"]), { encoding: "utf8", timeout: 1_800_000, stdio: ["ignore", "ignore", "pipe"] });
+      else {
+        const script = wave.map((f) => `java ${java(f, ["-s", "glucose"]).map(quoted).join(" ")} > ${quoted(`${f}.log`)} 2>&1 &`).join("\n") + "\nwait\n";
+        spawnSync("sh", ["-c", script], { encoding: "utf8", timeout: 1_800_000 });
+      }
     }
     const commands: Receipt["commands"] = {};
     let output = "";
@@ -1428,7 +1466,7 @@ export const alloy6: Checker = {
     return { files, commands, skipped };
   },
   run(files) {
-    return files["spec.als"] ? runAlloy(files["spec.als"]) : { output: "" };
+    return files["spec.als"] ? runAlloy([files["spec.als"]]) : { output: "" };
   },
   read(raw, commands, ir) {
     const receipt = raw.receipt as { commands?: Record<string, { solution?: { instances: { values: Record<string, Record<string, string[][]>> }[] }[] }> } | undefined;
@@ -1449,44 +1487,85 @@ export const alloy6: Checker = {
 
 const EMITTER = createHash("sha256").update(readFileSync(new URL(import.meta.url))).digest("hex");
 
-/** Runs the checker on an IR, with a cache keyed by the IR and the analysis (the result is a function of both). */
+/**
+ * Runs the checker on an IR. Each question runs in a module made for it (slice.ts; `CLP_ALLOY_SLICE=off` runs every
+ * question in the whole module), questions whose modules are the same run together, and every module is also asked
+ * whether it has a trace at all. Answers are cached question by question, keyed by the module and the question as
+ * written (whatever file of the emitter changed them), how answers are read back (this file) and the Alloy release.
+ */
 export function checkWithAlloy(ir: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): CheckResult {
-  const { files, commands, skipped } = alloy6.emit(ir, analysis);
-  // the key covers the module as written (whatever file of the emitter changed it), how results are read back (this
-  // file) and the Alloy release, so a fix is never hidden by an old result
-  const key = createHash("sha256")
-    .update(stableStringify8({ ir, analysis, checker: alloy6.name, module: files, reader: EMITTER, alloy: ALLOY_SHA256 }))
-    .digest("hex");
-  const cacheDir = join(process.env.XDG_CACHE_HOME ?? join(homedir(), ".cache"), "clp", "alloy-results");
-  const cached = join(cacheDir, `${key}.json`);
-  if (existsSync(cached)) return JSON.parse(readFileSync(cached, "utf8")) as CheckResult;
-  const raw = alloy6.run(files);
-  if (files["spec.als"] && !raw.receipt) {
-    return { checker: alloy6.name, skipped: [...skipped, `Alloy を実行できませんでした: ${raw.output.trim().slice(-800)}`], verdicts: [] };
+  const full = emitAlloy(ir, analysis);
+  const { skipped } = full;
+  if (!full.text) return { checker: alloy6.name, ...(skipped.length ? { skipped } : {}), verdicts: [] };
+  const slicing = process.env.CLP_ALLOY_SLICE !== "off";
+  // each question with the module it runs in (the same question, as written in the module made for it)
+  const plans = new Map<string, { info: CommandInfo; header: string }>();
+  const seen = new Map<string, number>();
+  for (const info of full.commands.filter((c) => c.name !== SANE)) {
+    const nth = (seen.get(`${info.kind}:${info.what}`) ?? 0) + 1;
+    seen.set(`${info.kind}:${info.what}`, nth);
+    let plan = { info, header: full.header };
+    if (slicing && info.uses) {
+      const made = emitAlloy(ir, analysis, sliceOf(ir, info.uses));
+      const same = made.commands.filter((c) => c.kind === info.kind && c.what === info.what)[nth - 1];
+      if (made.text && same) plan = { info: { ...info, body: same.body }, header: made.header };
+    }
+    plans.set(info.name, plan);
   }
-  let verdicts = alloy6.read(raw, commands, ir);
+  const headers = [...new Set([...plans.values()].map((p) => p.header))];
+  const saneOf = (header: string) => `${SANE}${headers.indexOf(header)}`;
+  const ask = (names: string[], scope: (info: CommandInfo) => string): Receipt | { error: string } => {
+    const cacheDir = join(process.env.XDG_CACHE_HOME ?? join(homedir(), ".cache"), "clp", "alloy-results");
+    // the questions as written, with their modules (and each module's own question: is there a trace at all)
+    const asked = new Map<string, { header: string; line: string }>();
+    for (const name of names) {
+      const { info, header } = plans.get(name)!;
+      asked.set(name, { header, line: renderAlloy("", [info], scope).trim() });
+      const sane: CommandInfo = { name: saneOf(header), kind: "reach", what: "", body: "some Bool" };
+      asked.set(sane.name, { header, line: renderAlloy("", [sane], scope).trim() });
+    }
+    const keyOf = (q: { header: string; line: string }) =>
+      createHash("sha256").update(stableStringify8({ header: q.header, question: q.line.replace(/^(check|run) \S+/, "$1"), reader: EMITTER, alloy: ALLOY_SHA256 })).digest("hex");
+    const commands: Receipt["commands"] = {};
+    const missing: string[] = [];
+    for (const [name, q] of asked) {
+      const file = join(cacheDir, `${keyOf(q)}.json`);
+      if (existsSync(file)) commands[name] = JSON.parse(readFileSync(file, "utf8"));
+      else missing.push(name);
+    }
+    if (missing.length > 0) {
+      const byHeader = new Map<string, string[]>();
+      for (const name of missing) byHeader.set(asked.get(name)!.header, [...(byHeader.get(asked.get(name)!.header) ?? []), name]);
+      const raw = runAlloy([...byHeader].map(([header, ns]) => header + ns.map((n) => asked.get(n)!.line.replace(/^(check|run) \S+/, `$1 ${n}`)).join("\n") + "\n"));
+      if (!raw.receipt) return { error: raw.output };
+      mkdirSync(cacheDir, { recursive: true });
+      for (const name of missing) {
+        const answer = raw.receipt.commands[name];
+        if (!answer) return { error: `Alloy が問い ${name} に答えませんでした` };
+        commands[name] = answer;
+        writeFileSync(join(cacheDir, `${keyOf(asked.get(name)!)}.json`), JSON.stringify(answer));
+      }
+    }
+    return { commands };
+  };
+  const infos = [...plans.values()].map((p) => p.info);
+  const first = ask([...plans.keys()], (info) => scopeOf(info, analysis, full.bitwidth, analysis.atoms, analysis.traceSteps, full.constants));
+  if ("error" in first) return { checker: alloy6.name, skipped: [...skipped, `Alloy を実行できませんでした: ${first.error.trim().slice(-800)}`], verdicts: [] };
   // a module without a single trace is the framework's mistake: none of its verdicts says anything
-  const sane = verdicts.find((v) => v.command === SANE);
-  verdicts = verdicts.filter((v) => v.command !== SANE);
-  if (sane && sane.status !== "reached") {
-    const result: CheckResult = { checker: alloy6.name, skipped: [...skipped, "Alloy の模型に手順が1つもありません (写し方の誤り)。Alloy の結果は使わず、PBT に任せます"], verdicts: [] };
-    return result;
+  if (headers.some((h) => !first.commands[saneOf(h)]?.solution?.length)) {
+    return { checker: alloy6.name, skipped: [...skipped, "Alloy の模型に手順が1つもありません (写し方の誤り)。Alloy の結果は使わず、PBT に任せます"], verdicts: [] };
   }
+  let verdicts = alloy6.read({ receipt: first }, infos, ir);
   // events not reached in the small scope: searched for again, with more atoms and longer traces
-  const missed = verdicts.filter((v) => v.kind === "reach" && v.status === "unreachable" && v.command !== SANE).map((v) => v.command);
+  const missed = verdicts.filter((v) => v.kind === "reach" && v.status === "unreachable").map((v) => v.command);
   if (missed.length > 0) {
-    const { header, bitwidth, constants } = emitAlloy(ir, analysis);
-    const again = commands.filter((c) => missed.includes(c.name));
-    const wide = alloy6.run({ "spec.als": renderAlloy(header, again, (info) => scopeOf(info, analysis, bitwidth, analysis.wideAtoms, analysis.maxTraceSteps, constants)) });
-    if (wide.receipt) {
-      const found = new Map(alloy6.read(wide, again, ir).map((v) => [v.command, v]));
+    const wide = ask(missed, (info) => scopeOf(info, analysis, full.bitwidth, analysis.wideAtoms, analysis.maxTraceSteps, full.constants));
+    if (!("error" in wide)) {
+      const found = new Map(alloy6.read({ receipt: wide }, infos.filter((i) => missed.includes(i.name)), ir).map((v) => [v.command, v]));
       verdicts = verdicts.map((v) => found.get(v.command) ?? v);
     }
   }
-  const result: CheckResult = { checker: alloy6.name, ...(skipped.length ? { skipped } : {}), verdicts };
-  mkdirSync(cacheDir, { recursive: true });
-  writeFileSync(cached, JSON.stringify(result));
-  return result;
+  return { checker: alloy6.name, ...(skipped.length ? { skipped } : {}), verdicts };
 }
 
 export type { ComponentIr };

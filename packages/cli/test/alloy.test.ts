@@ -162,8 +162,8 @@ test("Alloy を実際に動かす: lending の会員 (到達の検査 3 つ)", (
     assert.deepEqual(result.skipped ?? [], []);
     assert.equal(result.verdicts.length, 3);
     for (const verdict of result.verdicts) assert.equal(verdict.status, "reached", JSON.stringify(verdict));
-    // the result is cached under the module written
-    assert.equal(readdir(join(cache, "clp", "alloy-results")).length, 1);
+    // each answer is cached under its question and the module it ran in (with each module's question whether it has a trace)
+    assert.ok(readdir(join(cache, "clp", "alloy-results")).length >= 3);
   } finally {
     for (const [key, value] of [["CLP_ALLOY_JAR", saved.jar], ["XDG_CACHE_HOME", saved.cache]] as const) {
       if (value === undefined) delete process.env[key];
