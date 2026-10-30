@@ -155,7 +155,7 @@ function separator(before: string): string {
   return japanese ? "。" : before !== text ? "" : ". ";
 }
 
-function closingQuote(text: string, start: number): number | undefined {
+export function closingQuote(text: string, start: number): number | undefined {
   const quote = text[start];
   let depth = 0;
   for (let i = start + 1; i < text.length; i++) {

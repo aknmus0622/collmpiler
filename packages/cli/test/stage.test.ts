@@ -36,7 +36,7 @@ const withStage = async <T>(stage: string, fn: () => Promise<T>): Promise<T> => 
 
 test("Stage 1: 自身の部品は、合格の記録があり、読み込める", async () => {
   const components = readdirSync(join(SELF, "specs")).filter((name) => name.endsWith(".component.ts")).map((name) => name.replace(".component.ts", ""));
-  assert.equal(components.length, 19);
+  assert.equal(components.length, 20);
   for (const component of components) assert.ok(await adapterOf(component), component);
   // CLP_STAGE=0 では、どれも使わない
   await withStage("0", async () => {

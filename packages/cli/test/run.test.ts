@@ -7,6 +7,8 @@ import type { Answer, ConfirmEvent, QuestionEvent, RunEvent, Talk } from "../src
 import { AgentFailure } from "../src/strategy.ts";
 import type { ImplementationStrategy } from "../src/strategy.ts";
 import { readProgram } from "../src/v1/read.ts";
+import { adapterOf } from "../src/v1/stage1.ts";
+import { candidatesOf } from "../src/v1/split.ts";
 import { supplementAll } from "../src/v1/supplement.ts";
 import { harness, specsDir } from "./support.ts";
 
@@ -169,4 +171,132 @@ test("補足の書き足し: 文の引用符に合わせて書き、文の終わ
   assert.match(after, /Cancel: "A pending or paid order[^"]*what they paid\. Say \\"refunded\\"\.",/);
   // 項目の外の疑問は、部品の説明に
   assert.match(after, /注文全体について/);
+});
+
+const ROUGH = `import { service } from "@clp/core";
+
+// 町の図書館
+export const Library = service("図書館。本を貸し、返してもらう。延滞料は返した日数の分だけ足していく。払えば 0 になる。");
+`;
+const SPLIT = {
+  split: true,
+  arrangement: "inside",
+  description: "図書館。本を貸し、返してもらう。${Fines}",
+  parts: [{ name: "Fines", description: "延滞料は返した日数の分だけ足していく。払えば 0 になる。", because: "延滞料は貸出と別の状態を持つ" }],
+};
+// 分け方の依頼に answers を順に答える。解釈の依頼が来たら止める (ここでは分け方だけを見る)
+function splitAgent(answers: unknown[]) {
+  const requests: string[] = [];
+  const strategy: ImplementationStrategy = {
+    name: "scripted",
+    run(assignment) {
+      if (assignment.phase !== "split") throw new AgentFailure("reached interpretation");
+      requests.push(readFileSync(join(assignment.dir, "clp/REQUEST.md"), "utf8"));
+      const answer = answers[Math.min(requests.length, answers.length) - 1];
+      writeFileSync(join(assignment.dir, "clp/split.json"), typeof answer === "string" ? answer : JSON.stringify(answer));
+    },
+  };
+  return { strategy, requests };
+}
+function rough() {
+  const root = workdir();
+  const specs = join(root, "specs");
+  mkdirSync(specs);
+  writeFileSync(join(specs, "library.component.ts"), ROUGH);
+  return { specs, out: join(root, "out"), file: join(specs, "library.component.ts") };
+}
+
+test("run: 分け方の提案を受け入れると Layer 1 に部品と ${部品} を書き、もう提案しない", async () => {
+  const { specs, out, file } = rough();
+  const { strategy, requests } = splitAgent([SPLIT]);
+  const { talk, asked, events } = person([{ answer: "accept" }]);
+  assert.equal(await run({ specs, out, strategy, talk, sessions: 1, yes: true }), "failed");
+  const question = asked[0] as QuestionEvent;
+  assert.equal(question.kind, "split");
+  assert.deepEqual(question.choices, ["accept", "decline", "stop"]);
+  assert.equal(question.parts![0].because, SPLIT.parts[0].because);
+  assert.match(question.diff!, /^\+export const Fines = service\("延滞料/m);
+  const text = readFileSync(file, "utf8");
+  assert.ok(text.includes('export const Fines = service("延滞料は返した日数の分だけ足していく。払えば 0 になる。");\n// 町の図書館\nexport const Library = service(`図書館。本を貸し、返してもらう。${Fines}`);'), text);
+  const program = readProgram(specs);
+  assert.deepEqual(program.problems.filter((p) => p.code === "syntax"), []);
+  assert.equal(requests.length, 1);
+  assert.equal(asked.length, 1);
+  assert.match((events.at(-1) as { reason?: string }).reason ?? "", /reached interpretation/);
+});
+
+test("run: separate の提案は components を足す。読めて、親は解釈が要らない", async () => {
+  const { specs, out, file } = rough();
+  const proposal = { split: true, arrangement: "separate", description: "図書館。", parts: [{ name: "Lending", description: "本を貸し、返してもらう。", because: "貸出" }, { name: "Fines", description: "延滞料を足していく。", because: "延滞料" }] };
+  const { strategy } = splitAgent([proposal]);
+  const { talk } = person([{ answer: "accept" }]);
+  await run({ specs, out, strategy, talk, sessions: 1 });
+  assert.match(readFileSync(file, "utf8"), /export const Library = service\("図書館。", \{ components: \{ lending: Lending, fines: Fines \} \}\);/);
+  const library = readProgram(specs).units.find((u) => u.exportName === "Library")!;
+  assert.equal(library.proseOnly, false);
+});
+
+test("run: 分け方を断る・提案が無いと、Layer 1 は変わらず解釈へ進む。読めない答えは差し戻し、尽きたら警告して進む", async () => {
+  const declined = rough();
+  const one = splitAgent([SPLIT]);
+  const a = person([{ answer: "decline" }]);
+  await run({ ...declined, strategy: one.strategy, talk: a.talk, sessions: 1 });
+  assert.equal(readFileSync(declined.file, "utf8"), ROUGH);
+  assert.equal(one.requests.length, 1);
+
+  const none = rough();
+  const two = splitAgent([{ split: false }]);
+  const b = person([]);
+  await run({ ...none, strategy: two.strategy, talk: b.talk, sessions: 1 });
+  assert.equal(b.asked.length, 0);
+
+  const bad = rough();
+  const three = splitAgent(["not json", { ...SPLIT, description: "図書館。" }]);
+  const c = person([]);
+  await run({ ...bad, strategy: three.strategy, talk: c.talk, sessions: 1, maxAttempts: 3 });
+  assert.equal(three.requests.length, 3);
+  assert.match(three.requests[1], /not JSON/);
+  assert.match(three.requests[2], /must embed \$\{Fines\} once each/);
+  assert.ok(c.events.some((e) => e.type === "diagnostic" && e.code === "split-failed"));
+  assert.equal(readFileSync(bad.file, "utf8"), ROUGH);
+});
+
+test("分け方の対象: 文が1つ、見出しがある、他の部品と関わるものは問わない", () => {
+  const root = workdir();
+  const specs = join(root, "specs");
+  mkdirSync(specs);
+  writeFileSync(
+    join(specs, "a.component.ts"),
+    `import { service } from "@clp/core";
+export const One = service("文は1つ");
+export const Used = service("使われる。文は2つ。");
+export const User = service(\`使う。\${Used} 文は2つ。\`);
+export const Alone = service("独り。文は2つ。");
+export const Headed = service("見出し。文は2つ。", { commands: { Go: "進む" } });
+`,
+  );
+  assert.deepEqual(candidatesOf(readProgram(specs, { drafts: true })).map((u) => u.exportName), ["Alone"]);
+});
+
+test("run-flow: 同じ台本で、Stage 1 は Stage 0 と同じ順に進み、同じ結果になる", async () => {
+  assert.ok(await adapterOf("run-flow"), "run-flow の合格の記録が古い");
+  const script = async () => {
+    const { specs, out } = place();
+    const { strategy } = agent([reopened(LIST_PRICE, CANCEL), reopened(CANCEL), reviewed], false);
+    const { talk, events } = person([{ answer: "supplement", text: "The order means its list price." }, { answer: "accept" }, { answer: "yes" }, { answer: "accept" }]);
+    const result = await run({ specs, out, strategy, talk, sessions: 1 });
+    const split = rough();
+    const answers = splitAgent([SPLIT]);
+    const second = person([{ answer: "decline" }]);
+    const declined = await run({ ...split, strategy: answers.strategy, talk: second.talk, sessions: 1 });
+    return [result, events, declined, second.events.map((e) => (e.type === "question" ? { ...e, where: "" } : e))];
+  };
+  const stage1 = await script();
+  process.env.CLP_STAGE = "0";
+  try {
+    const plain = (value: unknown) => JSON.parse(JSON.stringify(value).replace(/[^"\s\\]*\/w-[A-Za-z0-9]+/g, "<work>"));
+    assert.deepEqual(plain(stage1), plain(await script()));
+  } finally {
+    delete process.env.CLP_STAGE;
+  }
 });

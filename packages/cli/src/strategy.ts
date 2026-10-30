@@ -12,7 +12,8 @@ export type Assignment = {
   dir: string;
   // 実装のどの段階か（設計 / 配線 / 実装）。依頼文はすでにその段階のものになっている。
   // "interpretation" は実装の流れとは別の、仕様の解釈 (interpret.ts)。"interpretation-2" 以降は、比べるための解釈
-  phase: Phase | "interpretation" | `interpretation-${number}`;
+  // "split" は clp run の分け方の提案 (v1/split.ts)
+  phase: Phase | "interpretation" | `interpretation-${number}` | "split";
   attempt: number;
   // 入口ゲートがリポジトリのパスを取り除いた環境変数
   env: NodeJS.ProcessEnv;

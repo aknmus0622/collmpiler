@@ -21,6 +21,7 @@ self outcome-apply: commands: reach 5
 self overlay-check: commands: reach 8
 self pipeline: commands: reach 20; skipped: pipeline.DesignChecked.otherwise を除いて確かめます (組のフィールド) / pipeline.ImplementationChecked.otherwise を除いて確かめます (組のフィールド) / pipeline.WiringChecked.case1 を除いて確かめます (組のフィールド) / pipeline.WiringChecked.otherwise を除いて確かめます (組のフィールド) / 組のフィールド / 組のフィールド
 self promise-keeper: commands: reach 12
+self run-flow: commands: property 1, reach 56
 self sentence-trace: commands: reach 10
 self step-choice: commands: reach 6
 self syntax-check: commands: reach 15

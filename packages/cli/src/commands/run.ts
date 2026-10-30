@@ -13,6 +13,9 @@ export const usage = `clp run (--out <dir> | --src <dir> --tests <dir>) --agent 
   状態から決まります（解釈が無いか古い → 導く、確かめていない疑問点がある → 問う、確定できる → 確定して clp apply）。
   途中で止めても、もう一度実行すれば続きから進みます。
 
+  文だけで書いた大きな部品が、まだ一度も解釈されていなければ、分け方の案を差分と一緒に見せます。受け入れると、その差分を
+  Layer 1 に書き込みます（LLM の文が含まれるので、よく読んでください。--yes でも必ず問います）。断れば、分けずに進みます。
+
   疑問点と食い違いには、次のどれかで答えます:
     この読み方でよい   その行の REVIEW を REVIEWED にする（Layer 1 は変わらない）
     補足を書く         あなたの文を、そのまま Layer 1 の該当する文の末尾に書き足し、解釈を導き直す
@@ -69,7 +72,7 @@ function jsonTalk(): Talk {
   };
 }
 
-const STEPS: Record<string, string> = { check: "検査", interpret: "解釈", questions: "疑問点への応答", accept: "確定", apply: "実装と検証" };
+const STEPS: Record<string, string> = { check: "検査", split: "分け方の提案", interpret: "解釈", questions: "疑問点への応答", accept: "確定", apply: "実装と検証" };
 
 /** A person at a terminal: everything on stderr, in Japanese. */
 function terminalTalk(): Talk {
@@ -90,6 +93,18 @@ function terminalTalk(): Talk {
         say(`\nLayer 1 に、次のように書き足します:\n${event.diff}`);
         const line = await prompt("書き込みますか [y/N] ");
         return line === undefined ? undefined : { id: event.id, answer: /^y(es)?$/i.test(line.trim()) ? "yes" : "no" };
+      }
+      if (event.kind === "split") {
+        const place = event.arrangement === "inside" ? "の中の部品" : "と別々に動く部品";
+        say(`\n分け方の提案 (${event.component}, ${event.where}): ${event.parts!.length} つの部品を、${event.component}${place}にします`);
+        for (const part of event.parts!) say(`  ${part.name}: ${part.because}`);
+        say(`\nLayer 1 を、次のように書き換えます（LLM が書いた文を含みます）:\n${event.diff}`);
+        for (;;) {
+          const line = await prompt("  [a] この分け方にする  [d] 分けない  [q] 止める > ");
+          if (line === undefined) return undefined;
+          const choice = { a: "accept", d: "decline", q: "stop" }[line.trim().toLowerCase()];
+          if (choice) return { id: event.id, answer: choice };
+        }
       }
       say(`\n${event.kind === "difference" ? "食い違い" : "疑問点"} (${event.component}, ${event.where})\n  ${event.text}`);
       for (;;) {

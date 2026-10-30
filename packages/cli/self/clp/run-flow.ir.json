@@ -1,0 +1,3014 @@
+{
+  "components": {
+    "run-driver": {
+      "external": {
+        "commands": {
+          "Accept": {
+            "params": {}
+          },
+          "Apply": {
+            "params": {}
+          },
+          "AskQuestion": {
+            "params": {}
+          },
+          "AskSplit": {
+            "params": {}
+          },
+          "CheckLayer1": {
+            "params": {}
+          },
+          "ConfirmSupplements": {
+            "params": {}
+          },
+          "Decline": {
+            "params": {}
+          },
+          "Finish": {
+            "params": {
+              "reason": {
+                "enum": [
+                  "passed",
+                  "layer1",
+                  "split-agent",
+                  "interpret-failed",
+                  "interpret-agent",
+                  "person",
+                  "unplaced",
+                  "not-written",
+                  "not-accepted",
+                  "not-verified",
+                  "apply-agent",
+                  "spec",
+                  "rounds"
+                ]
+              }
+            }
+          },
+          "Interpret": {
+            "params": {}
+          },
+          "MarkReviewed": {
+            "params": {}
+          },
+          "NextCandidate": {
+            "params": {}
+          },
+          "NextQuestion": {
+            "params": {}
+          },
+          "PlaceSupplements": {
+            "params": {}
+          },
+          "Propose": {
+            "params": {}
+          },
+          "QuestionsDone": {
+            "params": {}
+          },
+          "ReadQuestions": {
+            "params": {}
+          },
+          "StartInterpreting": {
+            "params": {}
+          },
+          "WriteSplit": {
+            "params": {}
+          },
+          "WriteSupplements": {
+            "params": {}
+          }
+        },
+        "queries": {}
+      }
+    },
+    "run-flow": {
+      "commands": {
+        "Accepted": {
+          "events": [
+            "Accepted.otherwise"
+          ],
+          "params": {
+            "ok": "bool"
+          },
+          "requires": [
+            "=",
+            [
+              "state",
+              "status"
+            ],
+            [
+              "lit",
+              "ACCEPTING"
+            ]
+          ]
+        },
+        "Applied": {
+          "events": [
+            "Applied.otherwise"
+          ],
+          "params": {
+            "outcome": {
+              "enum": [
+                "pass",
+                "fail",
+                "agent-failed",
+                "spec-error"
+              ]
+            }
+          },
+          "requires": [
+            "=",
+            [
+              "state",
+              "status"
+            ],
+            [
+              "lit",
+              "APPLYING"
+            ]
+          ]
+        },
+        "Candidate": {
+          "events": [
+            "Candidate.otherwise"
+          ],
+          "params": {},
+          "requires": [
+            "=",
+            [
+              "state",
+              "status"
+            ],
+            [
+              "lit",
+              "CANDIDATES"
+            ]
+          ]
+        },
+        "Interpreted": {
+          "events": [
+            "Interpreted.otherwise"
+          ],
+          "params": {
+            "outcome": {
+              "enum": [
+                "up-to-date",
+                "interpreted",
+                "failed",
+                "agent-failed"
+              ]
+            }
+          },
+          "requires": [
+            "=",
+            [
+              "state",
+              "status"
+            ],
+            [
+              "lit",
+              "INTERPRETING"
+            ]
+          ]
+        },
+        "Layer1Checked": {
+          "events": [
+            "Layer1Checked.otherwise"
+          ],
+          "params": {
+            "ok": "bool"
+          },
+          "requires": [
+            "=",
+            [
+              "state",
+              "status"
+            ],
+            [
+              "lit",
+              "CHECKING"
+            ]
+          ]
+        },
+        "NoMoreCandidates": {
+          "events": [
+            "NoMoreCandidates.otherwise"
+          ],
+          "params": {},
+          "requires": [
+            "=",
+            [
+              "state",
+              "status"
+            ],
+            [
+              "lit",
+              "CANDIDATES"
+            ]
+          ]
+        },
+        "NoMoreQuestions": {
+          "events": [
+            "NoMoreQuestions.otherwise"
+          ],
+          "params": {},
+          "requires": [
+            "=",
+            [
+              "state",
+              "status"
+            ],
+            [
+              "lit",
+              "QUESTIONS"
+            ]
+          ]
+        },
+        "Proposed": {
+          "events": [
+            "Proposed.otherwise"
+          ],
+          "params": {
+            "outcome": {
+              "enum": [
+                "none",
+                "proposal",
+                "agent-failed"
+              ]
+            }
+          },
+          "requires": [
+            "=",
+            [
+              "state",
+              "status"
+            ],
+            [
+              "lit",
+              "PROPOSING"
+            ]
+          ]
+        },
+        "Question": {
+          "events": [
+            "Question.otherwise"
+          ],
+          "params": {},
+          "requires": [
+            "=",
+            [
+              "state",
+              "status"
+            ],
+            [
+              "lit",
+              "QUESTIONS"
+            ]
+          ]
+        },
+        "QuestionAnswered": {
+          "events": [
+            "QuestionAnswered.otherwise"
+          ],
+          "params": {
+            "answer": {
+              "enum": [
+                "accept",
+                "supplement",
+                "stop"
+              ]
+            }
+          },
+          "requires": [
+            "=",
+            [
+              "state",
+              "status"
+            ],
+            [
+              "lit",
+              "QUESTION_ASKED"
+            ]
+          ]
+        },
+        "SplitAnswered": {
+          "events": [
+            "SplitAnswered.otherwise"
+          ],
+          "params": {
+            "answer": {
+              "enum": [
+                "accept",
+                "decline",
+                "stop"
+              ]
+            }
+          },
+          "requires": [
+            "=",
+            [
+              "state",
+              "status"
+            ],
+            [
+              "lit",
+              "SPLIT_ASKED"
+            ]
+          ]
+        },
+        "Start": {
+          "events": [
+            "Start.otherwise"
+          ],
+          "params": {
+            "rounds": "int",
+            "yes": "bool"
+          },
+          "requires": [
+            "and",
+            [
+              "and",
+              [
+                ">=",
+                [
+                  "var",
+                  "rounds"
+                ],
+                1
+              ],
+              [
+                "<=",
+                [
+                  "var",
+                  "rounds"
+                ],
+                10
+              ]
+            ],
+            [
+              "=",
+              [
+                "state",
+                "status"
+              ],
+              [
+                "lit",
+                "IDLE"
+              ]
+            ]
+          ]
+        },
+        "SupplementsConfirmed": {
+          "events": [
+            "SupplementsConfirmed.otherwise"
+          ],
+          "params": {
+            "yes": "bool"
+          },
+          "requires": [
+            "=",
+            [
+              "state",
+              "status"
+            ],
+            [
+              "lit",
+              "CONFIRMING"
+            ]
+          ]
+        },
+        "SupplementsPlaced": {
+          "events": [
+            "SupplementsPlaced.otherwise"
+          ],
+          "params": {
+            "placed": "bool"
+          },
+          "requires": [
+            "=",
+            [
+              "state",
+              "status"
+            ],
+            [
+              "lit",
+              "PLACING"
+            ]
+          ]
+        }
+      },
+      "events": {
+        "Accepted.otherwise": {
+          "assign": {
+            "status": [
+              "ite",
+              [
+                "var",
+                "ok"
+              ],
+              [
+                "lit",
+                "APPLYING"
+              ],
+              [
+                "lit",
+                "DONE"
+              ]
+            ]
+          },
+          "calls": [
+            {
+              "args": {},
+              "command": "Apply",
+              "component": "run-driver",
+              "when": [
+                "var",
+                "ok"
+              ]
+            },
+            {
+              "args": {
+                "reason": [
+                  "lit",
+                  "not-accepted"
+                ]
+              },
+              "command": "Finish",
+              "component": "run-driver",
+              "when": [
+                "not",
+                [
+                  "var",
+                  "ok"
+                ]
+              ]
+            }
+          ],
+          "command": "Accepted",
+          "guard": true
+        },
+        "Applied.otherwise": {
+          "assign": {
+            "status": [
+              "lit",
+              "DONE"
+            ]
+          },
+          "calls": [
+            {
+              "args": {
+                "reason": [
+                  "lit",
+                  "passed"
+                ]
+              },
+              "command": "Finish",
+              "component": "run-driver",
+              "when": [
+                "=",
+                [
+                  "var",
+                  "outcome"
+                ],
+                [
+                  "lit",
+                  "pass"
+                ]
+              ]
+            },
+            {
+              "args": {
+                "reason": [
+                  "lit",
+                  "not-verified"
+                ]
+              },
+              "command": "Finish",
+              "component": "run-driver",
+              "when": [
+                "and",
+                [
+                  "not",
+                  [
+                    "=",
+                    [
+                      "var",
+                      "outcome"
+                    ],
+                    [
+                      "lit",
+                      "pass"
+                    ]
+                  ]
+                ],
+                [
+                  "=",
+                  [
+                    "var",
+                    "outcome"
+                  ],
+                  [
+                    "lit",
+                    "fail"
+                  ]
+                ]
+              ]
+            },
+            {
+              "args": {
+                "reason": [
+                  "lit",
+                  "apply-agent"
+                ]
+              },
+              "command": "Finish",
+              "component": "run-driver",
+              "when": [
+                "and",
+                [
+                  "not",
+                  [
+                    "=",
+                    [
+                      "var",
+                      "outcome"
+                    ],
+                    [
+                      "lit",
+                      "pass"
+                    ]
+                  ]
+                ],
+                [
+                  "not",
+                  [
+                    "=",
+                    [
+                      "var",
+                      "outcome"
+                    ],
+                    [
+                      "lit",
+                      "fail"
+                    ]
+                  ]
+                ],
+                [
+                  "=",
+                  [
+                    "var",
+                    "outcome"
+                  ],
+                  [
+                    "lit",
+                    "agent-failed"
+                  ]
+                ]
+              ]
+            },
+            {
+              "args": {
+                "reason": [
+                  "lit",
+                  "spec"
+                ]
+              },
+              "command": "Finish",
+              "component": "run-driver",
+              "when": [
+                "and",
+                [
+                  "not",
+                  [
+                    "=",
+                    [
+                      "var",
+                      "outcome"
+                    ],
+                    [
+                      "lit",
+                      "pass"
+                    ]
+                  ]
+                ],
+                [
+                  "not",
+                  [
+                    "=",
+                    [
+                      "var",
+                      "outcome"
+                    ],
+                    [
+                      "lit",
+                      "fail"
+                    ]
+                  ]
+                ],
+                [
+                  "not",
+                  [
+                    "=",
+                    [
+                      "var",
+                      "outcome"
+                    ],
+                    [
+                      "lit",
+                      "agent-failed"
+                    ]
+                  ]
+                ]
+              ]
+            }
+          ],
+          "command": "Applied",
+          "guard": true
+        },
+        "Candidate.otherwise": {
+          "assign": {
+            "status": [
+              "lit",
+              "PROPOSING"
+            ]
+          },
+          "calls": [
+            {
+              "args": {},
+              "command": "Propose",
+              "component": "run-driver"
+            }
+          ],
+          "command": "Candidate",
+          "guard": true
+        },
+        "Interpreted.otherwise": {
+          "assign": {
+            "status": [
+              "ite",
+              [
+                "=",
+                [
+                  "var",
+                  "outcome"
+                ],
+                [
+                  "lit",
+                  "interpreted"
+                ]
+              ],
+              [
+                "state",
+                "status"
+              ],
+              [
+                "ite",
+                [
+                  "=",
+                  [
+                    "var",
+                    "outcome"
+                  ],
+                  [
+                    "lit",
+                    "up-to-date"
+                  ]
+                ],
+                [
+                  "lit",
+                  "QUESTIONS"
+                ],
+                [
+                  "lit",
+                  "DONE"
+                ]
+              ]
+            ]
+          },
+          "calls": [
+            {
+              "args": {},
+              "command": "Interpret",
+              "component": "run-driver",
+              "when": [
+                "=",
+                [
+                  "var",
+                  "outcome"
+                ],
+                [
+                  "lit",
+                  "interpreted"
+                ]
+              ]
+            },
+            {
+              "args": {},
+              "command": "ReadQuestions",
+              "component": "run-driver",
+              "when": [
+                "and",
+                [
+                  "not",
+                  [
+                    "=",
+                    [
+                      "var",
+                      "outcome"
+                    ],
+                    [
+                      "lit",
+                      "interpreted"
+                    ]
+                  ]
+                ],
+                [
+                  "=",
+                  [
+                    "var",
+                    "outcome"
+                  ],
+                  [
+                    "lit",
+                    "up-to-date"
+                  ]
+                ]
+              ]
+            },
+            {
+              "args": {},
+              "command": "NextQuestion",
+              "component": "run-driver",
+              "when": [
+                "and",
+                [
+                  "not",
+                  [
+                    "=",
+                    [
+                      "var",
+                      "outcome"
+                    ],
+                    [
+                      "lit",
+                      "interpreted"
+                    ]
+                  ]
+                ],
+                [
+                  "=",
+                  [
+                    "var",
+                    "outcome"
+                  ],
+                  [
+                    "lit",
+                    "up-to-date"
+                  ]
+                ]
+              ]
+            },
+            {
+              "args": {
+                "reason": [
+                  "lit",
+                  "interpret-failed"
+                ]
+              },
+              "command": "Finish",
+              "component": "run-driver",
+              "when": [
+                "and",
+                [
+                  "not",
+                  [
+                    "=",
+                    [
+                      "var",
+                      "outcome"
+                    ],
+                    [
+                      "lit",
+                      "interpreted"
+                    ]
+                  ]
+                ],
+                [
+                  "not",
+                  [
+                    "=",
+                    [
+                      "var",
+                      "outcome"
+                    ],
+                    [
+                      "lit",
+                      "up-to-date"
+                    ]
+                  ]
+                ],
+                [
+                  "=",
+                  [
+                    "var",
+                    "outcome"
+                  ],
+                  [
+                    "lit",
+                    "failed"
+                  ]
+                ]
+              ]
+            },
+            {
+              "args": {
+                "reason": [
+                  "lit",
+                  "interpret-agent"
+                ]
+              },
+              "command": "Finish",
+              "component": "run-driver",
+              "when": [
+                "and",
+                [
+                  "not",
+                  [
+                    "=",
+                    [
+                      "var",
+                      "outcome"
+                    ],
+                    [
+                      "lit",
+                      "interpreted"
+                    ]
+                  ]
+                ],
+                [
+                  "not",
+                  [
+                    "=",
+                    [
+                      "var",
+                      "outcome"
+                    ],
+                    [
+                      "lit",
+                      "up-to-date"
+                    ]
+                  ]
+                ],
+                [
+                  "not",
+                  [
+                    "=",
+                    [
+                      "var",
+                      "outcome"
+                    ],
+                    [
+                      "lit",
+                      "failed"
+                    ]
+                  ]
+                ]
+              ]
+            }
+          ],
+          "command": "Interpreted",
+          "guard": true
+        },
+        "Layer1Checked.otherwise": {
+          "assign": {
+            "status": [
+              "ite",
+              [
+                "var",
+                "ok"
+              ],
+              [
+                "lit",
+                "CANDIDATES"
+              ],
+              [
+                "lit",
+                "DONE"
+              ]
+            ]
+          },
+          "calls": [
+            {
+              "args": {},
+              "command": "NextCandidate",
+              "component": "run-driver",
+              "when": [
+                "var",
+                "ok"
+              ]
+            },
+            {
+              "args": {
+                "reason": [
+                  "lit",
+                  "layer1"
+                ]
+              },
+              "command": "Finish",
+              "component": "run-driver",
+              "when": [
+                "not",
+                [
+                  "var",
+                  "ok"
+                ]
+              ]
+            }
+          ],
+          "command": "Layer1Checked",
+          "guard": true
+        },
+        "NoMoreCandidates.otherwise": {
+          "assign": {
+            "round": [
+              "ite",
+              [
+                "state",
+                "splitAccepted"
+              ],
+              [
+                "ite",
+                [
+                  "<",
+                  [
+                    "state",
+                    "round"
+                  ],
+                  [
+                    "nonNull",
+                    [
+                      "state",
+                      "roundLimit"
+                    ]
+                  ]
+                ],
+                [
+                  "+",
+                  [
+                    "state",
+                    "round"
+                  ],
+                  1
+                ],
+                [
+                  "state",
+                  "round"
+                ]
+              ],
+              [
+                "state",
+                "round"
+              ]
+            ],
+            "splitAccepted": [
+              "ite",
+              [
+                "state",
+                "splitAccepted"
+              ],
+              [
+                "ite",
+                [
+                  "<",
+                  [
+                    "state",
+                    "round"
+                  ],
+                  [
+                    "nonNull",
+                    [
+                      "state",
+                      "roundLimit"
+                    ]
+                  ]
+                ],
+                false,
+                [
+                  "state",
+                  "splitAccepted"
+                ]
+              ],
+              [
+                "state",
+                "splitAccepted"
+              ]
+            ],
+            "status": [
+              "ite",
+              [
+                "state",
+                "splitAccepted"
+              ],
+              [
+                "ite",
+                [
+                  "<",
+                  [
+                    "state",
+                    "round"
+                  ],
+                  [
+                    "nonNull",
+                    [
+                      "state",
+                      "roundLimit"
+                    ]
+                  ]
+                ],
+                [
+                  "lit",
+                  "CHECKING"
+                ],
+                [
+                  "lit",
+                  "DONE"
+                ]
+              ],
+              [
+                "lit",
+                "INTERPRETING"
+              ]
+            ],
+            "supplemented": [
+              "ite",
+              [
+                "state",
+                "splitAccepted"
+              ],
+              [
+                "ite",
+                [
+                  "<",
+                  [
+                    "state",
+                    "round"
+                  ],
+                  [
+                    "nonNull",
+                    [
+                      "state",
+                      "roundLimit"
+                    ]
+                  ]
+                ],
+                false,
+                [
+                  "state",
+                  "supplemented"
+                ]
+              ],
+              [
+                "state",
+                "supplemented"
+              ]
+            ]
+          },
+          "calls": [
+            {
+              "args": {},
+              "command": "CheckLayer1",
+              "component": "run-driver",
+              "when": [
+                "and",
+                [
+                  "state",
+                  "splitAccepted"
+                ],
+                [
+                  "<",
+                  [
+                    "state",
+                    "round"
+                  ],
+                  [
+                    "nonNull",
+                    [
+                      "state",
+                      "roundLimit"
+                    ]
+                  ]
+                ]
+              ]
+            },
+            {
+              "args": {
+                "reason": [
+                  "lit",
+                  "rounds"
+                ]
+              },
+              "command": "Finish",
+              "component": "run-driver",
+              "when": [
+                "and",
+                [
+                  "state",
+                  "splitAccepted"
+                ],
+                [
+                  "not",
+                  [
+                    "<",
+                    [
+                      "state",
+                      "round"
+                    ],
+                    [
+                      "nonNull",
+                      [
+                        "state",
+                        "roundLimit"
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            },
+            {
+              "args": {},
+              "command": "StartInterpreting",
+              "component": "run-driver",
+              "when": [
+                "not",
+                [
+                  "state",
+                  "splitAccepted"
+                ]
+              ]
+            },
+            {
+              "args": {},
+              "command": "Interpret",
+              "component": "run-driver",
+              "when": [
+                "not",
+                [
+                  "state",
+                  "splitAccepted"
+                ]
+              ]
+            }
+          ],
+          "command": "NoMoreCandidates",
+          "guard": true
+        },
+        "NoMoreQuestions.otherwise": {
+          "assign": {
+            "status": [
+              "ite",
+              [
+                "state",
+                "supplemented"
+              ],
+              [
+                "lit",
+                "PLACING"
+              ],
+              [
+                "lit",
+                "ACCEPTING"
+              ]
+            ]
+          },
+          "calls": [
+            {
+              "args": {},
+              "command": "PlaceSupplements",
+              "component": "run-driver",
+              "when": [
+                "state",
+                "supplemented"
+              ]
+            },
+            {
+              "args": {},
+              "command": "QuestionsDone",
+              "component": "run-driver",
+              "when": [
+                "not",
+                [
+                  "state",
+                  "supplemented"
+                ]
+              ]
+            },
+            {
+              "args": {},
+              "command": "Accept",
+              "component": "run-driver",
+              "when": [
+                "not",
+                [
+                  "state",
+                  "supplemented"
+                ]
+              ]
+            }
+          ],
+          "command": "NoMoreQuestions",
+          "guard": true
+        },
+        "Proposed.otherwise": {
+          "assign": {
+            "status": [
+              "ite",
+              [
+                "=",
+                [
+                  "var",
+                  "outcome"
+                ],
+                [
+                  "lit",
+                  "none"
+                ]
+              ],
+              [
+                "lit",
+                "CANDIDATES"
+              ],
+              [
+                "ite",
+                [
+                  "=",
+                  [
+                    "var",
+                    "outcome"
+                  ],
+                  [
+                    "lit",
+                    "proposal"
+                  ]
+                ],
+                [
+                  "lit",
+                  "SPLIT_ASKED"
+                ],
+                [
+                  "lit",
+                  "DONE"
+                ]
+              ]
+            ]
+          },
+          "calls": [
+            {
+              "args": {},
+              "command": "NextCandidate",
+              "component": "run-driver",
+              "when": [
+                "=",
+                [
+                  "var",
+                  "outcome"
+                ],
+                [
+                  "lit",
+                  "none"
+                ]
+              ]
+            },
+            {
+              "args": {},
+              "command": "AskSplit",
+              "component": "run-driver",
+              "when": [
+                "and",
+                [
+                  "not",
+                  [
+                    "=",
+                    [
+                      "var",
+                      "outcome"
+                    ],
+                    [
+                      "lit",
+                      "none"
+                    ]
+                  ]
+                ],
+                [
+                  "=",
+                  [
+                    "var",
+                    "outcome"
+                  ],
+                  [
+                    "lit",
+                    "proposal"
+                  ]
+                ]
+              ]
+            },
+            {
+              "args": {
+                "reason": [
+                  "lit",
+                  "split-agent"
+                ]
+              },
+              "command": "Finish",
+              "component": "run-driver",
+              "when": [
+                "and",
+                [
+                  "not",
+                  [
+                    "=",
+                    [
+                      "var",
+                      "outcome"
+                    ],
+                    [
+                      "lit",
+                      "none"
+                    ]
+                  ]
+                ],
+                [
+                  "not",
+                  [
+                    "=",
+                    [
+                      "var",
+                      "outcome"
+                    ],
+                    [
+                      "lit",
+                      "proposal"
+                    ]
+                  ]
+                ]
+              ]
+            }
+          ],
+          "command": "Proposed",
+          "guard": true
+        },
+        "Question.otherwise": {
+          "assign": {
+            "status": [
+              "lit",
+              "QUESTION_ASKED"
+            ]
+          },
+          "calls": [
+            {
+              "args": {},
+              "command": "AskQuestion",
+              "component": "run-driver"
+            }
+          ],
+          "command": "Question",
+          "guard": true
+        },
+        "QuestionAnswered.otherwise": {
+          "assign": {
+            "status": [
+              "ite",
+              [
+                "=",
+                [
+                  "var",
+                  "answer"
+                ],
+                [
+                  "lit",
+                  "stop"
+                ]
+              ],
+              [
+                "lit",
+                "DONE"
+              ],
+              [
+                "lit",
+                "QUESTIONS"
+              ]
+            ],
+            "supplemented": [
+              "ite",
+              [
+                "=",
+                [
+                  "var",
+                  "answer"
+                ],
+                [
+                  "lit",
+                  "stop"
+                ]
+              ],
+              [
+                "state",
+                "supplemented"
+              ],
+              [
+                "ite",
+                [
+                  "=",
+                  [
+                    "var",
+                    "answer"
+                  ],
+                  [
+                    "lit",
+                    "accept"
+                  ]
+                ],
+                [
+                  "state",
+                  "supplemented"
+                ],
+                true
+              ]
+            ]
+          },
+          "calls": [
+            {
+              "args": {
+                "reason": [
+                  "lit",
+                  "person"
+                ]
+              },
+              "command": "Finish",
+              "component": "run-driver",
+              "when": [
+                "=",
+                [
+                  "var",
+                  "answer"
+                ],
+                [
+                  "lit",
+                  "stop"
+                ]
+              ]
+            },
+            {
+              "args": {},
+              "command": "MarkReviewed",
+              "component": "run-driver",
+              "when": [
+                "and",
+                [
+                  "not",
+                  [
+                    "=",
+                    [
+                      "var",
+                      "answer"
+                    ],
+                    [
+                      "lit",
+                      "stop"
+                    ]
+                  ]
+                ],
+                [
+                  "=",
+                  [
+                    "var",
+                    "answer"
+                  ],
+                  [
+                    "lit",
+                    "accept"
+                  ]
+                ]
+              ]
+            },
+            {
+              "args": {},
+              "command": "NextQuestion",
+              "component": "run-driver",
+              "when": [
+                "not",
+                [
+                  "=",
+                  [
+                    "var",
+                    "answer"
+                  ],
+                  [
+                    "lit",
+                    "stop"
+                  ]
+                ]
+              ]
+            }
+          ],
+          "command": "QuestionAnswered",
+          "guard": true
+        },
+        "SplitAnswered.otherwise": {
+          "assign": {
+            "splitAccepted": [
+              "ite",
+              [
+                "=",
+                [
+                  "var",
+                  "answer"
+                ],
+                [
+                  "lit",
+                  "stop"
+                ]
+              ],
+              [
+                "state",
+                "splitAccepted"
+              ],
+              [
+                "ite",
+                [
+                  "=",
+                  [
+                    "var",
+                    "answer"
+                  ],
+                  [
+                    "lit",
+                    "accept"
+                  ]
+                ],
+                true,
+                [
+                  "state",
+                  "splitAccepted"
+                ]
+              ]
+            ],
+            "status": [
+              "ite",
+              [
+                "=",
+                [
+                  "var",
+                  "answer"
+                ],
+                [
+                  "lit",
+                  "stop"
+                ]
+              ],
+              [
+                "lit",
+                "DONE"
+              ],
+              [
+                "lit",
+                "CANDIDATES"
+              ]
+            ]
+          },
+          "calls": [
+            {
+              "args": {
+                "reason": [
+                  "lit",
+                  "person"
+                ]
+              },
+              "command": "Finish",
+              "component": "run-driver",
+              "when": [
+                "=",
+                [
+                  "var",
+                  "answer"
+                ],
+                [
+                  "lit",
+                  "stop"
+                ]
+              ]
+            },
+            {
+              "args": {},
+              "command": "WriteSplit",
+              "component": "run-driver",
+              "when": [
+                "and",
+                [
+                  "not",
+                  [
+                    "=",
+                    [
+                      "var",
+                      "answer"
+                    ],
+                    [
+                      "lit",
+                      "stop"
+                    ]
+                  ]
+                ],
+                [
+                  "=",
+                  [
+                    "var",
+                    "answer"
+                  ],
+                  [
+                    "lit",
+                    "accept"
+                  ]
+                ]
+              ]
+            },
+            {
+              "args": {},
+              "command": "Decline",
+              "component": "run-driver",
+              "when": [
+                "and",
+                [
+                  "not",
+                  [
+                    "=",
+                    [
+                      "var",
+                      "answer"
+                    ],
+                    [
+                      "lit",
+                      "stop"
+                    ]
+                  ]
+                ],
+                [
+                  "not",
+                  [
+                    "=",
+                    [
+                      "var",
+                      "answer"
+                    ],
+                    [
+                      "lit",
+                      "accept"
+                    ]
+                  ]
+                ]
+              ]
+            },
+            {
+              "args": {},
+              "command": "NextCandidate",
+              "component": "run-driver",
+              "when": [
+                "not",
+                [
+                  "=",
+                  [
+                    "var",
+                    "answer"
+                  ],
+                  [
+                    "lit",
+                    "stop"
+                  ]
+                ]
+              ]
+            }
+          ],
+          "command": "SplitAnswered",
+          "guard": true
+        },
+        "Start.otherwise": {
+          "assign": {
+            "round": [
+              "+",
+              [
+                "state",
+                "round"
+              ],
+              1
+            ],
+            "roundLimit": [
+              "var",
+              "rounds"
+            ],
+            "splitAccepted": false,
+            "status": [
+              "lit",
+              "CHECKING"
+            ],
+            "supplemented": false,
+            "writeUnasked": [
+              "var",
+              "yes"
+            ]
+          },
+          "calls": [
+            {
+              "args": {},
+              "command": "CheckLayer1",
+              "component": "run-driver"
+            }
+          ],
+          "command": "Start",
+          "guard": true
+        },
+        "SupplementsConfirmed.otherwise": {
+          "assign": {
+            "round": [
+              "ite",
+              [
+                "not",
+                [
+                  "var",
+                  "yes"
+                ]
+              ],
+              [
+                "state",
+                "round"
+              ],
+              [
+                "ite",
+                [
+                  "<",
+                  [
+                    "state",
+                    "round"
+                  ],
+                  [
+                    "nonNull",
+                    [
+                      "state",
+                      "roundLimit"
+                    ]
+                  ]
+                ],
+                [
+                  "+",
+                  [
+                    "state",
+                    "round"
+                  ],
+                  1
+                ],
+                [
+                  "state",
+                  "round"
+                ]
+              ]
+            ],
+            "splitAccepted": [
+              "ite",
+              [
+                "not",
+                [
+                  "var",
+                  "yes"
+                ]
+              ],
+              [
+                "state",
+                "splitAccepted"
+              ],
+              [
+                "ite",
+                [
+                  "<",
+                  [
+                    "state",
+                    "round"
+                  ],
+                  [
+                    "nonNull",
+                    [
+                      "state",
+                      "roundLimit"
+                    ]
+                  ]
+                ],
+                false,
+                [
+                  "state",
+                  "splitAccepted"
+                ]
+              ]
+            ],
+            "status": [
+              "ite",
+              [
+                "not",
+                [
+                  "var",
+                  "yes"
+                ]
+              ],
+              [
+                "lit",
+                "DONE"
+              ],
+              [
+                "ite",
+                [
+                  "<",
+                  [
+                    "state",
+                    "round"
+                  ],
+                  [
+                    "nonNull",
+                    [
+                      "state",
+                      "roundLimit"
+                    ]
+                  ]
+                ],
+                [
+                  "lit",
+                  "CHECKING"
+                ],
+                [
+                  "lit",
+                  "DONE"
+                ]
+              ]
+            ],
+            "supplemented": [
+              "ite",
+              [
+                "not",
+                [
+                  "var",
+                  "yes"
+                ]
+              ],
+              [
+                "state",
+                "supplemented"
+              ],
+              [
+                "ite",
+                [
+                  "<",
+                  [
+                    "state",
+                    "round"
+                  ],
+                  [
+                    "nonNull",
+                    [
+                      "state",
+                      "roundLimit"
+                    ]
+                  ]
+                ],
+                false,
+                [
+                  "state",
+                  "supplemented"
+                ]
+              ]
+            ]
+          },
+          "calls": [
+            {
+              "args": {
+                "reason": [
+                  "lit",
+                  "not-written"
+                ]
+              },
+              "command": "Finish",
+              "component": "run-driver",
+              "when": [
+                "not",
+                [
+                  "var",
+                  "yes"
+                ]
+              ]
+            },
+            {
+              "args": {},
+              "command": "WriteSupplements",
+              "component": "run-driver",
+              "when": [
+                "var",
+                "yes"
+              ]
+            },
+            {
+              "args": {},
+              "command": "QuestionsDone",
+              "component": "run-driver",
+              "when": [
+                "var",
+                "yes"
+              ]
+            },
+            {
+              "args": {},
+              "command": "CheckLayer1",
+              "component": "run-driver",
+              "when": [
+                "and",
+                [
+                  "var",
+                  "yes"
+                ],
+                [
+                  "<",
+                  [
+                    "state",
+                    "round"
+                  ],
+                  [
+                    "nonNull",
+                    [
+                      "state",
+                      "roundLimit"
+                    ]
+                  ]
+                ]
+              ]
+            },
+            {
+              "args": {
+                "reason": [
+                  "lit",
+                  "rounds"
+                ]
+              },
+              "command": "Finish",
+              "component": "run-driver",
+              "when": [
+                "and",
+                [
+                  "var",
+                  "yes"
+                ],
+                [
+                  "not",
+                  [
+                    "<",
+                    [
+                      "state",
+                      "round"
+                    ],
+                    [
+                      "nonNull",
+                      [
+                        "state",
+                        "roundLimit"
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            }
+          ],
+          "command": "SupplementsConfirmed",
+          "guard": true
+        },
+        "SupplementsPlaced.otherwise": {
+          "assign": {
+            "round": [
+              "ite",
+              [
+                "not",
+                [
+                  "var",
+                  "placed"
+                ]
+              ],
+              [
+                "state",
+                "round"
+              ],
+              [
+                "ite",
+                [
+                  "state",
+                  "writeUnasked"
+                ],
+                [
+                  "ite",
+                  [
+                    "<",
+                    [
+                      "state",
+                      "round"
+                    ],
+                    [
+                      "nonNull",
+                      [
+                        "state",
+                        "roundLimit"
+                      ]
+                    ]
+                  ],
+                  [
+                    "+",
+                    [
+                      "state",
+                      "round"
+                    ],
+                    1
+                  ],
+                  [
+                    "state",
+                    "round"
+                  ]
+                ],
+                [
+                  "state",
+                  "round"
+                ]
+              ]
+            ],
+            "splitAccepted": [
+              "ite",
+              [
+                "not",
+                [
+                  "var",
+                  "placed"
+                ]
+              ],
+              [
+                "state",
+                "splitAccepted"
+              ],
+              [
+                "ite",
+                [
+                  "state",
+                  "writeUnasked"
+                ],
+                [
+                  "ite",
+                  [
+                    "<",
+                    [
+                      "state",
+                      "round"
+                    ],
+                    [
+                      "nonNull",
+                      [
+                        "state",
+                        "roundLimit"
+                      ]
+                    ]
+                  ],
+                  false,
+                  [
+                    "state",
+                    "splitAccepted"
+                  ]
+                ],
+                [
+                  "state",
+                  "splitAccepted"
+                ]
+              ]
+            ],
+            "status": [
+              "ite",
+              [
+                "not",
+                [
+                  "var",
+                  "placed"
+                ]
+              ],
+              [
+                "lit",
+                "DONE"
+              ],
+              [
+                "ite",
+                [
+                  "state",
+                  "writeUnasked"
+                ],
+                [
+                  "ite",
+                  [
+                    "<",
+                    [
+                      "state",
+                      "round"
+                    ],
+                    [
+                      "nonNull",
+                      [
+                        "state",
+                        "roundLimit"
+                      ]
+                    ]
+                  ],
+                  [
+                    "lit",
+                    "CHECKING"
+                  ],
+                  [
+                    "lit",
+                    "DONE"
+                  ]
+                ],
+                [
+                  "lit",
+                  "CONFIRMING"
+                ]
+              ]
+            ],
+            "supplemented": [
+              "ite",
+              [
+                "not",
+                [
+                  "var",
+                  "placed"
+                ]
+              ],
+              [
+                "state",
+                "supplemented"
+              ],
+              [
+                "ite",
+                [
+                  "state",
+                  "writeUnasked"
+                ],
+                [
+                  "ite",
+                  [
+                    "<",
+                    [
+                      "state",
+                      "round"
+                    ],
+                    [
+                      "nonNull",
+                      [
+                        "state",
+                        "roundLimit"
+                      ]
+                    ]
+                  ],
+                  false,
+                  [
+                    "state",
+                    "supplemented"
+                  ]
+                ],
+                [
+                  "state",
+                  "supplemented"
+                ]
+              ]
+            ]
+          },
+          "calls": [
+            {
+              "args": {
+                "reason": [
+                  "lit",
+                  "unplaced"
+                ]
+              },
+              "command": "Finish",
+              "component": "run-driver",
+              "when": [
+                "not",
+                [
+                  "var",
+                  "placed"
+                ]
+              ]
+            },
+            {
+              "args": {},
+              "command": "WriteSupplements",
+              "component": "run-driver",
+              "when": [
+                "and",
+                [
+                  "var",
+                  "placed"
+                ],
+                [
+                  "state",
+                  "writeUnasked"
+                ]
+              ]
+            },
+            {
+              "args": {},
+              "command": "QuestionsDone",
+              "component": "run-driver",
+              "when": [
+                "and",
+                [
+                  "var",
+                  "placed"
+                ],
+                [
+                  "state",
+                  "writeUnasked"
+                ]
+              ]
+            },
+            {
+              "args": {},
+              "command": "CheckLayer1",
+              "component": "run-driver",
+              "when": [
+                "and",
+                [
+                  "var",
+                  "placed"
+                ],
+                [
+                  "state",
+                  "writeUnasked"
+                ],
+                [
+                  "<",
+                  [
+                    "state",
+                    "round"
+                  ],
+                  [
+                    "nonNull",
+                    [
+                      "state",
+                      "roundLimit"
+                    ]
+                  ]
+                ]
+              ]
+            },
+            {
+              "args": {
+                "reason": [
+                  "lit",
+                  "rounds"
+                ]
+              },
+              "command": "Finish",
+              "component": "run-driver",
+              "when": [
+                "and",
+                [
+                  "var",
+                  "placed"
+                ],
+                [
+                  "state",
+                  "writeUnasked"
+                ],
+                [
+                  "not",
+                  [
+                    "<",
+                    [
+                      "state",
+                      "round"
+                    ],
+                    [
+                      "nonNull",
+                      [
+                        "state",
+                        "roundLimit"
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            },
+            {
+              "args": {},
+              "command": "ConfirmSupplements",
+              "component": "run-driver",
+              "when": [
+                "and",
+                [
+                  "var",
+                  "placed"
+                ],
+                [
+                  "not",
+                  [
+                    "state",
+                    "writeUnasked"
+                  ]
+                ]
+              ]
+            }
+          ],
+          "command": "SupplementsPlaced",
+          "guard": true
+        }
+      },
+      "init": {
+        "round": 0,
+        "roundLimit": null,
+        "splitAccepted": false,
+        "status": [
+          "lit",
+          "IDLE"
+        ],
+        "supplemented": false,
+        "writeUnasked": false
+      },
+      "properties": {
+        "roundsWithinLimit": {
+          "is": [
+            "always",
+            [
+              "or",
+              [
+                "=",
+                [
+                  "state",
+                  "roundLimit"
+                ],
+                null
+              ],
+              [
+                "<=",
+                [
+                  "state",
+                  "round"
+                ],
+                [
+                  "state",
+                  "roundLimit"
+                ]
+              ]
+            ]
+          ],
+          "kind": "invariant"
+        }
+      },
+      "relies": [
+        "run-driver"
+      ],
+      "state": {
+        "round": "int",
+        "roundLimit": {
+          "optional": "int"
+        },
+        "splitAccepted": "bool",
+        "status": {
+          "enum": [
+            "IDLE",
+            "CHECKING",
+            "CANDIDATES",
+            "PROPOSING",
+            "SPLIT_ASKED",
+            "INTERPRETING",
+            "QUESTIONS",
+            "QUESTION_ASKED",
+            "PLACING",
+            "CONFIRMING",
+            "ACCEPTING",
+            "APPLYING",
+            "DONE"
+          ]
+        },
+        "supplemented": "bool",
+        "writeUnasked": "bool"
+      }
+    }
+  },
+  "entries": {
+    "commands": [
+      "run-flow.Accepted",
+      "run-flow.Applied",
+      "run-flow.Candidate",
+      "run-flow.Interpreted",
+      "run-flow.Layer1Checked",
+      "run-flow.NoMoreCandidates",
+      "run-flow.NoMoreQuestions",
+      "run-flow.Proposed",
+      "run-flow.Question",
+      "run-flow.QuestionAnswered",
+      "run-flow.SplitAnswered",
+      "run-flow.Start",
+      "run-flow.SupplementsConfirmed",
+      "run-flow.SupplementsPlaced"
+    ],
+    "queries": []
+  },
+  "examples": {
+    "run-flow.aSplitInTheLastRound": {
+      "steps": [
+        {
+          "event": "run-flow.Start",
+          "params": {
+            "rounds": 1,
+            "yes": false
+          }
+        },
+        {
+          "event": "run-flow.Layer1Checked",
+          "params": {
+            "ok": true
+          }
+        },
+        {
+          "event": "run-flow.Candidate",
+          "params": {}
+        },
+        {
+          "event": "run-flow.Proposed",
+          "params": {
+            "outcome": "proposal"
+          }
+        },
+        {
+          "event": "run-flow.SplitAnswered",
+          "params": {
+            "answer": "accept"
+          }
+        },
+        {
+          "event": "run-flow.NoMoreCandidates",
+          "params": {}
+        }
+      ]
+    },
+    "run-flow.aSupplementWithNoPlace": {
+      "steps": [
+        {
+          "event": "run-flow.Start",
+          "params": {
+            "rounds": 2,
+            "yes": false
+          }
+        },
+        {
+          "event": "run-flow.Layer1Checked",
+          "params": {
+            "ok": true
+          }
+        },
+        {
+          "event": "run-flow.NoMoreCandidates",
+          "params": {}
+        },
+        {
+          "event": "run-flow.Interpreted",
+          "params": {
+            "outcome": "up-to-date"
+          }
+        },
+        {
+          "event": "run-flow.Question",
+          "params": {}
+        },
+        {
+          "event": "run-flow.QuestionAnswered",
+          "params": {
+            "answer": "supplement"
+          }
+        },
+        {
+          "event": "run-flow.NoMoreQuestions",
+          "params": {}
+        },
+        {
+          "event": "run-flow.SupplementsPlaced",
+          "params": {
+            "placed": false
+          }
+        }
+      ]
+    },
+    "run-flow.agentFailed": {
+      "steps": [
+        {
+          "event": "run-flow.Start",
+          "params": {
+            "rounds": 2,
+            "yes": false
+          }
+        },
+        {
+          "event": "run-flow.Layer1Checked",
+          "params": {
+            "ok": true
+          }
+        },
+        {
+          "event": "run-flow.NoMoreCandidates",
+          "params": {}
+        },
+        {
+          "event": "run-flow.Interpreted",
+          "params": {
+            "outcome": "up-to-date"
+          }
+        },
+        {
+          "event": "run-flow.NoMoreQuestions",
+          "params": {}
+        },
+        {
+          "event": "run-flow.Accepted",
+          "params": {
+            "ok": true
+          }
+        },
+        {
+          "event": "run-flow.Applied",
+          "params": {
+            "outcome": "agent-failed"
+          }
+        }
+      ]
+    },
+    "run-flow.notAccepted": {
+      "steps": [
+        {
+          "event": "run-flow.Start",
+          "params": {
+            "rounds": 2,
+            "yes": false
+          }
+        },
+        {
+          "event": "run-flow.Layer1Checked",
+          "params": {
+            "ok": true
+          }
+        },
+        {
+          "event": "run-flow.NoMoreCandidates",
+          "params": {}
+        },
+        {
+          "event": "run-flow.Interpreted",
+          "params": {
+            "outcome": "up-to-date"
+          }
+        },
+        {
+          "event": "run-flow.NoMoreQuestions",
+          "params": {}
+        },
+        {
+          "event": "run-flow.Accepted",
+          "params": {
+            "ok": false
+          }
+        }
+      ]
+    },
+    "run-flow.notVerified": {
+      "steps": [
+        {
+          "event": "run-flow.Start",
+          "params": {
+            "rounds": 2,
+            "yes": false
+          }
+        },
+        {
+          "event": "run-flow.Layer1Checked",
+          "params": {
+            "ok": true
+          }
+        },
+        {
+          "event": "run-flow.NoMoreCandidates",
+          "params": {}
+        },
+        {
+          "event": "run-flow.Interpreted",
+          "params": {
+            "outcome": "up-to-date"
+          }
+        },
+        {
+          "event": "run-flow.NoMoreQuestions",
+          "params": {}
+        },
+        {
+          "event": "run-flow.Accepted",
+          "params": {
+            "ok": true
+          }
+        },
+        {
+          "event": "run-flow.Applied",
+          "params": {
+            "outcome": "fail"
+          }
+        }
+      ]
+    },
+    "run-flow.specError": {
+      "steps": [
+        {
+          "event": "run-flow.Start",
+          "params": {
+            "rounds": 2,
+            "yes": false
+          }
+        },
+        {
+          "event": "run-flow.Layer1Checked",
+          "params": {
+            "ok": true
+          }
+        },
+        {
+          "event": "run-flow.NoMoreCandidates",
+          "params": {}
+        },
+        {
+          "event": "run-flow.Interpreted",
+          "params": {
+            "outcome": "up-to-date"
+          }
+        },
+        {
+          "event": "run-flow.NoMoreQuestions",
+          "params": {}
+        },
+        {
+          "event": "run-flow.Accepted",
+          "params": {
+            "ok": true
+          }
+        },
+        {
+          "event": "run-flow.Applied",
+          "params": {
+            "outcome": "spec-error"
+          }
+        }
+      ]
+    },
+    "run-flow.theLastRoundIsConfirmed": {
+      "steps": [
+        {
+          "event": "run-flow.Start",
+          "params": {
+            "rounds": 1,
+            "yes": false
+          }
+        },
+        {
+          "event": "run-flow.Layer1Checked",
+          "params": {
+            "ok": true
+          }
+        },
+        {
+          "event": "run-flow.NoMoreCandidates",
+          "params": {}
+        },
+        {
+          "event": "run-flow.Interpreted",
+          "params": {
+            "outcome": "up-to-date"
+          }
+        },
+        {
+          "event": "run-flow.Question",
+          "params": {}
+        },
+        {
+          "event": "run-flow.QuestionAnswered",
+          "params": {
+            "answer": "supplement"
+          }
+        },
+        {
+          "event": "run-flow.NoMoreQuestions",
+          "params": {}
+        },
+        {
+          "event": "run-flow.SupplementsPlaced",
+          "params": {
+            "placed": true
+          }
+        },
+        {
+          "event": "run-flow.SupplementsConfirmed",
+          "params": {
+            "yes": true
+          }
+        }
+      ]
+    },
+    "run-flow.theLastRoundWritesUnasked": {
+      "steps": [
+        {
+          "event": "run-flow.Start",
+          "params": {
+            "rounds": 1,
+            "yes": true
+          }
+        },
+        {
+          "event": "run-flow.Layer1Checked",
+          "params": {
+            "ok": true
+          }
+        },
+        {
+          "event": "run-flow.NoMoreCandidates",
+          "params": {}
+        },
+        {
+          "event": "run-flow.Interpreted",
+          "params": {
+            "outcome": "up-to-date"
+          }
+        },
+        {
+          "event": "run-flow.Question",
+          "params": {}
+        },
+        {
+          "event": "run-flow.QuestionAnswered",
+          "params": {
+            "answer": "supplement"
+          }
+        },
+        {
+          "event": "run-flow.NoMoreQuestions",
+          "params": {}
+        },
+        {
+          "event": "run-flow.SupplementsPlaced",
+          "params": {
+            "placed": true
+          }
+        }
+      ]
+    },
+    "run-flow.thePersonRefusesTheChange": {
+      "steps": [
+        {
+          "event": "run-flow.Start",
+          "params": {
+            "rounds": 2,
+            "yes": false
+          }
+        },
+        {
+          "event": "run-flow.Layer1Checked",
+          "params": {
+            "ok": true
+          }
+        },
+        {
+          "event": "run-flow.NoMoreCandidates",
+          "params": {}
+        },
+        {
+          "event": "run-flow.Interpreted",
+          "params": {
+            "outcome": "up-to-date"
+          }
+        },
+        {
+          "event": "run-flow.Question",
+          "params": {}
+        },
+        {
+          "event": "run-flow.QuestionAnswered",
+          "params": {
+            "answer": "supplement"
+          }
+        },
+        {
+          "event": "run-flow.NoMoreQuestions",
+          "params": {}
+        },
+        {
+          "event": "run-flow.SupplementsPlaced",
+          "params": {
+            "placed": true
+          }
+        },
+        {
+          "event": "run-flow.SupplementsConfirmed",
+          "params": {
+            "yes": false
+          }
+        }
+      ]
+    },
+    "run-flow.thePersonStopsAtAQuestion": {
+      "steps": [
+        {
+          "event": "run-flow.Start",
+          "params": {
+            "rounds": 2,
+            "yes": false
+          }
+        },
+        {
+          "event": "run-flow.Layer1Checked",
+          "params": {
+            "ok": true
+          }
+        },
+        {
+          "event": "run-flow.NoMoreCandidates",
+          "params": {}
+        },
+        {
+          "event": "run-flow.Interpreted",
+          "params": {
+            "outcome": "up-to-date"
+          }
+        },
+        {
+          "event": "run-flow.Question",
+          "params": {}
+        },
+        {
+          "event": "run-flow.QuestionAnswered",
+          "params": {
+            "answer": "stop"
+          }
+        }
+      ]
+    },
+    "run-flow.thePersonStopsAtASplit": {
+      "steps": [
+        {
+          "event": "run-flow.Start",
+          "params": {
+            "rounds": 2,
+            "yes": false
+          }
+        },
+        {
+          "event": "run-flow.Layer1Checked",
+          "params": {
+            "ok": true
+          }
+        },
+        {
+          "event": "run-flow.Candidate",
+          "params": {}
+        },
+        {
+          "event": "run-flow.Proposed",
+          "params": {
+            "outcome": "proposal"
+          }
+        },
+        {
+          "event": "run-flow.SplitAnswered",
+          "params": {
+            "answer": "stop"
+          }
+        }
+      ]
+    },
+    "run-flow.verified": {
+      "steps": [
+        {
+          "event": "run-flow.Start",
+          "params": {
+            "rounds": 2,
+            "yes": false
+          }
+        },
+        {
+          "event": "run-flow.Layer1Checked",
+          "params": {
+            "ok": true
+          }
+        },
+        {
+          "event": "run-flow.NoMoreCandidates",
+          "params": {}
+        },
+        {
+          "event": "run-flow.Interpreted",
+          "params": {
+            "outcome": "up-to-date"
+          }
+        },
+        {
+          "event": "run-flow.NoMoreQuestions",
+          "params": {}
+        },
+        {
+          "event": "run-flow.Accepted",
+          "params": {
+            "ok": true
+          }
+        },
+        {
+          "event": "run-flow.Applied",
+          "params": {
+            "outcome": "pass"
+          }
+        }
+      ]
+    }
+  },
+  "irVersion": 8,
+  "notes": {
+    "run-driver": "The driver: it does what the flow asks for, and answers with a command.",
+    "run-flow": "Decides how `clp run` proceeds, from the specs to verified code: what to do next, where an answer leads, and how the run ends. Each round reads Layer 1, offers the splits, interprets, and asks the open questions; a round that changed Layer 1 is followed by another, and a round with nothing left to change accepts, applies and ends.",
+    "run-flow.does.accepted": "If not everything was accepted, the run finishes with not-accepted. Otherwise the code is brought into agreement.",
+    "run-flow.does.applied": "The run finishes: pass with passed, fail with not-verified, agent-failed with apply-agent, spec-error with spec.",
+    "run-flow.does.candidate": "A candidate: an agent is asked how to split it.",
+    "run-flow.does.interpreted": "If a file was interpreted, the next is. When everything is up to date, the questions are read and the next question is asked for. If interpreting failed, the run finishes with interpret-failed; if the agent failed, with interpret-agent.",
+    "run-flow.does.layer1Checked": "If Layer 1 does not read, the run finishes with layer1. Otherwise the next candidate is asked for.",
+    "run-flow.does.noMoreCandidates": "If a split was accepted in this round, Layer 1 changed: the next round starts (as in Start). Otherwise interpreting starts, and the first file is interpreted.",
+    "run-flow.does.noMoreQuestions": "If a question was supplemented, the supplements are placed. Otherwise the questions are done, and the interpretations are accepted.",
+    "run-flow.does.proposed": "With no proposal, the next candidate is asked for. With a proposal, the person is asked. If the agent failed, the run finishes with split-agent.",
+    "run-flow.does.question": "A question: the person is asked.",
+    "run-flow.does.questionAnswered": "On stop, the run finishes with person. On accept, the reading is marked as reviewed; on supplement, that a question was supplemented is remembered for this round. Either way the next question is asked for.",
+    "run-flow.does.splitAnswered": "On stop, the run finishes with person. On accept, the split is written and remembered for this round; on decline, the refusal is recorded. Either way the next candidate is asked for.",
+    "run-flow.does.start": "A run starts with the most rounds it may take, and whether supplements are written without asking. The first round starts: if a round would go past the limit, the run finishes with rounds; otherwise its supplement and split marks are cleared and Layer 1 is checked.",
+    "run-flow.does.supplementsConfirmed": "If the person refuses, the run finishes with not-written. Otherwise the supplements are written, the questions are done, and the next round starts (as in Start).",
+    "run-flow.does.supplementsPlaced": "If some supplement has no place, the run finishes with unplaced. If supplements are written unasked, they are written, the questions are done, and the next round starts (as in Start). Otherwise the person is asked to confirm.",
+    "run-flow.examples.aSplitInTheLastRound": "A split accepted in the last round: the run ends for lack of rounds.",
+    "run-flow.examples.aSupplementWithNoPlace": "A supplement with no sentence to go to ends the run.",
+    "run-flow.examples.agentFailed": "The agent fails while applying.",
+    "run-flow.examples.notAccepted": "The interpretations cannot be accepted.",
+    "run-flow.examples.notVerified": "The code does not pass.",
+    "run-flow.examples.specError": "The specification is wrong.",
+    "run-flow.examples.theLastRoundIsConfirmed": "Confirmed in the last round: the run ends for lack of rounds.",
+    "run-flow.examples.theLastRoundWritesUnasked": "Written unasked in the last round: the run ends for lack of rounds.",
+    "run-flow.examples.thePersonRefusesTheChange": "The person refuses the change to Layer 1.",
+    "run-flow.examples.thePersonStopsAtAQuestion": "The person stops at a question.",
+    "run-flow.examples.thePersonStopsAtASplit": "The person stops at a proposed split.",
+    "run-flow.examples.verified": "The code passes."
+  },
+  "root": "run-flow",
+  "sorts": [],
+  "trace": {
+    "run-flow.does.accepted": [
+      "RunFlow.commands.Accepted"
+    ],
+    "run-flow.does.applied": [
+      "RunFlow.commands.Applied"
+    ],
+    "run-flow.does.candidate": [
+      "RunFlow.commands.Candidate"
+    ],
+    "run-flow.does.interpreted": [
+      "RunFlow.commands.Interpreted"
+    ],
+    "run-flow.does.layer1Checked": [
+      "RunFlow.commands.Layer1Checked"
+    ],
+    "run-flow.does.noMoreCandidates": [
+      "RunFlow.commands.NoMoreCandidates"
+    ],
+    "run-flow.does.noMoreQuestions": [
+      "RunFlow.commands.NoMoreQuestions"
+    ],
+    "run-flow.does.proposed": [
+      "RunFlow.commands.Proposed"
+    ],
+    "run-flow.does.question": [
+      "RunFlow.commands.Question"
+    ],
+    "run-flow.does.questionAnswered": [
+      "RunFlow.commands.QuestionAnswered"
+    ],
+    "run-flow.does.splitAnswered": [
+      "RunFlow.commands.SplitAnswered"
+    ],
+    "run-flow.does.start": [
+      "RunFlow.commands.Start"
+    ],
+    "run-flow.does.supplementsConfirmed": [
+      "RunFlow.commands.SupplementsConfirmed"
+    ],
+    "run-flow.does.supplementsPlaced": [
+      "RunFlow.commands.SupplementsPlaced"
+    ]
+  }
+}
