@@ -15,7 +15,7 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { availableParallelism, homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ComponentIr, Expr, Ir8, TraceStep, Type } from "./ir.ts";
 import { entriesOf, entryName } from "./pbt.ts";
@@ -1269,23 +1269,70 @@ export function javaAvailable(): boolean {
   return spawnSync("java", ["-version"], { encoding: "utf8" }).status === 0;
 }
 
-function runAlloy(text: string): { receipt?: { commands: Record<string, { solution?: { instances: unknown[] }[]; type: string }> }; output: string } {
+type Receipt = { commands: Record<string, { solution?: { instances: unknown[] }[]; type: string }> };
+
+const QUESTIONS_PER_PROCESS = 8;
+/**
+ * How many Alloy processes run at once, at most: `--alloy-jobs` (which sets `CLP_ALLOY_JOBS`, so processes `clp` starts
+ * get it too), `CLP_ALLOY_JOBS`, or half the processors. Only how fast: the answers are the same for any number.
+ */
+const alloyJobs = () => Math.max(1, Number(process.env.CLP_ALLOY_JOBS) || Math.floor(availableParallelism() / 2));
+
+/** The option of the commands that run Alloy. */
+export const ALLOY_JOBS_USAGE = `  --alloy-jobs <n>     Alloy の問いを同時に流すプロセスの数の上限（既定: CPU の数 ÷ 2。環境変数 CLP_ALLOY_JOBS でも指定できる。
+                       1 なら並列にしない。結果は変わらず、速さだけが変わる）`;
+/** `--alloy-jobs`: kept in the environment, for this process and the ones it starts. */
+export function useAlloyJobs(value: string | undefined): void {
+  if (value === undefined) return;
+  if (!/^[1-9]\d*$/.test(value)) throw new Error(`--alloy-jobs は 1 以上の整数です (${value})`);
+  process.env.CLP_ALLOY_JOBS = value;
+}
+
+/**
+ * Runs a module. Its questions (the `check` / `run` lines at its end) are independent of each other, so they are split
+ * into groups, each with the whole module before them, and the groups run in separate processes at the same time; the
+ * answers are put back together by the questions' names.
+ */
+function runAlloy(text: string): { receipt?: Receipt; output: string } {
+  const lines = text.trimEnd().split("\n");
+  const first = lines.findIndex((line) => /^(check|run) /.test(line));
+  const header = first < 0 ? lines : lines.slice(0, first);
+  const questions = first < 0 ? [] : lines.slice(first);
+  // each process reads and translates the whole module again: a group is worth it only with several questions in it
+  const groups = Math.min(alloyJobs(), Math.max(1, Math.ceil(questions.length / QUESTIONS_PER_PROCESS)));
+  const texts = Array.from({ length: groups }, (_, g) => [...header, ...questions.filter((_, i) => i % groups === g)].join("\n") + "\n");
   const dir = mkdtempSync(join(tmpdir(), "clp-alloy-"));
   try {
-    writeFileSync(join(dir, "spec.als"), text);
+    const files = texts.map((t, g) => {
+      const file = join(dir, `spec-${g}.als`);
+      writeFileSync(file, t);
+      return file;
+    });
+    const java = (file: string, solver: string[]) => ["-Djava.awt.headless=true", "-jar", alloyJar(), "exec", "-f", "-q", "-t", "json", "-o", `${file}.out`, "-n", ...solver, file];
     // a native solver when the platform has one (several times faster), SAT4J otherwise
-    const exec = (solver: string[]) =>
-      spawnSync("java", ["-Djava.awt.headless=true", "-jar", alloyJar(), "exec", "-f", "-q", "-t", "json", "-o", join(dir, "out"), "-n", ...solver, join(dir, "spec.als")], { encoding: "utf8", timeout: 1_800_000 });
-    let run = exec(["-s", "glucose"]);
-    const receipt = join(dir, "out", "receipt.json");
-    if (!existsSync(receipt) && /solver|glucose|UnsatisfiedLink/i.test(`${run.stdout}${run.stderr}`)) run = exec([]);
-    if (!existsSync(receipt)) {
-      const output = `${run.stdout ?? ""}${run.stderr ?? ""}${run.error?.message ?? ""}`;
-      // the message, without the stack trace
-      const message = output.split("\n").filter((line) => !/^\s*at |WARNING|Picked up/.test(line)).join("\n").trim();
-      return { output: message.replaceAll(join(dir, "spec.als"), "spec.als") };
+    if (files.length === 1) spawnSync("java", java(files[0], ["-s", "glucose"]), { encoding: "utf8", timeout: 1_800_000, stdio: ["ignore", "ignore", "pipe"] });
+    else {
+      const quoted = (x: string) => `'${x.replaceAll("'", `'\\''`)}'`;
+      const script = files.map((f) => `java ${java(f, ["-s", "glucose"]).map(quoted).join(" ")} > ${quoted(`${f}.log`)} 2>&1 &`).join("\n") + "\nwait\n";
+      spawnSync("sh", ["-c", script], { encoding: "utf8", timeout: 1_800_000 });
     }
-    return { receipt: JSON.parse(readFileSync(receipt, "utf8")), output: run.stdout ?? "" };
+    const commands: Receipt["commands"] = {};
+    let output = "";
+    for (const file of files) {
+      const receipt = join(`${file}.out`, "receipt.json");
+      let run: { stdout?: string; stderr?: string; error?: Error } = { stdout: existsSync(`${file}.log`) ? readFileSync(`${file}.log`, "utf8") : "" };
+      // no native solver here: SAT4J
+      if (!existsSync(receipt)) run = spawnSync("java", java(file, []), { encoding: "utf8", timeout: 1_800_000 });
+      if (!existsSync(receipt)) {
+        const all = `${run.stdout ?? ""}${run.stderr ?? ""}${run.error?.message ?? ""}`;
+        // the message, without the stack trace
+        const message = all.split("\n").filter((line) => !/^\s*at |WARNING|Picked up/.test(line)).join("\n").trim();
+        return { output: message.replaceAll(file, "spec.als") };
+      }
+      Object.assign(commands, (JSON.parse(readFileSync(receipt, "utf8")) as Receipt).commands);
+      output += run.stdout ?? "";
+    }
+    return { receipt: { commands }, output };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

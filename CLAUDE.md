@@ -106,14 +106,15 @@ pnpm clp __agreement --specs packages/cli/self/specs --component gate-rules [--d
 
 `clp apply` options: `--out` (or `--src` / `--tests`; `--tests` ending in `.` makes its last part a file-name prefix),
 `--component`, `--fresh`, `--from <phase>`, `--stop-after design`, `--max-attempts`, `--transcripts <dir>`,
-`--asset [<phases>=]<file>`, `--drafts` (unreviewed drafts as the oracle: logged, recorded as `oracle: "draft"`, no
+`--asset [<phases>=]<file>`, `--alloy-jobs <n>`, `--drafts` (unreviewed drafts as the oracle: logged, recorded as `oracle: "draft"`, no
 pass record), `--mutation auto|builtin|off`, `--static-check auto|tsc|off`, `--target typescript`, `--runs`,
 `--agent-timeout <seconds>` (default 600).
 
 Dependencies: `typescript` (in `@clp/cli`, plus `@types/node` at the root) and `fast-check`; `packages/core` has none.
 Java is needed for the Alloy checker (`CLP_ALLOY_JAR`, or the jar is downloaded to `~/.cache/clp/` on first use and
 checked against the pinned sha256 in `v1/alloy.ts`; results are cached in `~/.cache/clp/alloy-results/`, keyed by the
-module written; `CLP_ALLOY=off` disables it).
+module written; `CLP_ALLOY=off` disables it). Alloy's questions run in parallel processes: `--alloy-jobs <n>` on the commands
+that run Alloy, or `CLP_ALLOY_JOBS`; by default half the processors; the answers are the same for any number.
 
 ## Vocabulary
 

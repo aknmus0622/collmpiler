@@ -4,6 +4,7 @@ import { readAssets } from "../assets.ts";
 import { run } from "../run.ts";
 import type { Answer, ConfirmEvent, QuestionEvent, RunEvent, RunResult, Talk } from "../run.ts";
 import { commandStrategy } from "../strategy.ts";
+import { ALLOY_JOBS_USAGE, useAlloyJobs } from "../v1/alloy.ts";
 
 export const summary = "検査から検証までを1回で進める（疑問点には、その場で答える）";
 export const usage = `clp run (--out <dir> | --src <dir> --tests <dir>) --agent "<command>" [--json] [--yes] [options]
@@ -29,6 +30,7 @@ export const usage = `clp run (--out <dir> | --src <dir> --tests <dir>) --agent 
   --asset <file>       依頼に添付する資料。何度でも指定できる
   --transcripts <dir>  エージェントの出力を、試行ごとに保存する
   --agent-timeout <秒> エージェントの1回のセッションの制限時間（既定: 600）
+${ALLOY_JOBS_USAGE}
 
   終了コード: 0 = 検証に通った、1 = 失敗した、3 = 人の手が要るので止まった`;
 
@@ -123,8 +125,10 @@ export async function main(args: string[]): Promise<void> {
       asset: { type: "string", multiple: true },
       transcripts: { type: "string" },
       "agent-timeout": { type: "string" },
+      "alloy-jobs": { type: "string" },
     },
   });
+  useAlloyJobs(values["alloy-jobs"]);
   if (!values.agent) {
     console.error(`エージェントを指定してください (--agent)\n\n${usage}`);
     process.exit(2);

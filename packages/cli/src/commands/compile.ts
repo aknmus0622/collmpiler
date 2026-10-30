@@ -6,6 +6,7 @@ import { checkSpec, prepare } from "../v1/prepare.ts";
 import { stableStringify } from "../generate.ts";
 import { problemText } from "../v1/read.ts";
 import type { Program } from "../v1/read.ts";
+import { ALLOY_JOBS_USAGE, useAlloyJobs } from "../v1/alloy.ts";
 
 /** The files of the named components (Layer 1 and interpretation, drafts included), and what they import relatively. */
 function filesOf(program: Program, names: string[]): Set<string> {
@@ -74,9 +75,11 @@ export const usage = `clp compile [<specs-dir>] [--component <name>] [--drafts]
 
   <specs-dir>          仕様のディレクトリ（既定: specs）
   --component <name>   1つのコンポーネントだけを対象にする（ほかのコンポーネントの解釈にある型エラーは報告しない）
-  --drafts             解釈の下書き (*.draft.ts) を、確定版の代わりに読む`;
+  --drafts             解釈の下書き (*.draft.ts) を、確定版の代わりに読む
+${ALLOY_JOBS_USAGE}`;
 
 export async function main(args: string[]): Promise<void> {
-  const { values, positionals } = parseArgs({ args, options: { drafts: { type: "boolean", default: false }, component: { type: "string" } }, allowPositionals: true });
+  const { values, positionals } = parseArgs({ args, options: { drafts: { type: "boolean", default: false }, component: { type: "string" }, "alloy-jobs": { type: "string" } }, allowPositionals: true });
+  useAlloyJobs(values["alloy-jobs"]);
   await compileSpecs(resolve(process.cwd(), positionals[0] ?? "specs"), values);
 }

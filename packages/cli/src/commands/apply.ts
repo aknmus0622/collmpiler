@@ -8,6 +8,7 @@ import type { Phase } from "../request.ts";
 import { commandStrategy } from "../strategy.ts";
 import type { ImplementationStrategy } from "../strategy.ts";
 import { selectTarget } from "../target-typescript.ts";
+import { ALLOY_JOBS_USAGE, useAlloyJobs } from "../v1/alloy.ts";
 
 export const summary = "仕様・本番コード・アダプターを一致させる（エージェントに書かせ、検証する）";
 export const usage = `clp apply (--out <dir> | --src <dir> --tests <dir | path-prefix.>) [--agent "<command>"] [options]
@@ -40,7 +41,8 @@ export const usage = `clp apply (--out <dir> | --src <dir> --tests <dir | path-p
   --target typescript  対象言語（いまは typescript だけ）
   --transcripts <dir>  エージェントの出力を、試行ごとに保存する
   --agent-timeout <秒> エージェントの1回のセッションの制限時間（既定: 600）
-  --keep-sandbox       作業場所を消さずに残す（調査用）`;
+  --keep-sandbox       作業場所を消さずに残す（調査用）
+${ALLOY_JOBS_USAGE}`;
 
 // エージェントの指定が無いとき: エージェントが要る場面で、何が要るかを伝えて止まる
 const noAgent: ImplementationStrategy = {
@@ -76,8 +78,10 @@ const { values } = parseArgs({
     "static-check": { type: "string", default: "auto" },
     // 対象言語（本番システムを書く言語）。いまは typescript だけ
     target: { type: "string", default: "typescript" },
+    "alloy-jobs": { type: "string" },
   },
 });
+useAlloyJobs(values["alloy-jobs"]);
 if (values.from !== undefined && !PHASES.includes(values.from as Phase)) {
   console.error(`--from は ${PHASES.join(" / ")} のいずれかです`);
   process.exit(2);

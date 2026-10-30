@@ -3,6 +3,7 @@ import { readAssets } from "../assets.ts";
 import { commandStrategy } from "../strategy.ts";
 import { accept8, interpret8 } from "../v1/interpret.ts";
 import { describeDifference8 } from "../v1/compare.ts";
+import { ALLOY_JOBS_USAGE, useAlloyJobs } from "../v1/alloy.ts";
 
 export const summary = "解釈 (Layer 2) を LLM に導かせる。--accept で確定する";
 export const usage = `clp interpret --agent "<command>" [--specs <dir>] [--component <name>] [--sessions <n>] [options]
@@ -22,7 +23,8 @@ clp interpret --accept [--specs <dir>] [--component <name>]
   --max-attempts <n>   検査に落ちたときに書き直させる回数の上限（既定: 3）
   --asset <file>       依頼に添付する資料（用語集など）。何度でも指定できる
   --transcripts <dir>  エージェントの出力を、試行ごとに保存する
-  --agent-timeout <秒> エージェントの1回のセッションの制限時間（既定: 600）`;
+  --agent-timeout <秒> エージェントの1回のセッションの制限時間（既定: 600）
+${ALLOY_JOBS_USAGE}`;
 
 export async function main(args: string[]): Promise<void> {
 const { values } = parseArgs({
@@ -40,8 +42,10 @@ const { values } = parseArgs({
     transcripts: { type: "string" },
     "agent-timeout": { type: "string" },
     asset: { type: "string", multiple: true },
+    "alloy-jobs": { type: "string" },
   },
 });
+useAlloyJobs(values["alloy-jobs"]);
 
 if (values.accept) {
   const { accepted, problems } = await accept8({ specs: values.specs, component: values.component });

@@ -7,7 +7,9 @@ described here, §17.18 for what the implementation decided); the layers and the
 A spec is TypeScript that is **read, never run**: `clp` parses it (a subset of TypeScript, see below), type-checks it
 with `tsc`, and turns it into a formal model (the IR, version 8). Expressions in it are the specification itself:
 the expected behaviour during verification is computed by evaluating them, and they are checked with Alloy before
-any agent runs.
+any agent runs. Alloy needs Java; its questions run in parallel processes (`--alloy-jobs <n>` on `compile`, `interpret`,
+`apply`, `run` and `verify`, or `CLP_ALLOY_JOBS`; by default half the processors). The number changes only how fast the
+check is, never its answers.
 
 ## Files
 
@@ -233,5 +235,5 @@ Every diagnostic is `severity[code] where: message`. The common ones:
 | `spec-check` | running the spec alone failed (a property broken, a missing map key, no case applies); with the steps |
 | `unobservable-value` | a constant whose change shows nowhere: an unused column, a filler, an unreachable threshold |
 | `bad-failure`, `bad-promise` | `failed` on a query that cannot fail; a promise that cannot hold |
-| warning `out-of-range` | Alloy cannot check this component (numbers too large, lists, JSON ...); PBT still does |
+| warning `out-of-range` | Alloy cannot check (part of) this component (numbers it computes with that do not fit, operations it cannot write); PBT still does |
 | warning `unused` | an outside-world port nobody uses |

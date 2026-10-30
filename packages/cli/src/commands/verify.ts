@@ -5,6 +5,7 @@ import { parseArgs } from "node:util";
 import { resolveLayout, workspaceOf } from "../layout.ts";
 import { selectTarget } from "../target-typescript.ts";
 import { loadProgram } from "../v1/load.ts";
+import { ALLOY_JOBS_USAGE, useAlloyJobs } from "../v1/alloy.ts";
 
 export const summary = "すでにある本番コードを、仕様に照らして検証する (PBT)";
 export const usage = `clp verify (--out <dir> | --src <dir> --tests <dir | path-prefix.>) [--specs <dir>] [--component <name>] [options]
@@ -19,7 +20,8 @@ export const usage = `clp verify (--out <dir> | --src <dir> --tests <dir | path-
   --path <p>           反例への経路。不一致を再現するときに、報告された値を指定する
   --runs <n>           試行の回数（既定: 5000）
   --drafts             人が確定していない解釈の下書きを、正解として使う
-  --target typescript  対象言語（いまは typescript だけ）`;
+  --target typescript  対象言語（いまは typescript だけ）
+${ALLOY_JOBS_USAGE}`;
 
 export async function main(args: string[]): Promise<void> {
   const { values } = parseArgs({
@@ -35,8 +37,10 @@ export async function main(args: string[]): Promise<void> {
       runs: { type: "string" },
       drafts: { type: "boolean", default: false },
       target: { type: "string", default: "typescript" },
+      "alloy-jobs": { type: "string" },
     },
   });
+  useAlloyJobs(values["alloy-jobs"]);
   if (!values.out && !(values.src && values.tests)) {
     console.error(`出力先を指定してください (--out、または --src と --tests)\n\n${usage}`);
     process.exit(2);
