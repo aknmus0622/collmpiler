@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { ALLOY_SHA256, alloyJar, checkWithAlloy, emitAlloy, isPinnedJar, javaAvailable } from "../src/v1/alloy.ts";
+import { ALLOY_SHA256, alloyJar, atomsNeeded, checkWithAlloy, emitAlloy, isPinnedJar, javaAvailable } from "../src/v1/alloy.ts";
 import { checkEmbedding, intsOf, relevanceOf } from "../src/v1/abstraction.ts";
 import type { Relevance } from "../src/v1/abstraction.ts";
 import { compile, loadProgram } from "../src/v1/load.ts";
@@ -90,6 +90,13 @@ test("Alloy に渡すもの: 答えと外の世界にしか流れない計算は
   assert.match(text, /var f_order_price: one s_num0/);
   assert.match(text, /fun next_num0: s_num0 -> s_num0/);
   assert.doesNotMatch(text, /10000|1000000/);
+});
+
+test("Alloy の原子の数: 一度に比べうる値の数 (1つの入力の引数 + 問いが量化する変数 + 1) が範囲より多ければ、その種類だけ増やす", () => {
+  // text-plan の問い合わせ Notes は文字列を 4 つ取る: 文字列の原子は 5 個要る (範囲の 3 より多い)
+  const { ir } = compile(join(repoRoot, "packages/cli/self/specs"), "text-plan");
+  const notes = emitAlloy(ir!).commands.find((c) => c.what.startsWith("text-plan.Notes"))!;
+  assert.equal(atomsNeeded(ir!, notes).Str, 5);
 });
 
 test("Alloy の jar: 固定したハッシュと違う jar は、その jar と分かる。CLP_ALLOY_JAR はそのまま使う (違えば警告)", () => {

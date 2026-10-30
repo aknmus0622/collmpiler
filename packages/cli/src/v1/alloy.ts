@@ -1142,8 +1142,40 @@ export function emitAlloy(spec: Ir8, analysis: Analysis = DEFAULT_ANALYSIS, keep
 }
 const SANE = "sane";
 // strings: the constants are atoms of their own, so the scope of strings is that many more
-const scopeOf = (info: CommandInfo, analysis: Analysis, bitwidth: number, atoms: number, maxSteps = analysis.traceSteps, constants = 0) =>
-  `for ${atoms} but ${bitwidth} Int, ${atoms + constants} Str, ${info.kind === "reach" ? `1..${maxSteps}` : analysis.steps} steps`;
+const scopeOf = (info: CommandInfo, analysis: Analysis, bitwidth: number, atoms: number, maxSteps = analysis.traceSteps, constants = 0, more: Record<string, number> = {}) =>
+  `for ${atoms} but ${bitwidth} Int, ${Math.max(atoms, more.Str ?? 0) + constants} Str, ${Object.entries(more)
+    .filter(([sig, n]) => sig !== "Str" && n > atoms)
+    .map(([sig, n]) => `${n} ${sig}, `)
+    .join("")}${info.kind === "reach" ? `1..${maxSteps}` : analysis.steps} steps`;
+
+/**
+ * How many atoms of each kind a question needs at least (data independence): values of a kind compared at once are at
+ * most the inputs of that kind one command takes, and the variables of that kind the question quantifies over; one more
+ * for a value that is none of them. More than the scope's atoms only makes the check stronger.
+ */
+export function atomsNeeded(ir: Ir8, info: CommandInfo): Record<string, number> {
+  const inputs = new Map<string, number>();
+  const kindOf = (t: Type): string | undefined =>
+    t === "string" ? "Str" : typeof t === "object" && "atom" in t ? sort(t.atom) : typeof t === "object" && "optional" in t ? kindOf(t.optional) : undefined;
+  for (const c of Object.values(ir.components)) {
+    for (const def of [...Object.values(c.commands ?? {}), ...Object.values(c.queries ?? {})]) {
+      const counts = new Map<string, number>();
+      for (const t of Object.values(flatParams(def.params))) {
+        const kind = kindOf(t);
+        if (kind) counts.set(kind, (counts.get(kind) ?? 0) + 1);
+      }
+      for (const [kind, n] of counts) inputs.set(kind, Math.max(inputs.get(kind) ?? 0, n));
+    }
+  }
+  const bound = new Map<string, number>();
+  for (const m of info.body.matchAll(/\b(?:all|some)\s+(?:disj\s+)?([\w\s,]+?):\s*(s_\w+|Str)\b/g)) {
+    if (/^s_num\d+$/.test(m[2])) continue;
+    bound.set(m[2], (bound.get(m[2]) ?? 0) + m[1].split(",").length);
+  }
+  const needed: Record<string, number> = {};
+  for (const kind of new Set([...inputs.keys(), ...bound.keys()])) needed[kind] = (inputs.get(kind) ?? 0) + (bound.get(kind) ?? 0) + 1;
+  return needed;
+}
 
 /** The cases of an answer: each branch of its `ite`s and each row of a decision table it reads, with the conditions that choose it. */
 type Case = { label?: string; path: ((cx: Ctx) => string)[] };
@@ -1549,7 +1581,7 @@ export function checkWithAlloy(ir: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): 
     return { commands };
   };
   const infos = [...plans.values()].map((p) => p.info);
-  const first = ask([...plans.keys()], (info) => scopeOf(info, analysis, full.bitwidth, analysis.atoms, analysis.traceSteps, full.constants));
+  const first = ask([...plans.keys()], (info) => scopeOf(info, analysis, full.bitwidth, analysis.atoms, analysis.traceSteps, full.constants, atomsNeeded(ir, info)));
   if ("error" in first) return { checker: alloy6.name, skipped: [...skipped, `Alloy を実行できませんでした: ${first.error.trim().slice(-800)}`], verdicts: [] };
   // a module without a single trace is the framework's mistake: none of its verdicts says anything
   if (headers.some((h) => !first.commands[saneOf(h)]?.solution?.length)) {
@@ -1559,7 +1591,7 @@ export function checkWithAlloy(ir: Ir8, analysis: Analysis = DEFAULT_ANALYSIS): 
   // events not reached in the small scope: searched for again, with more atoms and longer traces
   const missed = verdicts.filter((v) => v.kind === "reach" && v.status === "unreachable").map((v) => v.command);
   if (missed.length > 0) {
-    const wide = ask(missed, (info) => scopeOf(info, analysis, full.bitwidth, analysis.wideAtoms, analysis.maxTraceSteps, full.constants));
+    const wide = ask(missed, (info) => scopeOf(info, analysis, full.bitwidth, analysis.wideAtoms, analysis.maxTraceSteps, full.constants, atomsNeeded(ir, info)));
     if (!("error" in wide)) {
       const found = new Map(alloy6.read({ receipt: wide }, infos.filter((i) => missed.includes(i.name)), ir).map((v) => [v.command, v]));
       verdicts = verdicts.map((v) => found.get(v.command) ?? v);
