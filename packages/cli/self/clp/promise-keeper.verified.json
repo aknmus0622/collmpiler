@@ -4,7 +4,7 @@
     "promise-keeper.interpretation.ts"
   ],
   "specs": "sha256:4ac7910019c1a21c6b4a7969114bd78a798d23c47de5b747ec50f3083fb1365e",
-  "code": "sha256:2b1bcd9628db018016a49708c01b268636e3a850b3183a319120bd47d802053b",
+  "code": "sha256:b17a6fd2548ae0f79f237cd1397788d45fb6b6b1c17de117f32d5363396ebcb7",
   "files": [
     "../src/checker-verdict.ts",
     "../src/fill-check.ts",
@@ -19,6 +19,7 @@
     "../src/overlay-check.ts",
     "../src/pipeline.ts",
     "../src/promise-keeper.ts",
+    "../src/run-flow.ts",
     "../src/sentence-trace.ts",
     "../src/step-choice.ts",
     "../src/syntax-check.ts",

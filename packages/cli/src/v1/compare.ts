@@ -64,7 +64,7 @@ export async function compare8(first: Ir8, second: Ir8, params: { seed?: number;
   };
   const differences: Difference8[] = [];
   const names = new Simulation(first).entries.map((e) => entryName(first, e.qualified));
-  const ports = Object.entries(first.components).flatMap(([id, c]) => Object.keys(c.external?.commands ?? {}).map((p) => `effect:${id}.${p}`));
+  const ports = Object.entries(first.components).flatMap(([id, c]) => Object.keys(c.external?.commands ?? (c.sibling ? c.commands : undefined) ?? {}).map((p) => `effect:${id}.${p}`));
   for (const command of names) {
     for (const aspect of ["runs", "output", ...ports.sort(), "order"]) {
       const details = await fc.check(fc.property(sequences, (raw) => walk(raw, command, aspect) === undefined), { numRuns: 300, seed: params.seed ?? 1, ...(params.numRuns ? { numRuns: params.numRuns } : {}) });

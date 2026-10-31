@@ -45,6 +45,12 @@ export type ComponentIr = {
   /** Components inside this one (their state is this component's) and outside it (verified against their spec or their promise). */
   contains?: string[];
   relies?: string[];
+  /**
+   * A component placed beside this system (`components` of another component; DSL.md §17.3): to the production system it
+   * is the outside world, reached through ports, and its spec is the stand-in. Written whole, so that the spec, the
+   * checker and the stand-in run it; its commands are entries that only the stand-in sees.
+   */
+  sibling?: true;
   durable?: true;
   routes?: Record<string, string>;
   state?: Record<string, Type>;

@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import { posix, relative, sep } from "node:path";
 import type { Ir8, Type } from "./ir.ts";
 import { readOut } from "./ops.ts";
-import { entriesOf, entryName } from "./pbt.ts";
+import { entryName, systemEntriesOf } from "./pbt.ts";
 import { dirFrom, importPath, testsDirOf } from "../layout.ts";
 import type { Workspace } from "../layout.ts";
 
@@ -101,7 +101,7 @@ export function contractFacts8(ir: Ir8): { types: TypeFacts8[]; notes: NotesFact
     types.push(facts);
     return typeText8Stage0(facts);
   };
-  const entries = entriesOf(ir);
+  const entries = systemEntriesOf(ir);
   for (const e of entries) {
     walk({ record: e.params });
     if (e.output) walk(e.output);
@@ -114,11 +114,20 @@ export function contractFacts8(ir: Ir8): { types: TypeFacts8[]; notes: NotesFact
       notes.push({ promise: q.promise ?? "none", mayFail: q.mayFail === true });
     }
     for (const command of Object.values(c.external?.commands ?? {})) walk({ record: command.params });
+    if (!c.sibling) continue;
+    for (const q of Object.values(c.queries ?? {})) {
+      walk({ record: q.params });
+      walk(q.result);
+    }
+    for (const command of Object.values(c.commands ?? {})) {
+      walk({ record: command.params });
+      if (command.output) walk(command.output);
+    }
   }
   return { types, notes, sections: sectionFacts(ir) };
 }
 const sectionFacts = (ir: Ir8): SectionFacts8 => {
-  const entries = entriesOf(ir);
+  const entries = systemEntriesOf(ir);
   return {
     answering: entries.filter((e) => e.kind === "command" && e.output !== undefined).length,
     queries: entries.filter((e) => e.kind === "query").length,
@@ -131,7 +140,7 @@ const sectionFacts = (ir: Ir8): SectionFacts8 => {
 const usesJson = (ir: Ir8) => JSON.stringify(ir.components).includes('"json"');
 const fieldsOf = (params: Record<string, Type>) => typeText({ record: params }).replace("Record<string, never>", "{}");
 
-export const restarts8 = (ir: Ir8) => Object.values(ir.components).some((c) => c.durable);
+export const restarts8 = (ir: Ir8) => Object.values(ir.components).some((c) => c.durable && !c.sibling);
 
 export function contract8(ir: Ir8): string {
   plan = PLANS.get(specHash8(ir));
@@ -142,12 +151,12 @@ export function contract8(ir: Ir8): string {
   }
 }
 function writeContract8(ir: Ir8): string {
-  const entries = entriesOf(ir);
+  const entries = systemEntriesOf(ir);
   const sections = sectionsOf(sectionFacts(ir));
   const commands = entries.filter((e) => e.kind === "command");
   const queries = entries.filter((e) => e.kind === "query");
   const answering = commands.filter((e) => e.output !== undefined);
-  const outside = Object.entries(ir.components).filter(([, c]) => c.external).sort(([a], [b]) => (a < b ? -1 : 1));
+  const outside = Object.entries(ir.components).filter(([, c]) => c.external || c.sibling).sort(([a], [b]) => (a < b ? -1 : 1));
   const routes = sections.routes ? ir.components[ir.root].routes : undefined;
   const lines: string[] = [header(ir)];
   if (sections.sorts) {
@@ -194,12 +203,20 @@ ${Object.keys(routes).sort().map((name) => `  ${key(name)}: ${JSON.stringify(rou
   const portLines: string[] = [];
   for (const [id, c] of outside) {
     const members: string[] = [];
-    for (const [name, port] of Object.entries(c.external!.queries).sort(([a], [b]) => (a < b ? -1 : 1))) {
+    const byName = <T,>(of: Record<string, T> | undefined) => Object.entries(of ?? {}).sort(([a], [b]) => (a < b ? -1 : 1));
+    for (const [name, query] of byName(c.sibling ? c.queries : undefined)) {
+      const params = Object.keys(query.params).length ? `input: ${fieldsOf(query.params)}` : "";
+      members.push(`${key(name)}(${params}): ${typeText(query.result)};`);
+    }
+    for (const [name, command] of byName(c.sibling ? c.commands : undefined)) {
+      members.push(`${key(name)}(input: ${fieldsOf(command.params)}): ${command.output ? typeText(command.output) : "void"};`);
+    }
+    for (const [name, port] of Object.entries(c.external?.queries ?? {}).sort(([a], [b]) => (a < b ? -1 : 1))) {
       const notes = noteIds({ promise: port.promise ?? "none", mayFail: port.mayFail === true }).map((id) => NOTES8[id]);
       const params = Object.keys(port.params).length ? `input: ${fieldsOf(port.params)}` : "";
       members.push(`${notes.length ? `/** ${notes.join(" ")} */ ` : ""}${key(name)}(${params}): ${typeText(port.result)};`);
     }
-    for (const [name, command] of Object.entries(c.external!.commands).sort(([a], [b]) => (a < b ? -1 : 1))) {
+    for (const [name, command] of Object.entries(c.external?.commands ?? {}).sort(([a], [b]) => (a < b ? -1 : 1))) {
       members.push(`${key(name)}(input: ${fieldsOf(command.params)}): void;`);
     }
     portLines.push(`  ${key(id)}: {\n${members.map((m) => `    ${m}`).join("\n")}\n  };`);
@@ -312,6 +329,7 @@ export function specView(ir: Ir8, language: "ja" | "en" = "en"): string {
       out.push("");
       continue;
     }
+    if (c.sibling) out.push(t ? "Beside this system, not part of it: the system reaches it from outside and never implements it. What follows says how it behaves." : "このシステムの外に並ぶ部品。外から呼ぶだけで、実装しない。以下は、その振る舞い。");
     if (c.contains?.length) out.push(`${t ? "Contains" : "中に持つ部品"}: ${c.contains.join(", ")}`);
     if (c.relies?.length) out.push(`${t ? "Relies on" : "外のもの"}: ${c.relies.join(", ")}`);
     if (c.durable) out.push(t ? "What it keeps survives a restart." : "覚えていることは、再起動を越えて残る。");

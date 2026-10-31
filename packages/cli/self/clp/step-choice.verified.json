@@ -4,7 +4,7 @@
     "step-choice.interpretation.ts"
   ],
   "specs": "sha256:fd086ce037d286a16d3f3cc834da6251985730725b0f1c6e9ca588867f77d279",
-  "code": "sha256:28dbc1df6d3dd93c0a217ea224ef79dcf8d1f667b16dd0f70a12a38db4d19b8b",
+  "code": "sha256:fea191b333e759641b351916693f2caa1c10e79835f02cdca9e690cf62a8bb42",
   "files": [
     "../src/checker-verdict.ts",
     "../src/fill-check.ts",
@@ -19,6 +19,7 @@
     "../src/overlay-check.ts",
     "../src/pipeline.ts",
     "../src/promise-keeper.ts",
+    "../src/run-flow.ts",
     "../src/sentence-trace.ts",
     "../src/step-choice.ts",
     "../src/syntax-check.ts",

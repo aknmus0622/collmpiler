@@ -497,8 +497,10 @@ export function execute(ir: Ir8, world: World, component: string, command: strin
       if (decision === "skip") continue;
       if (decision === "twice") fail(`${call.component} が、1つのステップの中で2回呼ばれています`);
       const callArgs = argValues(call.args, env);
-      if (decision === "effect") effects.push({ port: `${call.component}.${call.command}`, args: callArgs });
-      else run(call.component, call.command, callArgs, false);
+      // what a component beside the system does is its own business: the system sees only that it called it
+      const seen = !c.sibling && (decision === "effect" || ir.components[call.component]?.sibling === true);
+      if (seen) effects.push({ port: `${call.component}.${call.command}`, args: callArgs });
+      if (decision !== "effect") run(call.component, call.command, callArgs, false);
     }
     return output;
   };

@@ -165,16 +165,18 @@ function defaultOf(type: Type, atoms: Atoms): unknown {
 
 // --- Steps ---
 
-type Entry = { qualified: string; component: string; name: string; kind: "command" | "query"; params: Record<string, Type>; output?: Type };
+type Entry = { qualified: string; component: string; name: string; kind: "command" | "query"; params: Record<string, Type>; output?: Type; standIn?: true };
 export function entriesOf(ir: Ir8): Entry[] {
   const make = (qualified: string, kind: "command" | "query"): Entry => {
     const [component, name] = qualified.split(".") as [string, string];
     const c = ir.components[component];
     const def = kind === "command" ? c.commands![name] : c.queries![name];
-    return { qualified, component, name, kind, params: def.params, output: kind === "command" ? (def as { output?: Type }).output : (def as { result: Type }).result };
+    return { qualified, component, name, kind, params: def.params, output: kind === "command" ? (def as { output?: Type }).output : (def as { result: Type }).result, ...(c.sibling ? { standIn: true as const } : {}) };
   };
   return [...ir.entries.commands.map((q) => make(q, "command")), ...ir.entries.queries.map((q) => make(q, "query"))];
 }
+/** The entries the production system has: a command of a component beside it moves only that component's stand-in. */
+export const systemEntriesOf = (ir: Ir8) => entriesOf(ir).filter((e) => !e.standIn);
 
 type OutsideQuery = { id: string; port: Port };
 export function outsideQueries(ir: Ir8): OutsideQuery[] {
@@ -182,7 +184,7 @@ export function outsideQueries(ir: Ir8): OutsideQuery[] {
     Object.entries(c.external?.queries ?? {}).map(([name, port]) => ({ id: `${component}.${name}`, port })),
   );
 }
-const restartsIn = (ir: Ir8) => Object.values(ir.components).some((c) => c.durable);
+const restartsIn = (ir: Ir8) => Object.values(ir.components).some((c) => c.durable && !c.sibling);
 
 export type RawStep = {
   entry: number;
@@ -380,11 +382,14 @@ export class Simulation {
     this.states = [this.world];
     this.coverage = coverage;
   }
+  get now(): World {
+    return this.world;
+  }
   /** A restart: what is durable stays, the rest starts again. The outside world remembers what it answered. */
   restart(): void {
     const initial = initialWorld(this.ir);
     const survives = (durable: boolean) => decided("promise-keeper", { kind: "survives", durable }, survivesRestartStage0(durable));
-    this.world = Object.fromEntries(Object.entries(this.world).map(([id, state]) => [id, survives(this.ir.components[id].durable === true) ? state : initial[id]]));
+    this.world = Object.fromEntries(Object.entries(this.world).map(([id, state]) => [id, survives(this.ir.components[id].durable === true || this.ir.components[id].sibling === true) ? state : initial[id]]));
     this.steps.push({ name: "(restart)", input: {}, answers: {}, events: [] });
   }
   /** One step. Undefined when the step is outside the spec (`requires` does not hold). A spec error is thrown, with the steps so far. */
@@ -438,9 +443,11 @@ export class Simulation {
     if (broken.length) throw Object.assign(new SpecError(`性質 ${broken.join(", ")} が成り立ちません`), { steps: this.steps });
     const expectedEffects = effects.map((e) => {
       const [component, port] = e.port.split(".");
-      return { port: e.port, args: normalized(e.args, { record: ir.components[component].external!.commands[port].params }) };
+      const c = ir.components[component];
+      return { port: e.port, args: normalized(e.args, { record: (c.external?.commands[port] ?? c.commands![port]).params }) };
     });
-    const expected: Observed8 = { state: null, effects: expectedEffects, ...(entry.output !== undefined ? { output: normalized(output, entry.output) } : {}) };
+    // a step of a stand-in: the production system takes no part in it, so nothing is seen
+    const expected: Observed8 = entry.standIn ? { state: null, effects: [] } : { state: null, effects: expectedEffects, ...(entry.output !== undefined ? { output: normalized(output, entry.output) } : {}) };
     return { entry, step, expected, answers };
   }
 }
@@ -496,6 +503,45 @@ export async function trial(ir: Ir8, raw: RawStep[], options: TrialOptions = {})
       },
     ]),
   );
+  // a component beside the system: its spec is the stand-in, with what happened so far in this step
+  let standIn: World = {};
+  const refused = (id: string, name: string, error: unknown) =>
+    error instanceof OutOfSpec || error instanceof SpecError ? new Error(`ports.${id}.${name}: ${messageOf(error)}`) : error;
+  for (const [id, c] of Object.entries(ir.components).filter(([, c]) => c.sibling)) {
+    ports[id] = {
+      ...Object.fromEntries(
+        Object.entries(c.queries ?? {}).map(([name, query]) => [
+          name,
+          (input?: Record<string, unknown>) => {
+            if (!current) throw new Error(`ports.${id}.${name}() was called outside a command; ask while executing one`);
+            const args = Object.fromEntries(Object.keys(query.params).map((p) => [p, fromPlain(input?.[p], query.params[p])]));
+            try {
+              return structuredClone(plain(answer(ir, standIn, id, name, args, current.answers)));
+            } catch (error) {
+              throw refused(id, name, error);
+            }
+          },
+        ]),
+      ),
+      ...Object.fromEntries(
+        Object.entries(c.commands ?? {}).map(([name, command]) => [
+          name,
+          (input?: Record<string, unknown>) => {
+            if (!current) throw new Error(`ports.${id}.${name}() was called outside a command; call it while executing one`);
+            const args = Object.fromEntries(Object.keys(command.params).map((p) => [p, fromPlain(input?.[p], command.params[p])]));
+            recorded.push({ port: `${id}.${name}`, args: normalized(input ?? {}, { record: command.params }) });
+            try {
+              const result = execute(ir, standIn, id, name, args, current.answers);
+              standIn = result.world;
+              return structuredClone(plain(result.output));
+            } catch (error) {
+              throw refused(id, name, error);
+            }
+          },
+        ]),
+      ),
+    };
+  }
   const storageDir = adapter && restartsIn(ir) ? mkdtempSync(join(tmpdir(), "clp-storage-")) : undefined;
   if (storageDir) ports.storage = join(storageDir, "data.sqlite");
   let expected: Observed8 = { state: null, effects: [] };
@@ -511,10 +557,11 @@ export async function trial(ir: Ir8, raw: RawStep[], options: TrialOptions = {})
             await adapter.restartSystem();
           }
         }
+        standIn = sim.now;
         const planned = sim.step(rawStep);
         if (!planned) continue;
         expected = planned.expected;
-        if (!adapter) continue;
+        if (!adapter || planned.entry.standIn) continue;
         const { entry, step } = planned;
         current = { answers: planned.answers, asked: planned.step.answers };
         recorded = [];

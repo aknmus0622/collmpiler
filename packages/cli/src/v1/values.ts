@@ -26,7 +26,7 @@ export function decisionValues8(ir: Ir8): DecisionValue[] {
     for (const calc of Object.values(component.calcs ?? {})) constant(calc.is);
     for (const event of Object.values(component.events ?? {})) {
       constant(event.output);
-      for (const call of event.calls) if (ir.components[call.component]?.external) constant(call.args);
+      for (const call of event.calls) if (ir.components[call.component]?.external || ir.components[call.component]?.sibling) constant(call.args);
     }
   }
   return [...values];

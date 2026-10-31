@@ -4,7 +4,7 @@
     "checker-verdict.interpretation.ts"
   ],
   "specs": "sha256:85ef0d45c3c96319826d6feeabdba9a23fc874e2b3f430ab55af4b04da0dda24",
-  "code": "sha256:ac52d992ca936b817cf9ecd7a01898803c559c01967588c1ac77df94ac208021",
+  "code": "sha256:718acd1cab71763299299dd89604446a2bc51bdcdaad6da552e5441f71dec445",
   "files": [
     "../src/checker-verdict.ts",
     "../src/fill-check.ts",
@@ -19,6 +19,7 @@
     "../src/overlay-check.ts",
     "../src/pipeline.ts",
     "../src/promise-keeper.ts",
+    "../src/run-flow.ts",
     "../src/sentence-trace.ts",
     "../src/step-choice.ts",
     "../src/syntax-check.ts",

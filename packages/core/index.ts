@@ -84,7 +84,7 @@ declare const STATE: unique symbol;
 type Ports<B> = (B extends { commands: infer C } ? { [K in keyof C]: C[K] extends Method ? (...args: Parameters<C[K]>) => ReturnType<C[K]> : (...args: any[]) => any } : {}) &
   (B extends { queries: infer Q } ? { [K in keyof Q]: Q[K] extends Method ? (...args: Parameters<Q[K]>) => ReturnType<Q[K]> : (...args: any[]) => any } : {});
 /** A component. A component written as prose has every port: what it has is not written yet. */
-export type Component<S = {}, B = {}> = { readonly [STATE]?: S } & Ports<B> & { readonly [port: string]: any; as(alias: string): Component<S, B> };
+export type Component<S = {}, B = {}> = { readonly [STATE]?: S } & Ports<B> & { readonly [port: string]: any };
 
 /** A component. `service("…")` is prose only; `service("…", { … })` has contents; `service({ … })` has no description. */
 export function service(text: string): Component;
@@ -102,7 +102,7 @@ type ExternalPorts<Q, C> = { [K in keyof Q]: Q[K] extends ExternalQuery ? ((...a
 export function external<const Q extends Record<string, ExternalQuery>, const C extends Record<string, Method> = {}>(
   text: string,
   ports: { queries?: Q; commands?: C },
-): ExternalPorts<Q, C> & { as(alias: string): ExternalPorts<Q, C> } {
+): ExternalPorts<Q, C> {
   void text;
   void ports;
   return marker("external");

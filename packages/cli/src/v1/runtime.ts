@@ -4,7 +4,7 @@
 import { parseArgs } from "node:util";
 import { compileChecked } from "./load.ts";
 import { deciders8 } from "./stage1.ts";
-import { check8, entriesOf } from "./pbt.ts";
+import { check8, systemEntriesOf } from "./pbt.ts";
 import type { Adapter8, PbtResult8 } from "./pbt.ts";
 import { specHash8 } from "./generate.ts";
 import type { Ir8 } from "./ir.ts";
@@ -17,10 +17,10 @@ export const defaultRuns8 = (ir: Ir8) => (ir.components[ir.root].routes || (ir.c
 
 /** What the production system's boundary is: entries, their inputs and answers, the outside world, routes, restarts. */
 export function boundary8(ir: Ir8): string {
-  const entries = entriesOf(ir).map((e) => ({ name: e.qualified, kind: e.kind, params: e.params, output: e.output ?? null }));
-  const outside = Object.fromEntries(Object.entries(ir.components).flatMap(([id, c]) => (c.external ? [[id, c.external]] : [])));
+  const entries = systemEntriesOf(ir).map((e) => ({ name: e.qualified, kind: e.kind, params: e.params, output: e.output ?? null }));
+  const outside = Object.fromEntries(Object.entries(ir.components).flatMap(([id, c]): [string, unknown][] => (c.external ? [[id, c.external]] : c.sibling ? [[id, { queries: c.queries, commands: c.commands }]] : [])));
   const root = ir.components[ir.root];
-  return JSON.stringify({ entries, outside, routes: root.routes ?? null, durable: Object.values(ir.components).some((c) => c.durable), sorts: ir.sorts });
+  return JSON.stringify({ entries, outside, routes: root.routes ?? null, durable: Object.values(ir.components).some((c) => c.durable && !c.sibling), sorts: ir.sorts });
 }
 
 export async function runPbt(options: { specs: string; adapter: Adapter8; component?: string; args?: string[] }): Promise<PbtResult8> {

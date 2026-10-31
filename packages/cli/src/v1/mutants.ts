@@ -72,7 +72,7 @@ export function sitesOf(ir: Ir8): Site[] {
     for (const [name, event] of Object.entries(c.events ?? {})) {
       if (event.output !== undefined) visit(`${id}.events.${name}.output`, (x) => x.components[id].events![name].output, (x, v) => (x.components[id].events![name].output = v as Expr));
       event.calls.forEach((call, i) => {
-        if (!ir.components[call.component]?.external) return;
+        if (!ir.components[call.component]?.external && !ir.components[call.component]?.sibling) return;
         for (const arg of Object.keys(call.args)) {
           visit(`${id}.events.${name}.calls[${i}].${arg}`, (x) => x.components[id].events![name].calls[i].args[arg], (x, v) => (x.components[id].events![name].calls[i].args[arg] = v as Expr));
         }

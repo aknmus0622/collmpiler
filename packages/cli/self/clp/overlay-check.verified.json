@@ -4,7 +4,7 @@
     "overlay-check.interpretation.ts"
   ],
   "specs": "sha256:86d426b32d094746e44ce9ae78a29cc5c44546a39bb093827d53868f8f346cd8",
-  "code": "sha256:ee71af755ffb04b11f8a2afc3bc17ce9cb5a4ce72286b993672e8ace74b20d8f",
+  "code": "sha256:4f88101fe922963ad12569148a43cd6fa4da52df6b9a982d1c1962600c48b822",
   "files": [
     "../src/checker-verdict.ts",
     "../src/fill-check.ts",
@@ -19,6 +19,7 @@
     "../src/overlay-check.ts",
     "../src/pipeline.ts",
     "../src/promise-keeper.ts",
+    "../src/run-flow.ts",
     "../src/sentence-trace.ts",
     "../src/step-choice.ts",
     "../src/syntax-check.ts",

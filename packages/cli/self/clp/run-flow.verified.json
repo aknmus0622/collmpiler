@@ -1,0 +1,32 @@
+{
+  "roots": [
+    "run-flow.component.ts",
+    "run-flow.interpretation.ts"
+  ],
+  "specs": "sha256:8ab95478d3d835443c8d3b221ec2008891419e5e90ddc0f8005dbd4d55f9c2c5",
+  "code": "sha256:297a9c46bcef58e6faba03f5133d8cff87597231e6ec0f48a4a113362b42a5d2",
+  "files": [
+    "../src/checker-verdict.ts",
+    "../src/fill-check.ts",
+    "../src/fit-check.ts",
+    "../src/gate-rules.ts",
+    "../src/input-candidates.ts",
+    "../src/interpret-flow.ts",
+    "../src/mutation-judge.ts",
+    "../src/mutation-verdict.ts",
+    "../src/observation-compare.ts",
+    "../src/outcome-apply.ts",
+    "../src/overlay-check.ts",
+    "../src/pipeline.ts",
+    "../src/promise-keeper.ts",
+    "../src/run-flow.ts",
+    "../src/sentence-trace.ts",
+    "../src/step-choice.ts",
+    "../src/syntax-check.ts",
+    "../src/text-plan.ts",
+    "../src/type-check.ts",
+    "../src/usage-check.ts",
+    "run-flow.adapter.ts"
+  ],
+  "gradedBy": "stage0"
+}

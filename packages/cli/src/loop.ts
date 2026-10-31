@@ -125,7 +125,7 @@ export async function implement(options: ImplementOptions) {
 
   // 部品を含む部品は、含む部品のあとに一致させる（中の部品の本番コードを使うので）
   // 保存先の部品 (durable: Store。W7) も、含む部品と同じに扱う: 先に一致させ、本番コードは使うだけ
-  const partsOf = (unit: Unit): string[] => Object.keys(unit.ir.components).filter((id) => id !== unit.name && !unit.ir.components[id].external && units.some((u) => u.name === id));
+  const partsOf = (unit: Unit): string[] => Object.keys(unit.ir.components).filter((id) => id !== unit.name && !unit.ir.components[id].external && !unit.ir.components[id].sibling && units.some((u) => u.name === id));
   const ordered: Unit[] = [];
   const place = (unit: Unit) => {
     if (ordered.includes(unit)) return;

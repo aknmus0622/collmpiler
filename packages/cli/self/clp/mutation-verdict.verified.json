@@ -4,7 +4,7 @@
     "mutation-verdict.interpretation.ts"
   ],
   "specs": "sha256:7823b7d508257b2761cdde173ba32890022f68c54975b9c3456a70ac73ad14de",
-  "code": "sha256:619060b7233089c4bbbb2cbdfd0ab7b6a7779f434166e05dabe2f24ca4f47631",
+  "code": "sha256:385cf6ace5e535cde5803b66b5995a6c5555e88d492ed9f9c53e98ad20d03fb5",
   "files": [
     "../src/checker-verdict.ts",
     "../src/fill-check.ts",
@@ -19,6 +19,7 @@
     "../src/overlay-check.ts",
     "../src/pipeline.ts",
     "../src/promise-keeper.ts",
+    "../src/run-flow.ts",
     "../src/sentence-trace.ts",
     "../src/step-choice.ts",
     "../src/syntax-check.ts",

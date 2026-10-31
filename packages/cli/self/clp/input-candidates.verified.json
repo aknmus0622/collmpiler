@@ -4,7 +4,7 @@
     "input-candidates.interpretation.ts"
   ],
   "specs": "sha256:193070c486fc59eecd3786a1c5c86b0dd6124376ffa941d1ff10531bc72ba3d2",
-  "code": "sha256:cb106e64570560dcfb25c574b220ed2d75171f79adf855baa84b1402f2a2b07b",
+  "code": "sha256:291768254b8c8f35840c4c9e4890f05be61af80a9ea65e08eb5f9334c865898d",
   "files": [
     "../src/checker-verdict.ts",
     "../src/fill-check.ts",
@@ -19,6 +19,7 @@
     "../src/overlay-check.ts",
     "../src/pipeline.ts",
     "../src/promise-keeper.ts",
+    "../src/run-flow.ts",
     "../src/sentence-trace.ts",
     "../src/step-choice.ts",
     "../src/syntax-check.ts",

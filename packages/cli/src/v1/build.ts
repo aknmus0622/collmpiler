@@ -150,6 +150,7 @@ export class Builder {
   private names: Names;
   private built = new Map<Unit, Built>();
   private building = new Set<Unit>();
+  private placed = new Map<Unit, Unit[]>();
   private program: Program;
   // the types of the methods of each component, filled while building (a callee's output type needs its body)
   private outputs = new Map<string, T>();
@@ -355,7 +356,7 @@ export class Builder {
     for (const entry of this.entriesUnder(unit, "calcs")) {
       if (!this.usedFragments.has(`${unit.id}#${entry.name}`)) this.fail("unknown-fragment", `${unit.exportName}.calcs.${entry.name}`, `本体の中に value.${entry.name}(…) がありません`, entry.at);
     }
-    for (const kind of ["decisions", "components"] as const) {
+    for (const kind of ["decisions"] as const) {
       for (const entry of this.entriesUnder(unit, kind)) this.fail("not-yet", `${unit.exportName}.${kind}.${entry.name}`, `見出し ${kind} は、まだ使えません（よそで ${kind === "decisions" ? "decisions" : "service"}(…) として定義して呼んでください）`, entry.at);
     }
     if (unit.description) {
@@ -1770,6 +1771,48 @@ export class Builder {
 
   // --- The IR of one component to verify ---
 
+  /** What the `components` heading of a component lists. */
+  private listed(unit: Unit): Unit[] {
+    if (unit.kind !== "service") return [];
+    const known = this.placed.get(unit);
+    if (known) return known;
+    const parts = this.entriesUnder(unit, "components").flatMap((entry) => {
+      const value = entry.value;
+      const part = value?.k === "id" ? this.unitOf(unit.module, value.name) : undefined;
+      if (!part || part.kind !== "service") {
+        this.fail("bad-component", `${unit.exportName}.components.${entry.name}`, "components に置けるのは service の部品だけです", entry.at);
+        return [];
+      }
+      return [part];
+    });
+    this.placed.set(unit, parts);
+    return parts;
+  }
+
+  /**
+   * The components inside `root`'s tree. A component placed nowhere is inside whoever calls it; one placed in
+   * `components` is inside only what places it. Anything else `root` reaches is beside it.
+   */
+  private insideOf(root: Unit): Set<Unit> {
+    const parents = new Map<Unit, Unit[]>();
+    for (const unit of this.program.units) for (const part of this.listed(unit)) parents.set(part, [...(parents.get(part) ?? []), unit]);
+    const inside = new Set<Unit>([root]);
+    for (let grown = true; grown; ) {
+      grown = false;
+      for (const unit of [...inside]) {
+        for (const used of [...this.component(unit).uses, ...this.listed(unit)]) {
+          if (used.kind !== "service" || inside.has(used)) continue;
+          const placedBy = parents.get(used);
+          if (placedBy === undefined || placedBy.some((p) => inside.has(p))) {
+            inside.add(used);
+            grown = true;
+          }
+        }
+      }
+    }
+    return inside;
+  }
+
   /** The IR that verifies `root`: the root, every component it contains, and what it relies on. */
   irOf(root: Unit): Ir8 {
     const components: Record<string, ComponentIr> = {};
@@ -1786,18 +1829,27 @@ export class Builder {
       Object.assign(notes, b.notes);
       Object.assign(trace, b.trace);
       for (const [name, example] of Object.entries(b.examples)) examples[`${unit.id}.${name}`] = example;
-      for (const used of [...b.uses].sort((a, c) => (a.id < c.id ? -1 : 1))) visit(used);
+      for (const used of [...b.uses, ...this.listed(unit)].sort((a, c) => (a.id < c.id ? -1 : 1))) visit(used);
     };
     visit(root);
+    const inside = this.insideOf(root);
+    const beside = (unit: Unit) => unit.kind === "service" && !inside.has(unit);
+    for (const unit of order.filter(beside)) {
+      components[unit.id].sibling = true;
+      for (const name of Object.keys(examples)) if (name.startsWith(`${unit.id}.`)) delete examples[name];
+      for (const used of this.component(unit).uses) {
+        if (inside.has(used)) this.fail("calls-back", unit.exportName, `${unit.exportName} は ${root.exportName} の外の部品なのに、中の ${used.exportName} を呼んでいます。外から呼び返す形は、まだ書けません`, unit.at);
+      }
+    }
     // what each component contains and relies on: a component called and placed nowhere is inside the one that calls it
     const placed = new Set<string>([root.id]);
     for (const unit of order) {
-      if (unit.kind !== "service") continue;
+      if (unit.kind !== "service" || beside(unit)) continue;
       const b = this.component(unit);
       const contains: string[] = [];
       const relies: string[] = [];
-      for (const used of [...b.uses].sort((a, c) => (a.id < c.id ? -1 : 1))) {
-        if (used.kind === "external") relies.push(used.id);
+      for (const used of [...new Set([...b.uses, ...this.listed(unit)])].sort((a, c) => (a.id < c.id ? -1 : 1))) {
+        if (used.kind === "external" || beside(used)) relies.push(used.id);
         else if (used.kind === "service" && !placed.has(used.id)) {
           placed.add(used.id);
           contains.push(used.id);
@@ -1807,15 +1859,17 @@ export class Builder {
       if (relies.length) components[unit.id].relies = relies;
     }
     for (const component of Object.values(components)) collectSorts(component, sorts);
-    // entries: the root's commands, and the commands of its parts that nothing inside calls; every query (queries only
+    // entries: the root's commands, the commands of its parts that nothing inside calls, and every command of what is
+    // beside it (anyone may call those; only the stand-in runs them); every query of the system (queries only
     // observe, and a part's state is otherwise seen only through what the root answers)
-    const called = new Set(order.flatMap((unit) => [...this.component(unit).called]));
+    const called = new Set(order.filter((unit) => !beside(unit)).flatMap((unit) => [...this.component(unit).called]));
     const commands: string[] = [];
     const queries: string[] = [];
     for (const unit of order) {
       if (unit.kind !== "service") continue;
       const ir = components[unit.id];
-      for (const name of Object.keys(ir.commands ?? {}).sort()) if (unit === root || !called.has(`${unit.id}.${name}`)) commands.push(`${unit.id}.${name}`);
+      for (const name of Object.keys(ir.commands ?? {}).sort()) if (unit === root || beside(unit) || !called.has(`${unit.id}.${name}`)) commands.push(`${unit.id}.${name}`);
+      if (beside(unit)) continue;
       for (const name of Object.keys(ir.queries ?? {}).sort()) queries.push(`${unit.id}.${name}`);
     }
     const ir: Ir8 = { irVersion: IR8_VERSION as 8, root: root.id, sorts: [...sorts].sort(), components, entries: { commands, queries } };
