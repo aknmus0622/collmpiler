@@ -94,8 +94,8 @@ export const Library = service("The library. It lends books, takes them back and
   `ports.members`; in verification the spec of `Members` answers its queries, and the commands `Library` calls are
   recorded and compared. Anyone may call those commands, so verification also moves `Members` on its own. A listing
   component without commands or queries is never built; each listed one is verified on its own. One that has them
-  contains everything it lists. Calls between listed components go one way (`calls-back`): parts that call each other are one system, so list them
-  in a component with commands, which contains them.
+  contains everything it lists. Calls between components go one way (`calls-back`, `cycle`): what concerns two
+  of them is written in a command of the parent, which calls each in turn.
 - **The outside world**: `external("what it is", { queries: { ... }, commands: { Notify(member: MemberId) {} } })`.
   A query is an arrow with its return type and `answer({ ... })`: `fresh` (never the same value twice: an
   identifier), `increasing` (never less than before: a clock), `mayFail` (it can be unavailable; the spec says what

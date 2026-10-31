@@ -258,12 +258,15 @@ export class Builder {
   // --- Components ---
 
   component(unit: Unit): Built {
+    const chain = [...this.building];
+    // a component's own examples call it: only a call back from another component is a cycle
+    if (this.building.has(unit) && chain.at(-1) !== unit) {
+      const names = [...chain.slice(chain.indexOf(unit)), unit].map((u) => u.exportName).join(" → ");
+      this.fail("cycle", unit.exportName, `部品の呼び出しが輪になっています (${names})。呼び出しは一方向だけです。両方に関わることは、親のコマンドから順に呼んでください`);
+      return this.built.get(unit)!;
+    }
     const done = this.built.get(unit);
     if (done) return done;
-    if (this.building.has(unit)) {
-      this.fail("cycle", unit.exportName, `部品の呼び出しが輪になっています (${[...this.building].map((u) => u.exportName).join(" → ")} → ${unit.exportName})`);
-      return this.emptyBuilt(unit);
-    }
     this.building.add(unit);
     const b = this.emptyBuilt(unit);
     this.built.set(unit, b);
@@ -997,7 +1000,9 @@ export class Builder {
       this.fail("unknown-name", cx.where, `${unit.exportName} に "${port}" はありません (あるのは: ${[...Object.keys(built.ir.external?.queries ?? {}), ...Object.keys(built.ir.external?.commands ?? {})].join(", ")})`, at);
       return undefined;
     }
+    const callsBack = this.building.has(unit) && [...this.building].at(-1) !== unit;
     const built = this.component(unit);
+    if (callsBack) return undefined;
     const command = built.ir.commands?.[port];
     if (command) return { kind: "command", params: command.params, output: this.outputs.get(`${unit.id}.${port}`) };
     const query = built.ir.queries?.[port];
@@ -1838,7 +1843,7 @@ export class Builder {
       components[unit.id].sibling = true;
       for (const name of Object.keys(examples)) if (name.startsWith(`${unit.id}.`)) delete examples[name];
       for (const used of this.component(unit).uses) {
-        if (inside.has(used)) this.fail("calls-back", unit.exportName, `${unit.exportName} は ${root.exportName} の外の部品なのに、中の ${used.exportName} を呼んでいます。並べた部品のあいだの呼び出しは一方向だけです。呼び合うなら、コマンドを持つ親に並べて、親の中に入れてください`, unit.at);
+        if (inside.has(used)) this.fail("calls-back", unit.exportName, `${unit.exportName} は ${root.exportName} の外の部品なのに、中の ${used.exportName} を呼んでいます。並べた部品のあいだの呼び出しは一方向だけです。両方に関わることは、親のコマンドから順に呼んでください`, unit.at);
       }
     }
     // what each component contains and relies on: a component called and placed nowhere is inside the one that calls it

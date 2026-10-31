@@ -37,6 +37,9 @@ const COUNTING = new Set(["card", "count", "len", "strlen"]);
 /** Numbers kept as they are: counts never exceed the atoms of the scope (6 at most), so they stay inside. */
 export const WINDOW = 8;
 
+/** The number that stands for a class in a trace: its lower end, or the upper, or 0 for a class with no end. */
+export const representative = (c: readonly [number, number]): number => (Number.isFinite(c[0]) ? c[0] : Number.isFinite(c[1]) ? c[1] : 0);
+
 export function relevanceOf(ir: Ir8): Relevance {
   const internal = Object.entries(ir.components).filter(([, c]) => !c.external);
   const outputs = new Set<string>();
@@ -446,7 +449,7 @@ export function prepareNumbers(ir: Ir8, relevance: Relevance, lengths: number[] 
       }
       for (const sort of [...group].sort((a, b) => a - b)) {
         const intervals = made.classes.get(sort)!;
-        const values = intervals.map((c) => (Number.isFinite(c[0]) ? c[0] : c[1]));
+        const values = intervals.map(representative);
         const chain: Chain = { name: `num${chainOf.size}`, values, classes: intervals };
         chainOf.set(sort, { chain, index: { get: (n) => ((i) => (i < 0 ? undefined : i))(intervals.findIndex((c) => c[0] <= n && n <= c[1])) } });
       }

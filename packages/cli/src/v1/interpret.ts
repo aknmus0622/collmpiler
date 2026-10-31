@@ -353,7 +353,8 @@ object types (records), \`T[]\` (lists), \`T | null\`, \`Json\`, \`SpecMap<K, V>
 ## Questions
 
 Where the prose does not say what you need, choose the most natural reading and put \`// REVIEW: <the question>\` on
-the line above. The person answers it. Do not invent requirements the prose does not suggest.
+the line above. The person answers it, so write the question in the language of Layer 1, whatever language this request
+is in. Do not invent requirements the prose does not suggest.
 
 ## Rules (checked mechanically)
 

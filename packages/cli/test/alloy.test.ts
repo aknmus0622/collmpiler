@@ -1,3 +1,4 @@
+import { representative } from "../src/v1/abstraction.ts";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -370,3 +371,9 @@ test("Alloy を実際に動かす: lending の会員 (到達の検査 3 つ)", (
 });
 
 const readdir = (dir: string) => (existsSync(dir) ? readdirSync(dir) : []);
+
+test("数の分類の代表: 端の無い分類も、経路で再生できる有限の数になる", () => {
+  assert.equal(representative([3, Infinity]), 3);
+  assert.equal(representative([-Infinity, 3]), 3);
+  assert.equal(representative([-Infinity, Infinity]), 0);
+});

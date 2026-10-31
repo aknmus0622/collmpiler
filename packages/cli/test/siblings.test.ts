@@ -119,9 +119,26 @@ test("components: 親が部品を持つと、並べた部品は親の中。誤�
 export const Down = service("下。", { commands: { Pong() {}, Back() { Up.Ping(); } } });
 export const Pair = service("組。", { components: { up: Up, down: Down } });
 `;
-  assert.ok(compile(specs(cycle), "down").problems.some((p) => p.code === "calls-back"));
-  // 呼び合う部品は 1 つの系: コマンドを持つ親に並べれば、親の中に入る
-  const together = compile(specs(cycle.replace("{ components: { up: Up, down: Down } }", "{ components: { up: Up, down: Down }, commands: { Go() { Down.Back(); } } }")), "pair");
+  assert.ok(compile(specs(cycle), "down").problems.some((p) => p.code === "cycle"));
+  // 輪でなくても、外の部品が中の部品を呼ぶのは呼び返し
+  const reaching = `export const Inner = service("中。", { commands: { Tick() {} } });
+export const Up = service("上。", { commands: { Ping() { Inner.Tick(); Down.Pong(); } } });
+export const Down = service("下。", { commands: { Pong() { Inner.Tick(); } } });
+export const Pair = service("組。", { components: { up: Up, down: Down } });
+`;
+  assert.ok(compile(specs(reaching), "up").problems.some((p) => p.code === "calls-back"));
+  // コマンドを持つ親に並べても、呼び合えない: 書く順に関わらず輪として断る
+  const inParent = cycle.replace("{ components: { up: Up, down: Down } }", "{ components: { up: Up, down: Down }, commands: { Go() { Down.Back(); } } }");
+  for (const [spec, root] of [[inParent, "pair"], [inParent, "up"], [inParent.replace("Pong() {}, Back() { Up.Ping(); }", "Back() { Up.Ping(); }, Pong() {}"), "pair"]] as const) {
+    const problems = compile(specs(spec), root).problems;
+    assert.ok(problems.some((p) => p.code === "cycle"), root);
+    assert.ok(!problems.some((p) => p.code === "unknown-name"), root);
+  }
+  // 両方に関わることは、親のコマンドから順に呼ぶ
+  const together = compile(specs(`export const Up = service("上。", { commands: { Ping() { Down.Pong(); } } });
+export const Down = service("下。", { commands: { Pong() {}, Back() {} } });
+export const Pair = service("組。", { components: { up: Up, down: Down }, commands: { Go() { Down.Back(); Up.Ping(); } } });
+`), "pair");
   assert.deepEqual(together.problems, []);
   assert.deepEqual(together.ir!.components.pair.contains, ["down", "up"]);
 });

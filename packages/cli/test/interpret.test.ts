@@ -86,6 +86,8 @@ test("解釈: 文の場所を並べた雛形から始め、検査に通ったら
   assert.match(seen[0].start, /A pending or paid order can be cancelled/);
   assert.match(seen[0].start, /The customer is a Silver member/);
   assert.match(seen[0].request, /^# Write the interpretation of a specification \(attempt 1\)/);
+  // 疑問点を読むのは Layer 1 を書いた人なので、その言葉で問う
+  assert.match(seen[0].request, /write the question in the language of Layer 1/);
 
   // 書き出された下書きには、生成物であることと、導いたときの Layer 1 のハッシュが部品ごとに記される
   const draft = readFileSync(join(dir, DRAFT), "utf8");
