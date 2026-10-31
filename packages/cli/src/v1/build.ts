@@ -1838,7 +1838,7 @@ export class Builder {
       components[unit.id].sibling = true;
       for (const name of Object.keys(examples)) if (name.startsWith(`${unit.id}.`)) delete examples[name];
       for (const used of this.component(unit).uses) {
-        if (inside.has(used)) this.fail("calls-back", unit.exportName, `${unit.exportName} は ${root.exportName} の外の部品なのに、中の ${used.exportName} を呼んでいます。外から呼び返す形は、まだ書けません`, unit.at);
+        if (inside.has(used)) this.fail("calls-back", unit.exportName, `${unit.exportName} は ${root.exportName} の外の部品なのに、中の ${used.exportName} を呼んでいます。並べた部品のあいだの呼び出しは一方向だけです。呼び合うなら、コマンドを持つ親に並べて、親の中に入れてください`, unit.at);
       }
     }
     // what each component contains and relies on: a component called and placed nowhere is inside the one that calls it

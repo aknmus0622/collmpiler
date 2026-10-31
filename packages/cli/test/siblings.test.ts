@@ -120,4 +120,8 @@ export const Down = service("下。", { commands: { Pong() {}, Back() { Up.Ping(
 export const Pair = service("組。", { components: { up: Up, down: Down } });
 `;
   assert.ok(compile(specs(cycle), "down").problems.some((p) => p.code === "calls-back"));
+  // 呼び合う部品は 1 つの系: コマンドを持つ親に並べれば、親の中に入る
+  const together = compile(specs(cycle.replace("{ components: { up: Up, down: Down } }", "{ components: { up: Up, down: Down }, commands: { Go() { Down.Back(); } } }")), "pair");
+  assert.deepEqual(together.problems, []);
+  assert.deepEqual(together.ir!.components.pair.contains, ["down", "up"]);
 });
