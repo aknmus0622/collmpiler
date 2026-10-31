@@ -34,7 +34,8 @@ the one page a spec author needs. The code:
     then random sequences), `selfCheck8`, `checkExamples`, coverage. `decide.ts` — the log of Stage 0 decisions and
     `agree` (R4). `compare.ts` — comparing two interpretations. `mutants.ts` + `verdict.ts` — spec mutation.
   - `supplement.ts` (what `clp run` writes into Layer 1: a person's answer to a review mark, in their own words,
-    appended to the sentence the mark is about; the only place Layer 1 is written),
+    appended to the sentence the mark is about), `split.ts` (`clp run`'s proposal to split a large component given
+    only as sentences; with `supplement.ts`, the only places Layer 1 is written),
     `load.ts` (`compile`, `compileChecked`, interpretation problems), `prepare.ts` (`prepare`, `checkSpec`: self-check,
     examples, Alloy, spec mutation), `alloy.ts` + `traces.ts` (the Alloy 6 checker;
     numbers never reach it as integers: `abstraction.ts` / `sorts.ts` make compared numbers chains of atoms,
@@ -50,7 +51,7 @@ the one page a spec author needs. The code:
     `declared.ts`, `trace.ts`, `reported.ts`, `usage.ts`, `outcome.ts`).
 - `packages/cli/src/` — what does not depend on the notation: `bin/clp.ts` (loads only the chosen subcommand from
   `commands/`: `run`, `compile`, `interpret`, `apply`, `verify`, internal `__compare`, `__cases`, `__agreement`; each
-  exports `summary`, `usage`, `main(args)`), `run.ts` (`clp run`: check → interpret → the person's answers → accept →
+  exports `summary`, `usage`, `main(args)`), `run.ts` (`clp run`: check → propose splits → interpret → the person's answers → accept →
   `implement`, started from the state of the specs and output, talking through `Talk`: a terminal or JSON lines),
   `loop.ts` (the pipeline), `gates.ts`, `request.ts`, `strategy.ts`, `target.ts` + `target-typescript.ts`, `layout.ts`,
   `check.ts` + `scan.ts`, `typecheck.ts`, `static-check.ts`, `mutation.ts`, `assets.ts`, `guide.ts`, `verified.ts`,
@@ -66,7 +67,7 @@ the one page a spec author needs. The code:
   - `todo-ts/` — a to-do API over HTTP (`routes`); `todo-db-ts/` — the same made durable (`durable: true` on a store,
     `node:sqlite`) with a failing identifier source (`mayFail`). In both, `server/main.ts` (the composition root) is
     the only code a person wrote.
-- `packages/cli/self/` — the framework's own components in the 1.0 notation (19; `examples/co-llm-piler` is a
+- `packages/cli/self/` — the framework's own components in the 1.0 notation (20; `examples/co-llm-piler` is a
   symlink to it): `specs/`, `src/` (by agents), `clp/` (test side and pass records), `cases/` (R3).
 - Tests: `packages/cli/test/` — `notation.test.ts` (reading, IR, oracle, PBT, comparison), `example.test.ts`,
   `features.test.ts`, `parts.test.ts`, `durable.test.ts`, `interpret.test.ts`, the pipeline tests (`loop`, `gates`,
@@ -142,10 +143,10 @@ spec/verification and places no constraints on the target system's architecture.
 | --- | --- |
 | `DSL.md` | The design of the DSL. **§17 is the current notation** (§17.18: what the implementation decided); §1–§16 are the history up to 0.3 |
 | `REFERENCE.md` | One page for spec authors (English) |
-| `SPEC.md` | Concept and layer design (written for 0.3; the layers and the LLM loop still hold) |
+| `SPEC.md` | Concept and layer design: the layers, the LLM loop, the gates (the notation is in `REFERENCE.md` and `DSL.md` §17) |
 | `SELF_HOSTING.md` | Self-hosting: Stage 0 / Stage 1, the three fixed-point checks, the grading rules R1–R5 (§10) |
 | `ROADMAP.md` | Completion conditions of 0.1 and 0.3 (done) and the stages towards 1.0 |
-| `DISTRIBUTION.md` | How `clp` is built and shared; overrides `PACKAGE.md` where they conflict |
+| `DISTRIBUTION.md` | How `clp` is built and shared (`PACKAGE.md` only points to it) |
 | `INCREMENTAL.md`, `OWNERSHIP.md` | Repeated runs; whose code is whose when components share production code |
 
 ## The notation (DSL.md §17)
@@ -157,8 +158,9 @@ spec/verification and places no constraints on the target system's architecture.
   it, make Layer 1 more precise and run `clp interpret`). Written in the same notation: it fills, never overrides
   (`overwrite`, `wrong-heading`), may declare an `external` the prose implies, and must leave no prose
   (`prose-left`). Its meaning is expressions, so the oracle is the IR itself: there are no meaning functions and
-  nothing of the spec runs as code. The one place the framework writes Layer 1 is `clp run`'s supplement: the
-  person's own words, appended to a sentence after they confirm the diff; an LLM never writes Layer 1.
+  nothing of the spec runs as code. The framework writes Layer 1 in two places, both in `clp run`: the supplement (the
+  person's own words, appended to a sentence after they confirm the diff) and a proposed split the person saw as a
+  diff and accepted (the one way an LLM's words reach Layer 1; asked even with `--yes`).
 - **The IR (version 8)** is the formal model: components with state, events (guard, assigns, calls, output),
   queries, conditions, calcs, decisions, properties, the outside world's promises, `notes` (the prose) and `trace`.
   Strings are `["lit", …]`; the IR does not depend on where something was written.
@@ -235,11 +237,11 @@ Invariants to preserve:
 
 ## Self-hosting (SELF_HOSTING.md)
 
-Nineteen of the framework's decisions are made by code generated from its own specs (`packages/cli/self/specs`, in
+Twenty of the framework's decisions are made by code generated from its own specs (`packages/cli/self/specs`, in
 the 1.0 notation): the reader's judgements (`overlay-check`, `fill-check`, `syntax-check`, `type-check`, `fit-check`,
 `sentence-trace`, `checker-verdict`, `usage-check`), the oracle's (`step-choice`, `outcome-apply`, `promise-keeper`,
 `input-candidates`, `observation-compare`), the gate's (`gate-rules`, `mutation-judge`, `mutation-verdict`), the
-contract's text (`text-plan`), and the procedures turned inside out (`pipeline`, `interpret-flow`). Keep these:
+contract's text (`text-plan`), and the procedures turned inside out (`pipeline`, `interpret-flow`, `run-flow`). Keep these:
 
 - **Stage 0 stays.** Each has a hand-written version (`R1_COMPONENTS8` and the imports of `v1/agreement.ts` name
   them). Stage 1 is used through the generated adapter (`adapterOf`), never by importing `self/src`, and only when the

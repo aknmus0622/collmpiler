@@ -89,6 +89,12 @@ export const Library = service("The library. It lends books, takes them back and
 - **Calling a component is using it.** `Fines.Owed(member)` (a query), `Fines.Charge(m, 3);` (a command). A
   component that is called and not placed anywhere else is part of the caller (its state is the caller's, and
   verification runs its spec together with the caller's). The outside world (`external`) is always outside.
+- **Components that run separately** are listed in one component: `service("…", { components: { library: Library,
+  members: Members } })`. To each other they are outside: when `Library` calls `Members`, the contract gives it
+  `ports.members`; in verification the spec of `Members` answers its queries, and the commands `Library` calls are
+  recorded and compared. Anyone may call those commands, so verification also moves `Members` on its own. A listing
+  component without commands or queries is never built; each listed one is verified on its own. One that has them
+  contains everything it lists. A listed component cannot yet call back into the one that calls it (`calls-back`).
 - **The outside world**: `external("what it is", { queries: { ... }, commands: { Notify(member: MemberId) {} } })`.
   A query is an arrow with its return type and `answer({ ... })`: `fresh` (never the same value twice: an
   identifier), `increasing` (never less than before: a clock), `mayFail` (it can be unavailable; the spec says what
@@ -206,9 +212,16 @@ from where it stopped when run again. To each question (`REVIEW`) or difference 
   the change as a diff before it is written (`--yes` skips this); then the interpretation is derived again;
 - **stop**: change Layer 1 yourself, then run again.
 
-This is the only place `clp` writes Layer 1, and only your words. `--json` makes it JSON lines: events on stdout
+A component given only as several sentences, never interpreted and connected to no other component, may really be
+several. Before interpreting it, `clp run` shows you a proposed split as a diff of Layer 1: new `service("…")`
+declarations with the original embedding them as `${Part}`, or listing them under `components` when they run
+separately. **Accepting writes that diff, including the words an agent wrote**, so read it; you are asked even with
+`--yes`. Declining leaves the component as it is; it is not proposed again.
+
+Those are the only two places `clp` writes Layer 1. `--json` makes it JSON lines: events on stdout
 (`step`, `question`, `confirm`, `diagnostic`, `end` with `result` `passed` / `stopped` / `failed`), answers on stdin
-(`{ "id": "q1", "answer": "supplement", "text": "…" }`, `{ "id": "c2", "answer": "yes" }`). Exit codes: 0 passed,
+(`{ "id": "q1", "answer": "supplement", "text": "…" }`, `{ "id": "c2", "answer": "yes" }`; a `question` of `kind` `split`
+carries `arrangement`, `parts` and `diff`, and is answered `accept`, `decline` or `stop`). Exit codes: 0 passed,
 1 failed, 3 stopped for you.
 
 ## Restarts and failing dependencies

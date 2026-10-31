@@ -1,21 +1,23 @@
 # 企画・詳細設計書: Specification & Verification Engine
 
+> この文書は、考え方、層の分け方、実装のループの設計を説明します。仕様の書き方は `REFERENCE.md` と `DSL.md` §17 にあり、ここには書きません。
+> 0.3 の時点で書かれ、1.0 の書き方に合わせて直しました（2026-10-31）。一度に全部を進めるコマンド `clp run` は `REFERENCE.md` にあります。
+
 ## 1. 全体企画 (Overall Concept)
 
 本プラットフォームは、本番システムの実装アーキテクチャ（MVC、DDD、DB選定等）には一切干渉せず、「仕様（Spec）と検証（Verification）の完全なる同期」のみを責務とする独立したテスト・検証エンジンです。
 
-「仕様書がそのまま動く」という幻想を捨て、「仕様は純粋なデータとして存在し、プラットフォームはそれをステートマシンとして解釈し、本番実装を外部から数学的に検証する」というアプローチをとります。
+「仕様書がそのまま動く」という幻想を捨て、「仕様は実行されず形式モデルとして読み取られ、プラットフォームはそれをステートマシンとして解釈し、本番実装を外部から検証する」というアプローチをとります。
 
 ### コア・バリュー
 
 1. **実装の完全解放 (Zero Lock-in):** プラットフォームは「検証」のみを担います。DB設計、状態のマイグレーション（Upcaster）、トランザクション制御など、本番のアーキテクチャには一切の制約を与えません。
-2. **TS-Native 純粋データ仕様:** 仕様書は、ロジックを含まない純粋な TypeScript データとして記述されます。多重度DSLと自然言語キーを用いたデシジョンテーブル（DMN）を「真の源泉」とします。状態・データ・Command も値として宣言し、型は値から導出します（型は実行時に消えるため、値を源泉にしないと IR にも PBT にも渡せません）。
+2. **TS-Native の仕様:** 仕様書は TypeScript の部分集合で記述され、実行はされず、読み取られるだけです。文でも、コードでも書け、文のままにした所は解釈が式にします。IR の式が「真の源泉」です。
 3. **完全な決定論的テスト (Deterministic PBT):** ランダム生成を行うPBTエンジンと、DB等の副作用を持つ本番システムを安全に接続するため、厳格な「状態分離契約（Isolation Contract）」を導入します。
-4. **極限のデバッグ体験 (Observability):** エラー発見時、「最小失敗経路（Shrinking）」への自動圧縮、「状態差分（State Diff）」の可視化、「1-Clickリプレイ」を提供し、原因特定を数分で完了させます。
+4. **極限のデバッグ体験 (Observability):** エラー発見時、「最小失敗経路（Shrinking）」への自動圧縮と、シードとパスによるリプレイを提供します。
 5. **TypeScript as IDL (仕様記述言語としてのTS):** YAMLやカスタム言語の劣悪なDXを排し、世界最高峰の型システムを持つ TypeScript を「仕様とドメインを記述するためのメタ言語」として採用します。
 6. **Universal IR (中間表現) によるマルチ言語展開:** TSで書かれた仕様をプラットフォームがコンパイルし、言語非依存の `Universal IR (JSON)` を出力します。これを元に、各言語向けのネイティブなPBT（プロパティベーステスト）コードを自動生成します。
-7. **イベントストーミング＆DFDの自動同期:** 仕様書（Layer 1）から、データフロー図（DFD）や状態遷移図を動的に自動生成し、モデリングの付箋とコードが永久に同期する世界を実現します。
-8. **LLM をコンパイラとして使う (LLM as a Compiler):** 本番コードは、Universal IR を入力として LLM エージェントが書きます。フレームワークが生成するのはテスト側のコードだけで、PBT が合否を判定し、不合格なら反例をエージェントに差し戻します。PBT の反例が「コンパイルエラー」に相当します。
+7. **LLM をコンパイラとして使う (LLM as a Compiler):** 本番コードは、Universal IR を入力として LLM エージェントが書きます。フレームワークが生成するのはテスト側のコードだけで、PBT が合否を判定し、不合格なら反例をエージェントに差し戻します。PBT の反例が「コンパイルエラー」に相当します。
 
 
 ---
@@ -28,9 +30,9 @@
 
 | 領域 | レイヤー | 責務と特性 | 書き手 |
 | --- | --- | --- | --- |
-| **IN SCOPE**(プラットフォーム) | **Layer 1: Spec** | 業務の真実（What）を宣言する。決定表（条件から値を選ぶ）と、コンポーネント（文と、書きたい分だけの構造）。**関数は一切書かない。** | 人 |
-|  | **Layer 2: Interpretation** | Layer 1 の文を、構造と意味に細かくする。構造（宣言。IR に出る）と、名前の意味（関数。PBT の正解として使い、IR には含めない）。Layer 1 が構造として書いたものは書き換えられない。 | LLM（人が確かめて確定する） |
-|  | **Universal IR** | Layer 1 と、Layer 2 の構造から作る、**完全な言語非依存のJSON**。Layer 2 の関数は含まない。 | 生成 |
+| **IN SCOPE**(プラットフォーム) | **Layer 1: Spec** | 業務の真実（What）を宣言する。決定表（条件から値を選ぶ）と、コンポーネント（文か、書きたい分だけのコード）。 | 人 |
+|  | **Layer 2: Interpretation** | Layer 1 の文の中身を、同じ書き方の式で与える。式は IR に入り、PBT の正解になる。Layer 1 がコードとして書いたものは書き換えられない。 | LLM（人が確かめて確定する） |
+|  | **Universal IR** | Layer 1 と Layer 2 から作る、**完全な言語非依存のJSON**。意味はすべて式で持つ。 | 生成 |
 |  | **Layer 3: Verification** | Layer 1, 2 から構築されるPBTエンジン。Target System をアダプター経由で操作して検証する。テスト側にのみ生成される。 | 生成 |
 | **境界線** | **Adapter Contract** | テストごとの状態リセット（`setupIsolation` / `teardownIsolation`）を強制し、決定論的なリプレイを可能にするインターフェース。本番システムの依存は、フレームワークが用意する代役（Ports）に置き換える。型は生成され、中身は実装エージェントが書く。 | 生成＋LLM |
 | **OUT OF SCOPE**(開発者の自由) | **Target System** | 本番のアプリケーション実装。**プラットフォームはここに一切コードを置かない**（型もシグネチャも生成しない）。 | LLM（または人） |
@@ -40,8 +42,7 @@
 PBTエンジンがエラーを発見した場合、巨大なログダンプを避け、以下のステップでデバッグ体験を提供します。
 
 * **自動 Shrinking:** エラー発見後、エンジンがアダプターの「状態リセット」を駆使して再試行を繰り返し、エラーが発生する最短手順（例: 15手 → 3手）を特定する。
-* **State Diff の可視化:** Trace Visualizer にて、最小化された手順ごとに「直前の状態から何が変化したか（Delta）」と「起きた副作用 (Effect)」のみをハイライトする。
-* **決定論的リプレイ:** エンジニアが `npx pbt-runner --seed X --path Y` をローカルで実行。「DBの初期化契約」により、CI上のクラッシュをローカル環境で100%再現する。
+* **決定論的リプレイ:** エンジニアが `clp verify --out . --seed X --path Y` をローカルで実行。「DBの初期化契約」により、CI上のクラッシュをローカル環境で再現する。
 
 ### 2.3. LLM による実装ループ
 
@@ -56,7 +57,7 @@ PBTエンジンがエラーを発見した場合、巨大なログダンプを�
  Universal IR
       │
       ▼
- ① 設計      見せる: IR、設計方針
+ ① 設計      見せる: IR、仕様の見取り図、設計方針
              書かせる: 本番コードの骨組み（型とシグネチャ。中身は未実装）
              検査: 静的検査、読み込めること、仕様の文を書き写していないこと
       │
@@ -66,7 +67,7 @@ PBTエンジンがエラーを発見した場合、巨大なログダンプを�
              検査: 静的検査、PBT が「未実装」で失敗すること（赤）
       │
       ▼
- ③ 実装      見せる: IR、骨組み、設計方針              ← アダプターと契約は見せない
+ ③ 実装      見せる: IR、仕様の見取り図、骨組み、設計方針              ← アダプターと契約は見せない
              書かせる: 本番コードの中身
              検査: 静的検査、PBT に合格すること（緑）、ミューテーション
       │
@@ -100,7 +101,7 @@ PBTエンジンがエラーを発見した場合、巨大なログダンプを�
 | 出力先の状態 | 動かす段階 |
 | --- | --- |
 | 本番コードが無い | 設計 → 配線 → 実装 |
-| 境界（状態・コマンドと入力・問い合わせ・副作用）が、前回の IR と違う | 設計 → 配線 → 実装 |
+| 境界（コマンドと問い合わせの入力と答え、外の世界、ルート、再起動）が、前回の IR と違う | 設計 → 配線 → 実装 |
 | アダプターだけが無い | 配線 → 実装 |
 | それ以外（値や条件だけが変わった、何も変わっていない） | 実装（その前に採点し、合格なら何もしない） |
 
@@ -109,39 +110,27 @@ PBTエンジンがエラーを発見した場合、巨大なログダンプを�
 * **配線のあとの赤の確認**は、「本番コードに未実装の部分が残っているなら、PBT は合格してはならない」です。未実装の部分が無いとき（仕様の変更が、すでにあるコードで満たされている）は、合格してかまいません。
 * **弱くなる保証**: 2回目以降は、配線の段階が中身の入った本番コードを読みます。配線の段階に IR を渡さない点は変わりませんが、本番コードから読み取った判断をアダプターに書き写すことを防ぐ手段は、ミューテーションのゲートだけになります。
 * 骨組みのシグネチャを実装の段階が変えると、アダプターが型エラーになります。出口ゲートの静的検査で見つかり、「公開している名前かシグネチャが変わった」として実装の段階に差し戻されます（実装の段階はアダプターを見られないので、何が起きたかを言葉で伝えます）。
-* 設計の段階のあとで止めて、人が骨組みを確認してから続ける機能は、まだありません（今後の課題）。
 
 #### 仕様の型チェックと事前検査（LLM を呼ぶ前）
 
-まず仕様を型チェックします。意味の漏れや余り、フィールド名や条件の typo、存在しない状態や副作用、型の合わない参照は、ここで見つかります（§3.1、§3.2）。続いて IR を作るときに、同じ種類の誤りを実行時にも検査し、場所と理由を添えて報告します。解釈が無い、Layer 1 と合わない、Layer 1 より古い、という場合も、ここで止まります（§3.2）。
+まず仕様を読み取り、型を確かめます。名前の typo、型の合わない参照は、ここで見つかります（§3.1、§3.2）。続いて IR を作るときに、同じ種類の誤りを実行時にも検査し、場所と理由を添えて報告します。解釈が無い、Layer 1 と合わない、Layer 1 より古い、という場合も、ここで止まります（§3.2）。
 
-IR の抽出に続いて、仕様だけをランダムなコマンド列で実行します（実装は使いません）。次のものを見つけたら、**仕様の誤りとして人に報告して止まり、LLM には渡しません。**
+IR の抽出に続いて、仕様だけを検査します（実装は使いません）。作者の例を実行し、Alloy で確かめ（下の「Alloy の検査」）、ランダムなコマンド列で実行します。次のものを見つけたら、**仕様の誤りとして人に報告して止まり、LLM には渡しません。**
 
-* 2つの条件が同時に成り立つ（決定表でも、コマンドの `when` でも）
-* 意味の書かれていない条件・計算・不変条件がある
-* 不変条件が破れる（最短のコマンド列つきで報告）
-* 覚えるデータや副作用の値が、宣言した型・範囲に合わない（計算の結果が整数でない、など）
+* どの場合にも当たらない入力がある、マップに無いキーを読む
+* 文のまま中身の無い所が残っている（`prose-left`）
+* 性質が破れる（最短のコマンド列つきで報告）
+* 作者の例の答えが合わない
 
 PBT の実行中に同じ種類の問題が見つかった場合も、実装の誤りとは区別し、エージェントへは差し戻しません。
 
-#### グラフの検査（たどり着けない状態、使われない語彙）
+#### Alloy の検査
 
-仕様に書かれた構造は、グラフとして読めます（状態から状態への遷移、場合から副作用へ、場合からデータへ、コマンドから
-問い合わせへ）。仕様を実行せずに、「道が無い」ことを確かめます。
-
-| 見つけるもの | 扱い |
-| --- | --- |
-| 初期状態から、どのコマンドでもたどり着けない状態 | エラー（`unreachable-state`） |
-| 実行できる状態のどれにもたどり着けない、または `from()` が空のコマンド | エラー（`unreachable-command`） |
-| 起こされない副作用、覚えられないデータ、尋ねられない引数つきの問い合わせ | 注意（`unused-effect`、`unset-data`、`unasked-query`） |
-
-条件が成り立つかどうかは見ません（意味は関数で、書かれたものからは分かりません）。道があるのに届かないこと
-（いつも偽の条件、入力が届かないしきい値）は、下の、仕様を実行する検査が見ます。
-引数の無い問い合わせ、計算、決定表は、意味の関数が読むかもしれないので、「使われない」の対象にしていません。
+仕様を Alloy 6 の模型に写し、有界に確かめます（Java が要ります。`CLP_ALLOY=off` で外せます）。性質、式が定義されていること、呼ぶ部品の `requires`、すべての場合に届く手順を調べ、見つけた手順は共通のトレースに戻して、仕様の実行で再現してから報告します。どの場合にも届かないときは `unreached-case` を出します。範囲に収まらない部品は、警告つきで PBT に任せます。届いた手順は、PBT と仕様のミューテーションで先に流します。詳しくは `DSL.md` §17.11〜§17.14、§17.20、§17.21 にあります。
 
 #### 仕様のミューテーション（検証に現れない値を、先に見つける）
 
-事前検査に通ったら、**決定表の値を1つずつ変えて、仕様が期待する結果が変わるかを確かめます**（実装もエージェントも使いません）。
+事前検査に通ったら、**ゲートが壊してよい定数を1つずつ変えて、仕様が期待する結果が変わるかを確かめます**（実装もエージェントも使いません）。
 ミューテーションのゲートが本番コードに対して行うことを、先に仕様に対して行うものです。
 
 変えても結果が変わらない値は、検証に現れません。そういう値があると、正しく実装しても、ミューテーションのゲートが
@@ -150,7 +139,7 @@ PBT の実行中に同じ種類の問題が見つかった場合も、実装の�
 
 | 判定 | 決め方 | 扱い |
 | --- | --- | --- |
-| 事前条件にしか現れない | 変えると、コマンドを実行できるかどうかだけが変わる。検証は実行できるコマンドしか実行しないので、現れない | エラー。断ることは、`from` / `onlyIf` ではなく、結果の1つ（`when`）として書く |
+| 事前条件にしか現れない | 変えると、コマンドを実行できるかどうかだけが変わる。検証は実行できるコマンドしか実行しないので、現れない | エラー。断ることは、`requires` ではなく、答えとして書く |
 | 現れない | 検証のシードでも、ほかのシードでも、何も変わらない。使われていない列、`null` の代わりに埋めた値、入力が届かないしきい値 | エラー |
 | 検証が薄い | 検証のシードでは何も変わらないが、ほかのシードでは結果が変わる | 警告。エージェントへは差し戻さない |
 
@@ -160,8 +149,7 @@ PBT の実行中に同じ種類の問題が見つかった場合も、実装の�
   しきい値の境目のように届きにくい値は、完成した仕様でも、シードによっては現れません（貸出の例の `lostAfterDays` は、
   30 シードのうち 3 シード）。検証のシードで現れなかった値は、ほかの2つのシードでも確かめてから決めます。
 * 真偽値のセルは、どの判定でも警告にとどめます。ゲートが合否に使うのは数値と文字列だけだからです。
-* 対象は決定表のセルです。意味の関数の中に直接書いた数値は、変えられないので対象になりません（数値は決定表に書く、という
-  決まりを守っていれば、対象になります）。
+* 対象は、ゲートが壊してよい定数です（下の「ミューテーションのゲート」）。
 * 解釈を導く工程（`clp interpret`）の検査にも含まれます。LLM が上限を事前条件に書いた下書きは、ここで差し戻されます。
 * 費用は、1つの仕様あたり 0.1〜1 秒ほどです。
 
@@ -177,7 +165,7 @@ PBT の実行中に同じ種類の問題が見つかった場合も、実装の�
 | 本番コードの中身 | LLM（実装の段階） | 本番側（`src/`） | いいえ |
 
 * **テストケースは LLM に書かせません。** 採点基準を LLM に書かせると、実装とテストが同じ誤解をして合格してしまいます。
-* **仕様について LLM に見せるのは IR だけです。** 仕様の TypeScript（特に解釈の、意味の関数）は見せません。自然言語の条件（「The customer is a Gold member and it is month-end」）をデータ定義に照らして解釈し実装するのが LLM の仕事であり、その解釈が正しいかを Layer 2 を正解として PBT が判定します。これは「IR が実装に十分な情報を持っているか」の検証も兼ねます。
+* **仕様について LLM に見せるのは IR と、IR から作る見取り図（`<名前>.spec.md`）だけです。** 仕様の TypeScript は見せません。意味は式なので、正解は実装するエージェントにも見えます。読み違いは、解釈の段階（2つの解釈の比べ合い、式の読み下し、例）で見つけます。
 * **決定性は検証側で保ちます。** LLM の出力は毎回変わるので、合格した本番コードを成果物として保存します。出口ゲートは決定的で、PBT のシードは仕様のハッシュから決めます。
 
 #### 複数のコンポーネント
@@ -191,7 +179,7 @@ PBT の実行中に同じ種類の問題が見つかった場合も、実装の�
 * **公開している形**: 設計と実装の段階の静的検査には、ほかのコンポーネントのアダプターも含めます。すでにある名前やシグネチャを変えると、そこが型エラーになり、「公開している名前かシグネチャが変わった」として差し戻されます。
 * 「配線まで済んでいる」とは、出力先の IR がいまの仕様と同じで、アダプターがあることです。仕様を変えてまだ一致させていないコンポーネントは、そのコンポーネントの番で直すので、回帰の対象にしません。
 
-今後の課題:
+だれのコードか:
 
 * **だれのコードかは、検証が実行するかで決まります。** ファイルとコンポーネントは多対多です（共通の型や判断の関数を、複数のコンポーネントが使うのが普通です）。持ち主を記録したり人が指定したりはせず、実装の段階の採点で、各コンポーネントの検証が本番コードのどこを実行したかを調べます。「使っている」とは、そのファイルの関数を実行したことです（関数を持たないファイルは、読み込んだこと）。
 * **書いてよい範囲**: エージェントは本番コードの全体を読めますが、書き換えてよいのは次のものです。
@@ -239,9 +227,9 @@ PBT の実行中に同じ種類の問題が見つかった場合も、実装の�
 
 | 段階 | 作業場所に置くもの |
 | --- | --- |
-| 設計 | 依頼文、IR、添付資料（やり直しのときは前回の骨組み） |
+| 設計 | 依頼文、IR、見取り図、添付資料（やり直しのときは前回の骨組み） |
 | 配線 | 依頼文、アダプターの契約、アダプター（雛形か前回の成果）、骨組み |
-| 実装 | 依頼文、IR、添付資料、本番コード（骨組みか前回の成果） |
+| 実装 | 依頼文、IR、見取り図、添付資料、本番コード（骨組みか前回の成果） |
 
 * 作業場所は OS の一時ディレクトリに作り、リポジトリの内側になる場合はエラーにします。試行ごとに作り直し、終了後に削除します。
 * **仕様のソースと PBT のグルー（`verify.ts`）は、どの段階にも渡しません。** `verify.ts` は仕様の場所を知っているため、それ自体が手がかりになるからです。
@@ -259,16 +247,15 @@ PBT の実行中に同じ種類の問題が見つかった場合も、実装の�
 * **添付資料**として、任意のファイルや文言を依頼に添えられます。アーキテクチャの決まり、命名規約、用語集などを想定しています。コンポーネントの `assets` に、`file` / `dir` / `text` で包んで並べます。
 
   ```typescript
-  import { component, dir, file, text } from "@clp/core";
+  import { dir, file, service, text } from "@clp/core";
 
-  export const Order = component({
+  export const Order = service("…", {
     assets: [
       file("docs/architecture.md"),                              // ファイル（このファイルからの相対パス）
       dir("docs/conventions"),                                   // ディレクトリの中のファイルすべて
       text("Money is always handled as whole yen."),             // 短い文言
       text("Adapters are named *Gateway.", { phases: ["wiring"] }),  // 第2引数で、渡す段階を指定する
     ],
-    states: State,
     // ...
   });
   ```
@@ -304,7 +291,7 @@ PBT の実行中に同じ種類の問題が見つかった場合も、実装の�
 | --- | --- | --- |
 | 監査と取り出し | その段階で書いてよい場所だけを出力先へ写す。それ以外のファイルの追加、渡したファイルの書き換えや削除、シンボリックリンクは違反 | 採点基準の改ざんと、段階をまたいだ書き換え、リンク経由で仕様を持ち込む抜け道を防ぐ |
 | 採点基準の生成 | `ir.json` / `adapter.contract.ts` / `verify.ts` を出力先に生成し直す | 採点基準は作業場所を経由しない |
-| 余計なもの検査（本番コード） | `src/` 内の相対 import しか使っていない（パッケージ、`node:` 組み込み、`import()` / `require()` は不可） | 本番コードがフレームワーク・仕様・テスト側に依存しないことの保証 |
+| 余計なもの検査（本番コード） | `src/` 内の相対 import と、許した `node:` 組み込み（`node:http`、`url`、`events`、`stream`、`buffer`、`util`、`string_decoder`、`sqlite`）しか使っていない（パッケージ、`import()` / `require()` は不可） | 本番コードがフレームワーク・仕様・テスト側に依存しないことの保証 |
 | 余計なもの検査（アダプター） | `adapter.contract.ts` と `src/` しか import していない。中身は制限しない | アダプターが仕様や採点基準を読み込まないことの保証 |
 | 静的検査 | 設計の段階は本番コード、以降は本番コード・アダプター・契約を、実行せずに調べる（下の「2種類の検査」） | 骨組みに無いメンバーの呼び出しや、シグネチャの変更を、実行する前に見つける |
 | 段階ごとの検査 | 下の表 | |
@@ -353,7 +340,7 @@ PBT は別プロセスで実行します。LLM が書いたコードが実行さ
 
 **現在の実装は TypeScript 用だけです。** インターフェースは TypeScript 用の処理から切り出したもので、2つ目の言語で確かめてはいません。他の言語を足すときに、形を直す必要が出る可能性があります。
 
-特に PBT の実行は、言語によって作りが大きく変わります。期待値の計算は常に TypeScript（解釈の意味の関数）で行うので、対象が別の言語のときは、期待値を計算する側と本番システムを動かす側が別のプロセスになります。TypeScript 用の実装は両方を同じプロセスで動かしていますが、インターフェース上は「テストを走らせて結果を返す」だけなので、この違いは各言語の実装の内側に収まります。
+特に PBT の実行は、言語によって作りが大きく変わります。期待値の計算は常に TypeScript（IR の式の評価）で行うので、対象が別の言語のときは、期待値を計算する側と本番システムを動かす側が別のプロセスになります。TypeScript 用の実装は両方を同じプロセスで動かしていますが、インターフェース上は「テストを走らせて結果を返す」だけなので、この違いは各言語の実装の内側に収まります。
 
 #### 本番コードに条件を課さない
 
@@ -367,19 +354,19 @@ PBT は別プロセスで実行します。LLM が書いたコードが実行さ
 
 目的はテストの質の評価ではなく、「検証結果が本当に本番コードで決まっているか」の判定です。実装の段階でだけ実行します。配線の段階に IR を見せないことでアダプターの肩代わりは構造的に起きにくくなっていますが、骨組みのコメント経由で業務ルールが伝わる余地が残るため、その備えを兼ねます。
 
-* **壊し方は Strategy として差し替えられます。** 自前の Strategy は、本番コードの実行時のリテラル（型の中は除く）を1つずつ変えます。数値は +1、真偽値は反転、文字列は決定表の値に一致するものだけ末尾に文字を足します。軽量な外部ツールが環境にあればそれを使い、無ければ自前に落とす、という選択を想定しています（`--mutation auto|builtin|off`。外部ツールの接続は未実装で、現状は常に自前です）。使った Strategy と件数、生き残った箇所は、毎回結果に記録します。
+* **壊し方は Strategy として差し替えられます。** 自前の Strategy は、本番コードの実行時のリテラル（型の中は除く）を1つずつ変えます。数値は +1、真偽値は反転、文字列は判断の値（決定表のセルと、コマンドや問い合わせが答える定数、外の世界へ送る定数。`decisionValues8`）に一致するものだけ末尾に文字を足します。軽量な外部ツールが環境にあればそれを使い、無ければ自前に落とす、という選択を想定しています（`--mutation auto|builtin|off`。外部ツールの接続は未実装で、現状は常に自前です）。使った Strategy と件数、生き残った箇所は、毎回結果に記録します。
 * **合否の基準はゲートが持ちます。** どの Strategy でも同じ基準で判定します。
 
 | 状況 | 判定 |
 | --- | --- |
-| 決定表の値（割引率、クーポン種別など）が本番コードにあり、その出現箇所のどれを変えても PBT が合格する | 不合格（`mutation-survived`）。その値は本番コードで決まっていない |
-| 決定表の数値が本番コードに無く、アダプターにある | 不合格（`decision-in-adapter`） |
-| 決定表の値が本番コードに1つも見つからず（別の表現で書かれている等）、どの変異も検出されない | 不合格（`mutation-ineffective`） |
+| 判断の値（割引率、クーポン種別など）が本番コードにあり、その出現箇所のどれを変えても PBT が合格する | 不合格（`mutation-survived`）。その値は本番コードで決まっていない |
+| 判断の数値が本番コードに無く、アダプターにある | 不合格（`decision-in-adapter`） |
+| 判断の値が本番コードに1つも見つからず（別の表現で書かれている等）、どの変異も検出されない | 不合格（`mutation-ineffective`） |
 | それ以外の生き残り | 合格。報告のみ |
 
 「それ以外の生き残り」は、仕様の語彙では試せない本番コードのロジックを指していることがあります。例えば本番コードが日付から月末を計算している場合、仕様が与えるのは「月末かどうか」の2通りだけなので、その計算の細部は検証されません。
 
-限界: 判定はリテラルの一致に基づくヒューリスティックです。決定表の文字列の値をアダプターが返す形の肩代わりや、値を別の表現に変えたうえでの部分的な肩代わりは見逃し得ます。
+限界: 判定はリテラルの一致に基づくヒューリスティックです。判断の文字列の値をアダプターが返す形の肩代わりや、値を別の表現に変えたうえでの部分的な肩代わりは見逃し得ます。
 
 #### 隔離の限界
 
@@ -393,571 +380,50 @@ PBT は別プロセスで実行します。LLM が書いたコードが実行さ
 
 ## 3. 詳細スキーマ (Detailed Schema)
 
-各レイヤーの実体となる TypeScript スキーマおよびコード設計です。
+各レイヤーの設計です。形の定義そのものは、節ごとに示す文書とファイルにあります。
 
-### 3.1. Layer 1: 決定表とコンポーネント (Spec)
+### 3.1. Layer 1 (Spec)
 
-仕様は3つのものでできています。**人が書くのは Layer 1 だけです。**
-
-| もの | 内容 | 書き手 | 関数 | Layer |
-| --- | --- | --- | --- | --- |
-| 決定表 | 条件から値を選ぶ表 | 人 | なし | 1 |
-| コンポーネント | 部品の記述。文と、書きたい分だけの構造 | 人 | なし | 1 |
-| 解釈 | Layer 1 が書かなかった構造と、名前の意味（§3.2） | LLM（人は読んで確かめる） | 意味の部分だけ | 2 |
-
-シナリオ（ユースケース）、ドメインの部品、UI の部品は、どれも同じ形のコンポーネントとして書きます。値として宣言するので、IR に出力でき、PBT の入力生成にも、LLM への情報提供にもそのまま使えます。TypeScript の型は、宣言した値から導出します。
+**書き方は `REFERENCE.md` と `DSL.md` §17** にあります。ここには、書き方を決めた理由だけを残します。人が書くのは Layer 1 だけで、文でも、コードでも、好きな細かさで書けます。文のままにした所は、解釈（§3.2）が式にします。
 
 #### 決定表
 
-条件（自然言語）から値を選ぶ表です。コンポーネントとは別に定義します。行の条件は、先に `conditions({...})` で名前を付けて宣言し、その取っ手（下の「取っ手」）で書きます。表の中に文は書きません。
+* どの条件にも当たらないときの `otherwise` が必須です。上から見て、最初に成り立つ行を選びます。
+* **その行では使われない列には、`null` を書きます。** 使われない値を埋めると、実装がそれを忠実に写したときに「変えても結果が変わらない値」になり、ミューテーションのゲートが差し戻すためです。
 
-```typescript
-// --- specs/order.decisions.ts ---
-import { conditions, decisionTable, otherwise, when } from "@clp/core";
+#### 引数つきの問い合わせ
 
-export const CampaignIf = conditions({
-  customerGoldMemberMonthEnd: "The customer is a Gold member and it is month-end",
-  customerSilverMember: "The customer is a Silver member",
-});
-
-export const ShippingIf = conditions({
-  customerGoldMemberOrder10: "The customer is a Gold member, or the order is 10,000 yen or more",
-});
-
-// 割引率は整数のパーセントで持つ（小数だと金額の計算に誤差が出る）
-export const Campaign = decisionTable(
-  when(CampaignIf.customerGoldMemberMonthEnd, { discountPercent: 20, grantsCoupon: true, coupon: "Premium" }),
-  when(CampaignIf.customerSilverMember, { discountPercent: 5, grantsCoupon: false, coupon: null }),
-  otherwise({ discountPercent: 0, grantsCoupon: false, coupon: null }),
-);
-
-export const Shipping = decisionTable(
-  when(ShippingIf.customerGoldMemberOrder10, { priority: true }),
-  otherwise({ priority: false }),
-);
-```
-
-* 表の名前は、コンポーネントの `decisions` に置いたときのキーです（`decisions: { campaign: Campaign }`）。
-* どの条件にも当たらないときの `otherwise` が必須で、全行が同じ列を持ちます。
-* **セルに書けるのは値だけです。** 表が決めるのは率や区分といったパラメータで、副作用や計算は書きません。「副作用を起こすかどうか」は真偽値の列にし、構造の側で条件として使います（§3.2）。
-* **その行では使われない列には、`null` を書きます**（上の例の、クーポンを出さない行の `coupon`）。使われない値を埋めると、実装がそれを忠実に写したときに「変えても結果が変わらない値」になり、ミューテーションのゲートが差し戻すためです。値の無いセルが実際に使われる仕様（`when` で守らずに参照している、など）は誤りで、仕様の事前検査が見つけます。IR には `null` のまま出ます。
-* 同時に成り立つ条件は1つまでです（Hit Policy: Unique）。
-
-#### コンポーネント: 文から構造まで、好きな細かさで書く
-
-いちばん粗い書き方は、文だけです。そこから、**はっきり決めたい所だけを構造にします。** 文のままにした所が何を意味するかは、解釈（§3.2）が決めます。
-
-**仕様のすべての要素は「節」で、節は節を入れ子にできます。** どの項目も、文（`description`）か、部品か、その両方を `component(...)` で束ねたもので書きます。語彙もコマンドも同じ決まりです。書き方の全体（節の種類、何の中に何を書けるか）は `DSL.md` にあります。
-
-```typescript
-// いちばん粗い: すべてを解釈に任せる
-export const Order = component(description("An order: placed by a customer, paid, then shipped or cancelled. ..."));
-
-// まとまりごと文にするか、項目を並べるかを選ぶ。項目は、文だけか、部品か
-export const State = states("DRAFT", "PENDING", "PAID", "SHIPPED", "CANCELLED");
-export const Effect = effects({
-  Refund: description("What the customer paid is returned."),               // 項目を文だけで
-  SendReceipt: input({ discountPercent: "integer", amount: "integer" }),    // 項目を部品で
-});
-
-export const Order = component({
-  states: State,
-  queries: description("Whether it is month-end, and the payment result."),   // まとまりごと文
-  effects: Effect,
-  commands: {
-    Cancel: description("A pending or paid order can be cancelled. ..."),
-    Ship: component(from(State.PAID), does("The order becomes shipped. ...")),    // 一部だけ部品に
-  },
-});
-```
-
-#### 取っ手: 名前を文字列で指さない
-
-**語彙は、先にまとまりとして宣言し、そのまとまりが持つ「取っ手」で指します。** 状態も、条件も、データも、副作用も、
-文字列で名前を書いて指すことはありません。名前を書くのは、宣言のキーの1か所だけです。そのため、書き間違い（`State.PAYED`）や
-型の合わない参照は、エディタで型エラーになります（合否は、これまでどおり木の検査と `clp compile` が決めます。型は早い知らせです）。
-解釈は Layer 1 と同じ取っ手を import して使うので、**宣言したまとまりは、すべて export します。**
-
-```typescript
-export const State = states("DRAFT", "PENDING", "PAID");            // 説明を添えるなら states({ DRAFT: description("..."), ... })
-export const If = conditions({ paid: "The payment succeeded" });     // 条件の文
-export const Data = data({ price: Yen });
-export const Query = queries({ isMonthEnd: output("boolean") });
-export const Effect = effects({ SendReceipt: input({ amount: "integer" }) });
-export const Calc = calculations({ charged: component(description("..."), output("integer")) });
-export const Inv = invariants({ priced: "Every order past the draft state has a price" });
-export const PlaceInput = input({ listPrice: Yen });                 // コマンドの入力
-```
-
-| 取っ手 | 使い方 |
-| --- | --- |
-| `State.PAID` | 状態。`from(...)`、`goTo(...)`、`was(...)`、`init` |
-| `If.paid` | 条件。`when(...)`、`onlyIf(...)`、`onlyWhen(...)`、決定表の行 |
-| `Data.price` | 覚えているデータ（値として）。`Data.price.set(値)` で覚える |
-| `Query.isMonthEnd` | 引数の無い問い合わせの答え |
-| `Query.stateDeclared({ name: "PAID" }).as("found")` | 引数つきの問い合わせを尋ねる。その `.answer` が答えの値 |
-| `Effect.SendReceipt({ amount: ... })` | 副作用を起こす（何も運ばなければ `Effect.Refund()`） |
-| `Calc.charged` | 計算の結果 |
-| `Campaign.discountPercent` | 決定表の、当たった行の列の値 |
-| `PlaceInput.listPrice` | コマンドの入力のフィールド |
-
-* まとまりは、コンポーネントの中に、そのキーで置きます（`states: State`、`data: Data`、…）。条件のまとまりは宣言するだけで、置きません。
-* まとまりをその場に書く（`data: { price: Yen }`）こともでき、意味は同じですが、その場合は取っ手で指せません。
-* まとまりの変数名は自由です。例と依頼文では `State`、`Data`、`Query`、`Effect`、`If`、`Calc`、`Inv` にそろえています。
-* 文字列が残るのは、文（`description`、`does`、条件の文）と、名前を決める宣言のキーだけです。条件は、`when` などの中にその場で文を
-  書かず、必ず名前を付けて宣言します。文を直しても名前は変わりません。
-* IR は名前で書かれるので、取っ手で書いても IR は変わりません（§3.3）。
-
-| まとまり | 意味 | 項目に書ける部品 |
-| --- | --- | --- |
-| `description` | コンポーネント全体の説明（文字列） | — |
-| `states` / `init` | 状態名と初期状態。`states("A", "B")` で宣言したものを置き、初期状態は `init: State.A` | — |
-| `data` | 部品が覚えているデータ。初めは未設定 | 型（そのまま書く） |
-| `queries` | 依存への問い合わせ（部品が外に尋ねて答えをもらう値） | `output(答えの型)`、`input({ 引数 })` |
-| `effects` | 依存への副作用（部品が外に対して行うこと） | `input({ ペイロード })` |
-| `decisions` | 使う決定表（`{ 名前: 決定表 }`。キーが表の名前になる） | — |
-| `calculations` | 計算。`description` が、式を述べる文になる | `output(結果の型)` |
-| `invariants` | 不変条件（`invariants({ 名前: "文" })` で宣言したもの） | — |
-| `commands` | 外から部品を動かすコマンド | 下の表 |
-| `assets` | 実装を LLM に依頼するときに添付する資料（§2.3）。仕様の意味には影響しない | `file` / `dir` / `text` の配列 |
-
-* どのまとまりも省略できます。`states`・`data`・`queries`・`effects`・`calculations`・`commands` は、まとまりごと `description("...")` にもできます。
-* **境界でのやり取りは、同じ形にそろえてあります。** コマンドには入力があり、問い合わせには引数（入力）と答え（出力）があり、副作用にはペイロード（入力）があります。どれも `input({...})` で書きます。
-* **裸の型は、その項目の値の形です。** データなら覚える値（`price: Yen`）、問い合わせなら答え（`isMonthEnd: "boolean"` は `output("boolean")` と同じ）、計算なら結果です。
-* **型**は、`"boolean"` / `"integer"` / `"number"` / `"string"`、列挙（文字列の配列）、制約つきの数（`integer({ min, max })`、`number({ min, max })`）、
-  そして構造を持つ値です（下の「構造を持つ値」）。
-* **状態を持たない部品**は、`states` も `init` も書きません（内部では、`READY` という1つだけの状態を持つものとして扱います）。
-
-コマンドに書ける部品は、次のとおりです。
-
-| 部品 | 意味 |
-| --- | --- |
-| `description("...")` | コマンドの説明（文） |
-| 入力の取っ手（`PlaceOrderInput`） | 入力。`export const PlaceOrderInput = input({...})` と先に宣言して置く |
-| `from(State.A, State.B)` | 実行できる状態。どこにも書かなければ全状態 |
-| `onlyIf(If.x)` | 事前条件（条件の取っ手）。`from` と `onlyIf` を満たさない場合の挙動は仕様の対象外で、PBT も検証しない |
-| `Query.q({ 引数 }).as("名前")` | 尋ねること。引数つきの問い合わせを、どの引数で尋ねるか。答えは、付けた名前で読む（下の「引数つきの問い合わせ」） |
-| `goTo(State.A)` | 遷移先。**どこにも書かなければ、状態は変わらない** |
-| `output(型)` | 返すものの形。値1つの型か、`record({ フィールド: 型 })`。場合によって無いフィールドは `optional(型)`（下の「コマンドの結果」） |
-| `responds(値)` | 返す値。`output` を宣言したコマンドは、どの場合にも要る |
-| `does("...")` | 何が起きるかの文 |
-| `when(If.x, ...)` | 条件で分かれるときの、1つの場合。中に `goTo`・`responds`・`does` を書く |
-| `otherwise(...)` | どの条件にも当たらない場合 |
-
-```typescript
-// --- specs/order.component.ts ---
-import { calculations, component, conditions, data, description, does, effects, from, goTo, input, integer, invariants, onlyIf, otherwise, output, queries, states, when } from "@clp/core";
-import { Campaign, Shipping } from "./order.decisions.ts";
-
-const Rank = ["Gold", "Silver", "Bronze"] as const;   // 配列は列挙
-// 数値の制約。around は、その前後を PBT が重点的に生成するしきい値
-const Yen = integer({ min: 0, max: 1_000_000, around: [10_000] });
-
-// 語彙: 先に宣言し、取っ手で指す
-export const If = conditions({
-  externalPaymentModuleActive: "The external payment module is active",
-  paymentSucceeded: "The payment succeeded",
-});
-
-export const State = states("DRAFT", "PENDING", "PAID", "SHIPPED", "CANCELLED");
-
-export const Data = data({ rank: Rank, price: Yen });
-
-export const Query = queries({
-  isMonthEnd: component(description("Whether today is the last day of the month."), output("boolean")),
-  paymentModuleActive: output("boolean"),
-  paymentResult: component(description("What the payment module answered for this order."), output(["succeeded", "failed"])),
-});
-
-export const Effect = effects({
-  SendOrderConfirmation: input({}),
-  SendReceipt: input({ discountPercent: "integer", amount: "integer" }),
-  IssueCoupon: input({ type: ["Premium", "Standard"] }),
-  NotifyPaymentFailure: input({}),
-  SendShippingNotice: input({ priority: "boolean" }),
-  // 文だけ: 何を運ぶかは、解釈に任せる
-  Refund: description("What the customer paid is returned."),
-});
-
-export const Calc = calculations({
-  amountCharged: component(description("price × (100 − discount percent) ÷ 100, rounded down to a whole yen"), output("integer")),
-});
-
-export const Inv = invariants({
-  everyOrderPastDraftState: "Every order past the draft state has a member rank and a price",
-});
-
-export const PlaceOrderInput = input({ customerRank: Rank, listPrice: Yen });
-
-export const Order = component({
-  description: "An order: placed by a customer, paid through an external payment module, then shipped or cancelled.",
-
-  // 語彙
-  states: State,
-  init: State.DRAFT,
-  data: Data,
-  queries: Query,
-  effects: Effect,
-
-  // 決めごとと計算
-  decisions: { campaign: Campaign, shipping: Shipping },
-  calculations: Calc,
-  invariants: Inv,
-
-  commands: {
-    // すべてを構造で: 入力、実行できる状態、遷移先
-    PlaceOrder: component(
-      PlaceOrderInput,
-      from(State.DRAFT),
-      goTo(State.PENDING),
-      does("The order remembers the customer's rank and the list price. An order confirmation is sent."),
-    ),
-
-    Checkout: component(
-      from(State.PENDING),
-      onlyIf(If.externalPaymentModuleActive),
-      when(
-        If.paymentSucceeded,
-        goTo(State.PAID),
-        does(
-          "A receipt is sent with the campaign's discount percent and the amount charged. " +
-            "Then a coupon is issued if the campaign grants one.",
-        ),
-      ),
-      // goTo が無い: 状態は変わらない
-      otherwise(does("The customer is notified of the payment failure.")),
-    ),
-
-    // 一部だけ構造で: 遷移先は文に任せる
-    Ship: component(from(State.PAID), does("The order becomes shipped. A shipping notice is sent, with priority as the shipping decision says.")),
-
-    // 文だけ
-    Cancel: description("A pending or paid order can be cancelled. If the order had been paid, a refund is issued."),
-  },
-});
-```
-
-* **`component(...)` は、節を束ねます。** 名前のある節（`commands: { Ship: component(...) }`）は、親に含まれます。名前の無い節は、置いた先に溶け込みます。複数のコマンドに共通する場合分けは、`component(when(...), otherwise(...))` を変数に取り出して共有します。`packages/cli/self/specs/pipeline.component.ts` では、「検査に落ちたら、同じ段階をもう一度。回数を使い切ったら設計からやり直す」という場合分け（`rejected`）を、3つのコマンドが共有しています。
-* **`{}` は、「名前つきの子の並び」の短い書き方です。** 何の名前かは、受け取る語が決めます: `commands: {...}` ならコマンドの名前、`input({...})` ならフィールドとその型、`integer({...})` なら設定です。受け取る語の無い裸の `{}` は、型としては書けません（`{ type: "integer", min: 1 }` ではなく `integer({ min: 1 })`）。
-* **木の検査**: 書いたものは、文法（何の中に何を、いくつまで書けるか）に照らして確かめます。コマンドの中に書けない部品、2つ書いた遷移先や入力、同じ名前の重なり、知らないまとまりの名前は、**書いた場所（ファイルと行）と一緒に**報告します（例: `order.component.ts:42: コマンド "Ship"の中に、goToを 2 つ以上は書けません`）。解釈が無くても、Layer 1 だけで確かめます。宣言に無い状態や副作用を指すことは、取っ手で書く限り型エラーになります（`State.PAYED`）。
-* **型の付け方**: 型（tsc）の役割は、補完と、軽い誤りの検出です（取っ手の書き間違い、型の合わない参照）。誤りの検出の主役は、木の検査と、IR を作るときの検査です。`Rank` のように変数に取り出した配列には、`as const` を付けておきます。
-* **名前の重複**: 条件と計算からは、状態名（`status`）、覚えているデータ、引数の無い問い合わせの答え、コマンドの入力、尋ねた答えに付けた名前（`.as("名前")`）が同じ階層で見えます。そのため、これらの名前は重複できません（入力どうし、尋ねた答えの名前どうしは、コマンドが違えば同名で構いません）。
-* **数値**: 金額は整数で扱い、丸め方を計算の文に明記します。小数の計算は式の順序だけで結果がずれ、正解と実装が正当な理由なく食い違うためです。
-* **しきい値**: 条件に数値の境目があるときは、`around` に宣言します。ちょうどその値と前後の値を重点的に生成しないと、「以上」と「より大きい」の取り違えを見逃します。
-
-#### 構造を持つ値（`record` / `list` / `optional`）と、初期値（`initially`）
-
-型は、入れ子にできます。型を書けるところなら、どこにでも書けます（覚えるデータ、入力、問い合わせの答え、
-副作用のペイロード、計算の結果、コマンドの結果）。
-
-```typescript
-export const Todo = record({ id: "string", title: "string", done: "boolean" });
-export const Data = data({ items: component(list(Todo), initially([])) });    // 並び。はじめは空
-export const Query = queries({ newId: component(description("A fresh identifier."), output("string"), fresh()) });
-
-export const AddInput = input({ title: "string" });
-export const CompleteInput = input({ id: among(Data.items, "id") });
-export const ListInput = input({ only: ["all", "open", "done"] });
-
-export const Todos = component({
-  // 状態を持たない部品: states / init を書かない
-  data: Data,
-  queries: Query,
-  commands: {
-    Add: component(AddInput, output(record({ result: ["created", "invalid"], todo: optional(Todo) })), ...),
-    Complete: component(CompleteInput, output(["completed", "not-found", "already-done"]), ...),
-    List: component(ListInput, output(list(Todo)), does("The answer is the items in the order they were added, filtered as asked.")),
-  },
-});
-```
-
-| 型 | 意味 |
-| --- | --- |
-| `record({ フィールド: 型 })` | フィールドの組。`input({...})` の中身と同じもの |
-| `list(型)` | 並び。**順序も比べます** |
-| `optional(型)` | 無いことがある値。無いときの値は `null` |
-
-* **`initially(値)`** で、覚えるデータのはじめの値を宣言します。宣言しないデータは、いままでどおり、覚えるまで未設定です
-  （意味の関数からは `undefined`）。`optional` のデータには、`Data.x.set(null)` で「無い」に戻せます。
-* **並びやフィールドの組を「どう変えるか」は、構造の語彙にしません。** 計算（文と関数）にして、その結果を覚えます
-  （`Data.items.set(Calc.itemsWithNew)`）。IR には「この計算の結果を覚える」と、計算を定める文が出ます。
-* 値が型に合うことは、IR を作るときの検査（定数と、参照の型）と、仕様を実行する検査（計算の結果）が確かめます。
-* **構造を持つ値の検査は、手書きの版（Stage 0）が行います。** フレームワーク自身の `payload-check` の仕様は平らな値だけを
-  扱うので、語彙に構造を持つ型があるときは、Stage 1 を使いません（`pipeline` の「仕様の範囲の外は Stage 0 が決める」と同じです）。
-
-#### 依存の約束（`fresh` / `increasing`）と、入力の選び方（`among` / `examples`）
-
-問い合わせの答えは、1手ごとに独立に決まります。それでは困る依存には、依存が守る約束を宣言します。
-
-| 書き方 | 意味 | 使いどころ |
-| --- | --- | --- |
-| `fresh()` | 一度返した値は、二度と返さない | 識別子の採番 |
-| `increasing()` | 前の答えより小さくならない | 時計 |
-
-* 代役は、この約束を守って答えます。契約にも書かれます。本番コードは、約束を当てにしてよく、自分で実装はしません。
-* **`increasing()` の増え幅は、仕様の中の数の前後から選びます。** 「発行から 3600 秒以内」のような、覚えた値との差で決まる
-  しきい値に、時計の範囲が現実の時刻でも届きます（約束が無いと、時刻は1手ごとに無関係な値になり、届きません）。
-* 引数つきの問い合わせには、まだ付けられません。
-
-生成する入力を、仕様の中の値に寄せる手がかりです。合否の決まりではありません。
-
-| 書き方 | 意味 |
-| --- | --- |
-| `among(Data.items, "id")` | 入力を、いま覚えている並び `items` の要素の `id` から選ぶ（4回に3回。残りは乱数のままで、無いものも試す） |
-| `string({ examples: [...] })` | 形式の決まった文字列の例。生成に混ぜる |
-| `integer({ ..., around: [...] })` | 試すしきい値を足す |
-
-* **仕様の中の数と文字列（意味の関数の中の定数、決定表の値）は、いつも自動で試します。** `around` は、それに足すためのもので、
-  狙う値を書き写す必要はありません。以前は、`around` を書くと自動で集めた数が使われなくなり、`around` が値の写しを書く場所に
-  なっていました。
-
-#### コマンドの結果（`output` と `responds`）
-
-コマンドは、実行した相手に値を返せます。返すものの形を `output` で宣言し、場合ごとに返す値を `responds` で書きます。
-
-```typescript
-// --- examples/library-ts/specs/loan.component.ts（抜粋） ---
-export const If = conditions({
-  memberAlreadyHoldsAtLeast: "The member already holds at least the policy's maximum number of books, or someone else has reserved the book",
-  bookReservedSomeoneElse: "The book is reserved by someone else",
-});
-// ...
-Borrow: component(
-  from(State.AVAILABLE),
-  output(record({ result: ["lent", "refused"], dueInDays: optional("integer") })),
-  when(
-    If.memberAlreadyHoldsAtLeast,
-    responds({ result: "refused", dueInDays: null }),          // 断ったことを、結果として返す
-    does("The borrowing is refused; nothing changes."),
-  ),
-  otherwise(goTo(State.ON_LOAN), does("... The answer is lent, with the number of days until the book is due.")),
-),
-Extend: component(from(State.ON_LOAN), output(["extended", "refused"]), when(If.bookReservedSomeoneElse, responds("refused"), ...), otherwise(...)),
-```
-
-* **形**は、どの型でも書けます: 値1つ（`output("boolean")`、`output(["extended", "refused"])`）、フィールドの組（`output(record({...}))`）、並び（`output(list(Todo))`）。
-  場合によって値が無いフィールドは `optional(型)` と宣言し、無いときは `null` を返します（決定表の `null` と同じ決まりです。
-  埋め草の値を書かせません）。
-* **値**は、定数か参照です（§3.2）。Layer 1 に書いても、解釈に書いても構いません。Layer 1 に書いた値は、解釈は書き換えられません。
-* `output` を宣言したコマンドは、**どの場合にも** `responds` が要ります。宣言していないコマンドは、返せません。
-* **読み取りだけのコマンド**（状態を変えず、副作用も無く、結果だけを返す）も、同じ書き方で書けます。
-* **検証（§3.6）**: 期待する観測に、状態と副作用に加えて、返す値が入ります。断ったのに何も返さない実装、違う値を返す実装は、
-  不合格になります。以前は、断ることは「何も起きない」としか検証できませんでした。
-* **契約**: `executeCommand` が、その値を返します。返すコマンドが1つも無い仕様では、契約も IR も以前のままです。
-* 仕様が決めない値（採番した ID、時刻）は、問い合わせの答えにして、それを返す形にします。「何でもよい」という期待値はありません。
-
-#### 引数つきの問い合わせ（`Query.q({...}).as(...)`）
-
-問い合わせには、引数を持たせられます。「月末か」は引数の無い問い合わせ、「この名前の状態は宣言済みか」は引数つきの問い合わせです。
-
-```typescript
-// --- packages/cli/self/specs/reference-check.component.ts（抜粋） ---
-export const Query = queries({
-  stateDeclared: component(description("Whether the specification declares a state of this name."), input({ name: "string" }), output("boolean")),
-});
-
-export const GoToInput = input({ state: "string" });
-// ...
-commands: {
-  GoTo: component(
-    GoToInput,
-    from(State.IN_CASE),
-    // このコマンドは、入力の state について、stateDeclared を尋ねる。答えに declared という名前を付ける
-    Query.stateDeclared({ name: GoToInput.state }).as("declared"),
-    when(If.namedStateNotDeclared, does("An unknown-state diagnostic is reported ...")),
-    otherwise(),
-  ),
-},
-```
-
-* **引数の無い問い合わせ**は、尋ねると書かなくても読めます（意味の関数では `state.isMonthEnd`、構造では `Query.isMonthEnd`）。
-* **引数つきの問い合わせ**は、コマンドが「何について尋ねるか」を `Query.q({ 引数 }).as("名前")` で書きます。引数は、定数か、入力のフィールド（`GoToInput.state`）か、覚えているデータ（`Data.x`）です。答えは、付けた名前で読みます（意味の関数では `state.declared`、構造では尋ねた取っ手の `.answer`）。尋ねずに読むことはできません。
-* 1つのコマンドで、同じ問い合わせを別の引数で何度でも尋ねられます（名前を別々に付けます）。同じ手の中では、同じ引数には同じ答えが返ります。手が変われば、答えは変わり得ます（引数の無い問い合わせと同じです）。
-* 尋ねること（`.as(...)`）は、Layer 1 に書いても、解釈に書いても構いません。Layer 1 に書いたコマンドには、解釈は尋ねることを書けません。
-* **検証（§3.6）**: 実装が尋ねてよいのは、そのコマンドが尋ねると書いた引数だけです。**書かれていない引数で尋ねたら、不合格にします。** 尋ねなかったこと、尋ねる順序と回数は問いません。答えで結果が変わるなら、尋ねない実装は結果の食い違いとして見つかるからです。
-* 尋ねた答えを、次の問い合わせの引数にすることは、まだできません。
+問い合わせには、引数を持たせられます。本番コードが、仕様の尋ねない引数で尋ねたら、検証は不合格になります（§3.6）。
 
 #### どこまで構造にするか
 
 文のままにするほど書くのは楽になり、解釈に任せる量が増えます。目安は次のとおりです。
 
-* **境界（状態、コマンドの入力、問い合わせ、副作用）は、決まっているなら構造で書きます。** アダプターの契約はここから決まるので、解釈に任せると、解釈を確かめるまで契約が定まりません。
+* **境界（コマンドと問い合わせの入力と答え、外の世界）は、決まっているならコードで書きます。** アダプターの契約はここから決まるので、解釈に任せると、解釈を確かめるまで契約が定まりません。
 * **数値や区分は決定表に書きます。** 表の値は解釈を通らずに IR に届くので、値だけを変えても解釈を導き直す必要がありません。
-* **何が起きるかの中身は、文で書きます。** どの副作用を、どの順で、どの値で起こすかは、解釈が構造にします。
-* **断ることは、事前条件（`onlyIf`）ではなく、結果（`when`）として書きます。** `from` と `onlyIf` は、その場面を
-  仕様の外に置きます。そこで何が起きるかは検証されず、本番コードは扱わなくてもよいことになります。
-  「上限に達していたら借りられない」を `onlyIf` で書くと、上限を確かめるコードは「壊しても検証が落ちない」ものになり、
-  ミューテーションのゲートが差し戻します。実際に、エージェントは確認そのものを本番コードから取り除いて合格しました
-  （`examples/library-ts`）。本番コードが判断すべきことは、`when` の場合の1つ（遷移先も副作用も無い結果）にします。
-  `onlyIf` は、起こり得ない場面か、ほかのだれかが防いでいる場面にだけ使います。
+* **何が起きるかの中身は、文で書きます。** どの外の世界へのコマンドを、どの順で、どの値で起こすかは、解釈が式にします。
+* **断ることは、`requires` ではなく、答えとして書きます（`return "limit";`）。** `requires` は、その場面を仕様の外に置きます。そこで何が起きるかは検証されず、本番コードは扱わなくてもよいことになります。「上限に達していたら借りられない」を `requires` で書くと、上限を確かめるコードは「壊しても検証が落ちない」ものになり、ミューテーションのゲートが差し戻します。実際に、エージェントは確認そのものを本番コードから取り除いて合格しました（`examples/library-ts`）。`requires` は、起こり得ない場面か、ほかのだれかが防いでいる場面にだけ使います。
 * 解釈が思ったとおりにならなかったら、**解釈を直すのではなく、Layer 1 を詳しくします**（§3.2）。
 
-今後の課題（書き方は `DSL.md` で決めてあり、実装がこれからのもの）:
-
-* Layer 1 に書いた `Data.x.set(...)` / `Effect.E(...)` / `Part.items.add(...)`。書くと、「まだ使えません」と報告します（解釈には書けます）。
-  条件のまとまりは、コンポーネントに置いても置かなくても同じです（宣言するだけで使えます）。
-* 部品の中の部品（`parts`、`many`、`route`）の書き方は `REFERENCE.md` の「Parts」と `DSL.md` §13・§14 にあります。
-  子の口をそのまま出す `forwards` は、まだです。
 
 ### 3.2. Layer 2: 解釈 (Interpretation)
 
-Layer 1 の文を、構造と意味に細かくしたものです。**LLM が導き、人は書きません。** 解釈は、Layer 1 と同じ木に節を足したもので、**語は Layer 1 と同じ**です。性質の違う2種類を持ちます。
-
-| | 構造 | 意味（`meanings`） |
-| --- | --- | --- |
-| 何を持つか | Layer 1 が構造として書かなかった分。語彙と、コマンドごとの入力・実行できる状態・遷移先・副作用・覚えるデータ | 名前が指すもの。条件の真偽、計算の値、不変条件の真偽 |
-| 書き方 | 宣言と参照（関数は無い） | 関数 |
-| IR に出るか | **出る。** 実装する LLM に渡る | **出ない。** PBT が期待値を計算するための正解 |
-
-```typescript
-// --- specs/order.interpretation.ts ---
-// Code generated by clp interpret. Do not edit: make the component (Layer 1) more precise and run it again.
-// layer1: sha256:ce958488…
-import { component, from, goTo, interpretation, onlyWhen, otherwise, was, when } from "@clp/core";
-// Layer 1 の取っ手を import する。名前を文字列で書く所は無い
-import { Campaign, CampaignIf, Shipping, ShippingIf } from "./order.decisions.ts";
-import { Calc, Data, Effect, If, Inv, Order, PlaceOrderInput, State } from "./order.component.ts";
-
-export const Interpretation = interpretation(Order, {
-  // 構造: Layer 1 が文のままにした分（宣言。IR に出る）
-  commands: {
-    PlaceOrder: component(Effect.SendOrderConfirmation(), Data.rank.set(PlaceOrderInput.customerRank), Data.price.set(PlaceOrderInput.listPrice)),
-    Checkout: component(
-      when(
-        If.paymentSucceeded,
-        Effect.SendReceipt({ discountPercent: Campaign.discountPercent, amount: Calc.amountCharged }),
-        Effect.IssueCoupon({ type: Campaign.coupon }, onlyWhen(Campaign.grantsCoupon)),
-      ),
-      otherwise(Effect.NotifyPaymentFailure()),
-    ),
-    // Layer 1 が書かなかった遷移先を、文から決める
-    Ship: component(goTo(State.SHIPPED), Effect.SendShippingNotice({ priority: Shipping.priority })),
-    // 文だけのコマンド: 実行できる状態も、遷移先も、ここで決まる
-    Cancel: component(from(State.PENDING, State.PAID), goTo(State.CANCELLED), Effect.Refund(onlyWhen(was(State.PAID)))),
-  },
-
-  // 意味: 名前が何を指すか（関数。IR に出ない）。取っ手に関数を付ける
-  meanings: [
-    CampaignIf.customerGoldMemberMonthEnd.means((state) => state.rank === "Gold" && state.isMonthEnd),
-    CampaignIf.customerSilverMember.means((state) => state.rank === "Silver"),
-    ShippingIf.customerGoldMemberOrder10.means((state) =>
-      state.rank === "Gold" || (state.price ?? 0) >= 10_000),
-    If.externalPaymentModuleActive.means((state) => state.paymentModuleActive),
-    If.paymentSucceeded.means((state) => state.paymentResult === "succeeded"),
-    Calc.amountCharged.means((state) =>
-      Math.floor(((state.price ?? 0) * (100 - Campaign.of(state).discountPercent)) / 100)),
-    Inv.everyOrderPastDraftState.means((state) =>
-      state.status === "DRAFT" || (state.rank !== undefined && state.price !== undefined)),
-  ],
-});
-```
-
-Layer 1 に無い語彙を解釈が足すときは、解釈のファイルの中で、同じようにまとまりを先に宣言して置きます。Layer 1 がすでに同じ名前の
-取っ手を持つときは、`IfAdded`・`CalcAdded`・`QueryAdded` のように別の名前にします。
-
-```typescript
-// --- examples/library-ts/specs/loan.interpretation.ts（抜粋） ---
-import { Policy } from "./loan.decisions.ts";
-import { Calc, If, Loan, State } from "./loan.component.ts";
-
-export const IfAdded = conditions({
-  loanThenPastDueDate: "The loan is then past its due date, but not by more than the policy's lost-after days",
-});
-export const Data = data({ daysUntilDue: "integer" });                 // Layer 1 に data が無いので、解釈が宣言する
-export const CalcAdded = calculations({
-  daysUntilDueAfterDaysPass: component(description("The days until the loan is due, minus the days that pass"), output("integer")),
-});
-
-export const Interpretation = interpretation(Loan, {
-  data: Data,
-  calculations: CalcAdded,
-  commands: {
-    DayPasses: component(
-      // （紛失になる場合の when は省略）
-      when(IfAdded.loanThenPastDueDate, goTo(State.OVERDUE), Data.daysUntilDue.set(CalcAdded.daysUntilDueAfterDaysPass)),
-      otherwise(Data.daysUntilDue.set(CalcAdded.daysUntilDueAfterDaysPass)),
-    ),
-    // ...
-  },
-  meanings: [
-    IfAdded.loanThenPastDueDate.means((state) => {
-      const daysUntilDue = CalcAdded.daysUntilDueAfterDaysPass.of(state);
-      return daysUntilDue < 0 && daysUntilDue >= -Policy.of(state).lostAfterDays;
-    }),
-    CalcAdded.daysUntilDueAfterDaysPass.means((state) => (state.daysUntilDue ?? 0) - (state.days ?? 0)),
-    // ...
-  ],
-});
-```
+解釈は、Layer 1 が文のままにした所の中身を、同じ書き方の式で与えます。**書き方は `REFERENCE.md` の "The interpretation" と `DSL.md` §17.6** にあります。ファイルは `<名前>.interpretation.ts` で、LLM が導き、人が確かめて確定します。手では書きません。変えたいときは Layer 1 を詳しくして導き直します。
 
 #### Layer 1 が先。解釈は書き換えられない
 
-**Layer 1 が構造として書いたものを、解釈は書き換えられません。** 足りない分を足すだけです。
-
-| Layer 1 に書かれたもの | 解釈にできること |
-| --- | --- |
-| `states`・`init`・`decisions` | 何も書けない |
-| 語彙のまとまり（`data`・`queries`・`effects`・`calculations`）が文か、無い | そのまとまりを書く |
-| 語彙のまとまりに、項目を並べている | 項目は足せない（計算だけは足せる）。項目ごとに、**書かれていない部品だけ**を足す |
-| コマンドを並べている | コマンドは足せない。**すべてのコマンドに1つずつ書く**（足すものが無ければ `component()`） |
-| コマンドの入力・`from`・`onlyIf`・尋ねること（`.as(...)`）・`goTo` | その部品は書けない |
-| コマンドの場合分け（`when`） | 同じ場合のそれぞれを、同じ条件の取っ手で、もう一度書く（足すものが無ければ `when(If.x)`）。足せるのは `otherwise` だけ |
-| コマンドが文だけ | 入力・実行できる状態・尋ねること・場合分け・遷移先のすべてを決める |
-
-解釈では、足す語彙を Layer 1 と同じく、まとまりとして先に宣言し（`export const Data = data({...})` など）、`interpretation` の
-同じキーに置きます（`data: Data`）。足した条件は `conditions({...})` で宣言するだけです。まとまりの中の項目は、次のように書きます。
-
-| まとまり | 解釈での書き方 |
-| --- | --- |
-| `data` | `data({ 名前: 型 })` |
-| `queries` | `queries({ 名前: output(型) })`（それだけなら、型をそのまま）。引数があれば `component(input({...}), output(型))` |
-| `effects` | `effects({ 名前: input({...}) })`。何も運ばなければ `component()` |
-| `calculations` | `calculations({ 名前: component(description("式"), output(型)) })`。Layer 1 が文を書いた計算には `output(型)` だけ |
-| `invariants` | `invariants({ 名前: "文" })` |
-
-これらに反した解釈は、IR を作るときに `bad-interpretation` として報告します（例: `コマンド "Checkout" の条件 "The payment succeeded" の goTo は Layer 1 に書かれているので、解釈では書けません`）。
-
-#### 構造の書き方
-
-コマンドごとに、尋ねること（`Query.q({...}).as("名前")`。§3.1）と、起きることを書きます。起きることは、条件で分かれるコマンドでは `when(...)` / `otherwise(...)` の中に書きます。
-
-* `goTo(State.X)`: 遷移先です。**書かなければ、状態は変わりません。**
-* `Effect.E({ フィールド: 値 })`: 起こす副作用です（何も運ばなければ `Effect.E()`）。起こす順に並べます。最後に `onlyWhen(...)` を添えると、それが成り立つときだけ起こします。
-* `Data.x.set(値)`: 覚えるデータです。書いたデータだけが更新されます。
-
-値は、定数か、取っ手による参照です。参照は、宣言から得た取っ手で書きます。名前を文字列で書く所はありません。
-
-| 参照 | 指すもの |
-| --- | --- |
-| `PlaceOrderInput.listPrice` | そのコマンドの入力のフィールド |
-| `Data.price` | 覚えているデータ |
-| `Query.isMonthEnd` | 引数の無い問い合わせの答え |
-| `Query.q({...}).as("名前")` の `.answer` | そのコマンドが尋ねた、引数つきの問い合わせの答え |
-| `Campaign.discountPercent` | 決定表の、当たった行の列の値 |
-| `Calc.amountCharged` | 計算の結果 |
-| `was(State.A, ...)` | コマンドの実行前の状態が、挙げたどれかであること（真偽値） |
-
-`onlyWhen` には、条件の取っ手か、真偽値の参照を書けます。表を引くだけの判断や、実行前の状態による判断は、参照で書けば条件の文と関数を増やさずに済みます。場合（`when`）と違って、ほかと排他ではありません。
-
-#### 意味の書き方
-
-* 条件と計算の関数は、状態名（`status`）、覚えているデータ（未設定があり得る）、引数の無い問い合わせの答え、コマンドの入力、そのコマンドが尋ねた答え（`.as("名前")` で付けた名前）を受け取ります。入力と尋ねた答えは、ほかのコマンドの実行中は未設定です。不変条件の関数が受け取るのは、状態名と覚えているデータだけです。
-* `meanings` は、取っ手に関数を付けたものの並びです（`If.x.means(関数)`、`Calc.c.means(関数)`、`Inv.k.means(関数)`）。
-* 関数の中では、`Campaign.of(state)` で決定表の当たった行を、`Calc.c.of(state)` で別の計算の結果を使えます。
-* 不変条件が検証するのは仕様であって実装ではありません。覚えているデータを本番システムから読まない方針のため、実装に対しては確かめられません。IR には文を載せるので、LLM には前提として伝わります。
+解釈は埋めるだけで、Layer 1 がコードとして書いたものを書き換えられません。Layer 1 と違う見出しに書くこともできません。文が言っている外の世界は、解釈が `external` として宣言できます。
 
 #### 検査
 
-解釈は LLM が書くので、使う前に確かめます。**主役は、型ではなく、木の検査と、仕様を実行する検査です。**
+解釈は LLM が書くので、使う前に確かめます。
 
 | 検査 | 見つけるもの |
 | --- | --- |
-| 木の検査（文法） | 書けない場所に書かれた部品、多すぎる部品、重なった名前、裸の `{}`。書いた場所（ファイルと行）と一緒に報告する |
-| Layer 1 との重ね合わせ | Layer 1 が構造として書いたものの書き換え、足りない構造（`bad-interpretation`） |
-| IR を作るときの検査 | 存在しない状態・副作用・フィールド、型の合わない値や参照、意味の書かれていない名前（例: `Notify.count: 決定表の値 true は integer に入りません`） |
-| 仕様を実行する検査（§2.3） | 条件の衝突、不変条件の破れ、型に合わない値。**意味の関数が、仕様に無い名前を読んだこと**（`state.paymentModuleActiv` のような書き間違い） |
+| Layer 1 との重ね合わせ | 書き換え（`overwrite`）、違う見出し（`wrong-heading`） |
+| IR を作るときの検査 | 文が残っている（`prose-left`）、存在しない名前、型の合わない値。書いた場所と一緒に報告する |
+| 仕様そのものの検査（§2.3） | 性質の破れ、どの場合にも当たらない入力、例の不一致 |
 
-以前は、意味の関数の引数に型を付けて、名前の書き間違いを型エラーにしていました。型の計算をやめた代わりに、仕様を実行するときに、関数が読んだ名前を確かめています。これらの報告は、エージェントへの差し戻しに使われます。
 
 #### 解釈を導く
 
@@ -969,8 +435,8 @@ pnpm clp interpret --accept                                            # 確定�
 **解釈は採点の正解なので、LLM が導いたものをそのまま正解にはしません。** 実装と正解の両方を LLM が同じ文から書くと、同じ読み違いをしたまま合格するためです。
 
 * 導いたものは `<名前>.interpretation.draft.ts` に書き出します。仕様の読み込みは既定で `*.draft.ts` を無視するので、**人が確定する（`--accept`）まで、検証には使われません。** 確定すると、下書きが `<名前>.interpretation.ts` になります。
-* 解釈がまだ無ければ、雛形から書かせます。雛形には、Layer 1 が名前を挙げたコマンド・場合・条件が並び、文がコメントとして添えてあります。Layer 1 に無い項目（`states` など）は `TODO` で示します。
-* 書き出す前に、上の検査にかけます。文法に合わない書き方、Layer 1 の書き換え、足りない構造、参照の誤り、意味の書かれていない名前、条件の衝突、不変条件の破れ、型に合わない値は、エージェントに差し戻します。
+* 解釈がまだ無ければ、雛形から書かせます。雛形には、Layer 1 が文のままにした項目が、`TODO` として文と一緒に並びます。
+* 書き出す前に、上の検査にかけます。書き方の誤り、Layer 1 の書き換え、残った文、参照の誤り、性質の破れ、型に合わない値は、エージェントに差し戻します。
 * コンポーネントの `assets` に宣言した添付資料（用語集など）が渡ります。コマンドの `--asset <file>` でも追加できます。
 * エージェントには「最も文字どおりの読み方で書き、2通りに読める文には `// REVIEW:` で疑問点を書く」よう指示します。疑問点は集めて、結果と一緒に報告します。
 * **疑問点と食い違いは、人が確かめるまで確定できません。** 2つの解釈の食い違い（下の「複数の解釈を比べる」）は、下書きの先頭に `// REVIEW(clp):` の行として書かれます。`--accept` は、`// REVIEW:` か `// REVIEW(clp):` が1つでも残っていれば断ります。人は、Layer 1 を詳しくして導き直すか、その読み方でよければ、その行の `REVIEW` を `REVIEWED` に書き換えます（確かめた記録として、ファイルに残ります。導き直すときも、エージェントはそれを保ちます）。導き直すときは、前の `// REVIEW(clp):` を消してから始め、新しい比較の結果を書き直します。確定版に確かめていない印が残っていれば（手で書き換えた、など）、`unreviewed-interpretation` として止めます。`clp apply --drafts` は、人を挟まないための指定なので、この確認も挟みません（結果に `oracle: "draft"` が残るのは、これまでどおりです）。
@@ -981,124 +447,49 @@ pnpm clp interpret --accept                                            # 確定�
 
 1. 1つ目のセッションが、**いちばん素直な読み方**で解釈を導きます。これが下書きとして残ります。
 2. 2つ目以降のセッションが、**1つ目を見ずに**、同じ文から解釈を導きます。依頼は1つ目と違い、「文が何も言っていない所、2通りに読める所では、**筋は通るが、いちばん素直ではない読み方**を選ぶ。文がはっきりしている所は、そのまま従う」です。
-3. 1つ目と、ほかのそれぞれを、同じランダムなコマンド列で実行し、期待する結果（状態と副作用）が食い違う所を探します。**コマンドと観点の組ごとに**、食い違いが起きる最短のコマンド列を1つ報告します。観点は、実行できるかどうか、遷移先、副作用の1つ1つ（起こすかどうかと値）、副作用の順序です。
+3. 1つ目と、ほかのそれぞれを、同じランダムなコマンド列で実行し、期待する結果（答えと外の世界へのコマンド）が食い違う所を探します。**コマンドと観点の組ごとに**、食い違いが起きる最短のコマンド列を1つ報告します。観点は、実行できるかどうか、答え、外の世界へのコマンドの1つ1つ（起こすかどうかと値）、その順序です。
 
 ```text
-食い違い (DayPasses、遷移先): Borrow {...} → DayPasses {"days":29, ...}
-  1つ目: {"state":"OVERDUE","effects":[]}
-  3 つ目: {"state":"LOST","effects":[{"name":"ReplacementCharge","payload":{}}]}
+2 つ目の解釈と食い違う (Return、外の世界へのコマンド loan-world.NotifyNextMember):
+  Borrow({} 外の世界: {"loan-world.ReservedBySomeoneElse":false}) → Return({} 外の世界: {"loan-world.ReservedBySomeoneElse":true})
+  1つ目: {"effects":[{"port":"loan-world.NotifyNextMember","args":{}}],"output":"returned"}、2 つ目: {"effects":[],"output":"returned"}
 ```
 
-**食い違う所は、Layer 1 の文があいまいな所です。** 人はそこを読んで、Layer 1 を詳しくします。構造や関数の字面ではなく振る舞いを比べるので、条件の文や計算の名前が解釈の間で違っていても比べられます。
+**食い違う所は、Layer 1 の文があいまいな所です。** 人はそこを読んで、Layer 1 を詳しくします。式の字面ではなく振る舞いを比べるので、条件の文や計算の名前が解釈の間で違っていても比べられます。
 
-* **語彙は1つ目のものを渡します。** 状態、コマンドの名前と入力、問い合わせ、副作用は、1つ目が決めたものを2つ目以降に渡して固定します（比べられるようにするためです）。しきい値（`around`）は除きます。1つ目が文から読み取った数値が、そこから伝わるためです。
-* **入力の生成には、解釈の意味の関数に書かれた定数と、決定表の値を混ぜます**（PBT と事前検査でも同じです）。自由な文字列を `"Gold"` と比べる条件は、`"Gold"` を生成しなければ一度も成り立たないためです。しきい値を宣言していない数値にも、関数の中の数値とその前後を混ぜます。
+* **境界は1つ目のものを渡します。** コマンドと問い合わせ、その入力と答えの型、宣言した外の世界は、1つ目が決めたものを2つ目以降に渡して固定します（比べられるようにするためです）。下書きそのものは渡しません。
+* **入力の生成には、仕様の式に書かれた定数と、決定表の値を混ぜます**（PBT と事前検査でも同じです）。自由な文字列を `"Gold"` と比べる条件は、`"Gold"` を生成しなければ一度も成り立たないためです。
 * **なぜ「素直ではない読み方」を頼むのか**: 同じ依頼を同じモデルに繰り返すと、書かれていない所を同じ値で埋めます。実際に、日数の書かれていない「長いあいだ延滞したら」を、4つのセッションがすべて 30 日と読み、食い違いは1つも出ませんでした。
 * **既定を 2 にした理由**: 粗く書いた2つの仕様（注文、図書の貸出）を4セッションで解釈させたところ、2つ目が、食い違いのあるコマンドをすべて見つけました。3つ目と4つ目は、同じコマンドの別の読み方を示しただけで、新しいコマンドは足しませんでした（試したのは各1回です）。
-* **観点を分けるのは、1つのコマンドにあいまいな所が複数あっても、それぞれを報告するためです。** 分けなければ、いちばん短く示せるものだけが出て、ほかは隠れます（注文の例では、領収書の金額の違いに、クーポンを出す条件の違いが隠れていました）。副作用だけが食い違った場合は、その先のコマンドも続けて比べます。実行できるかどうかや遷移先が分かれたら、そのコマンド列はそこまでです。
-* 同じ観点の中の違い（1つの副作用の、2つのフィールド）は、1つにまとまります。
+* **観点を分けるのは、1つのコマンドにあいまいな所が複数あっても、それぞれを報告するためです。** 分けなければ、いちばん短く示せるものだけが出て、ほかは隠れます（注文の例では、領収書の金額の違いに、クーポンを出す条件の違いが隠れていました）。外の世界へのコマンドだけが食い違った場合は、その先のコマンドも続けて比べます。実行できるかどうかが分かれたら、そのコマンド列はそこまでです。
+* 同じ観点の中の違い（1つのコマンドの、2つの引数）は、1つにまとまります。
 * 解釈した LLM が残す疑問点（`// REVIEW:`）のほうが、数は多く出ます（上の試行では、食い違い 2〜3 件に対して疑問点 11〜14 件）。食い違いは、そのうち振る舞いが変わるものを、具体的なコマンド列で示します。
-* 1つ目が決めた語彙そのもの（副作用が1つ足りない、など）は、比べられません。
+* 1つ目が決めた境界そのもの（外の世界へのコマンドが1つ足りない、など）は、比べられません。
 * 残るのは1つ目の下書きだけです。ほかは比べたあとで捨てます。
 
 #### Layer 1 が変わったとき
 
-解釈のファイルの先頭には、導いたときの Layer 1 のハッシュが記されます（`// layer1: sha256:…`）。
+解釈のファイルの先頭には、導いたときの Layer 1 のハッシュが、部品ごとに記されます（`// layer1 Order: sha256:…`）。
 
 * **Layer 1 がそのあとで変わっていれば、解釈は古いものとして扱い、正解には使いません**（`stale-interpretation`。`clp compile` も `clp apply` も、生成済みの `verify.ts` も止まります）。
-* **決定表の値だけの変更は、解釈を古くしません。** 値は解釈を通らずに IR に届くからです（ハッシュに含めるのは、行と列の名前と、値の型だけです）。
-* `interpret` は、いまの解釈を出発点にして、**合わなくなった所だけ**を直させます。確定版は書き換えず、下書きとして書き出します。構造が変わったコマンドと語彙の項目を報告するので（意味の関数の変更は含みません）、人は差分を読んで確定します。
+* **決定表の値だけの変更は、解釈を古くしません。** 値は解釈を通らずに IR に届くからです（ハッシュから、セルの値を除いています）。
+* `interpret` は、いまの解釈を出発点にして、**合わなくなった所だけ**を直させます。確定版は書き換えず、下書きとして書き出します。人は差分を読んで確定します。
 * 文の言い回しだけを直して、解釈はそのままでよいと判断したときは、`interpret --accept` だけを実行します。いまの Layer 1 のもとで検査に通ることを確かめたうえで、ハッシュを記し直します。
-* ハッシュの行が無い解釈（手で管理しているもの）は、古いかどうかを問われません。
 
 #### 人の確認を待たずに流す
 
 `clp apply --drafts` は、下書きを正解としてそのまま使います。Layer 1 から実装までを CI で自動的に流すためのものです。この場合、実装と正解の両方が LLM の解釈に基づくので、同じ読み違いは検出できません。結果には `oracle: "draft"` と記録され、実行時にも警告が出ます。
 
-#### 文と構造・意味の一致
+#### 文と式の一致
 
-文と、解釈の構造や関数が合っているかを、機械的に照合する手段はありません。PBT が確かめるのは「コードが解釈に合っているか」であって、「解釈が文に合っているか」ではありません。後者を守るのは、2つの解釈の比較、疑問点の報告、そして人の確認です。採点は構造と意味で行われるので、文と食い違っていた場合、実装する LLM は構造に従うことになります。
+文と解釈の式が合っているかを、機械的に照合する手段はありません。PBT が確かめるのは「コードが解釈に合っているか」であって、「解釈が文に合っているか」ではありません。後者を守るのは、2つの解釈の比較、疑問点の報告、式の読み下しと、人の確認です。採点は式で行われるので、文と食い違っていた場合、実装する LLM は式に従うことになります。
 
 ### 3.3. Universal IR (中間表現)
 
-プラットフォームは、Layer 1 のコンポーネントに、決定表と、解釈の構造を重ねて、フラットな JSON (Universal IR) を出力します。どれも関数を含まない宣言なので、並べ直すだけで作れます。解釈の意味（関数）は含めません。キーはソートされ、同じ仕様からは常にバイト一致する出力が得られます。
+IR は仕様の形式モデルで、版は 8 です。**形の定義は `packages/cli/src/v1/ir.ts`**、説明は `DSL.md` §17.9 にあり、実物は各例の `clp/<名前>.ir.json` です。
 
-```json
-// --- clp/order.ir.json（抜粋） ---
-{
-  "irVersion": 6,
-  "descriptions": {
-    "component": "An order: placed by a customer, paid through an external payment module, then shipped or cancelled.",
-    "queries.isMonthEnd": "Whether today is the last day of the month.",
-    "effects.Refund": "What the customer paid is returned."
-  },
-  "model": {
-    "init": "DRAFT",
-    "states": ["DRAFT", "PENDING", "PAID", "SHIPPED", "CANCELLED"],
-    "data": { "rank": ["Gold", "Silver", "Bronze"], "price": { "type": "integer", "min": 0, "max": 1000000, "around": [10000] } },
-    "commands": { "PlaceOrder": { "customerRank": [ ... ], "listPrice": { ... } }, "Checkout": {}, "Ship": {}, "Cancel": {} },
-    "queries": {
-      "isMonthEnd": { "input": {}, "output": "boolean" },
-      "paymentModuleActive": { "input": {}, "output": "boolean" },
-      "paymentResult": { "input": {}, "output": ["succeeded", "failed"] }
-    },
-    "effects": { "SendReceipt": { "discountPercent": "integer", "amount": "integer" }, "Refund": {}, ... },
-    "calculations": { "amountCharged": { "description": "price × (100 − discount percent) ÷ 100, rounded down to a whole yen", "output": "integer" } },
-    "invariants": ["Every order past the draft state has a member rank and a price"]
-  },
-  "decisions": {
-    "campaign": {
-      "rows": {
-        "The customer is a Gold member and it is month-end": { "discountPercent": 20, "grantsCoupon": true, "coupon": "Premium" },
-        "The customer is a Silver member": { "discountPercent": 5, "grantsCoupon": false, "coupon": null },
-        "otherwise": { "discountPercent": 0, "grantsCoupon": false, "coupon": null }
-      }
-    },
-    "shipping": { ... }
-  },
-  "behaviors": [
-    {
-      "name": "Checkout",
-      "from": ["PENDING"],
-      "onlyIf": ["The external payment module is active"],
-      "when": {
-        "The payment succeeded": {
-          "goTo": "PAID",
-          "does": "A receipt is sent with the campaign's discount percent and the amount charged. Then a coupon is issued if the campaign grants one.",
-          "emits": [
-            { "effect": "SendReceipt",
-              "input": { "discountPercent": { "$ref": "decision:campaign.discountPercent" }, "amount": { "$ref": "calculation:amountCharged" } } },
-            { "effect": "IssueCoupon",
-              "input": { "type": { "$ref": "decision:campaign.coupon" } },
-              "onlyWhen": { "$ref": "decision:campaign.grantsCoupon" } }
-          ]
-        },
-        "otherwise": { "does": "The customer is notified of the payment failure.", "emits": [ ... ] }
-      }
-    },
-    { "name": "Cancel",
-      "description": "A pending or paid order can be cancelled. If the order had been paid, a refund is issued.",
-      "from": ["PENDING", "PAID"],
-      "when": { "otherwise": { "goTo": "CANCELLED",
-        "emits": [ { "effect": "Refund", "input": {}, "onlyWhen": { "$was": ["PAID"] } } ] } } },
-    ...
-  ]
-}
-
-```
-
-* **IR のキーは、仕様を書くときの語と同じです。** `model` には語彙（`init`・`states`・`data`・`commands`（コマンド名と入力）・`queries`・`effects`・`calculations`・`invariants`）が、`behaviors` にはコマンドごとの振る舞い（`from`・`onlyIf`・`when`）が入ります。
-* `when` のキーは条件の文です（どれも成り立たなければ `otherwise`）。条件で分かれないコマンドは、`otherwise` だけを持ちます。
-* `model.queries` は、問い合わせごとに、引数（`input`）と答えの型（`output`）を持ちます。引数つきの問い合わせを尋ねるコマンドは、`behaviors` に `asks` を持ちます（`"asks": { "declared": { "query": "stateDeclared", "input": { "name": { "$ref": "input:state" } } } }`）。
-* **`goTo` が無い結果は、状態を変えません**（上の `Checkout` の `otherwise`）。
-* `descriptions`（全体と、項目ごとの説明）、コマンドの `description`、結果の `does` は、Layer 1 の文です。`emits`・`set`・`responds` がその正確な形で、LLM には両方が渡ります。文は、書かれていなければ出ません。
-* 場合の中の `emits` は、起こす副作用を順に並べたものです（`effect` が副作用の名前、`input` が渡す値、`onlyWhen` があればそれが成り立つときだけ）。起こす副作用が無ければ、`emits` は出ません（`set` と同じ）。
-* **IR は、Layer 1 をどこまで構造で書いたかによりません。** 同じ内容なら、Layer 1 に書いても解釈に書いても、同じ IR になります（文の置き場所だけが変わります）。
-* `onlyWhen` は、条件の文か、真偽値の参照です。
-* 参照: `{"$ref": "input:<名前>"}`、`{"$ref": "data:<名前>"}`、`{"$ref": "query:<名前>"}` は、コマンドの入力、覚えているデータ、問い合わせの答え。`{"$ref": "calculation:<名前>"}` は計算の結果。`{"$ref": "decision:<表>.<列>"}` は当たった行の列の値。`{"$was": [...]}` は、実行前の状態が挙げたどれかであること。取っ手が指す先と同じ名前です（`PlaceOrderInput.listPrice` は `input:listPrice`、`Campaign.discountPercent` は `decision:campaign.discountPercent`）。
-* 条件・計算・不変条件は自然言語のまま出力されます。評価関数は含みません。
-* `irVersion`（整数、単調増加）が唯一の互換性契約です。版 6 で、キーを仕様を書くときの語にそろえました（計算の `{ is, type }` → `{ description, output }`、場合の `effects: [{ name, payload, when }]` → `emits: [{ effect, input, onlyWhen }]`）。
-* **説明は、`descriptions` の表のまま残します。** 語彙の項目（`model.data` の各フィールドなど）は型そのものなので、説明を入れると、すべての型がオブジェクトになってしまうためです（`DSL.md` §9 の当初の案から変えました）。
+* 部品ごとの状態、イベント（ガード、代入、呼び出し、答え）、問い合わせ、条件、計算、決定表、性質、外の世界の約束を持ちます。条件や計算の中身は式（s 式）で、Layer 1 の文は `notes` と `trace` に記録として残るだけです。
+* `irVersion`（整数、単調増加）が唯一の互換性契約です。
 
 ### 3.4. Layer 3: PBT Verification Engine
 
@@ -1107,88 +498,37 @@ Universal IR から、テスト側のファイルだけを生成します。生�
 | 生成物 | 内容 | 書き換え |
 | --- | --- | --- |
 | `clp/order.ir.json` | Universal IR | 不可 |
-| `clp/order.adapter.contract.ts` | 状態名・コマンド・副作用の型と、`TargetSystemAdapter` インターフェース | 不可 |
+| `clp/order.adapter.contract.ts` | コマンド・問い合わせ・外の世界の型と、`TargetSystemAdapter` インターフェース | 不可 |
 | `clp/order.verify.ts` | アダプターと仕様を PBT ランタイムに渡すだけのグルー | 不可 |
 | `clp/order.adapter.ts` | アダプターの雛形（全メソッドが未実装） | 実装エージェントが埋める |
+| `clp/order.verified.json` | 合格の記録 | 不可 |
 
 生成ファイルのヘッダには `ir-version` と `spec-hash` のみを書き、日時やCLIのバージョンは埋めません。
 
 `clp/order.verify.ts` は出力先にのみ生成され、エージェントの作業場所には置かれません（§2.3）。
 
-現在の PBT は TypeScript（fast-check）向けで、期待値は仕様を Node 上で具体実行して得ています。他言語（Go の `rapid`、Rust の `proptest` など）向けには、IR から同じ構成のテスト側コードを生成する計画です。
+現在の PBT は TypeScript（fast-check）向けで、期待値は IR の式を Node 上で評価して得ています。他言語（Go の `rapid`、Rust の `proptest` など）向けには、IR から同じ構成のテスト側コードを生成する計画です。
 
 ### 3.5. テスト境界: 状態分離契約を備えた Target System Adapter
 
 PBTエンジン（Layer 3）と本番システムを安全に接続し、決定論的なテストを成立させるためのアダプター・インターフェースです。型は IR から生成されます。
 
-本番システムが外部に頼るものは、フレームワークが用意する代役（`Ports`）に置き換えます。代役は問い合わせに対して生成した答えを返し、受けた副作用を記録します。引数つきの問い合わせは、引数を受け取る関数になります（`stateDeclared(input: { name: string }): boolean`）。アダプターは、本番コードが尋ねた引数を、そのまま渡します。本番システムに状態を外から流し込む口はありません。任意の状態には、初期状態からコマンドを積み重ねて到達します。
+本番システムが外部に頼るものは、フレームワークが用意する代役（`Ports`）に置き換えます。代役は問い合わせに対して生成した答えを返し、受けたコマンドを記録します。本番システムに状態を外から流し込む口はありません。任意の状態には、初期状態からコマンドを積み重ねて到達します。
 
-```typescript
-// --- clp/order.adapter.contract.ts（生成物。コメントはエージェント向けに英語） ---
-export type StateName = "DRAFT" | "PENDING" | "PAID" | "SHIPPED" | "CANCELLED";
-
-/** 実行するコマンド1つ。名前と、それに対応する入力。 */
-export type Command =
-  | { name: "Cancel"; input: {} }
-  | { name: "Checkout"; input: {} }
-  | { name: "PlaceOrder"; input: { customerRank: "Gold" | "Silver" | "Bronze"; listPrice: number } }
-  | { name: "Ship"; input: {} };
-
-export type Ports = {
-  /** 問い合わせ（時計、設定、外部サービスの応答）。答えはコマンドごとに変わり得るので、必要なときに尋ねる（保持しない）。 */
-  queries: {
-    isMonthEnd(): boolean;
-    paymentModuleActive(): boolean;
-    paymentResult(): "succeeded" | "failed";
-  };
-  /** 副作用。呼び出しは起きた順に記録され、仕様と照合される。 */
-  effects: {
-    IssueCoupon(payload: { type: "Premium" | "Standard" }): void;
-    NotifyPaymentFailure(payload: {}): void;
-    Refund(payload: {}): void;
-    SendOrderConfirmation(payload: {}): void;
-    SendReceipt(payload: { amount: number; discountPercent: number }): void;
-    SendShippingNotice(payload: { priority: boolean }): void;
-  };
-};
-
-export interface TargetSystemAdapter {
-  /** 【分離契約】試行の開始前に呼ばれる。初期状態の本番システムを新しく作り、ports につなぐ。 */
-  setupIsolation(ports: Ports): Promise<void>;
-
-  /** 【分離契約】試行の終了後（成功・失敗問わず）に呼ばれる。試行が作ったものを完全に破棄する。 */
-  teardownIsolation(): Promise<void>;
-
-  /** コマンドを1つ実行する。1回の試行で、同じシステムに対して複数のコマンドが順に実行される。 */
-  executeCommand(command: Command): Promise<void>;
-
-  /** 現在の状態名を返す（Upcaster等のマイグレーション処理は本番側で完了していること）。 */
-  getCurrentState(): Promise<StateName>;
-}
-
-```
+契約の実物は生成物です。例は `examples/checkout-ts/clp/order.adapter.contract.ts` にあります。`Ports` は外の世界の部品ごとの代役で（`ports.customer.Receipt` のように呼びます）、アダプターは `setupIsolation(ports)`、`teardownIsolation()`、`executeCommand(command)`、`executeQuery(query)` を持ちます。`durable` の部品では `ports.storage` と `restartSystem()` が加わります。
 
 `Ports` はテスト側の型であり、本番コードがこれを import することはありません。本番コードの依存の受け取り方に `Ports` をつなぐのはアダプターの仕事です。
 
 ### 3.6. Layer 3: PBT の検証内容
 
-1回の試行は、初期状態から始まるコマンド列（最大8手）です。既定では 5000 回の試行を行います（`--runs` で変えられます）。しきい値ちょうどの値で特定の状態まで進む、問い合わせの答えを何段も経た先で判断する、といった狭い場合を、シードによらず踏むための回数です。壊れた実装の検証は最初の失敗で止まるので、回数に比例して遅くなるのは、合格する検証だけです。
+1回の試行は、初期状態から始まるコマンド列です。先に固定の手順（Alloy が見つけた各場合への最短の手順と、作者の例）を流し、そのあとランダムな列を流します。既定は 5000 回で、ほかの部品を含むか HTTP で受ける部品は 500 回です（`--runs` で変えられます）。
 
-1. `setupIsolation(ports)` で、初期状態の本番システムを代役につないで作る。
-2. 1手ごとに、入力と問い合わせの答えをランダムに決める。引数つきの問い合わせには、「引数から答えを決める関数」を1手ごとに決める（同じ引数には同じ答え）。数値は、範囲の端としきい値（`around`）の前後を重点的に生成する。意味の関数に書かれた定数と、決定表の値も混ぜる（決定表の「30 日」のようなしきい値は、関数の中には現れないため）。現在の状態で実行でき（`from`）、事前条件（`onlyIf`）を満たすコマンドの中から1つを選ぶ。
-3. 解釈の意味（関数）で、成り立つ条件を決める。その条件の構造（宣言）の参照を解決して、期待される次状態と副作用の列を得る。`when` が成り立たない副作用は含めない（決定表の行と計算も、意味の関数で評価する）。
-4. `executeCommand(command)` を呼び、`getCurrentState` の結果と、その手の間に代役が受けた副作用の列（順序を含む）が期待と一致することを確かめる。その手の間に、引数つきの問い合わせが、そのコマンドが尋ねると書いていない引数（IR の `asks` に無いもの）で呼ばれていたら、不合格にする（本番コードが例外を握りつぶしていても同じ）。
-5. 一致すれば、構造の `Data.x.set(...)` を仕様側の「覚えているデータ」に反映して次の手へ進む。最後に `teardownIsolation` を呼ぶ。
+1. `setupIsolation(ports)` で、初期状態の本番システムを代役につないで作る。`durable` の部品は、手の間で `restartSystem()` により再起動する。
+2. 1手ごとに、入力と外の世界の答えを決める。整数は `requires` の範囲の中で、文字列は仕様の定数とその近くから選ぶ。`requires` の外の入り口を引いた手は、仕様にある別の入り口を実行する。
+3. 仕様の式（IR）を評価して、期待される答えと、外の世界へのコマンドの列を得る。
+4. `executeCommand(command)` と `executeQuery(query)` を呼び、答えと、代役が受けたコマンドの列（順序を含む）が期待と一致することを確かめる。仕様がその手で尋ねない引数で、引数つきの問い合わせが呼ばれていたら、不合格にする（本番コードが例外を握りつぶしていても同じ）。
+5. 最後に `teardownIsolation` を呼ぶ。
 
-仕様側の評価で問題が起きた場合（条件の衝突、不変条件の破れなど）は、実装の誤りではなく仕様の誤りとして報告します（§2.3 の事前検査）。
+仕様側の評価で問題が起きた場合は、実装の誤りではなく仕様の誤りとして報告します（§2.3 の事前検査）。状態は本番システムから読まず、後の答えと外の世界へのコマンドを通してだけ確かめます。
 
-覚えているデータは、本番システムから直接は読みません。後のコマンドの振る舞いを通してだけ確かめます（例えば、注文時の会員ランクを正しく覚えているかは、決済時の割引と出荷時の優先扱いで分かります）。
-
-不一致が見つかると fast-check がコマンド列を最小化し、シード・パス・**最短のコマンド列**・期待値と実際の値を報告します。例えば「決済後のキャンセルで返金されない」という不具合は、「注文 → 決済成功 → キャンセル」の3手として報告され、各手の時点で覚えているはずのデータと、成り立った条件も併せて示されます。`node clp/order.verify.ts --seed X --path Y` で同じ反例を再現できます。
-
-## 4. イベントストーミング＆DFDの自動生成
-
-Layer 1が「純粋なデータ」であることと、Universal IR の存在により、ドメイン駆動設計のモデリング結果をシステムと直接同期できます。
-
-* **付箋との1対1マッピング:** イベントストーミングで定義した Command (青)、Domain Event (オレンジ)、Policy (薄紫) が、そのまま Layer 1 の `commands`、その結果（`goTo` と `effects`）、決定表に対応します。
-* **DFD / アーキテクチャ図の自動出力:** プラットフォームのビルドステップで、Universal IR を解析して Mermaid.js 等のアーキテクチャ図を自動出力します。ドキュメントはソースコードから錬成されるため、絶対に腐敗しません。
+不一致が見つかると fast-check がコマンド列を最小化し、シード、パス、最短のコマンド列を報告します。`node clp/order.verify.ts --seed X --path Y` で同じ反例を再現できます。

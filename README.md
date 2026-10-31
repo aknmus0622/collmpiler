@@ -31,8 +31,8 @@ TypeScript targets only.
 - **A person stays in the loop.** Questions the interpreting LLM could not settle, and places where two
   independent interpretations behave differently, block until a person resolves them — by making the spec more
   precise or by marking the reading as reviewed.
-- **The framework is built with itself.** Nineteen of its own decisions — the reader's judgements, the oracle's
-  choices, the grading verdicts, the pipeline and the interpret flow — are specs in the same notation, implemented by
+- **The framework is built with itself.** Twenty of its own decisions — the reader's judgements, the oracle's
+  choices, the grading verdicts, the pipeline, the interpret flow and the flow of `clp run` — are specs in the same notation, implemented by
   agents and used by the framework. A small hand-written version of each stays as the trusted base: parts that grade
   are always graded by it, and its answers must agree with theirs (`SELF_HOSTING.md`).
 
@@ -40,6 +40,8 @@ TypeScript targets only.
 
 - Node.js 22.18 or later (`.node-version` pins 24)
 - pnpm
+- Java, for the Alloy checker (the jar is downloaded on first use; `CLP_ALLOY=off` runs without it, and deep cases
+  then depend on random testing)
 
 ```bash
 pnpm install
@@ -60,8 +62,8 @@ pnpm clp --help
 | `clp verify` | verify existing production code against the spec |
 
 `pnpm clp` runs it from the repository root; inside a package, use `pnpm exec clp`. The commands look for the
-spec in `specs/` under the current directory (`--specs <dir>` names another place), so the usual way is to run
-them from the directory of the thing you are building.
+spec in `specs/` under the current directory (`--specs <dir>` names another place; `clp compile` takes the directory
+as its argument), so the usual way is to run them from the directory of the thing you are building.
 
 ## Start your own
 
@@ -392,7 +394,8 @@ pnpm test                       # (from the repository root) the framework's own
 ```
 
 When an implementation is wrong, the test reports the shortest sequence of commands that shows it. For an
-implementation that forgets the refund when a paid order is cancelled:
+implementation that forgets the refund when a paid order is cancelled, it amounts to this (the result itself is one
+`CLP_RESULT` line of JSON, with the seed and path to replay it):
 
 ```text
 PlaceOrder {"customerRank":"Gold","listPrice":0}  →  Checkout (order.Checkout.paid)  →  Cancel (order.Cancel.case1)
@@ -403,5 +406,4 @@ actual:   effects [], answer "cancelled"
 ## Future Scope
 
 See [`ROADMAP.md`](ROADMAP.md) (in Japanese): what versions 0.1 and 0.3 completed, and the stages towards 1.0
-(the notation, the formal model, the checker and the self-hosted parts are done; running the spec as a program,
-`clp run`, is next).
+(all six are done; what 1.0 still lacks is listed there).
