@@ -1,6 +1,6 @@
 import { representative } from "../src/v1/abstraction.ts";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -13,6 +13,7 @@ import { problemText } from "../src/v1/read.ts";
 import { boundsOf } from "../src/v1/bounds.ts";
 import { MAX_STEPS, Simulation, check8, sequences } from "../src/v1/pbt.ts";
 import { specAdapter } from "../src/v1/spec-adapter.ts";
+import { defaultRuns8, seedOf8 } from "../src/v1/runtime.ts";
 import { deciders8 } from "../src/v1/stage1.ts";
 import { tracesFor } from "../src/v1/traces.ts";
 import { VMap, VSet } from "../src/v1/eval.ts";
@@ -428,4 +429,40 @@ test("端の無い分類の時計: Alloy の経路の時計の値が有限で、
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("固定の手順の終わりを問い合わせで見る: 貸出日数の違いは、遅れて返したあとの延滞料にしか出ないが、検証のシードで見つかる", async (t) => {
+  const jar = process.env.CLP_ALLOY_JAR ?? join(process.env.XDG_CACHE_HOME ?? join(homedir(), ".cache"), "clp", "alloy-6.2.0.jar");
+  if (!javaAvailable() || !existsSync(jar)) return t.skip("Java か Alloy の jar がありません");
+  const specs = join(repoRoot, "examples/lending-ts/specs");
+  const changed = mkdtempSync(join(tmpdir(), "clp-loan-days-"));
+  try {
+    cpSync(specs, changed, { recursive: true });
+    const file = join(changed, "library.component.ts");
+    writeFileSync(file, readFileSync(file, "utf8").replace("loanDays: 14", "loanDays: 15"));
+    const { ir } = compile(specs, "library");
+    const wrong = compile(changed, "library").ir!;
+    const result = await check8(ir!, specAdapter(wrong), { seed: seedOf8(ir!), numRuns: defaultRuns8(ir!), traces: tracesFor(ir!) });
+    assert.equal(result.status, "fail", JSON.stringify(result).slice(0, 300));
+  } finally {
+    rmSync(changed, { recursive: true, force: true });
+  }
+});
+
+test("比較の境界: 1 日だけ遅れた返却を踏むので、遅れの判定が 1 ずれた実装は見つかる", async (t) => {
+  const jar = process.env.CLP_ALLOY_JAR ?? join(process.env.XDG_CACHE_HOME ?? join(homedir(), ".cache"), "clp", "alloy-6.2.0.jar");
+  if (!javaAvailable() || !existsSync(jar)) return t.skip("Java か Alloy の jar がありません");
+  const { ir } = compile(join(repoRoot, "examples/lending-ts/specs"), "library");
+  const wrong = structuredClone(ir!);
+  const shift = (e: unknown): boolean => {
+    if (!Array.isArray(e)) return typeof e === "object" && e !== null && Object.values(e).some(shift);
+    if (e[0] === ">" && JSON.stringify(e).includes("Today")) {
+      e[2] = ["+", e[2], 1];
+      return true;
+    }
+    return e.some(shift);
+  };
+  assert.ok(shift(wrong.components.library.events!["Return.case1"]));
+  const result = await check8(ir!, specAdapter(wrong), { seed: seedOf8(ir!), numRuns: defaultRuns8(ir!), traces: tracesFor(ir!) });
+  assert.equal(result.status, "fail", JSON.stringify(result).slice(0, 300));
 });

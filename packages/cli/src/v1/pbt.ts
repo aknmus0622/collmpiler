@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import fc from "fast-check";
-import { FAILED, OutOfSpec, SpecError, answer, brokenProperties, execute, fromPlain, initialWorld, keyOf, plain } from "./eval.ts";
+import { FAILED, OutOfSpec, SpecError, answer, brokenProperties, execute, fromPlain, initialWorld, keyOf, plain, watchingComparisons } from "./eval.ts";
 import type { Answers, Effect, World } from "./eval.ts";
 import type { Expr, Ir8, Port, TraceStep, Type } from "./ir.ts";
 import { freshStage0, increasingStage0, survivesRestartStage0 } from "../promise.ts";
@@ -224,7 +224,7 @@ export function fixedSteps(ir: Ir8, trace: TraceStep[]): RawStep[] | undefined {
   return steps;
 }
 
-export function stepArbitrary(ir: Ir8, hints: Hints = literalsOf(ir)): fc.Arbitrary<RawStep> {
+export function stepArbitrary(ir: Ir8, hints: Hints = literalsOf(ir), only?: Entry["kind"]): fc.Arbitrary<RawStep> {
   const entries = entriesOf(ir);
   const outside = outsideQueries(ir);
   // a path segment of a route (`/things/:id`) cannot be "." or "..": URLs normalize them away, so HTTP cannot carry them (outside the spec)
@@ -237,10 +237,11 @@ export function stepArbitrary(ir: Ir8, hints: Hints = literalsOf(ir)): fc.Arbitr
     return fc.record(Object.fromEntries(Object.entries(entry.params).map(([k, t]) => [k, path.has(k) ? of(k, t).filter((v) => v !== "." && v !== "..") : of(k, t)])));
   };
   const choose = fc.oneof(
-    ...entries.map((entry, index) => ({
-      weight: entry.kind === "command" ? 3 : 1,
-      arbitrary: fc.record({ entry: fc.constant(index), params: paramsOf(entry) }),
-    })),
+    ...entries.flatMap((entry, index) =>
+      only && entry.kind !== only
+        ? []
+        : [{ weight: entry.kind === "command" ? 3 : 1, arbitrary: fc.record({ entry: fc.constant(index), params: paramsOf(entry) }) }],
+    ),
   );
   const alternatives = fc.tuple(...entries.map(paramsOf));
   const answers = fc.record(
@@ -269,6 +270,10 @@ export function stepArbitrary(ir: Ir8, hints: Hints = literalsOf(ir)): fc.Arbitr
 
 export const MAX_STEPS = 8;
 const SEARCH_RUNS = 2000;
+const MOST_SEARCHED = 40;
+// after a fixed trace: how many times its end is looked at, and with how many queries
+const LOOKS = 10;
+const LOOK_STEPS = 4;
 export const sequences = (ir: Ir8) => fc.array(stepArbitrary(ir), { maxLength: MAX_STEPS });
 /** Random sequences, and (one in two) a fixed trace followed by a few random steps: what happens after a state that is hard to reach. */
 export function sequencesFrom(ir: Ir8, fixed: RawStep[][], step: fc.Arbitrary<RawStep> = stepArbitrary(ir)): fc.Arbitrary<RawStep[]> {
@@ -349,7 +354,7 @@ export type Observed8 = { state: null; effects: { port: string; args: unknown }[
 export type PbtResult8 =
   | { status: "pass"; seed: number; numRuns: number; coverage: Coverage }
   | { status: "fail"; seed: number; path: string; numRuns: number; numShrinks: number; steps: Step8[]; expected: Observed8; actual: Observed8 | { error: string } }
-  | { status: "error"; message: string; steps?: Step8[]; framework?: true };
+  | { status: "error"; message: string; steps?: Step8[]; framework?: true; spec?: true };
 
 /** How often each event happened, and which never did (DSL.md §17.13 ⑤). */
 export type Coverage = { events: Record<string, number>; never: string[] };
@@ -596,25 +601,59 @@ export const DEFAULT_RUNS = 5000;
 
 /** Verifies a production system against the IR. */
 /**
- * The shortest sequence, among random ones run on the spec alone, to each event no fixed trace reaches: what Alloy could
- * not check (strings, tuples) has no trace of its own, and random sequences may never run a case that takes two steps
- * on one item. Depends only on the seed, so a mutant is run on the same sequences as the code.
+ * The shortest sequence, among those run on the spec alone (random ones, and fixed traces continued), to each event no
+ * fixed trace reaches, and to each side of each comparison: what Alloy could not check (strings, tuples) has no trace of
+ * its own, a case can take two steps on one item, and `late > 0` shows `late > 1` only one day late. Depends only on the
+ * seed, so a mutant is run on the same sequences as the code.
  */
-async function searched(ir: Ir8, seed: number, have: Set<string>): Promise<{ event: string; raw: RawStep[] }[]> {
+async function searched(ir: Ir8, seed: number, fixed: { event: string; raw: RawStep[] }[]): Promise<{ event: string; raw: RawStep[] }[]> {
+  const have = new Set(fixed.map((t) => t.event));
   const wanted = Object.keys(coverageOf(ir, {}).events).filter((event) => !have.has(event));
   const found = new Map<string, RawStep[]>();
-  if (wanted.length === 0) return [];
-  for (const raw of fc.sample(sequences(ir), { seed, numRuns: SEARCH_RUNS })) {
+  const sidesIn = async (raw: RawStep[], coverage: Record<string, number>) => {
+    const sides = new Set<string>();
+    const watch = (e: unknown, difference: number) => {
+      if (Math.abs(difference) <= 1) sides.add(`${JSON.stringify(e)} ${difference}`);
+    };
+    await watchingComparisons(watch, () => trial(ir, raw, { coverage }));
+    return sides;
+  };
+  const keep = (key: string, raw: RawStep[]) => {
+    if (raw.length < (found.get(key)?.length ?? Infinity)) found.set(key, raw);
+  };
+  for (const raw of fc.sample(sequencesFrom(ir, fixed.map((t) => t.raw)), { seed, numRuns: SEARCH_RUNS })) {
     const coverage: Record<string, number> = {};
+    let sides: Set<string>;
     try {
-      await trial(ir, raw, { coverage });
+      sides = await sidesIn(raw, coverage);
     } catch (error) {
       if (error instanceof SpecError) continue;
       throw error;
     }
-    for (const event of wanted) if (coverage[event] && raw.length < (found.get(event)?.length ?? Infinity)) found.set(event, raw);
+    for (const event of wanted) if (coverage[event]) keep(event, raw);
+    for (const side of sides) keep(side, raw);
   }
-  return [...found].map(([event, raw]) => ({ event, raw }));
+  // cut right after what was found: the steps after it may undo it before it is looked at
+  for (const [key, raw] of found) {
+    for (let length = 1; length < raw.length; length++) {
+      const coverage: Record<string, number> = {};
+      const sides = await sidesIn(raw.slice(0, length), coverage).catch(() => new Set<string>());
+      if (sides.has(key) || coverage[key]) {
+        found.set(key, raw.slice(0, length));
+        break;
+      }
+    }
+  }
+  // the events first, then the comparisons, shortest first
+  const shortest = [...found].sort(([k, a], [l, b]) => Number(wanted.includes(l)) - Number(wanted.includes(k)) || a.length - b.length);
+  return shortest.slice(0, MOST_SEARCHED).map(([event, raw]) => ({ event, raw }));
+}
+
+/** Queries to ask at the end of each trace (`LOOKS` for each). Depends only on the seed. */
+function looksAt(ir: Ir8, seed: number, traces: number): RawStep[][] {
+  if (traces === 0 || !entriesOf(ir).some((entry) => entry.kind === "query")) return [];
+  const step = stepArbitrary(ir, literalsOf(ir), "query").map((raw) => ({ ...raw, alternatives: undefined, restart: false }));
+  return fc.sample(fc.array(step, { minLength: LOOK_STEPS, maxLength: LOOK_STEPS }), { seed, numRuns: traces * LOOKS });
 }
 
 export async function check8(
@@ -650,9 +689,16 @@ export async function check8(
     const details = await fc.check(fc.asyncProperty(sequencesFrom(ir, fixed.map((t) => t.raw)), run), { seed: params.seed, numRuns: params.numRuns ?? DEFAULT_RUNS, ...(params.path ? { path: params.path } : {}) });
     if (!details.failed) {
       // after the random sequences, which shrink what they find
-      for (const trace of await searched(ir, params.seed, new Set(fixed.map((t) => t.event)))) {
+      const found = await searched(ir, params.seed, fixed);
+      for (const trace of found) {
         const failure = await checked(trace.raw);
         if (failure) return { status: "fail", seed: params.seed, path: `trace:${trace.event}`, numRuns: details.numRuns, numShrinks: 0, ...failure };
+      }
+      // reaching a state shows nothing until it is looked at: a wrong amount remembered shows only in a query after it
+      const traces = [...fixed, ...found];
+      for (const [index, looks] of looksAt(ir, params.seed, traces.length).entries()) {
+        const failure = await checked([...traces[Math.floor(index / LOOKS)].raw, ...looks]);
+        if (failure) return { status: "fail", seed: params.seed, path: `trace:${traces[Math.floor(index / LOOKS)].event}`, numRuns: details.numRuns, numShrinks: 0, ...failure };
       }
       return { status: "pass", seed: details.seed, numRuns: details.numRuns, coverage: coverageOf(ir, coverage) };
     }
@@ -668,7 +714,7 @@ export async function check8(
     return { status: "fail", seed: details.seed, path: details.counterexamplePath ?? "", numRuns: details.numRuns, numShrinks: details.numShrinks, ...failure };
   } catch (error) {
     const cause = (error as { cause?: unknown }).cause ?? error;
-    if (cause instanceof SpecError) return { status: "error", message: `仕様の誤り: ${cause.message}`, steps: (cause as SpecError & { steps?: Step8[] }).steps };
+    if (cause instanceof SpecError) return { status: "error", message: `仕様の誤り: ${cause.message}`, steps: (cause as SpecError & { steps?: Step8[] }).steps, spec: true };
     if (cause instanceof FrameworkError) return { status: "error", message: `フレームワークの誤り: ${cause.message}`, framework: true };
     throw error;
   }

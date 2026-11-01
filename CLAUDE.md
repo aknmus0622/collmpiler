@@ -31,7 +31,7 @@ the one page a spec author needs. The code:
     (IR version 8), `ops.ts` (the operator table with ja/en read-out).
   - `eval.ts` — the oracle: evaluates the IR (`execute`, `answer`, `brokenProperties`). `pbt.ts` — the
     `Simulation`, input generation, `check8` (fixed traces first: Alloy's shortest traces and the author's examples, then random sequences, then for
-    an event with no fixed trace the shortest sequence found by running the spec alone), `selfCheck8`, `checkExamples`, coverage. `decide.ts` — the log of Stage 0 decisions and
+    an event with no fixed trace, and each side of each comparison, the shortest sequence found by running the spec alone; each trace's end is then looked at with queries), `selfCheck8`, `checkExamples`, coverage. `decide.ts` — the log of Stage 0 decisions and
     `agree` (R4). `compare.ts` — comparing two interpretations. `mutants.ts` + `verdict.ts` — spec mutation.
   - `supplement.ts` (what `clp run` writes into Layer 1: a person's answer to a review mark, in their own words,
     appended to the sentence the mark is about), `split.ts` (`clp run`'s proposal to split a large component given

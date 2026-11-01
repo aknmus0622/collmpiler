@@ -120,6 +120,17 @@ function readable(value: unknown, what: string): unknown {
   return value;
 }
 
+let comparing: ((e: unknown, difference: number) => void) | undefined;
+/** Sees every comparison evaluated while `run` runs: how far apart its two sides were (pbt.ts looks for the boundaries). */
+export async function watchingComparisons<T>(watch: (e: unknown, difference: number) => void, run: () => Promise<T>): Promise<T> {
+  comparing = watch;
+  try {
+    return await run();
+  } finally {
+    comparing = undefined;
+  }
+}
+
 export function evaluate(e: Expr | unknown, env: Env): unknown {
   if (e === null || typeof e === "number" || typeof e === "boolean") return e;
   if (!Array.isArray(e)) return fail(`式ではありません: ${JSON.stringify(e)}`);
@@ -179,13 +190,13 @@ export function evaluate(e: Expr | unknown, env: Env): unknown {
     case "=":
       return equal(ev(a[0]), ev(a[1]));
     case "<":
-      return int(a[0]) < int(a[1]);
     case "<=":
-      return int(a[0]) <= int(a[1]);
     case ">":
-      return int(a[0]) > int(a[1]);
-    case ">=":
-      return int(a[0]) >= int(a[1]);
+    case ">=": {
+      const [x, y] = [int(a[0]), int(a[1])];
+      comparing?.(e, x - y);
+      return op === "<" ? x < y : op === "<=" ? x <= y : op === ">" ? x > y : x >= y;
+    }
     case "+":
       return int(a[0]) + int(a[1]);
     case "-":

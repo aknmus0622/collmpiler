@@ -33,7 +33,7 @@ export async function runPbt(options: { specs: string; adapter: Adapter8; compon
   const errors = problems.filter((p) => p.severity === "error");
   if (!ir || errors.length > 0) {
     const framework = errors.find((p) => p.code === "framework");
-    result = framework ? { status: "error", message: `フレームワークの誤り: ${framework.message}`, framework: true } : { status: "error", message: `仕様に誤りがあります: ${errors.map((p) => `${p.where} ${p.message}`).join(" / ")}` };
+    result = framework ? { status: "error", message: `フレームワークの誤り: ${framework.message}`, framework: true } : { status: "error", message: `仕様に誤りがあります: ${errors.map((p) => `${p.where} ${p.message}`).join(" / ")}`, spec: true };
   } else {
     result = await check8(ir, options.adapter, {
       seed: values.seed === undefined ? seedOf8(ir) : Number(values.seed),

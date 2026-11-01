@@ -224,7 +224,8 @@ Those are the only two places `clp` writes Layer 1. `--json` makes it JSON lines
 (`{ "id": "q1", "answer": "supplement", "text": "…" }`, `{ "id": "c2", "answer": "yes" }`; a `question` of `kind` `split`
 carries `arrangement`, `parts` and `diff`, and is answered `accept`, `decline` or `stop`). Exit codes: 0 passed,
 1 failed, 3 stopped for you. A `diagnostic` of `code` `framework` means `clp` contradicted itself (Stage 0 and Stage 1
-disagreed): the run ends `failed`, and changing the specs will not help.
+disagreed): the run ends `failed`, and changing the specs will not help. `internal` means something else went wrong
+that is not known to be the spec's fault.
 
 ## Restarts and failing dependencies
 

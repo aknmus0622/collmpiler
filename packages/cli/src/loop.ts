@@ -13,6 +13,7 @@ import { checkSpec, prepare } from "./v1/prepare.ts";
 import { DRAFT_SUFFIX } from "./v1/read.ts";
 import type { Problem } from "./v1/read.ts";
 import { FrameworkError } from "./v1/decide.ts";
+import { SpecError } from "./v1/eval.ts";
 import { boundary8, defaultRuns8 } from "./v1/runtime.ts";
 import { R1_COMPONENTS8, adapterOf, fallback, planContract8, runCases, setGradingByStage0, stage0HashOf8 } from "./v1/stage1.ts";
 import { DEFAULT_GUIDE } from "./guide.ts";
@@ -105,15 +106,15 @@ export async function implement(options: ImplementOptions) {
 
   const drafts = options.drafts ?? false;
   const typeErrors = typecheckSpecs(specsDir, { drafts });
-  if (typeErrors.length > 0) throw new Error(`仕様に型エラーがあります:\n${formatTypeErrors(typeErrors)}`);
+  if (typeErrors.length > 0) throw new SpecError(`仕様に型エラーがあります:\n${formatTypeErrors(typeErrors)}`);
 
   // 仕様にあるコンポーネントをすべて読み、検査する。仕様自身の誤りは、エージェントを呼ぶ前に人に報告する
   const target = options.target ?? typescriptTarget;
   const layout = resolveLayout(options);
   const names = loadProgram(specsDir, { drafts }).components;
-  if (names.length === 0) throw new Error("仕様にコンポーネントがありません（service(...) を export してください）");
+  if (names.length === 0) throw new SpecError("仕様にコンポーネントがありません（service(...) を export してください）");
   if (options.component !== undefined && !names.includes(options.component)) {
-    throw new Error(`コンポーネント "${options.component}" がありません (あるのは: ${names.join(", ")})`);
+    throw new SpecError(`コンポーネント "${options.component}" がありません (あるのは: ${names.join(", ")})`);
   }
   const units: Unit[] = [];
   // 読み取り、IR、仕様だけの実行、具体例、仕様のミューテーション。仕様自身の誤りは、エージェントを呼ぶ前に人に報告する
@@ -122,10 +123,10 @@ export async function implement(options: ImplementOptions) {
     const errors = prepared.problems.filter((p) => p.severity === "error");
     for (const p of prepared.problems.filter((p) => p.severity === "warning")) log(`注意 (${name}): ${p.where}: ${p.message}`);
     throwFramework(errors);
-    if (errors.length > 0 || !prepared.ir) throw new Error(`仕様 (${name}) にエラーがあります:\n${errors.map((p) => `  ${p.where}: ${p.message}`).join("\n")}`);
+    if (errors.length > 0 || !prepared.ir) throw new SpecError(`仕様 (${name}) にエラーがあります:\n${errors.map((p) => `  ${p.where}: ${p.message}`).join("\n")}`);
     const checked = await checkSpec(prepared.ir, { runs: options.runs });
     throwFramework(checked.problems);
-    if (checked.problems.length > 0) throw new Error(`仕様 (${name}) に誤りがあります:\n${checked.problems.map((p) => `  ${p.where}: ${p.message}`).join("\n")}`);
+    if (checked.problems.length > 0) throw new SpecError(`仕様 (${name}) に誤りがあります:\n${checked.problems.map((p) => `  ${p.where}: ${p.message}`).join("\n")}`);
     for (const warning of checked.warnings) log(`注意 (${name}): ${warning}`);
     const ir = JSON.parse(stableStringify(prepared.ir)) as Ir;
     // 契約の文面の判断を、使えれば Stage 1 (text-plan) で前もって下す（生成は同期なので、ここで登録しておく）
@@ -293,7 +294,7 @@ async function session(
   } finally {
     if (!options.keepSandbox) rmSync(sandbox.dir, { recursive: true, force: true });
   }
-  log(`[${round}] ${phase} #${attempt}: ${describe(phase, feedback)}${mutation ? ` (mutation: ${mutation.strategy}, ${mutation.killed}/${mutation.mutants} killed)` : ""}`);
+  log(`[${round}] ${phase} #${attempt}: ${describe(phase, feedback)}${mutation ? ` (mutation: ${mutation.strategy}, ${mutation.killed}/${mutation.mutants} killed${mutation.survivors.length ? `; survived: ${mutation.survivors.map((m) => `${m.file}:${m.line} ${m.original}`).join(", ")}` : ""})` : ""}`);
   attempts.push({
     component: ctx.ws.component,
     round,

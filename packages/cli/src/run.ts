@@ -5,6 +5,7 @@ import type { ImplementOptions } from "./loop.ts";
 import type { ImplementationStrategy } from "./strategy.ts";
 import { AgentFailure } from "./strategy.ts";
 import { FrameworkError } from "./v1/decide.ts";
+import { SpecError } from "./v1/eval.ts";
 import { accept8, interpret8 } from "./v1/interpret.ts";
 import { readProgram } from "./v1/read.ts";
 import type { Unit } from "./v1/read.ts";
@@ -78,6 +79,7 @@ const MESSAGES: Record<Exclude<EndReason, "passed" | "split-agent" | "interpret-
   rounds: `疑問への応答を ${MAX_ROUNDS} 回繰り返しても、解釈を確定できませんでした`,
 };
 const FRAMEWORK_MESSAGE = "clp 自身の不具合です。仕様を直しても解決しません。上の内容を添えて、clp の不具合として報告してください";
+const INTERNAL_MESSAGE = "検証を進められませんでした。仕様の誤りとは限りません。上の内容を確かめてください";
 const RESULTS: Record<EndReason, RunResult> = {
   passed: "passed",
   layer1: "stopped",
@@ -267,16 +269,17 @@ function stepsOf(options: RunOptions) {
           agentMessage = error.message;
           return "agent-failed";
         }
-        if (error instanceof FrameworkError) throw error;
+        if (!(error instanceof SpecError)) throw error;
         // the spec's own errors (spec-check, unobservable-value, Alloy ...): for the person, before any agent
         talk.emit({ type: "diagnostic", severity: "error", code: "spec", where: "", message: (error as Error).message });
         return "spec-error";
       }
     },
-    /** The framework contradicted itself: nothing the person can change in the specs, and not for its own flow to decide. */
-    abandon(error: FrameworkError): RunResult {
-      talk.emit({ type: "diagnostic", severity: "error", code: "framework", where: "", message: error.message });
-      talk.emit({ type: "end", result: "failed", reason: FRAMEWORK_MESSAGE });
+    /** Nothing says the specs are wrong (the framework contradicted itself, or something unforeseen): not for its own flow to decide. */
+    abandon(error: Error): RunResult {
+      const framework = error instanceof FrameworkError;
+      talk.emit({ type: "diagnostic", severity: "error", code: framework ? "framework" : "internal", where: "", message: error.message });
+      talk.emit({ type: "end", result: "failed", reason: framework ? FRAMEWORK_MESSAGE : INTERNAL_MESSAGE });
       return "failed";
     },
     finish(reason: EndReason): RunResult {
@@ -294,8 +297,7 @@ export async function run(options: RunOptions): Promise<RunResult> {
   try {
     return (await runStage1(steps, options)) ?? (await runStage0(steps, options));
   } catch (error) {
-    if (error instanceof FrameworkError) return steps.abandon(error);
-    throw error;
+    return steps.abandon(error as Error);
   }
 }
 

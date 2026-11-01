@@ -158,6 +158,23 @@ test("run: フレームワークの誤りは仕様の誤りとして案内せず
   assert.ok(end?.type === "end" && /clp 自身の不具合/.test(end.reason ?? "") && !/Layer 1 を直/.test(end.reason ?? ""), JSON.stringify(end));
 });
 
+test("run: 仕様の誤りと確かめられないエラーでは、Layer 1 を直すよう案内しない", async () => {
+  const { specs, out } = place();
+  const { strategy: interpreting } = agent([reviewed]);
+  const strategy: ImplementationStrategy = {
+    ...interpreting,
+    run(assignment) {
+      if (assignment.phase.startsWith("interpretation")) return interpreting.run(assignment);
+      throw new Error("本番システムが非決定的な可能性があります");
+    },
+  };
+  const { talk, events } = person([{ answer: "accept" }, { answer: "accept" }, { answer: "accept" }, { answer: "accept" }]);
+  assert.equal(await run({ specs, out, strategy, talk, sessions: 1, maxAttempts: 2, maxRounds: 1, runs: 300 }), "failed");
+  assert.ok(events.some((e) => e.type === "diagnostic" && e.code === "internal" && /非決定的/.test(e.message)));
+  const end = events.find((e) => e.type === "end");
+  assert.ok(end?.type === "end" && /仕様の誤りとは限りません/.test(end.reason ?? ""), JSON.stringify(end));
+});
+
 test("run: Layer 1 が読めなければ、エージェントを呼ばずに止まる", async () => {
   const { specs, out } = place();
   writeFileSync(join(specs, LAYER1), readFileSync(join(specs, LAYER1), "utf8").replace("export const Order = service(", "export const Order = service(("));

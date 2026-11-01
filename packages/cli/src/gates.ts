@@ -24,6 +24,7 @@ import type { RequestSections } from "./request.ts";
 import type { Phase } from "./request.ts";
 import type { PbtResult8 as PbtResult } from "./v1/pbt.ts";
 import { FrameworkError } from "./v1/decide.ts";
+import { SpecError } from "./v1/eval.ts";
 import type { StaticCheckStrategy } from "./static-check.ts";
 import type { Usage } from "./target.ts";
 import type { Target } from "./target.ts";
@@ -240,7 +241,9 @@ function settledOthers(ctx: GateContext) {
 // usage: true なら、実行した範囲も調べる（対象言語が調べられるとき）
 /** A run of the PBT that says nothing about the code: it stops the pipeline, and whose mistake it is stays known. */
 function notRun(result: Extract<PbtResult, { status: "error" }>, where = ""): Error {
-  return result.framework ? new FrameworkError(result.message) : new Error(`PBT を実行できませんでした${where}: ${result.message}`);
+  if (result.framework) return new FrameworkError(result.message);
+  const message = `PBT を実行できませんでした${where}: ${result.message}`;
+  return result.spec ? new SpecError(message) : new Error(message);
 }
 
 function runVerify(ctx: GateContext, unit: { ws: Workspace; seed: number; runs?: number } = ctx, usage = false, stopAt?: string): { result?: PbtResult; crash?: string; usage?: Usage } {
