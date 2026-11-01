@@ -23,6 +23,7 @@ import { ASSETS_DIR, renderRequest } from "./request.ts";
 import type { RequestSections } from "./request.ts";
 import type { Phase } from "./request.ts";
 import type { PbtResult8 as PbtResult } from "./v1/pbt.ts";
+import { FrameworkError } from "./v1/decide.ts";
 import type { StaticCheckStrategy } from "./static-check.ts";
 import type { Usage } from "./target.ts";
 import type { Target } from "./target.ts";
@@ -237,6 +238,11 @@ function settledOthers(ctx: GateContext) {
 
 // PBT を実行する。どう実行するかは対象言語が決める
 // usage: true なら、実行した範囲も調べる（対象言語が調べられるとき）
+/** A run of the PBT that says nothing about the code: it stops the pipeline, and whose mistake it is stays known. */
+function notRun(result: Extract<PbtResult, { status: "error" }>, where = ""): Error {
+  return result.framework ? new FrameworkError(result.message) : new Error(`PBT を実行できませんでした${where}: ${result.message}`);
+}
+
 function runVerify(ctx: GateContext, unit: { ws: Workspace; seed: number; runs?: number } = ctx, usage = false, stopAt?: string): { result?: PbtResult; crash?: string; usage?: Usage } {
   const run = ctx.target.runTests({ ws: unit.ws, seed: unit.seed, runs: unit.runs ?? ctx.runs, drafts: ctx.drafts, usage, ...(stopAt ? { stopAt } : {}) });
   // 出力に含まれるリポジトリのパスを、差し戻しに載せない
@@ -405,7 +411,7 @@ async function judgeOutput(
   const { result, crash, usage } = runVerify(ctx, ctx, phase === "implementation");
   if (!result) return { ...ran, feedback: { kind: "crash", output: crash ?? "" } };
   // 仕様やハーネス側の問題は実装の誤りではないので、エージェントに差し戻さずに止める
-  if (result.status === "error") throw new Error(`PBT を実行できませんでした: ${result.message}`);
+  if (result.status === "error") throw notRun(result);
 
   if (phase === "wiring") {
     // 赤: 本番コードに未実装の部分が残っているなら、PBT は合格してはならない
@@ -417,7 +423,7 @@ async function judgeOutput(
     // 未実装の部分に当たった試行はそこで打ち切って、ほかの失敗が無いかを、もう一度探す
     if (error?.includes(target.notImplemented)) {
       const again = runVerify(ctx, ctx, false, target.notImplemented);
-      if (again.result?.status === "error") throw new Error(`PBT を実行できませんでした: ${again.result.message}`);
+      if (again.result?.status === "error") throw notRun(again.result);
       if (!again.result) error = again.crash ?? "";
       else if (again.result.status === "fail") {
         const { steps, expected, actual } = again.result as unknown as { steps: { name: string }[]; expected: unknown; actual: unknown };
@@ -457,7 +463,7 @@ async function judgeOutput(
     writeFileSync(join(other.ws.root, other.ws.paths.contract), target.generate.contract(other.ir));
     writeFileSync(join(other.ws.root, other.ws.paths.verify), target.generate.verify(other.ir, other.ws, ctx.specsDir));
     const { usage: used, ...regression } = runVerify(ctx, other, true);
-    if (regression.result?.status === "error") throw new Error(`PBT を実行できませんでした (${other.name}): ${regression.result.message}`);
+    if (regression.result?.status === "error") throw notRun(regression.result, ` (${other.name})`);
     const passed = { passed: regression.result?.status === "pass", purpose: "regression" as const };
     if ((await gateVerdictFor(ctx, "Tests", passed, testsStage0(passed), (a, b) => (a !== "ok" ? a : b))) !== "ok") {
       return { ...ran, feedback: { kind: "regression", component: other.name, ...regression } };

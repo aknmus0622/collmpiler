@@ -6,6 +6,7 @@ import { parseModule } from "../src/v1/syntax.ts";
 import { compile } from "../src/v1/load.ts";
 import { problemText } from "../src/v1/read.ts";
 import { check8, checkExamples, selfCheck8 } from "../src/v1/pbt.ts";
+import type { Deciders8 } from "../src/v1/decide.ts";
 import type { Adapter8 } from "../src/v1/pbt.ts";
 import { compare8 } from "../src/v1/compare.ts";
 import { readOut } from "../src/v1/ops.ts";
@@ -167,6 +168,15 @@ function counterAdapter(bug = false): Adapter8 {
     },
   };
 }
+
+test("PBT: Stage 0 と Stage 1 の食い違いは、仕様の誤りとは別の、フレームワークの誤りとして返る", async () => {
+  const { ir } = compile(specs({ "counter.component.ts": COUNTER }), "counter");
+  const lying = new Proxy({}, { get: () => async () => "another answer" }) as Deciders8;
+  const checked = await selfCheck8(ir!, { seed: 1 }, lying);
+  assert.ok(!checked.ok && checked.framework, JSON.stringify(checked));
+  const result = await check8(ir!, counterAdapter(), { seed: 1, numRuns: 10 }, lying);
+  assert.ok(result.status === "error" && result.framework, JSON.stringify(result));
+});
 
 test("PBT: 正しい実装は通り、しきい値の誤りは最短の反例で落ちる", async () => {
   const { ir } = compile(specs({ "counter.component.ts": COUNTER }), "counter");

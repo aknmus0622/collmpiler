@@ -6,6 +6,7 @@ import { run } from "../src/run.ts";
 import type { Answer, ConfirmEvent, QuestionEvent, RunEvent, Talk } from "../src/run.ts";
 import { AgentFailure } from "../src/strategy.ts";
 import type { ImplementationStrategy } from "../src/strategy.ts";
+import { FrameworkError } from "../src/v1/decide.ts";
 import { readProgram } from "../src/v1/read.ts";
 import { adapterOf } from "../src/v1/stage1.ts";
 import { candidatesOf } from "../src/v1/split.ts";
@@ -138,6 +139,23 @@ test("run: 書き足しを断ると、Layer 1 は変わらずに止まる。入�
   const closed = person([]);
   assert.equal(await run({ specs, out, strategy, talk: closed.talk, sessions: 1 }), "stopped");
   assert.equal(closed.asked.length, 1);
+});
+
+test("run: フレームワークの誤りは仕様の誤りとして案内せず、clp の不具合として終わる", async () => {
+  const { specs, out } = place();
+  const { strategy: interpreting } = agent([reviewed]);
+  const strategy: ImplementationStrategy = {
+    ...interpreting,
+    run(assignment) {
+      if (assignment.phase.startsWith("interpretation")) return interpreting.run(assignment);
+      throw new FrameworkError("Stage 0 と Stage 1 が食い違いました");
+    },
+  };
+  const { talk, events } = person([{ answer: "accept" }, { answer: "accept" }, { answer: "accept" }, { answer: "accept" }]);
+  assert.equal(await run({ specs, out, strategy, talk, sessions: 1, maxAttempts: 2, maxRounds: 1, runs: 300 }), "failed");
+  assert.ok(events.some((e) => e.type === "diagnostic" && e.code === "framework" && /食い違いました/.test(e.message)));
+  const end = events.find((e) => e.type === "end");
+  assert.ok(end?.type === "end" && /clp 自身の不具合/.test(end.reason ?? "") && !/Layer 1 を直/.test(end.reason ?? ""), JSON.stringify(end));
 });
 
 test("run: Layer 1 が読めなければ、エージェントを呼ばずに止まる", async () => {

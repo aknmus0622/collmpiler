@@ -11,7 +11,10 @@ import { compile, loadProgram } from "../src/v1/load.ts";
 import { layer1Hash } from "../src/v1/stamp.ts";
 import { problemText } from "../src/v1/read.ts";
 import { boundsOf } from "../src/v1/bounds.ts";
-import { MAX_STEPS, Simulation, sequences } from "../src/v1/pbt.ts";
+import { MAX_STEPS, Simulation, check8, sequences } from "../src/v1/pbt.ts";
+import { specAdapter } from "../src/v1/spec-adapter.ts";
+import { deciders8 } from "../src/v1/stage1.ts";
+import { tracesFor } from "../src/v1/traces.ts";
 import { VMap, VSet } from "../src/v1/eval.ts";
 import type { World } from "../src/v1/eval.ts";
 import type { Type } from "../src/v1/ir.ts";
@@ -376,4 +379,53 @@ test("数の分類の代表: 端の無い分類も、経路で再生できる有
   assert.equal(representative([3, Infinity]), 3);
   assert.equal(representative([-Infinity, 3]), 3);
   assert.equal(representative([-Infinity, Infinity]), 0);
+});
+
+const STOPWATCH = `import { answer, external, init, requires, service } from "@clp/core";
+import type { Int } from "@clp/core";
+
+export const Clock = external("The time.", {
+  queries: { Now: (): Int => answer({ increasing: true }) },
+});
+
+export const Stopwatch = service("Adds up how long the watch ran, and pays it out past ten.", {
+  state: { began: init<Int>(0), total: init<Int>(0), running: init<boolean>(false) },
+  commands: {
+    Begin() {
+      requires(!this.running);
+      this.running = true;
+      this.began = Clock.Now();
+    },
+    End() {
+      requires(this.running);
+      this.running = false;
+      this.total = this.total + (Clock.Now() - this.began);
+    },
+    Pay() {
+      if (this.total > 10) {
+        this.total = 0;
+        return "paid";
+      }
+      return "none";
+    },
+  },
+});
+`;
+
+test("端の無い分類の時計: Alloy の経路の時計の値が有限で、PBT で再生して Stage 1 とも食い違わない", async (t) => {
+  const jar = process.env.CLP_ALLOY_JAR ?? join(process.env.XDG_CACHE_HOME ?? join(homedir(), ".cache"), "clp", "alloy-6.2.0.jar");
+  if (!javaAvailable() || !existsSync(jar)) return t.skip("Java か Alloy の jar がありません");
+  const dir = mkdtempSync(join(tmpdir(), "clp-stopwatch-"));
+  try {
+    writeFileSync(join(dir, "stopwatch.component.ts"), STOPWATCH);
+    const { ir } = compile(dir, "stopwatch");
+    const traces = tracesFor(ir!);
+    const clocks = traces.flatMap((trace) => trace.steps.flatMap((step) => Object.values(step.answers ?? {})));
+    assert.ok(clocks.length > 0, JSON.stringify(traces));
+    assert.ok(clocks.every((value) => Number.isFinite(value)), JSON.stringify(clocks.map(String)));
+    const result = await check8(ir!, specAdapter(ir!), { seed: 1, numRuns: 50, traces }, await deciders8());
+    assert.equal(result.status, "pass", JSON.stringify(result));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

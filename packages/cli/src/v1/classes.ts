@@ -300,8 +300,9 @@ function refine(op: string, operands: ({ sort: number } | { literal: number })[]
 function checkTables(made: Classes, sorts: Sorts, bounds: Bounds): void {
   const samples = (x: Interval): number[] => {
     if (Number.isFinite(x[0]) && Number.isFinite(x[1]) && size(x) <= 16) return Array.from({ length: size(x) }, (_, i) => x[0] + i);
-    const lo = Number.isFinite(x[0]) ? x[0] : x[1] - 20;
-    const hi = Number.isFinite(x[1]) ? x[1] : x[0] + 20;
+    // a class with no end at all is sampled around 0
+    const lo = Number.isFinite(x[0]) ? x[0] : Number.isFinite(x[1]) ? x[1] - 20 : -20;
+    const hi = Number.isFinite(x[1]) ? x[1] : Number.isFinite(x[0]) ? x[0] + 20 : 20;
     return [...new Set([lo, lo + 1, Math.floor((lo + hi) / 2), hi - 1, hi])].filter((v) => v >= x[0] && v <= x[1]);
   };
   for (const o of sorts.operations) {

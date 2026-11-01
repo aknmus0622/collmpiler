@@ -116,11 +116,11 @@ class Atoms {
     const position = decided("input-candidates", question, amongStage0(question.pick, question.usable));
     return position === null ? this.make(sort) : pool[position];
   }
-  make(sort: string): string {
+  make(sort: string, known = true): string {
     const k = this.next.get(sort) ?? 0;
     this.next.set(sort, k + 1);
     const atom = `${sort}-${k}`;
-    this.remember(sort, atom);
+    if (known) this.remember(sort, atom);
     return atom;
   }
   remember(sort: string, atom: string) {
@@ -268,6 +268,7 @@ export function stepArbitrary(ir: Ir8, hints: Hints = literalsOf(ir)): fc.Arbitr
 }
 
 export const MAX_STEPS = 8;
+const SEARCH_RUNS = 2000;
 export const sequences = (ir: Ir8) => fc.array(stepArbitrary(ir), { maxLength: MAX_STEPS });
 /** Random sequences, and (one in two) a fixed trace followed by a few random steps: what happens after a state that is hard to reach. */
 export function sequencesFrom(ir: Ir8, fixed: RawStep[][], step: fc.Arbitrary<RawStep> = stepArbitrary(ir)): fc.Arbitrary<RawStep[]> {
@@ -318,7 +319,7 @@ function stepAnswers(ir: Ir8, raw: RawStep, memory: Memory, atoms: Atoms): { ans
       memory.last[id] = value as number;
     } else if (port.promise === "fresh") {
       const used = memory.used[id] ?? [];
-      value = typeof port.result === "object" && "atom" in port.result ? atoms.make(port.result.atom) : decided("promise-keeper", { kind: "fresh", drawn: value, used }, freshStage0(value, used));
+      value = typeof port.result === "object" && "atom" in port.result ? atoms.make(port.result.atom, false) : decided("promise-keeper", { kind: "fresh", drawn: value, used }, freshStage0(value, used));
       memory.used[id] = [...used, value];
     }
     return value;
@@ -333,6 +334,8 @@ function stepAnswers(ir: Ir8, raw: RawStep, memory: Memory, atoms: Atoms): { ans
     const key = `${id}(${keyOf(args)})`;
     if (!cache.has(key)) cache.set(key, draw(id, port, args));
     const value = cache.get(key);
+    // a fresh atom is drawn every step, asked or not: only one that was asked for is something inputs should pick
+    if (port.promise === "fresh" && typeof value === "string" && typeof port.result === "object" && "atom" in port.result) atoms.remember(port.result.atom, value);
     asked[Object.keys(port.params).length > 0 ? key : id] = value === FAILED ? "(failed)" : plain(value);
     return value;
   };
@@ -346,7 +349,7 @@ export type Observed8 = { state: null; effects: { port: string; args: unknown }[
 export type PbtResult8 =
   | { status: "pass"; seed: number; numRuns: number; coverage: Coverage }
   | { status: "fail"; seed: number; path: string; numRuns: number; numShrinks: number; steps: Step8[]; expected: Observed8; actual: Observed8 | { error: string } }
-  | { status: "error"; message: string; steps?: Step8[] };
+  | { status: "error"; message: string; steps?: Step8[]; framework?: true };
 
 /** How often each event happened, and which never did (DSL.md §17.13 ⑤). */
 export type Coverage = { events: Record<string, number>; never: string[] };
@@ -592,6 +595,28 @@ export async function trial(ir: Ir8, raw: RawStep[], options: TrialOptions = {})
 export const DEFAULT_RUNS = 5000;
 
 /** Verifies a production system against the IR. */
+/**
+ * The shortest sequence, among random ones run on the spec alone, to each event no fixed trace reaches: what Alloy could
+ * not check (strings, tuples) has no trace of its own, and random sequences may never run a case that takes two steps
+ * on one item. Depends only on the seed, so a mutant is run on the same sequences as the code.
+ */
+async function searched(ir: Ir8, seed: number, have: Set<string>): Promise<{ event: string; raw: RawStep[] }[]> {
+  const wanted = Object.keys(coverageOf(ir, {}).events).filter((event) => !have.has(event));
+  const found = new Map<string, RawStep[]>();
+  if (wanted.length === 0) return [];
+  for (const raw of fc.sample(sequences(ir), { seed, numRuns: SEARCH_RUNS })) {
+    const coverage: Record<string, number> = {};
+    try {
+      await trial(ir, raw, { coverage });
+    } catch (error) {
+      if (error instanceof SpecError) continue;
+      throw error;
+    }
+    for (const event of wanted) if (coverage[event] && raw.length < (found.get(event)?.length ?? Infinity)) found.set(event, raw);
+  }
+  return [...found].map(([event, raw]) => ({ event, raw }));
+}
+
 export async function check8(
   ir: Ir8,
   adapter: Adapter8,
@@ -609,21 +634,28 @@ export async function check8(
     return result;
   };
   const run = async (raw: RawStep[]) => (await checked(raw)) === undefined;
-  const building = await recordingAsync(async () => sequencesFrom(ir, []));
-  await agree(building.asked, deciders, cache);
   // fixed traces first (DSL.md §17.13 ②): the shortest ones Alloy found to every event, and the author's examples, shortest first
   const fixed = (params.traces ?? [])
     .map((trace) => ({ event: trace.event, raw: fixedSteps(ir, trace.steps) }))
     .filter((trace): trace is { event: string; raw: RawStep[] } => trace.raw !== undefined)
     .sort((a, b) => a.raw.length - b.raw.length);
   try {
+    const building = await recordingAsync(async () => sequencesFrom(ir, []));
+    await agree(building.asked, deciders, cache);
     for (const trace of fixed) {
       const failure = await checked(trace.raw);
       if (failure) return { status: "fail", seed: params.seed, path: `trace:${trace.event}`, numRuns: 0, numShrinks: 0, ...failure };
     }
     // the examples the author wrote come first, then random sequences
     const details = await fc.check(fc.asyncProperty(sequencesFrom(ir, fixed.map((t) => t.raw)), run), { seed: params.seed, numRuns: params.numRuns ?? DEFAULT_RUNS, ...(params.path ? { path: params.path } : {}) });
-    if (!details.failed) return { status: "pass", seed: details.seed, numRuns: details.numRuns, coverage: coverageOf(ir, coverage) };
+    if (!details.failed) {
+      // after the random sequences, which shrink what they find
+      for (const trace of await searched(ir, params.seed, new Set(fixed.map((t) => t.event)))) {
+        const failure = await checked(trace.raw);
+        if (failure) return { status: "fail", seed: params.seed, path: `trace:${trace.event}`, numRuns: details.numRuns, numShrinks: 0, ...failure };
+      }
+      return { status: "pass", seed: details.seed, numRuns: details.numRuns, coverage: coverageOf(ir, coverage) };
+    }
     if (!details.counterexample) return { status: "error", message: "反例を特定できませんでした" };
     const failure = await checked(details.counterexample[0], false);
     if (!failure) return { status: "error", message: "反例を再現できませんでした（本番システムが非決定的な可能性があります）" };
@@ -637,7 +669,7 @@ export async function check8(
   } catch (error) {
     const cause = (error as { cause?: unknown }).cause ?? error;
     if (cause instanceof SpecError) return { status: "error", message: `仕様の誤り: ${cause.message}`, steps: (cause as SpecError & { steps?: Step8[] }).steps };
-    if (cause instanceof FrameworkError) return { status: "error", message: `フレームワークの誤り: ${cause.message}` };
+    if (cause instanceof FrameworkError) return { status: "error", message: `フレームワークの誤り: ${cause.message}`, framework: true };
     throw error;
   }
 }
@@ -648,7 +680,7 @@ export function coverageOf(ir: Ir8, counts: Record<string, number>): Coverage {
 }
 
 /** The spec run alone (DSL.md §17.13 ①, the part without Alloy): no case missing, no two at once, no missing key, properties hold. */
-export async function selfCheck8(ir: Ir8, params: { seed: number; numRuns?: number }, deciders?: Deciders8): Promise<{ ok: true; coverage: Coverage } | { ok: false; message: string; steps: Step8[] }> {
+export async function selfCheck8(ir: Ir8, params: { seed: number; numRuns?: number }, deciders?: Deciders8): Promise<{ ok: true; coverage: Coverage } | { ok: false; message: string; steps: Step8[]; framework?: true }> {
   const coverage: Record<string, number> = {};
   const cache = new Map<string, unknown>();
   try {
@@ -663,7 +695,7 @@ export async function selfCheck8(ir: Ir8, params: { seed: number; numRuns?: numb
   } catch (error) {
     const cause = (error as { cause?: unknown }).cause ?? error;
     if (cause instanceof SpecError) return { ok: false, message: cause.message, steps: (cause as SpecError & { steps?: Step8[] }).steps ?? [] };
-    if (cause instanceof FrameworkError) return { ok: false, message: `フレームワークの誤り: ${cause.message}`, steps: [] };
+    if (cause instanceof FrameworkError) return { ok: false, message: `フレームワークの誤り: ${cause.message}`, steps: [], framework: true };
     const message = messageOf(cause);
     const match = /Got error: (SpecError: .*)/s.exec(error instanceof Error ? error.message : "");
     return { ok: false, message: match ? match[1].split("\n")[0] : message, steps: [] };

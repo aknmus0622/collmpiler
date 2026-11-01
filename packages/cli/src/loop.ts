@@ -11,6 +11,8 @@ import type { Ir } from "./generate.ts";
 import { loadProgram } from "./v1/load.ts";
 import { checkSpec, prepare } from "./v1/prepare.ts";
 import { DRAFT_SUFFIX } from "./v1/read.ts";
+import type { Problem } from "./v1/read.ts";
+import { FrameworkError } from "./v1/decide.ts";
 import { boundary8, defaultRuns8 } from "./v1/runtime.ts";
 import { R1_COMPONENTS8, adapterOf, fallback, planContract8, runCases, setGradingByStage0, stage0HashOf8 } from "./v1/stage1.ts";
 import { DEFAULT_GUIDE } from "./guide.ts";
@@ -91,6 +93,12 @@ export type Attempt = {
   feedback?: Feedback;
 };
 
+/** A disagreement of Stage 0 and Stage 1 is not the spec's error, whichever check it came up in. */
+function throwFramework(problems: Problem[]) {
+  const found = problems.find((p) => p.code === "framework");
+  if (found) throw new FrameworkError(found.message);
+}
+
 export async function implement(options: ImplementOptions) {
   const specsDir = resolve(process.cwd(), options.specs);
   const log = options.log ?? (() => {});
@@ -113,8 +121,10 @@ export async function implement(options: ImplementOptions) {
     const prepared = await prepare(specsDir, name, { drafts });
     const errors = prepared.problems.filter((p) => p.severity === "error");
     for (const p of prepared.problems.filter((p) => p.severity === "warning")) log(`注意 (${name}): ${p.where}: ${p.message}`);
+    throwFramework(errors);
     if (errors.length > 0 || !prepared.ir) throw new Error(`仕様 (${name}) にエラーがあります:\n${errors.map((p) => `  ${p.where}: ${p.message}`).join("\n")}`);
     const checked = await checkSpec(prepared.ir, { runs: options.runs });
+    throwFramework(checked.problems);
     if (checked.problems.length > 0) throw new Error(`仕様 (${name}) に誤りがあります:\n${checked.problems.map((p) => `  ${p.where}: ${p.message}`).join("\n")}`);
     for (const warning of checked.warnings) log(`注意 (${name}): ${warning}`);
     const ir = JSON.parse(stableStringify(prepared.ir)) as Ir;

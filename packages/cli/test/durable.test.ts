@@ -7,6 +7,9 @@ import { compile } from "../src/v1/load.ts";
 import { problemText } from "../src/v1/read.ts";
 import { check8, selfCheck8 } from "../src/v1/pbt.ts";
 import type { Adapter8 } from "../src/v1/pbt.ts";
+import { seedOf8 } from "../src/v1/runtime.ts";
+import { specAdapter } from "../src/v1/spec-adapter.ts";
+import { repoRoot } from "./support.ts";
 
 // 本物の web (N9。DSL.md §16.4、§17): 依存の失敗 (mayFail) と、再起動を越えて残るもの (durable)
 process.env.CLP_ALLOY = "off";
@@ -178,4 +181,12 @@ test("再起動 (durable): 再起動を越えて残る部品は、検証の途�
 
   // 再起動を越えて残るものが無い部品の契約には、保存先も再起動も無い
   assert.doesNotMatch(contract8(compiled(specDir({ "ids.component.ts": IDS(HANDLED) }), "ids")), /restartSystem|storage/);
+});
+
+test("Alloy の手順が無いイベント: 仕様だけで探した手順で、同じ項目への2度目のコマンドに少ない回数でも届く", async () => {
+  const dir = join(repoRoot, "examples/todo-db-ts/specs");
+  const ir = compiled(dir, "todos");
+  const adapter = { ...specAdapter(ir), async restartSystem() {} };
+  const result = await check8(ir, adapter, { seed: seedOf8(ir), numRuns: 1 });
+  assert.ok(result.status === "pass" && result.coverage.events["todos.Complete.case1"] > 0, JSON.stringify(result).slice(0, 400));
 });

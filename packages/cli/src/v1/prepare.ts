@@ -86,7 +86,8 @@ export async function checkSpec(ir: Ir8, options: { runs?: number; judge?: (tria
   const deciders = await deciders8();
   const checked = await selfCheck8(ir, { seed: 1 }, deciders);
   if (!checked.ok) {
-    problems.push({ severity: "error", code: "spec-check", where: ir.root, message: `${checked.message}\n  再現する手順: ${JSON.stringify(checked.steps)}` });
+    if (checked.framework) problems.push({ severity: "error", code: "framework", where: ir.root, message: checked.message });
+    else problems.push({ severity: "error", code: "spec-check", where: ir.root, message: `${checked.message}\n  再現する手順: ${JSON.stringify(checked.steps)}` });
     return { problems, warnings };
   }
   for (const found of checkExamples(ir)) problems.push({ severity: "error", code: "example", where: `${ir.root}.examples.${found.example}`, message: found.message });
@@ -150,6 +151,7 @@ export async function checkSpec(ir: Ir8, options: { runs?: number; judge?: (tria
   }
   if (!formal) {
     const more = await selfCheck8(ir, { seed: seedOf8(ir), numRuns: options.runs ?? 1000 }, deciders);
+    if (!more.ok && more.framework) problems.push({ severity: "error", code: "framework", where: ir.root, message: more.message });
     const never = new Set(checked.coverage.never.filter((e) => (more.ok ? more.coverage.never.includes(e) : true)));
     for (const event of never) warnings.push(`warning[unreached-case] ${event}: 仕様を実行しても、この場合には一度も当たりませんでした。この場合の結果は検証されません`);
   }
