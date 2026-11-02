@@ -1,22 +1,34 @@
 /**
- * Syntax check: which words of TypeScript a spec may not write, and why.
+ * Decides whether a spec may write a given word of TypeScript and, when it may
+ * not, names the reason.
  *
- * Corresponds to the specification component `syntax-check`. It has no state
- * and no dependencies; its one query is implemented here by a pure function
- * that answers the same result for the same argument and touches nothing:
- *
- * - `Word` → {@link wordVerdict}
+ * Stateless and free of dependencies: nothing is remembered between calls,
+ * nothing needs to be constructed, and calling it has no effect on anything.
+ * It corresponds to the specification's component `syntax-check`.
  */
 
 /**
- * The verdict on a word met in a spec (the specification's result of `Word`,
- * calculation `word`). Each value is the specification value of the same name.
+ * What is decided about a word. Specification name: the result of the query
+ * `Word`; the values are the specification's own.
  *
- * - `"allowed"`: the word may be written.
- * - every other value: the word is refused, and the value names the reason
- *   (the kind of construct the word belongs to): `"loop"`, `"let"`,
- *   `"exception"`, `"switch"`, `"function"`, `"class"`, `"async"`,
- *   `"generator"`, `"new"`, `"delete"`, `"typeof"`, `"in"`, `"jump"`.
+ * - `"allowed"`: the spec may write the word.
+ *
+ * Every other value means the word is refused, and names the kind of syntax it
+ * is refused as:
+ *
+ * - `"loop"`: looping.
+ * - `"let"`: a reassignable variable.
+ * - `"exception"`: exception handling.
+ * - `"switch"`: a switch statement.
+ * - `"function"`: a function declaration.
+ * - `"class"`: a class declaration.
+ * - `"async"`: asynchronous code.
+ * - `"generator"`: a generator.
+ * - `"new"`: object construction.
+ * - `"delete"`: property deletion.
+ * - `"typeof"`: a runtime type test by name.
+ * - `"in"`: a runtime membership or instance test.
+ * - `"jump"`: a jump out of the normal flow of a loop.
  */
 export type WordVerdict =
   | "allowed"
@@ -35,38 +47,50 @@ export type WordVerdict =
   | "jump";
 
 /**
- * Specification query `syntax-check.Word` (calculation `word`).
+ * Performs the specification's query `Word` (`syntax-check.Word`).
  *
- * Judges one word met in a spec.
+ * Accepts any string and always answers. Reads no state, so the same word
+ * always gives the same answer. Ask once per word met in a spec.
  *
- * @param word the word, exactly as met (specification parameter `word`); any
- *   string may be given, not only TypeScript keywords.
- * @returns whether the word is allowed, or the reason it is refused.
+ * @param word the word met in the spec (specification parameter `word`).
+ * @returns what is decided about the word.
  */
-export function wordVerdict(word: string): WordVerdict {
-  return REFUSED_WORDS.get(word) ?? "allowed";
+export function checkWord(word: string): WordVerdict {
+  switch (word) {
+    case "for":
+    case "while":
+    case "do":
+      return "loop";
+    case "let":
+    case "var":
+      return "let";
+    case "try":
+    case "throw":
+      return "exception";
+    case "switch":
+      return "switch";
+    case "function":
+      return "function";
+    case "class":
+      return "class";
+    case "await":
+    case "async":
+      return "async";
+    case "yield":
+      return "generator";
+    case "new":
+      return "new";
+    case "delete":
+      return "delete";
+    case "typeof":
+      return "typeof";
+    case "in":
+    case "instanceof":
+      return "in";
+    case "break":
+    case "continue":
+      return "jump";
+    default:
+      return "allowed";
+  }
 }
-
-/** The refused words, each with the reason it is refused. */
-const REFUSED_WORDS: ReadonlyMap<string, WordVerdict> = new Map<string, WordVerdict>([
-  ["for", "loop"],
-  ["while", "loop"],
-  ["do", "loop"],
-  ["let", "let"],
-  ["var", "let"],
-  ["try", "exception"],
-  ["throw", "exception"],
-  ["switch", "switch"],
-  ["function", "function"],
-  ["class", "class"],
-  ["await", "async"],
-  ["async", "async"],
-  ["yield", "generator"],
-  ["new", "new"],
-  ["delete", "delete"],
-  ["typeof", "typeof"],
-  ["in", "in"],
-  ["instanceof", "in"],
-  ["break", "jump"],
-  ["continue", "jump"],
-]);

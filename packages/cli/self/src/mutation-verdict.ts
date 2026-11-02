@@ -1,250 +1,223 @@
 /**
- * Mutation verdict: judges, one decision-table value at a time, whether changing
- * the value shows in what the specification expects. It asks for runs of the
- * changed specification and reports the values that do not show.
+ * Judges, one decision-table value at a time, whether changing that value shows in
+ * what the specification expects. It asks for runs of the changed specification and
+ * reports on the values through a `MutationRuns`.
  *
- * Corresponds to the specification component `mutation-verdict`. Nothing it keeps
- * is durable, and it serves no HTTP routes. Its state is
- * {@link MutationVerdictState}; it relies on one dependency, the runs
- * ({@link MutationRuns}, specification component `runs`), which is asked for runs
- * and told what is reported.
+ * The whole conversation is: call a command of `MutationVerdict`, see which
+ * `MutationRuns` methods it called, and call the next command.
  *
- * Each specification command is a pure step function (`*Step`) that takes the
- * state before the command and answers the state after it together with the
- * calls to make on the runs, in order ({@link MutationVerdictStep}).
- * {@link MutationVerdict} keeps the state, runs those step functions and makes the
- * calls on its runs.
- *
- * Use: for each value, `begin` with the value's kind; then, each time a run that
- * was asked for has finished, `tried` with its outcome, until the component is
- * back in status `"IDLE"`. Commands are only sent in the status stated for each
- * method; other inputs are never sent and need no handling.
+ * It corresponds to the specification's component `mutation-verdict`; `MutationRuns`
+ * corresponds to its external component `runs`. It keeps nothing across a restart: a
+ * new instance starts over.
  */
 
 /**
- * Where the verdict is (specification state field `status`). The names are the
- * specification's.
+ * What kind of value a decision-table value is. Specification name: parameter `kind`
+ * of command `Begin`; the values are the specification's own.
  *
- * - `"IDLE"`: no value is being judged; the next value may begin.
- * - `"TRYING"`: a value is being judged and a run of it has been asked for; its
- *   outcome (`tried`) comes next.
+ * - `"number"`, `"string"`, `"boolean"`: a value of that JSON type.
+ * - `"null"`: a cell a row of the table does not use.
  */
-export type VerdictStatus = "IDLE" | "TRYING";
+export type TableValueKind = "number" | "string" | "boolean" | "null";
 
 /**
- * The kind of the decision-table value judged next (specification parameter
- * `kind` of `Begin`). `"null"` is a cell that a row does not use.
- */
-export type ValueKind = "number" | "string" | "boolean" | "null";
-
-/** How serious a report is (specification parameter `severity` of `runs.Report`). */
-export type ReportSeverity = "error" | "warning";
-
-/**
- * What is reported about a value (specification parameter `verdict` of `runs.Report`).
+ * Where the judging stands. Specification name: state field `status`; the values are
+ * the specification's own.
  *
- * - `"precondition"`: the change shows only in whether commands can be executed.
- * - `"unobserved"`: the change was not observed at all.
- * - `"rare"`: the change shows, but only in some runs.
+ * - `"IDLE"`: no value is being judged; the next one can begin.
+ * - `"TRYING"`: a value is being judged; the outcome of a run is awaited.
  */
-export type ReportVerdict = "precondition" | "unobserved" | "rare";
+export type MutationVerdictStatus = "IDLE" | "TRYING";
 
 /**
- * Everything the verdict remembers (the specification's `state`). Each field has
- * the name of the specification state field it holds.
+ * Everything the verdict remembers, one field per state field of the specification,
+ * under the same names.
  */
 export interface MutationVerdictState {
-  /** Whether the value being judged is a boolean (state `booleanValue`). */
-  readonly booleanValue: boolean;
+  /** Whether the value being judged is a boolean (`booleanValue`). */
+  booleanValue: boolean;
   /**
-   * Whether, in some run of the value being judged so far, whether a command can
-   * be executed changed (state `enablementChanged`).
+   * Whether a run so far of the value being judged changed whether a command can be
+   * executed (`enablementChanged`).
    */
-  readonly enablementChanged: boolean;
-  /**
-   * Which run of the value is in progress: 0 for the verification seed, then the
-   * number of the extra seed (state `extra`).
-   */
-  readonly extra: number;
-  /** Where the verdict is (state `status`). */
-  readonly status: VerdictStatus;
-}
-
-/** The state the verdict starts from (the specification's `init`). */
-export function initialMutationVerdictState(): MutationVerdictState {
-  return { booleanValue: false, enablementChanged: false, extra: 0, status: "IDLE" };
-}
-
-/** The answer of the decision table `seeds` (specification decision `seeds`). */
-export interface SeedPlan {
-  /** How many extra seeds may be tried after the verification seed (result field `extraSeeds`). */
-  readonly extraSeeds: number;
-}
-
-/** Specification decision table `seeds` (no parameters). Pure. */
-export function seedPlan(): SeedPlan {
-  return { extraSeeds: 2 };
+  enablementChanged: boolean;
+  /** Which extra seed the run being awaited belongs to (`extra`). */
+  extra: number;
+  /** Where the judging stands (`status`). */
+  status: MutationVerdictStatus;
 }
 
 /**
- * The runs (specification component `runs`, external): asked for runs of the
- * changed specification and told what is reported. Each method is one of its
- * specification commands; the verdict calls them, in order, during one of its own
- * commands. None of them answers anything; the outcome of a run that was asked
- * for comes back later through {@link MutationVerdict.tried}.
+ * The outcome of one finished run. The field names are the parameter names of the
+ * specification's command `Tried`.
+ */
+export interface TrialOutcome {
+  /** Whether some expected outcome changed (specification parameter `changed`). */
+  changed: boolean;
+  /**
+   * Whether, in some step, the changed specification would have executed a different
+   * command (specification parameter `enablementDiffers`).
+   */
+  enablementDiffers: boolean;
+}
+
+/**
+ * How serious a report is. Specification name: parameter `severity` of the external
+ * command `Report`; the values are the specification's own.
+ */
+export type MutationSeverity = "error" | "warning";
+
+/**
+ * What is reported about a value. Specification name: parameter `verdict` of the
+ * external command `Report`; the values are the specification's own.
+ *
+ * - `"precondition"`: the change is seen only in whether commands can be executed.
+ * - `"unobserved"`: the change is not seen at all.
+ * - `"rare"`: the change is seen, but only seldom.
+ */
+export type MutationFinding = "precondition" | "unobserved" | "rare";
+
+/**
+ * What the verdict asks for and reports; it corresponds to the specification's
+ * external component `runs`, with one method per command under the same name in lower
+ * camel case.
+ *
+ * Each method is called from inside a command of `MutationVerdict` and returns
+ * nothing. Whether it is called, and with which arguments, is the verdict's decision.
+ * A stand-in should record the calls, in order. The outcome of a requested run is not
+ * returned: it comes back later, through `MutationVerdict.tried`.
  */
 export interface MutationRuns {
   /**
-   * Asks for a run of the value being judged (specification `RunTrials`).
+   * Asks for a run of the changed specification (specification command `RunTrials`).
+   * Called from `MutationVerdict.begin` and `MutationVerdict.tried`.
    *
-   * @param extra which seed to run under: 0 for the verification seed, otherwise
-   *              the number of the extra seed (specification parameter `extra`).
+   * @param extra which seed to run under (specification parameter `extra`).
    */
   runTrials(extra: number): void;
   /**
-   * Reports the value being judged (specification `Report`).
+   * Reports on the value being judged (specification command `Report`). Called from
+   * `MutationVerdict.tried`.
    *
-   * @param severity how serious the report is (specification parameter `severity`).
-   * @param verdict  what is reported (specification parameter `verdict`).
+   * @param severity how serious it is (specification parameter `severity`).
+   * @param verdict what is reported (specification parameter `verdict`).
    */
-  report(severity: ReportSeverity, verdict: ReportVerdict): void;
+  report(severity: MutationSeverity, verdict: MutationFinding): void;
 }
 
-/**
- * One call the verdict makes on its runs: `call` names the {@link MutationRuns}
- * method, the other fields are its arguments.
- */
-export type RunsCall =
-  | { readonly call: "runTrials"; readonly extra: number }
-  | { readonly call: "report"; readonly severity: ReportSeverity; readonly verdict: ReportVerdict };
-
-/** Makes one call on the runs. */
-export function callRuns(runs: MutationRuns, call: RunsCall): void {
-  if (call.call === "runTrials") {
-    runs.runTrials(call.extra);
-  } else {
-    runs.report(call.severity, call.verdict);
-  }
-}
-
-/** The result of a step function: the state after the command and the calls to make on the runs, in order. */
-export interface MutationVerdictStep {
-  readonly state: MutationVerdictState;
-  readonly calls: readonly RunsCall[];
-}
-
-/** The outcome of a finished run (parameters of specification `Tried`). */
-export interface TrialOutcome {
-  /** Whether some expected outcome changed in the run (specification parameter `changed`). */
-  readonly changed: boolean;
-  /**
-   * Whether, in some step of the run, the changed specification would have
-   * executed a different command, i.e. whether a command can be executed changed
-   * (specification parameter `enablementDiffers`).
-   */
-  readonly enablementDiffers: boolean;
-}
-
-// ---------------------------------------------------------------------------
-// Step functions: one per specification command, pure
-
-/**
- * Specification command `Begin`: a value of a decision table is judged next.
- * Sent only in status `"IDLE"`.
- *
- * @param kind the kind of the value (specification parameter `kind`).
- */
-export function beginStep(state: MutationVerdictState, kind: ValueKind): MutationVerdictStep {
-  // A cell that a row does not use is not judged.
-  if (kind === "null") {
-    return { state, calls: [] };
-  }
+/** The verdict's state before anything has been judged. */
+function initialState(): MutationVerdictState {
   return {
-    state: { booleanValue: kind === "boolean", enablementChanged: false, extra: 0, status: "TRYING" },
-    calls: [{ call: "runTrials", extra: 0 }],
+    booleanValue: false,
+    enablementChanged: false,
+    extra: 0,
+    status: "IDLE",
   };
 }
 
-/**
- * Specification command `Tried`: a run that was asked for has finished.
- * Sent only in status `"TRYING"`.
- *
- * @param outcome what the run showed (specification parameters `changed` and `enablementDiffers`).
- */
-export function triedStep(state: MutationVerdictState, outcome: TrialOutcome): MutationVerdictStep {
-  if (outcome.changed) {
-    // The change shows; if only under an extra seed, it shows only rarely.
-    const calls: RunsCall[] = state.extra > 0 ? [{ call: "report", severity: "warning", verdict: "rare" }] : [];
-    return { state: { ...state, status: "IDLE" }, calls };
-  }
-  if (state.extra < seedPlan().extraSeeds) {
-    // Not shown yet: try the next extra seed.
-    return {
-      state: {
-        ...state,
-        enablementChanged: state.enablementChanged || outcome.enablementDiffers,
-        extra: state.extra + 1,
-      },
-      calls: [{ call: "runTrials", extra: state.extra + 1 }],
-    };
-  }
-  // Every seed tried and the change never showed.
-  const severity: ReportSeverity = state.booleanValue ? "warning" : "error";
-  const verdict: ReportVerdict = state.enablementChanged || outcome.enablementDiffers ? "precondition" : "unobserved";
-  return { state: { ...state, status: "IDLE" }, calls: [{ call: "report", severity, verdict }] };
+/** How many extra seeds a value is tried under after the verification seed. */
+function extraSeeds(): number {
+  return 2;
 }
 
-// ---------------------------------------------------------------------------
-// The component
+/** Whether the value is a cell a row of the table does not use, which is not judged. */
+function isUnusedCell(kind: TableValueKind): boolean {
+  return kind === "null";
+}
+
+/** Whether, after a run under this seed that changed nothing, another seed remains. */
+function seedsRemain(extra: number): boolean {
+  return extra < extraSeeds();
+}
+
+/** The severity of a value no seed showed: booleans do not fail the mutation gate. */
+function unseenSeverity(booleanValue: boolean): MutationSeverity {
+  return booleanValue ? "warning" : "error";
+}
+
+/** The finding on a value no seed showed. */
+function unseenFinding(enablementChanged: boolean): MutationFinding {
+  return enablementChanged ? "precondition" : "unobserved";
+}
 
 /**
- * The verdict on the values of a mutation, one value at a time. It starts in the
- * initial state, keeps its state between commands, and makes its calls on the
- * runs synchronously, in order, before the command method returns. No command
- * answers anything; read {@link MutationVerdict.state} to see where it is.
+ * The judging of a sequence of decision-table values. Create one with
+ * `new MutationVerdict(runs)`; it starts in the specification's initial state.
+ *
+ * Each method other than `state` performs one command of the specification and
+ * returns nothing: what the command leads to is seen in the calls on `runs` and in
+ * `state()`. A command's `requires` limits when it may be called; other calls are
+ * never made. The usual sequence is: for each value `begin`, then `tried` once per run
+ * asked for.
  */
 export class MutationVerdict {
   private readonly runs: MutationRuns;
-  private current: MutationVerdictState = initialMutationVerdictState();
+  private current: MutationVerdictState = initialState();
 
-  /** @param runs the runs the verdict asks for runs and reports to (specification `runs`). */
+  /**
+   * @param runs asked for runs and told the reports, for as long as the verdict lives.
+   */
   constructor(runs: MutationRuns) {
     this.runs = runs;
   }
 
-  /** The current state (all specification state fields, with the same names). */
-  get state(): MutationVerdictState {
-    return this.current;
-  }
-
   /**
-   * A decision-table value is judged next (specification `Begin`). Sent only in
-   * status `"IDLE"`. The runs may be asked for a run (`runTrials`).
+   * Reads what the verdict remembers. It only reads, and may be called at any point.
    *
-   * @param kind the kind of the value (specification parameter `kind`).
+   * @returns a new plain object, so it can be compared by value.
    */
-  begin(kind: ValueKind): void {
-    this.apply(beginStep(this.current, kind));
+  state(): MutationVerdictState {
+    return { ...this.current };
   }
 
   /**
-   * A run that was asked for has finished (specification `Tried`). Sent only in
-   * status `"TRYING"`. The runs may be asked for another run (`runTrials`) or told
-   * a report (`report`).
+   * Performs the specification's command `Begin`: a value of a decision table is
+   * judged next.
    *
-   * @param outcome whether some expected outcome changed in the run, and whether
-   *                whether a command can be executed changed in it
-   *                (specification parameters `changed` and `enablementDiffers`).
+   * @param kind what kind of value it is (specification parameter `kind`).
+   */
+  begin(kind: TableValueKind): void {
+    if (isUnusedCell(kind)) {
+      return;
+    }
+    this.current = {
+      booleanValue: kind === "boolean",
+      enablementChanged: false,
+      extra: 0,
+      status: "TRYING",
+    };
+    this.runs.runTrials(0);
+  }
+
+  /**
+   * Performs the specification's command `Tried`: a run asked for has finished. This
+   * is where `runs` may be asked for another run, or told a report.
+   *
+   * @param outcome how the run came out.
    */
   tried(outcome: TrialOutcome): void {
-    this.apply(triedStep(this.current, outcome));
-  }
-
-  /** Takes the state after a command and makes its calls on the runs, in order. */
-  private apply(step: MutationVerdictStep): void {
-    this.current = step.state;
-    for (const call of step.calls) {
-      callRuns(this.runs, call);
+    const finished = this.current;
+    if (outcome.changed) {
+      this.current = { ...finished, status: "IDLE" };
+      if (finished.extra > 0) {
+        this.runs.report("warning", "rare");
+      }
+      return;
     }
+    if (seedsRemain(finished.extra)) {
+      const next = finished.extra + 1;
+      this.current = {
+        ...finished,
+        enablementChanged: finished.enablementChanged || outcome.enablementDiffers,
+        extra: next,
+      };
+      this.runs.runTrials(next);
+      return;
+    }
+    this.current = { ...finished, status: "IDLE" };
+    this.runs.report(
+      unseenSeverity(finished.booleanValue),
+      unseenFinding(finished.enablementChanged || outcome.enablementDiffers),
+    );
   }
 }

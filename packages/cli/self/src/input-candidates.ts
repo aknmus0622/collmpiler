@@ -1,311 +1,265 @@
 /**
- * Input candidates: decides which values the generator of command inputs mixes
- * in, and which remembered value an input is picked from.
+ * Decides which values the generator of command inputs mixes in, and which
+ * remembered value an input is picked from.
  *
- * Corresponds to the specification component `input-candidates`. It has no
- * dependencies and nothing durable. Its state is {@link InputCandidatesState};
- * each specification command is a pure step function on that state (and a
- * method of {@link InputCandidates}, which keeps the state for the caller), and
- * each specification query is a pure function of the state.
+ * Nothing here looks at a specification or generates anything: the caller
+ * announces what it is about to decide, feeds in what it found, one call per
+ * finding, and then reads the answer.
  *
- * The component is used in three independent rounds, each opened by its own
- * "begin" command and then fed values one at a time:
- *
- * - numbers: {@link InputCandidates.beginNumbers}, then any number of
- *   {@link InputCandidates.around}, then {@link InputCandidates.decideNumbers};
- * - strings: {@link InputCandidates.beginStrings}, then any number of
- *   {@link InputCandidates.text} and {@link InputCandidates.lengthNumber}, then
- *   {@link InputCandidates.decideStrings};
- * - picking a remembered value: {@link InputCandidates.beginAmong}, then one
- *   {@link InputCandidates.item} per remembered value in order, then
- *   {@link InputCandidates.decideAmong}.
+ * It corresponds to the specification's component `input-candidates`. It has no
+ * dependencies and keeps nothing across a restart: a new instance starts empty.
  */
 
 /**
- * Everything the component remembers (the specification's `state`). Each field
- * has the name of the specification state field it holds.
+ * The number input whose candidates are decided next. The field names are the
+ * parameter names of the specification's command `BeginNumbers`.
  */
-export interface InputCandidatesState {
-  /** Thresholds given in the current numbers round, in the order given (state `aroundValues`). */
-  aroundValues: readonly number[];
-  /** String lengths decided in the current strings round, in the order decided (state `foundLengths`). */
-  foundLengths: readonly number[];
-  /** The largest value the number input takes, or `null` when it has none (state `highest`). */
-  highest: number | null;
-  /** How many remembered values have been given in the current picking round (state `itemsGiven`). */
-  itemsGiven: number;
-  /** Strings given in the current strings round (state `knownTexts`). */
-  knownTexts: readonly string[];
-  /** The smallest value the number input takes, or `null` when it has none (state `lowest`). */
-  lowest: number | null;
-  /** The position asked for in the current picking round, or `null` for none (state `pickGiven`). */
-  pickGiven: number | null;
-  /** Positions (from 0, among all remembered values given) of the values that can be used (state `usablePositions`). */
-  usablePositions: readonly number[];
-  /** Whether the number input takes integers only (state `wholeOnly`). */
-  wholeOnly: boolean;
+export interface NumberInput {
+  /** Whether the input takes integers only (specification parameter `integer`). */
+  integer: boolean;
+  /** Its smallest value, or `null` if it has none (specification parameter `min`). */
+  min: number | null;
+  /** Its largest value, or `null` if it has none (specification parameter `max`). */
+  max: number | null;
 }
 
 /**
- * The answer of the query `DecideNumbers`: the candidate values for a number input.
+ * The answer for a number input. A new plain object with exactly these two
+ * fields, so it can be compared by value. The field names are those of the
+ * result of the specification's query `DecideNumbers`.
  */
 export interface NumberCandidates {
-  /** The smallest and then the largest value the input takes, those that exist (specification field `limits`). */
+  /** The candidates that come from the input's own limits, in order. */
   limits: number[];
-  /** Values around the thresholds given, that the input takes (specification field `thresholds`). */
+  /** The candidates that come from the thresholds given, in order. */
   thresholds: number[];
 }
 
 /**
- * The answer of the query `DecideStrings`: the candidate values for a string input.
+ * The answer for a string input. A new plain object with exactly these two
+ * fields, so it can be compared by value. The field names are those of the
+ * result of the specification's query `DecideStrings`.
  */
 export interface StringCandidates {
-  /** The strings given, each once, in the order first given (specification field `known`). */
+  /** The strings to try as they are, in order. */
   known: string[];
-  /** The string lengths to try, each once, in the order first decided (specification field `lengths`). */
+  /** The lengths of strings to try, in order. */
   lengths: number[];
 }
 
-/** The smallest string length a number found in the specification can suggest. */
-const SHORTEST_SUGGESTED_LENGTH = 1;
-/** The largest string length a number found in the specification can suggest. */
-const LONGEST_SUGGESTED_LENGTH = 10000;
-
-/** The list with the value appended, unless it is already there. */
-function appendOnce<T>(list: readonly T[], value: T): readonly T[] {
-  return list.includes(value) ? list : [...list, value];
-}
-
-/** How far from a threshold a value may be to count as around it. */
-function thresholdReach(wholeOnly: boolean): number {
-  return wholeOnly ? 1 : 0;
-}
-
-/** Whether the number input takes the value: within its smallest and largest value. */
-function withinLimits(state: InputCandidatesState, value: number): boolean {
-  return (state.lowest === null || value >= state.lowest) && (state.highest === null || value <= state.highest);
-}
-
-/** The state the component starts from (the specification's `init`). */
-export function initialInputCandidatesState(): InputCandidatesState {
-  return {
-    aroundValues: [],
-    foundLengths: [],
-    highest: null,
-    itemsGiven: 0,
-    knownTexts: [],
-    lowest: null,
-    pickGiven: null,
-    usablePositions: [],
-    wholeOnly: false,
-  };
-}
-
-/**
- * Command `BeginNumbers`: the candidates for a number input are decided next;
- * forgets the thresholds of the previous numbers round.
- *
- * @param state the state before the command.
- * @param integer whether the input takes integers only (parameter `integer`).
- * @param min its smallest value, or `null` when it has none (parameter `min`).
- * @param max its largest value, or `null` when it has none (parameter `max`).
- * @returns the state after the command.
- */
-export function beginNumbers(
-  state: InputCandidatesState,
-  integer: boolean,
-  min: number | null,
-  max: number | null,
-): InputCandidatesState {
-  return { ...state, aroundValues: [], highest: max, lowest: min, wholeOnly: integer };
-}
-
-/**
- * Command `Around`: a threshold, a number found in the specification or
- * declared with `around`, for the current number input.
- *
- * @param state the state before the command.
- * @param around the threshold (parameter `around`); only small integers are ever sent.
- * @returns the state after the command.
- */
-export function around(state: InputCandidatesState, around: number): InputCandidatesState {
-  return { ...state, aroundValues: [...state.aroundValues, around] };
-}
-
-/**
- * Command `BeginStrings`: the candidates for a string input are decided next;
- * forgets what the previous strings round was given.
- *
- * @param state the state before the command.
- * @returns the state after the command.
- */
-export function beginStrings(state: InputCandidatesState): InputCandidatesState {
-  return { ...state, foundLengths: [], knownTexts: [] };
-}
-
-/**
- * Command `Text`: a string found in the specification, or an example declared
- * for the current string input.
- *
- * @param state the state before the command.
- * @param text the string (parameter `text`).
- * @returns the state after the command.
- */
-export function text(state: InputCandidatesState, text: string): InputCandidatesState {
-  return { ...state, knownTexts: appendOnce(state.knownTexts, text) };
-}
-
-/**
- * Command `LengthNumber`: a number found in the specification, from which
- * string lengths to try may be decided for the current string input.
- *
- * @param state the state before the command.
- * @param number the number (parameter `number`); only integers in a bounded range are ever sent.
- * @returns the state after the command.
- */
-export function lengthNumber(state: InputCandidatesState, number: number): InputCandidatesState {
-  if (number < SHORTEST_SUGGESTED_LENGTH || number > LONGEST_SUGGESTED_LENGTH) return state;
-  let lengths = state.foundLengths;
-  for (const length of [number - 1, number, number + 1]) lengths = appendOnce(lengths, length);
-  return { ...state, foundLengths: lengths };
-}
-
-/**
- * Command `BeginAmong`: an input is to be picked from the remembered values
- * given next; starts a new picking round.
- *
- * @param state the state before the command.
- * @param pick the position asked for, or `null` to pick none (parameter `pick`).
- * @returns the state after the command.
- */
-export function beginAmong(state: InputCandidatesState, pick: number | null): InputCandidatesState {
-  return { ...state, itemsGiven: 0, pickGiven: pick, usablePositions: [] };
-}
-
-/**
- * Command `Item`: the next remembered value of the current picking round.
- *
- * @param state the state before the command.
- * @param usable whether the value can be used: it is not null and fits the
- *               input's type (parameter `usable`).
- * @returns the state after the command.
- */
-export function item(state: InputCandidatesState, usable: boolean): InputCandidatesState {
-  return {
-    ...state,
-    itemsGiven: state.itemsGiven + 1,
-    usablePositions: usable ? [...state.usablePositions, state.itemsGiven] : state.usablePositions,
-  };
-}
-
-/**
- * Query `DecideNumbers` (calculation `decideNumbers`): the candidate values for
- * the current number input. Pure.
- */
-export function decideNumbers(state: InputCandidatesState): NumberCandidates {
-  const { lowest, highest } = state;
-  let limits: number[];
-  if (lowest !== null && highest !== null) {
-    limits = lowest < highest ? [lowest, highest] : lowest === highest ? [lowest] : [];
-  } else if (lowest !== null) {
-    limits = [lowest];
-  } else if (highest !== null) {
-    limits = [highest];
-  } else {
-    limits = [];
+/** Appends `value` to `values` unless it is already there. */
+function addOnce<T>(values: T[], value: T): void {
+  if (!values.includes(value)) {
+    values.push(value);
   }
+}
 
-  const reach = thresholdReach(state.wholeOnly);
-  let thresholds: readonly number[] = [];
-  for (const threshold of state.aroundValues) {
-    for (let value = threshold - reach; value <= threshold + reach; value++) {
-      if (withinLimits(state, value)) thresholds = appendOnce(thresholds, value);
+/** The smallest and then the largest value, those that exist, each once. */
+function limitsOf(lowest: number | null, highest: number | null): number[] {
+  if (lowest === null) {
+    return highest === null ? [] : [highest];
+  }
+  if (highest === null) {
+    return [lowest];
+  }
+  if (lowest < highest) {
+    return [lowest, highest];
+  }
+  return lowest === highest ? [lowest] : [];
+}
+
+/** Whether `value` lies within the bounds that exist. */
+function isWithin(value: number, lowest: number | null, highest: number | null): boolean {
+  return (lowest === null || value >= lowest) && (highest === null || value <= highest);
+}
+
+/**
+ * For each threshold in order, the values from `reach` below it to `reach`
+ * above it that are accepted, each once, in the order first found.
+ */
+function thresholdsNear(
+  thresholds: number[],
+  reach: number,
+  accepts: (value: number) => boolean,
+): number[] {
+  const found: number[] = [];
+  for (const threshold of thresholds) {
+    for (let value = threshold - reach; value <= threshold + reach; value += 1) {
+      if (accepts(value)) {
+        addOnce(found, value);
+      }
     }
   }
-  return { limits, thresholds: [...thresholds] };
+  return found;
 }
 
 /**
- * Query `DecideStrings` (calculation `decideStrings`): the candidate values for
- * the current string input. Pure.
+ * The position of the usable value at `pick` modulo their number, or `null` when
+ * there is no `pick` or no usable value. A negative `pick` counts from the end.
  */
-export function decideStrings(state: InputCandidatesState): StringCandidates {
-  return { known: [...state.knownTexts], lengths: [...state.foundLengths] };
+function positionPicked(pick: number | null, usablePositions: number[]): number | null {
+  const count = usablePositions.length;
+  if (pick === null || count === 0) {
+    return null;
+  }
+  return usablePositions[((pick % count) + count) % count];
 }
 
 /**
- * Query `DecideAmong` (calculation `decideAmong`): the position (from 0, among
- * all remembered values given in the current picking round) of the value
- * picked, or `null` when none is picked. Pure.
- */
-export function decideAmong(state: InputCandidatesState): number | null {
-  const usable = state.usablePositions;
-  if (state.pickGiven === null || usable.length === 0) return null;
-  const index = ((state.pickGiven % usable.length) + usable.length) % usable.length;
-  return usable[index];
-}
-
-/**
- * Keeps the component's state between commands. Each method is the
- * specification command or query of the same name (see the pure function of
- * the same name for its arguments and answer); commands replace the kept
- * state, queries only read it. A new instance is in the specification's
- * initial state.
+ * One generator's working memory while it decides inputs. Create one with
+ * `new InputCandidates()`; it takes no arguments.
+ *
+ * It answers three separate questions, each with its own sequence of calls:
+ *
+ * - number input: `beginNumbers`, then `around` any number of times, then
+ *   `decideNumbers`;
+ * - string input: `beginStrings`, then `text` and `lengthNumber` any number of
+ *   times and in any mix, then `decideStrings`;
+ * - picking a remembered value: `beginAmong`, then `item` once per remembered
+ *   value, in order, then `decideAmong`.
+ *
+ * The three sequences do not affect one another, so they may be interleaved. A
+ * `begin…` call discards what its own sequence had gathered. The `decide…`
+ * methods only read: they change nothing, may be called at any point, also
+ * before any `begin…`, and repeated calls give equal answers.
  */
 export class InputCandidates {
-  private state: InputCandidatesState = initialInputCandidatesState();
+  private aroundValues: number[] = [];
+  private lowest: number | null = null;
+  private highest: number | null = null;
+  private wholeOnly = false;
 
-  /** Command `BeginNumbers`; see {@link beginNumbers}. */
-  beginNumbers(integer: boolean, min: number | null, max: number | null): void {
-    this.state = beginNumbers(this.state, integer, min, max);
+  private knownTexts: string[] = [];
+  private foundLengths: number[] = [];
+
+  private pickGiven: number | null = null;
+  private itemsGiven = 0;
+  private usablePositions: number[] = [];
+
+  /**
+   * Performs the specification's command `BeginNumbers`: the candidates for a
+   * number input are decided next, and no threshold has been given yet.
+   *
+   * @param input the input's description.
+   */
+  beginNumbers(input: NumberInput): void {
+    this.wholeOnly = input.integer;
+    this.lowest = input.min;
+    this.highest = input.max;
+    this.aroundValues = [];
   }
 
-  /** Command `Around`; see {@link around}. */
+  /**
+   * Performs the specification's command `Around`: gives one threshold, a number
+   * found in the specification or declared with `around`, for the number input
+   * begun last. Call it once per threshold found, in the order found.
+   *
+   * @param around the threshold (specification parameter `around`). The
+   *   specification's `requires` limits it; other values are never passed.
+   */
   around(around: number): void {
-    this.state = around_(this.state, around);
+    this.aroundValues.push(around);
   }
 
-  /** Command `BeginStrings`; see {@link beginStrings}. */
-  beginStrings(): void {
-    this.state = beginStrings(this.state);
-  }
-
-  /** Command `Text`; see {@link text}. */
-  text(text: string): void {
-    this.state = text_(this.state, text);
-  }
-
-  /** Command `LengthNumber`; see {@link lengthNumber}. */
-  lengthNumber(number: number): void {
-    this.state = lengthNumber(this.state, number);
-  }
-
-  /** Command `BeginAmong`; see {@link beginAmong}. */
-  beginAmong(pick: number | null): void {
-    this.state = beginAmong(this.state, pick);
-  }
-
-  /** Command `Item`; see {@link item}. */
-  item(usable: boolean): void {
-    this.state = item(this.state, usable);
-  }
-
-  /** Query `DecideNumbers`; see {@link decideNumbers}. */
+  /**
+   * Performs the specification's query `DecideNumbers`.
+   *
+   * @returns the candidates for the number input begun last, from everything
+   *   given for it so far.
+   */
   decideNumbers(): NumberCandidates {
-    return decideNumbers(this.state);
+    return {
+      limits: limitsOf(this.lowest, this.highest),
+      thresholds: thresholdsNear(
+        this.aroundValues,
+        this.wholeOnly ? 1 : 0,
+        (value) => isWithin(value, this.lowest, this.highest),
+      ),
+    };
   }
 
-  /** Query `DecideStrings`; see {@link decideStrings}. */
+  /**
+   * Performs the specification's command `BeginStrings`: the candidates for a
+   * string input are decided next, and nothing has been given yet.
+   */
+  beginStrings(): void {
+    this.knownTexts = [];
+    this.foundLengths = [];
+  }
+
+  /**
+   * Performs the specification's command `Text`: gives one string found in the
+   * specification, or an example declared for the input, for the string input
+   * begun last.
+   *
+   * @param text the string (specification parameter `text`).
+   */
+  text(text: string): void {
+    addOnce(this.knownTexts, text);
+  }
+
+  /**
+   * Performs the specification's command `LengthNumber`: gives one number found
+   * in the specification, from which lengths of strings to try may follow, for
+   * the string input begun last.
+   *
+   * @param number the number found (specification parameter `number`). The
+   *   specification's `requires` limits it; other values are never passed.
+   */
+  lengthNumber(number: number): void {
+    if (number >= 1 && number <= 10000) {
+      addOnce(this.foundLengths, number - 1);
+      addOnce(this.foundLengths, number);
+      addOnce(this.foundLengths, number + 1);
+    }
+  }
+
+  /**
+   * Performs the specification's query `DecideStrings`.
+   *
+   * @returns the candidates for the string input begun last, from everything
+   *   given for it so far.
+   */
   decideStrings(): StringCandidates {
-    return decideStrings(this.state);
+    return { known: [...this.knownTexts], lengths: [...this.foundLengths] };
   }
 
-  /** Query `DecideAmong`; see {@link decideAmong}. */
+  /**
+   * Performs the specification's command `BeginAmong`: an input is to be picked
+   * from what the component remembers, and no remembered value has been given
+   * yet.
+   *
+   * @param pick the position to pick at, or `null` to pick nothing
+   *   (specification parameter `pick`).
+   */
+  beginAmong(pick: number | null): void {
+    this.pickGiven = pick;
+    this.itemsGiven = 0;
+    this.usablePositions = [];
+  }
+
+  /**
+   * Performs the specification's command `Item`: gives the next remembered value
+   * for the pick begun last. The value itself is not needed, only whether it can
+   * be used.
+   *
+   * @param usable whether the value can be used, meaning it is not null and fits
+   *   the input's type (specification parameter `usable`).
+   */
+  item(usable: boolean): void {
+    if (usable) {
+      this.usablePositions.push(this.itemsGiven);
+    }
+    this.itemsGiven += 1;
+  }
+
+  /**
+   * Performs the specification's query `DecideAmong`.
+   *
+   * @returns where the value picked stands among all the values given to `item`
+   *   since `beginAmong`, counting from 0, or `null` if none is picked.
+   */
   decideAmong(): number | null {
-    return decideAmong(this.state);
+    return positionPicked(this.pickGiven, this.usablePositions);
   }
 }
-
-// The methods `around` and `text` shadow the functions of the same name through their parameters.
-const around_ = around;
-const text_ = text;

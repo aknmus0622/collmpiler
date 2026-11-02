@@ -1,83 +1,34 @@
 /**
- * Checker verdict: how serious each outcome of the formal checker is.
+ * Classifies one result reported by the formal checker: given what was checked
+ * and how it came out, says which finding (if any) to report and how serious it is.
  *
- * Corresponds to the specification component `checker-verdict`. It has no state
- * and no dependencies; its only entry is the query `Verdict`, implemented here by
- * the pure function {@link checkerVerdict}.
+ * Stateless and free of dependencies: nothing is remembered between calls,
+ * nothing needs to be constructed, and calling it has no effect on anything.
+ * It corresponds to the specification's component `checker-verdict`.
  */
 
 /**
- * Specification query `checker-verdict.Verdict` (calculation `verdict`).
- *
- * Pure: answers the same result for the same arguments, touches nothing.
- *
- * @param kind   what was checked (specification parameter `kind`).
- * @param status how that check came out (specification parameter `status`).
- * @returns the code and severity to report for that check, as a fresh record.
- */
-export function checkerVerdict(kind: CheckKind, status: CheckStatus): CheckerVerdict {
-  const rule = VERDICT_RULES.find((r) => ruleMatches(r, kind, status));
-  const outcome = rule === undefined ? NOTHING_TO_REPORT : rule.outcome;
-  return { code: outcome.code as VerdictCode, severity: outcome.severity as VerdictSeverity };
-}
-
-/** A diagnostic as written in the decision table below. */
-interface VerdictOutcome {
-  readonly code: string;
-  readonly severity: string;
-}
-
-/**
- * One row of the decision table: it applies when the check's kind and status are
- * those given (`null` matches any value).
- */
-interface VerdictRule {
-  readonly kind: string | null;
-  readonly status: string | null;
-  readonly outcome: VerdictOutcome;
-}
-
-/** Something the checker skipped or could not explore: a warning. */
-const OUT_OF_RANGE: VerdictOutcome = { code: "out-of-range", severity: "warning" };
-
-/** Anything that holds, or an event that is reached: nothing is reported. */
-const NOTHING_TO_REPORT: VerdictOutcome = { code: "none", severity: "none" };
-
-/** The decision table; the first row that matches decides. */
-const VERDICT_RULES: readonly VerdictRule[] = [
-  { kind: "skipped", status: null, outcome: OUT_OF_RANGE },
-  { kind: null, status: "skipped", outcome: OUT_OF_RANGE },
-  { kind: null, status: "out-of-range", outcome: OUT_OF_RANGE },
-  { kind: "reach", status: "unreachable", outcome: { code: "unreached-case", severity: "warning" } },
-  { kind: "property", status: "broken", outcome: { code: "property", severity: "error" } },
-  { kind: "defined", status: "broken", outcome: { code: "undefined-value", severity: "error" } },
-  { kind: "requires", status: "broken", outcome: { code: "requires-broken", severity: "error" } },
-];
-
-function ruleMatches(rule: VerdictRule, kind: string, status: string): boolean {
-  return (rule.kind === null || rule.kind === kind) && (rule.status === null || rule.status === status);
-}
-
-/**
- * What the formal checker checked (specification parameter `kind`).
+ * What the checker examined. Specification name: parameter `kind`; the values
+ * are the specification's own.
  *
  * - `"property"`: a stated property of the model.
- * - `"defined"`: that a value read is defined where it is read.
+ * - `"defined"`: that a value that is read is defined at that point.
  * - `"requires"`: that a component is called within its `requires`.
- * - `"reach"`: that an event can happen (some trace reaches it).
+ * - `"reach"`: that an event can happen.
  * - `"skipped"`: something the checker could not express at all.
  */
 export type CheckKind = "property" | "defined" | "requires" | "reach" | "skipped";
 
 /**
- * How a check came out (specification parameter `status`).
+ * How the check came out, as the checker reported it. Specification name:
+ * parameter `status`; the values are the specification's own.
  *
- * - `"holds"`: the checked thing holds.
- * - `"broken"`: the checked thing does not hold.
- * - `"reached"`: the event is reached by some trace.
+ * - `"holds"`: the checker found the claim to be true.
+ * - `"broken"`: the checker found a counterexample.
+ * - `"reached"`: some trace reaches the event.
  * - `"unreachable"`: no trace reaches the event.
- * - `"out-of-range"`: the check left the range the checker explores.
- * - `"skipped"`: the check was not performed.
+ * - `"out-of-range"`: the checker's outcome lies outside what it could decide.
+ * - `"skipped"`: the checker did not perform the check.
  */
 export type CheckStatus =
   | "holds"
@@ -88,10 +39,11 @@ export type CheckStatus =
   | "skipped";
 
 /**
- * The diagnostic code reported for a check (field `code` of the specification's
- * result record). `"none"` means nothing is reported.
+ * Identifies the finding to report. Specification name: field `code` of the
+ * query's result; the values are the specification's own, and `"none"` means
+ * there is no finding.
  */
-export type VerdictCode =
+export type FindingCode =
   | "property"
   | "undefined-value"
   | "requires-broken"
@@ -100,13 +52,49 @@ export type VerdictCode =
   | "none";
 
 /**
- * How serious the reported diagnostic is (field `severity` of the specification's
- * result record). `"none"` means nothing is reported.
+ * How serious a finding is. Specification name: field `severity` of the query's
+ * result; the values are the specification's own, and `"none"` means there is
+ * nothing to act on.
  */
-export type VerdictSeverity = "error" | "warning" | "none";
+export type FindingSeverity = "error" | "warning" | "none";
 
-/** The answer of the `Verdict` query: a diagnostic code with its severity. */
-export interface CheckerVerdict {
-  code: VerdictCode;
-  severity: VerdictSeverity;
+/**
+ * The answer for one checker result. A new plain object with exactly these two
+ * fields, so it can be compared by value.
+ */
+export interface CheckerFinding {
+  /** Which finding this is. */
+  code: FindingCode;
+  /** How serious it is. */
+  severity: FindingSeverity;
+}
+
+/**
+ * Performs the specification's query `Verdict` (`checker-verdict.Verdict`).
+ *
+ * Accepts any combination of the two arguments, including ones the checker
+ * would not normally pair, and always answers. Never throws for a valid
+ * argument. Reads no state, so the same arguments always give an equal answer.
+ *
+ * @param kind what was checked (specification parameter `kind`).
+ * @param status how it came out (specification parameter `status`).
+ * @returns the finding to report, with its `code` and `severity`.
+ */
+export function classifyCheckerResult(kind: CheckKind, status: CheckStatus): CheckerFinding {
+  if (kind === "skipped" || status === "skipped" || status === "out-of-range") {
+    return { code: "out-of-range", severity: "warning" };
+  }
+  if (kind === "reach" && status === "unreachable") {
+    return { code: "unreached-case", severity: "warning" };
+  }
+  if (kind === "property" && status === "broken") {
+    return { code: "property", severity: "error" };
+  }
+  if (kind === "defined" && status === "broken") {
+    return { code: "undefined-value", severity: "error" };
+  }
+  if (kind === "requires" && status === "broken") {
+    return { code: "requires-broken", severity: "error" };
+  }
+  return { code: "none", severity: "none" };
 }

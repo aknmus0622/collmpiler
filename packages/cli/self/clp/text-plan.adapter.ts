@@ -1,30 +1,21 @@
-import type { Ports, Query, QueryOutput, TargetSystemAdapter } from "./text-plan.adapter.contract.ts";
-import { contractSections, queryNotes, typeText } from "../src/text-plan.ts";
+import type { TargetSystemAdapter } from "./text-plan.adapter.contract.ts";
+import { decideNotes, decideSections, writeType } from "../src/text-plan.ts";
 
-// Import the production code from ../src/ and forward each call to it. No business logic here.
-// The text plan has no state and no dependencies: there is nothing to build or discard.
-let ports: Ports | null = null;
-
+// `text-plan` is stateless and has no dependencies, so there is nothing to build, connect or discard.
 export const adapter: TargetSystemAdapter = {
-  async setupIsolation(given) {
-    ports = given;
-  },
-  async teardownIsolation() {
-    ports = null;
-  },
+  async setupIsolation(ports) {},
+  async teardownIsolation() {},
   async executeCommand(command) {
-    throw new Error(`unknown command: ${JSON.stringify(command)}`);
+    throw new Error(`text-plan has no commands: ${JSON.stringify(command)}`);
   },
-  async executeQuery(query: Query): Promise<QueryOutput[keyof QueryOutput]> {
+  async executeQuery(query) {
     switch (query.name) {
       case "Notes":
-        return queryNotes(query.input.promise, query.input.mayFail);
+        return decideNotes(query.input);
       case "Sections":
-        return contractSections(query.input);
+        return decideSections(query.input);
       case "TypeText":
-        return typeText(query.input);
-      default:
-        throw new Error(`unknown query: ${JSON.stringify(query)}`);
+        return writeType(query.input);
     }
   },
 };

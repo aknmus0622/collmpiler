@@ -1,65 +1,46 @@
 import type { TargetSystemAdapter } from "./input-candidates.adapter.contract.ts";
 import { InputCandidates } from "../src/input-candidates.ts";
 
-// Import the production code from ../src/ and forward each call to it. No business logic here.
-let system: InputCandidates | null = null;
+let system: InputCandidates | undefined;
 
-function current(): InputCandidates {
-  if (system === null) throw new Error("the system is not set up");
-  return system;
-}
-
+// Forwards each call to the production code. No business logic here.
 export const adapter: TargetSystemAdapter = {
   async setupIsolation(_ports) {
-    // The component has no dependencies, so there is nothing in `ports` to connect.
     system = new InputCandidates();
   },
   async teardownIsolation() {
-    system = null;
+    system = undefined;
   },
   async executeCommand(command) {
-    const s = current();
     switch (command.name) {
-      case "Around":
-        s.around(command.input.around);
-        return;
-      case "BeginAmong":
-        s.beginAmong(command.input.pick);
-        return;
       case "BeginNumbers":
-        s.beginNumbers(command.input.integer, command.input.min, command.input.max);
-        return;
+        return system!.beginNumbers(command.input);
+      case "Around":
+        return system!.around(command.input.around);
       case "BeginStrings":
-        s.beginStrings();
-        return;
-      case "Item":
-        s.item(command.input.usable);
-        return;
-      case "LengthNumber":
-        s.lengthNumber(command.input.number);
-        return;
+        return system!.beginStrings();
       case "Text":
-        s.text(command.input.text);
-        return;
+        return system!.text(command.input.text);
+      case "LengthNumber":
+        return system!.lengthNumber(command.input.number);
+      case "BeginAmong":
+        return system!.beginAmong(command.input.pick);
+      case "Item":
+        return system!.item(command.input.usable);
       default:
-        throw new Error(`unknown command: ${(command as { name: string }).name}`);
+        throw new Error(`unknown command: ${JSON.stringify(command)}`);
     }
   },
   async executeQuery(query) {
-    const s = current();
     switch (query.name) {
+      case "DecideNumbers":
+        return system!.decideNumbers();
+      case "DecideStrings":
+        return system!.decideStrings();
       case "DecideAmong":
-        return s.decideAmong();
-      case "DecideNumbers": {
-        const { limits, thresholds } = s.decideNumbers();
-        return { limits, thresholds };
-      }
-      case "DecideStrings": {
-        const { known, lengths } = s.decideStrings();
-        return { known, lengths };
-      }
+        return system!.decideAmong();
       default:
-        throw new Error(`unknown query: ${(query as { name: string }).name}`);
+        throw new Error(`unknown query: ${JSON.stringify(query)}`);
     }
   },
 };

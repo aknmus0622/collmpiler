@@ -62,6 +62,8 @@ export type ComponentIr = {
   calcs?: Record<string, { params: Params; result: Type; is: Expr }>;
   decisions?: Record<string, { params: Params; result: Type; rows: { when: Expr; then: Record<string, Expr> }[] }>;
   properties?: Record<string, { kind: "invariant" | "temporal"; is: Expr }>;
+  /** The identifiers the spec spells out (`"x" as Leaf`), by sort: inputs draw them, as nothing generated would equal one. */
+  known?: Record<string, string[]>;
   /**
    * How the formal checker writes the numbers it computes with (not part of the meaning; DSL.md §17.21): `fun` (exactly,
    * or as Alloy's integers) or `pred` (exactly when it can, otherwise over-approximated), for the component and for the

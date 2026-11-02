@@ -4,7 +4,7 @@
     "usage-check.interpretation.ts"
   ],
   "specs": "sha256:6132bf78a29a90c177c0b70d4a71e6c90c8de683386b2dffba90841ab2f153c9",
-  "code": "sha256:24a609f3b552377dd683c65fa38f10e22c22a3844aa6f3214e8a604c05c73c17",
+  "code": "sha256:1108fd767ba4d2cd0b55076a408ff85d04e27bd8e448c17d7ce15cb87b976e3c",
   "files": [
     "../src/checker-verdict.ts",
     "../src/fill-check.ts",

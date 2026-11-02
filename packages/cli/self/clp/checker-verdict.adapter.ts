@@ -1,25 +1,21 @@
 import type { TargetSystemAdapter } from "./checker-verdict.adapter.contract.ts";
-import { checkerVerdict } from "../src/checker-verdict.ts";
+import { classifyCheckerResult } from "../src/checker-verdict.ts";
 
-// Import the production code from ../src/ and forward each call to it. No business logic here.
-// The production component is a stateless pure function with no dependencies, so there is no
-// system instance to build or discard and no ports to connect.
+// The production code is a stateless function with no dependencies: there is nothing to build, connect to
+// `ports` or discard, so the lifecycle methods have nothing to do.
 export const adapter: TargetSystemAdapter = {
   async setupIsolation(_ports) {},
   async teardownIsolation() {},
   async executeCommand(command) {
-    // The contract defines no commands.
-    const unknown: never = command;
-    throw new Error(`unknown command: ${JSON.stringify(unknown)}`);
+    // The contract defines no commands, so `command` has type `never`.
+    throw new Error(`unknown command: ${JSON.stringify(command)}`);
   },
   async executeQuery(query) {
     switch (query.name) {
       case "Verdict":
-        return checkerVerdict(query.input.kind, query.input.status);
-      default: {
-        const unknown: never = query.name;
-        throw new Error(`unknown query: ${String(unknown)}`);
-      }
+        return classifyCheckerResult(query.input.kind, query.input.status);
+      default:
+        throw new Error(`unknown query: ${JSON.stringify(query)}`);
     }
   },
 };

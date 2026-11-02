@@ -1,40 +1,41 @@
-import type { Command, Query, QueryOutput, TargetSystemAdapter } from "./gate-rules.adapter.contract.ts";
+import type { TargetSystemAdapter } from "./gate-rules.adapter.contract.ts";
 import {
-  changedFileVerdict,
-  partFileVerdict,
-  removedVerdict,
-  sandboxFileVerdict,
-  siteBroken,
-  testsVerdict,
-  wiringVerdict,
+  decideChangedFile,
+  decidePartFile,
+  decideRemoved,
+  decideSandboxFile,
+  decideSite,
+  decideTests,
+  decideWiring,
 } from "../src/gate-rules.ts";
 
-// Import the production code from ../src/ and forward each call to it. No business logic here.
-// The component has no state and no dependencies: there is nothing to build or discard.
+// The production code is a set of stateless functions: there is nothing to construct, connect or discard,
+// and the contract's `Ports` is empty. Query inputs already have the shape of the production facts.
 export const adapter: TargetSystemAdapter = {
   async setupIsolation(_ports) {},
   async teardownIsolation() {},
-  async executeCommand(command: Command) {
-    throw new Error(`unknown command: ${(command as { name: string }).name}`);
+  async executeCommand(command) {
+    // The contract defines no commands.
+    throw new Error(`unknown command: ${JSON.stringify(command)}`);
   },
-  async executeQuery(query: Query): Promise<QueryOutput[keyof QueryOutput]> {
+  async executeQuery(query) {
     switch (query.name) {
       case "ChangedFile":
-        return changedFileVerdict({ ...query.input });
+        return decideChangedFile(query.input);
       case "PartFile":
-        return partFileVerdict({ ...query.input });
+        return decidePartFile(query.input);
       case "Removed":
-        return removedVerdict({ ...query.input });
+        return decideRemoved(query.input);
       case "SandboxFile":
-        return sandboxFileVerdict({ ...query.input });
+        return decideSandboxFile(query.input);
       case "Site":
-        return siteBroken({ ...query.input });
+        return decideSite(query.input);
       case "Tests":
-        return testsVerdict({ ...query.input });
+        return decideTests(query.input);
       case "Wiring":
-        return wiringVerdict({ ...query.input });
+        return decideWiring(query.input);
       default:
-        throw new Error(`unknown query: ${(query as { name: string }).name}`);
+        throw new Error(`unknown query: ${JSON.stringify(query)}`);
     }
   },
 };

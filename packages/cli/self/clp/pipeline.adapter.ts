@@ -1,54 +1,61 @@
-import type { Ports, TargetSystemAdapter } from "./pipeline.adapter.contract.ts";
-import { Pipeline, type OutputDirectory, type PipelineDriver } from "../src/pipeline.ts";
+import type { Command, Ports, Query, QueryOutput, TargetSystemAdapter } from "./pipeline.adapter.contract.ts";
+import { Pipeline } from "../src/pipeline.ts";
+import type { OutputDirectory, PipelineDriver } from "../src/pipeline.ts";
 
-// Import the production code from ../src/ and forward each call to it. No business logic here.
+let system: Pipeline | undefined;
 
-let pipeline: Pipeline | undefined;
-
-function system(): Pipeline {
-  if (!pipeline) throw new Error("adapter: setupIsolation was not called");
-  return pipeline;
-}
-
-function outputDirectory(ports: Ports): OutputDirectory {
+function connectOutput(ports: Ports): OutputDirectory {
+  const output = ports.output;
   return {
-    hasProductionCode: () => ports.output.HasProductionCode(),
-    boundaryChanged: () => ports.output.BoundaryChanged(),
-    hasAdapter: () => ports.output.HasAdapter(),
+    boundaryChanged: () => output.BoundaryChanged(),
+    hasAdapter: () => output.HasAdapter(),
+    hasProductionCode: () => output.HasProductionCode(),
   };
 }
 
-function pipelineDriver(ports: Ports): PipelineDriver {
+function connectDriver(ports: Ports): PipelineDriver {
+  const driver = ports["pipeline-driver"];
   return {
-    startSession: (round, attempt, phase) => ports["pipeline-driver"].StartSession({ attempt, phase, round }),
-    gradeCurrentCode: (round) => ports["pipeline-driver"].GradeCurrentCode({ round }),
-    discardCode: () => ports["pipeline-driver"].DiscardCode({}),
+    discardCode: () => driver.DiscardCode({}),
+    gradeCurrentCode: (round) => driver.GradeCurrentCode({ round }),
+    startSession: ({ attempt, phase, round }) => driver.StartSession({ attempt, phase, round }),
   };
+}
+
+function running(): Pipeline {
+  if (system === undefined) {
+    throw new Error("adapter: no system; setupIsolation has not been called");
+  }
+  return system;
 }
 
 export const adapter: TargetSystemAdapter = {
-  async setupIsolation(ports) {
-    pipeline = new Pipeline(outputDirectory(ports), pipelineDriver(ports));
+  async setupIsolation(ports: Ports): Promise<void> {
+    system = new Pipeline(connectOutput(ports), connectDriver(ports));
   },
-  async teardownIsolation() {
-    pipeline = undefined;
+  async teardownIsolation(): Promise<void> {
+    system = undefined;
   },
-  async executeCommand(command) {
+  async executeCommand(command: Command): Promise<void> {
+    const pipeline = running();
     switch (command.name) {
       case "Start":
-        system().start({ attemptsPerPhase: command.input.attemptsPerPhase, rounds: command.input.rounds });
+        pipeline.start({
+          attemptsPerPhase: command.input.attemptsPerPhase,
+          rounds: command.input.rounds,
+        });
         return;
       case "DesignChecked":
-        system().designChecked(command.input.passed);
+        pipeline.designChecked(command.input.passed);
         return;
       case "WiringChecked":
-        system().wiringChecked(command.input.passed);
+        pipeline.wiringChecked(command.input.passed);
         return;
       case "ImplementationChecked":
-        system().implementationChecked(command.input.passed);
+        pipeline.implementationChecked(command.input.passed);
         return;
       case "CurrentCodeGraded":
-        system().currentCodeGraded(command.input.passed);
+        pipeline.currentCodeGraded(command.input.passed);
         return;
       default: {
         const unknown: never = command;
@@ -56,10 +63,11 @@ export const adapter: TargetSystemAdapter = {
       }
     }
   },
-  async executeQuery(query) {
+  async executeQuery(query: Query): Promise<QueryOutput[keyof QueryOutput]> {
+    const pipeline = running();
     switch (query.name) {
       case "Status":
-        return system().status();
+        return pipeline.status();
       default: {
         const unknown: never = query.name;
         throw new Error(`adapter: unknown query ${JSON.stringify(unknown)}`);

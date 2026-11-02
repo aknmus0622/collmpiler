@@ -1,141 +1,146 @@
 /**
- * Observation compare: decides whether the observation of the system after a
- * command equals the one the specification expects.
+ * Compares two observations of the system after a command: the one the
+ * specification expects and the one actually seen. The caller opens a comparison,
+ * feeds in the leaves of both observations as a sequence of calls, and then asks
+ * for the answer.
  *
- * Corresponds to the specification component `observation-compare`. It has no
- * dependencies and nothing durable. Its state is {@link ObservationCompareState};
- * each specification command is a pure step function on that state (and a
- * method of {@link ObservationCompare}, which keeps the state for the caller),
- * and the specification query `Decide` is a pure function of the state.
- *
- * Use, once per comparison: {@link ObservationCompare.begin}, then any number of
- * {@link ObservationCompare.expected} and {@link ObservationCompare.actual}, in
- * any interleaving, then {@link ObservationCompare.decide}. Everything given is
- * kept until the next `begin`.
+ * It corresponds to the specification's component `observation-compare`. It has no
+ * dependencies, and it keeps nothing across a restart: a new instance starts over.
  */
 
 /**
- * One leaf of an observation (specification sort `Leaf`): an opaque string,
- * compared only for equality.
+ * One leaf of an observation. Specification name: sort `Leaf`. An opaque string in
+ * the form the leaves' producer writes them, compared only for equality; this
+ * component does not take it apart.
  */
-export type Leaf = string;
+export type ObservationLeaf = string;
 
 /**
- * Everything the component remembers (the specification's `state`). Each field
- * has the name of the specification state field it holds.
+ * Everything the comparison remembers, one field per state field of the
+ * specification, under the same names.
  */
 export interface ObservationCompareState {
-  /** Leaves of the actual observation given since the last `begin`, in the order given (state `actual`). */
-  readonly actual: readonly Leaf[];
+  /** The leaves of the actual observation, in the order given (`actual`). */
+  actual: ObservationLeaf[];
   /**
-   * Whether the command being compared answers (declares an output) while the
-   * system answered nothing, as told by the last `begin` (state `answerAbsent`).
+   * What `begin` noted about the command's answer: `true` when the system's answer
+   * counts as absent, `false` otherwise (`answerAbsent`).
    */
-  readonly answerAbsent: boolean;
-  /** Leaves of the expected observation given since the last `begin`, in the order given (state `expected`). */
-  readonly expected: readonly Leaf[];
+  answerAbsent: boolean;
+  /** The leaves of the expected observation, in the order given (`expected`). */
+  expected: ObservationLeaf[];
 }
 
-/** The observation field that holds what the command answered. */
-const OUTPUT_FIELD = "output";
-
 /**
- * A leaf of an observation: the JSON-encoded field name, then the JSON-encoded
- * parts of its value, separated by `|`.
+ * What is known about the command before its leaves are given. The field names are
+ * the parameter names of the specification's command `Begin`.
  */
-function leafOf(field: string, ...parts: readonly unknown[]): Leaf {
-  return [field, ...parts].map((part) => JSON.stringify(part)).join("|");
+export interface CommandAnswerFacts {
+  /** Whether the system answered something (specification parameter `answered`). */
+  answered: boolean;
+  /**
+   * Whether the command answers, that is, declares an output (specification
+   * parameter `answers`).
+   */
+  answers: boolean;
 }
 
+/** The leaf that stands for a command answering null. */
+const NULL_OUTPUT_LEAF: ObservationLeaf = '"output"|null|null';
+
 /**
- * The leaf the actual observation also has when the command answers but the
- * system answered nothing: that counts as answering null.
+ * The actual observation as it counts in the comparison: a command that answers but
+ * answered nothing counts as answering null.
  */
-const ABSENT_OUTPUT_LEAF: Leaf = leafOf(OUTPUT_FIELD, null, null);
+function countedActual(state: ObservationCompareState): ObservationLeaf[] {
+  return state.answerAbsent ? [...state.actual, NULL_OUTPUT_LEAF] : state.actual;
+}
 
-/** The state the component starts from (the specification's `init`). */
-export function initialObservationCompareState(): ObservationCompareState {
-  return { actual: [], answerAbsent: false, expected: [] };
+/** Whether every leaf of `leaves` is also among `others`. */
+function allAmong(leaves: ObservationLeaf[], others: ObservationLeaf[]): boolean {
+  return leaves.every((leaf) => others.includes(leaf));
 }
 
 /**
- * Command `Begin`: two observations are compared next; no leaf has been given
- * for them yet.
+ * Whether the two observations in the given state are equal. Pure: it reads only
+ * its argument and changes nothing. It corresponds to the specification's
+ * calculation `decide`.
  *
- * @param state the state before the command.
- * @param answered whether the system answered something to the command (parameter `answered`).
- * @param answers whether the command answers, i.e. declares an output (parameter `answers`).
- * @returns the state after the command.
+ * @param state what the comparison remembers.
+ * @returns `true` when the observations are equal, `false` when they differ.
  */
-export function begin(state: ObservationCompareState, answered: boolean, answers: boolean): ObservationCompareState {
-  return { actual: [], answerAbsent: answers && !answered, expected: [] };
+export function observationsEqual(state: ObservationCompareState): boolean {
+  const actual = countedActual(state);
+  return allAmong(state.expected, actual) && allAmong(actual, state.expected);
 }
 
 /**
- * Command `Expected`: one leaf of the expected observation.
+ * One comparison, reusable for the next by calling `begin` again. Create one with
+ * `new ObservationCompare()`; it starts in the specification's initial state.
  *
- * @param state the state before the command.
- * @param leaf the leaf (parameter `leaf`).
- * @returns the state after the command.
- */
-export function expected(state: ObservationCompareState, leaf: Leaf): ObservationCompareState {
-  return { ...state, expected: [...state.expected, leaf] };
-}
-
-/**
- * Command `Actual`: one leaf of the actual observation.
- *
- * @param state the state before the command.
- * @param leaf the leaf (parameter `leaf`).
- * @returns the state after the command.
- */
-export function actual(state: ObservationCompareState, leaf: Leaf): ObservationCompareState {
-  return { ...state, actual: [...state.actual, leaf] };
-}
-
-/**
- * Query `Decide` (calculation `decide`): whether the actual observation equals
- * the expected one, for the leaves given since the last `begin`. Pure.
- */
-export function decide(state: ObservationCompareState): boolean {
-  const actualLeaves = state.answerAbsent ? [...state.actual, ABSENT_OUTPUT_LEAF] : state.actual;
-  return (
-    state.expected.every((leaf) => actualLeaves.includes(leaf)) &&
-    actualLeaves.every((leaf) => state.expected.includes(leaf))
-  );
-}
-
-/**
- * Keeps the component's state between commands. Each method is the
- * specification command or query of the same name (see the pure function of
- * the same name for its arguments and answer); commands replace the kept
- * state, the query only reads it. A new instance is in the specification's
- * initial state.
+ * `begin`, `expected` and `actual` each perform one command of the specification
+ * and return nothing: what they lead to is seen in `state()` and `decide()`. The
+ * usual sequence is: `begin`, then `expected` once per expected leaf and `actual`
+ * once per actual leaf, in any interleaving, and last `decide`.
  */
 export class ObservationCompare {
-  private state: ObservationCompareState;
+  #state: ObservationCompareState = { actual: [], answerAbsent: false, expected: [] };
 
-  constructor() {
-    this.state = initialObservationCompareState();
+  /**
+   * Reads what the comparison remembers. It only reads, and may be called at any
+   * point.
+   *
+   * @returns a new plain object, so it can be compared by value.
+   */
+  state(): ObservationCompareState {
+    return {
+      actual: [...this.#state.actual],
+      answerAbsent: this.#state.answerAbsent,
+      expected: [...this.#state.expected],
+    };
   }
 
-  /** Command `Begin`; see {@link begin}. */
-  begin(answered: boolean, answers: boolean): void {
-    this.state = begin(this.state, answered, answers);
+  /**
+   * Performs the specification's command `Begin`: two observations are compared
+   * next, and no leaf of either has been given yet.
+   *
+   * @param facts what is known about the command's answer.
+   */
+  begin(facts: CommandAnswerFacts): void {
+    this.#state = {
+      actual: [],
+      answerAbsent: facts.answers && !facts.answered,
+      expected: [],
+    };
   }
 
-  /** Command `Expected`; see {@link expected}. */
-  expected(leaf: Leaf): void {
-    this.state = expected(this.state, leaf);
+  /**
+   * Performs the specification's command `Expected`: gives one leaf of the expected
+   * observation.
+   *
+   * @param leaf the leaf (specification parameter `leaf`).
+   */
+  expected(leaf: ObservationLeaf): void {
+    this.#state.expected = [...this.#state.expected, leaf];
   }
 
-  /** Command `Actual`; see {@link actual}. */
-  actual(leaf: Leaf): void {
-    this.state = actual(this.state, leaf);
+  /**
+   * Performs the specification's command `Actual`: gives one leaf of the actual
+   * observation.
+   *
+   * @param leaf the leaf (specification parameter `leaf`).
+   */
+  actual(leaf: ObservationLeaf): void {
+    this.#state.actual = [...this.#state.actual, leaf];
   }
 
-  /** Query `Decide`; see {@link decide}. */
+  /**
+   * Performs the specification's query `Decide`. It only reads, and may be called
+   * at any point, including more than once.
+   *
+   * @returns whether the two observations given so far are equal.
+   */
   decide(): boolean {
-    return decide(this.state);
+    return observationsEqual(this.#state);
   }
 }

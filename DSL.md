@@ -1440,7 +1440,7 @@ IR（文の無い、言語に寄らない核）
 2. **その場で書く**: 本体の中の `is.unpaid("未払いがある", Fines.Owed(member) > 0)`。
 3. **よそで定義した部品を置く（呼ぶ）**: `if (Unpaid(member)) …`。
 
-切り出しは、その場の部品を export した定数にして、呼ぶ形に置き換えるだけ（木は変わらない）。本体の中で文だけの断片を書くときは、
+切り出しは、その場の部品を export した定数にして、呼ぶ形に置き換えるだけ（木は変わらない。場合の名前だけは、`is.full` なら `Add.full`、呼ぶ形なら `Add.case1` と違うが、名前は観測されない。`notation.test.ts` が確かめる）。本体の中で文だけの断片を書くときは、
 名前を付ける（`is.onLoan("…")`、`does.rememberDue("…")`）。解釈は、その名前で中身を埋める。式も一緒に書くときは、名前を省いて
 よい（解釈が付ける）。
 
@@ -1748,13 +1748,14 @@ IR の外に置く、1つの表。名前・型・意味と、TypeScript の書�
 
 ```ts
 interface Checker {
-  name: string;                                         // 1.0 は "alloy6" だけ
-  profile: Profile;                                     // できることの一覧
-  emit(ir: Ir, analysis: Analysis): GeneratedFiles;     // IR → その言語のファイル（決定的）
-  run(files: GeneratedFiles): Promise<RawResult>;       // 外部のコマンド（java -jar …）
-  read(raw: RawResult): CheckResult;                    // 「確かめた / 反例（共通のトレース） / 範囲の外」
+  name: string;                                                   // 1.0 は "alloy6" だけ
+  emit(ir, analysis): { files; commands; skipped };               // IR → その言語のファイル（決定的）
+  run(files): { output; receipt? };                               // 外部のコマンド（java -jar …）
+  read(raw, commands, ir): Verdict[];                             // 「確かめた / 反例（共通のトレース） / 範囲の外」
 }
 ```
+
+できることの一覧は別の値にせず、書けないものは `emit` が `skipped` で伝える（§17.11）。検査器が2つになったら、一覧を持つかを決める。
 
 実装の検証の `Target`（`generate` / `runTests`）と同じ形の入れ替え口。分析の設定（原子の数、整数の幅、ステップ数）は IR の外に
 置き、検査ごとに渡す。反例とトレースは、どの検査器のものも次の形に戻す。シミュレーターで再現でき、実装の検証の固定の手順になる
@@ -2080,6 +2081,10 @@ import した値なので、無い部品は型の誤り。解釈は、埋め込�
 `FrameworkError` のまま `clp run` まで届き、`failed` で「clp 自身の不具合」と案内して終わる（`code: "framework"`）。以前は文字列になって
 `spec` の終わり方に混ざり、「Layer 1 を直して」と案内していた。この終わり方は `EndReason` に足さず、`run()` が流れの外で受ける:
 Stage 1 が疑わしいときの進め方を、Stage 1 (run-flow) に決めさせないため。
+
+**仕様が書いた識別子（2026-11-02）。** 全部品の作り直しで、`observation-compare` の `"output"|null|null` の変異が6回生き残って止まった。`Id` の
+入力は作った値だけなので、仕様が `'…' as Leaf` と書いた値に届かず、「答えが無いコマンドは null を答えたとみなす」場合を検証できていなかった（前のコードは文字列を組み立てていたので、変異の対象にならず、見逃していた）。
+こう書いた値を IR の `known` に型ごとに残し、その型の入力に混ぜる（4 回に 1 回）。書いていない仕様の IR と乱数は変わらない。
 
 **届きにくい分岐（2026-11-01）。** `todo-db-ts` を実エージェントで作り直すと、`already-done` の変異が生き残り続けて止まった。同じ項目への
 2度目の `Complete` に、検証が届いていなかった（文字列を含むので Alloy の手順も無い）。入力の候補に、使われなかった `fresh` な原子を入れないようにし、

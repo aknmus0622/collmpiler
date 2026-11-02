@@ -60,7 +60,7 @@ export function shapeProblems(ir: Ir8): string[] {
     bad(where, `型ではないもの ${JSON.stringify(t)} があります`);
   };
   const params = (p: Record<string, Type>, where: string) => Object.entries(p).forEach(([k, t]) => (NAME.test(k) ? type(t, `${where}.${k}`) : bad(where, `引数の名前 ${JSON.stringify(k)}`)));
-  const known = new Set(["external", "contains", "relies", "sibling", "durable", "routes", "state", "init", "commands", "events", "queries", "conditions", "calcs", "decisions", "properties", "analysis"]);
+  const known = new Set(["external", "contains", "relies", "sibling", "durable", "routes", "state", "init", "commands", "events", "queries", "conditions", "calcs", "decisions", "properties", "known", "analysis"]);
   for (const [id, c] of Object.entries(ir.components) as [string, ComponentIr][]) {
     for (const key of Object.keys(c)) if (!known.has(key)) bad(id, `知らない欄 "${key}" があります`);
     // how the checker writes numbers: `fun` or `pred`, and the numbers of each type's places

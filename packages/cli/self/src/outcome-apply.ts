@@ -1,55 +1,62 @@
 /**
- * Outcome apply: decides what happens with each call an event makes.
+ * Classifies one entry of an event's call list, so that whoever runs the event
+ * knows how to treat that entry.
  *
- * Corresponds to the specification component `outcome-apply`. It has no state
- * and no dependencies; its only entry is the query `Call`, implemented here
- * by the pure function {@link outcomeApply}.
+ * Stateless and free of dependencies: nothing is remembered between calls,
+ * nothing needs to be constructed, and calling it has no effect on anything.
+ * It corresponds to the specification's component `outcome-apply`.
  */
 
 /**
- * Specification query `outcome-apply.Call` (calculation `call`).
+ * Where the call's condition stands. Specification name: parameter `guard`; the
+ * values are the specification's own.
  *
- * Pure: answers the same result for the same arguments, touches nothing.
- * Asked once for each call an event makes, in the order the event lists them.
- *
- * @param call the call to decide on (the specification's parameters, as one record).
- * @returns what happens with the call (the specification's result).
- */
-export function outcomeApply(call: EventCall): CallOutcome {
-  if (call.guard === "not") return "skip";
-  if (call.external) return "effect";
-  return call.touched ? "twice" : "call";
-}
-
-/**
- * The input of the `Call` query: one call made by an event.
- * Each field is the specification parameter of the same name.
- */
-export interface EventCall {
-  /** Whether the called component is the outside world (specification parameter `external`). */
-  external: boolean;
-  /** The call's own condition (specification parameter `guard`). */
-  guard: CallGuard;
-  /** Whether the called component was already changed in this step (specification parameter `touched`). */
-  touched: boolean;
-}
-
-/**
- * The call's own condition (specification parameter `guard`).
- *
- * - `"none"`: the call has no condition.
- * - `"holds"`: the call has a condition, and it holds.
- * - `"not"`: the call has a condition, and it does not hold.
+ * - `"none"`: the entry carries no `when`.
+ * - `"holds"`: the entry carries a `when`, and it evaluated to true.
+ * - `"not"`: the entry carries a `when`, and it evaluated to false.
  */
 export type CallGuard = "none" | "holds" | "not";
 
 /**
- * What happens with the call (the specification's result of `Call`).
+ * How the runner treats the entry. Specification name: the result of the query
+ * `Call`; the values are the specification's own.
  *
- * - `"effect"`: it is an effect on the outside world.
- * - `"call"`: the component inside the system is called in this step.
- * - `"skip"`: the call is not made.
- * - `"twice"`: the component would be called twice in one step, which a
- *   specification must not do.
+ * - `"effect"`: the runner records it as an action against an external component.
+ * - `"call"`: the runner performs it on the contained component, within the step.
+ * - `"skip"`: the runner passes over it.
+ * - `"twice"`: the runner reports a repeated invocation, which is a fault in the
+ *   model being run rather than in this code.
  */
 export type CallOutcome = "effect" | "call" | "skip" | "twice";
+
+/**
+ * The facts about one entry of the call list. The field names are the
+ * specification's parameter names.
+ */
+export interface CallFacts {
+  /** True when the target is an `external` component, false when it is a contained one (specification parameter `external`). */
+  external: boolean;
+  /** The state of the entry's `when` (specification parameter `guard`). */
+  guard: CallGuard;
+  /** True when the current step has previously modified the target's state (specification parameter `touched`). */
+  touched: boolean;
+}
+
+/**
+ * Performs the specification's query `Call` (`outcome-apply.Call`).
+ *
+ * Accepts any combination of the three facts and always answers. Reads no state,
+ * so the same facts always give the same answer. Ask once per entry of the list.
+ *
+ * @param facts the entry's three facts, one field per specification parameter.
+ * @returns how the runner treats the entry.
+ */
+export function decideCall(facts: CallFacts): CallOutcome {
+  if (facts.guard === "not") {
+    return "skip";
+  }
+  if (facts.external) {
+    return "effect";
+  }
+  return facts.touched ? "twice" : "call";
+}

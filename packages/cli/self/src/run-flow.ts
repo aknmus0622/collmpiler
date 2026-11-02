@@ -1,51 +1,36 @@
 /**
- * Run flow: decides how `clp run` proceeds, from the specs to verified code. It
- * says what to do next, where an answer leads, and how the run ends; the work
- * itself is done by the driver.
+ * Decides how `clp run` proceeds, from the specs to verified code.
  *
- * Corresponds to the specification component `run-flow`. Nothing it keeps is
- * durable, it serves no HTTP routes, and the specification has no queries. Its
- * state is {@link RunFlowState}; it relies on one dependency, the driver
- * ({@link RunDriver}, specification component `run-driver`), which it tells what
- * to do and which never answers directly.
+ * Nothing here does the work itself. The flow tells its driver what to do next;
+ * the driver does it and reports the result by calling the matching command of
+ * the flow. The whole conversation is therefore: call a command of `RunFlow`, see
+ * which `RunDriver` methods it called and in what order, read `state()`, and call
+ * the next command.
  *
- * Each specification command is a pure step function (`*Step`) that takes the
- * state before the command and answers the state after it together with the
- * calls to make on the driver, in order ({@link RunFlowStep}). {@link RunFlow}
- * keeps the state, runs those functions and makes the calls on its driver.
- *
- * Use: `start` once; then, each time the driver has finished what it was asked
- * for, send the command that reports its result (see {@link RunFlowStatus} for
- * which commands each status waits for) until the status is `"DONE"`. Commands
- * are only sent in the status that waits for them; other inputs are never sent
- * and need no handling.
+ * It corresponds to the specification's component `run-flow`; the driver
+ * corresponds to its external component `run-driver`. It keeps nothing across a
+ * restart: a new instance starts over.
  */
 
 /**
- * Where the run is (specification state field `status`). The names are the
- * specification's.
+ * Where the flow stands. Specification name: state field `status`; the values are
+ * the specification's own.
  *
- * - `"IDLE"`: not started yet; `start` comes next.
- * - `"CHECKING"`: Layer 1 is being checked; `layer1Checked` comes next.
- * - `"CANDIDATES"`: the next split candidate was asked for; `candidate` or
- *   `noMoreCandidates` comes next.
- * - `"PROPOSING"`: an agent is proposing a split of a candidate; `proposed` comes
- *   next.
- * - `"SPLIT_ASKED"`: the person is being asked about a proposed split;
- *   `splitAnswered` comes next.
- * - `"INTERPRETING"`: a file is being interpreted; `interpreted` comes next.
- * - `"QUESTIONS"`: the next open question was asked for; `question` or
- *   `noMoreQuestions` comes next.
- * - `"QUESTION_ASKED"`: the person is being asked a question; `questionAnswered`
- *   comes next.
- * - `"PLACING"`: supplements are being placed; `supplementsPlaced` comes next.
- * - `"CONFIRMING"`: the person is being asked to confirm the supplements;
- *   `supplementsConfirmed` comes next.
- * - `"ACCEPTING"`: the interpretations are being accepted; `accepted` comes next.
- * - `"APPLYING"`: the code is being brought into agreement; `applied` comes next.
- * - `"DONE"`: the run has ended; no command comes any more.
+ * - `"IDLE"`: nothing has started yet.
+ * - `"CHECKING"`: Layer 1 is being checked.
+ * - `"CANDIDATES"`: the flow is waiting to hear about the next split candidate.
+ * - `"PROPOSING"`: an agent is being asked how to split a candidate.
+ * - `"SPLIT_ASKED"`: the person is being asked about a proposed split.
+ * - `"INTERPRETING"`: a file is being interpreted.
+ * - `"QUESTIONS"`: the flow is waiting to hear about the next open question.
+ * - `"QUESTION_ASKED"`: the person is being asked an open question.
+ * - `"PLACING"`: supplements are being placed.
+ * - `"CONFIRMING"`: the person is being asked to confirm the supplements.
+ * - `"ACCEPTING"`: the interpretations are being accepted.
+ * - `"APPLYING"`: the code is being brought into agreement.
+ * - `"DONE"`: the run is over.
  */
-export type RunFlowStatus =
+export type RunStatus =
   | "IDLE"
   | "CHECKING"
   | "CANDIDATES"
@@ -61,52 +46,23 @@ export type RunFlowStatus =
   | "DONE";
 
 /**
- * Everything the run flow remembers (the specification's `state`). Each field has
- * the name of the specification state field it holds.
+ * How the run ended. Specification name: parameter `reason` of the driver command
+ * `Finish`; the values are the specification's own.
+ *
+ * - `"passed"`: the code passes.
+ * - `"layer1"`: Layer 1 does not read.
+ * - `"split-agent"`: the agent failed while proposing a split.
+ * - `"interpret-failed"`: interpreting failed.
+ * - `"interpret-agent"`: the agent failed while interpreting.
+ * - `"person"`: the person stopped the run.
+ * - `"unplaced"`: a supplement has no place.
+ * - `"not-written"`: the person refused to have the supplements written.
+ * - `"not-accepted"`: the interpretations could not be accepted.
+ * - `"not-verified"`: the code does not pass.
+ * - `"apply-agent"`: the agent failed while applying.
+ * - `"spec"`: the specification is wrong.
+ * - `"rounds"`: the run has no rounds left.
  */
-export interface RunFlowState {
-  /** The number of the current round (state `round`). */
-  readonly round: number;
-  /** The most rounds the run may take, or `null` while none was given (state `roundLimit`). */
-  readonly roundLimit: number | null;
-  /** Whether a split was accepted in this round (state `splitAccepted`). */
-  readonly splitAccepted: boolean;
-  /** Where the run is (state `status`). */
-  readonly status: RunFlowStatus;
-  /** Whether a question was supplemented in this round (state `supplemented`). */
-  readonly supplemented: boolean;
-  /** Whether supplements are written without asking the person (state `writeUnasked`). */
-  readonly writeUnasked: boolean;
-}
-
-/** The state the run flow starts from (the specification's `init`). */
-export function initialRunFlowState(): RunFlowState {
-  return {
-    round: 0,
-    roundLimit: null,
-    splitAccepted: false,
-    status: "IDLE",
-    supplemented: false,
-    writeUnasked: false,
-  };
-}
-
-/** What came of asking an agent to split a candidate (parameter `outcome` of specification `Proposed`). */
-export type ProposalOutcome = "none" | "proposal" | "agent-failed";
-
-/** The person's answer about a proposed split (parameter `answer` of specification `SplitAnswered`). */
-export type SplitAnswer = "accept" | "decline" | "stop";
-
-/** What came of interpreting (parameter `outcome` of specification `Interpreted`). */
-export type InterpretOutcome = "up-to-date" | "interpreted" | "failed" | "agent-failed";
-
-/** The person's answer to a question (parameter `answer` of specification `QuestionAnswered`). */
-export type QuestionAnswer = "accept" | "supplement" | "stop";
-
-/** What came of bringing the code into agreement (parameter `outcome` of specification `Applied`). */
-export type ApplyOutcome = "pass" | "fail" | "agent-failed" | "spec-error";
-
-/** Why the run ended (parameter `reason` of specification `run-driver.Finish`). The names are the specification's. */
 export type RunFinishReason =
   | "passed"
   | "layer1"
@@ -123,464 +79,432 @@ export type RunFinishReason =
   | "rounds";
 
 /**
- * The driver (specification component `run-driver`, external): does what the
- * flow asks for. Each method is one of its specification commands; the flow calls
- * them, in order, during one of its own commands. None of them answers anything:
- * the result comes back later, not from inside the call, as a command on
- * {@link RunFlow}.
+ * What came of applying. Specification name: parameter `outcome` of the command
+ * `Applied`; the values are the specification's own.
+ *
+ * - `"pass"`: the code passes.
+ * - `"fail"`: the code does not pass.
+ * - `"agent-failed"`: the agent failed.
+ * - `"spec-error"`: the specification is wrong.
  */
-export interface RunDriver {
-  /** Checks that Layer 1 reads (specification `CheckLayer1`). The result comes back as `layer1Checked`. */
-  checkLayer1(): void;
-  /** Asks for the next split candidate (specification `NextCandidate`). The result comes back as `candidate` or `noMoreCandidates`. */
-  nextCandidate(): void;
-  /** Asks an agent how to split the candidate (specification `Propose`). The result comes back as `proposed`. */
-  propose(): void;
-  /** Asks the person about the proposed split (specification `AskSplit`). The result comes back as `splitAnswered`. */
-  askSplit(): void;
-  /** Writes the accepted split (specification `WriteSplit`). */
-  writeSplit(): void;
-  /** Records that the person refused the split (specification `Decline`). */
-  decline(): void;
-  /** Tells that interpreting begins (specification `StartInterpreting`). */
-  startInterpreting(): void;
-  /** Interprets the next file (specification `Interpret`). The result comes back as `interpreted`. */
-  interpret(): void;
-  /** Reads the open questions (specification `ReadQuestions`). */
-  readQuestions(): void;
-  /** Asks for the next question (specification `NextQuestion`). The result comes back as `question` or `noMoreQuestions`. */
-  nextQuestion(): void;
-  /** Asks the person the question (specification `AskQuestion`). The result comes back as `questionAnswered`. */
-  askQuestion(): void;
-  /** Marks the reading in question as reviewed (specification `MarkReviewed`). */
-  markReviewed(): void;
-  /** Places the supplements (specification `PlaceSupplements`). The result comes back as `supplementsPlaced`. */
-  placeSupplements(): void;
-  /** Asks the person to confirm the supplements (specification `ConfirmSupplements`). The result comes back as `supplementsConfirmed`. */
-  confirmSupplements(): void;
-  /** Writes the supplements (specification `WriteSupplements`). */
-  writeSupplements(): void;
-  /** Tells that the questions of this round are done (specification `QuestionsDone`). */
-  questionsDone(): void;
-  /** Accepts the interpretations (specification `Accept`). The result comes back as `accepted`. */
-  accept(): void;
-  /** Brings the code into agreement (specification `Apply`). The result comes back as `applied`. */
-  apply(): void;
-  /**
-   * Ends the run (specification `Finish`).
-   *
-   * @param reason why the run ended (specification parameter `reason`).
-   */
-  finish(reason: RunFinishReason): void;
+export type ApplyOutcome = "pass" | "fail" | "agent-failed" | "spec-error";
+
+/**
+ * What came of asking to interpret. Specification name: parameter `outcome` of the
+ * command `Interpreted`; the values are the specification's own.
+ *
+ * - `"up-to-date"`: there was nothing left to interpret.
+ * - `"interpreted"`: a file was interpreted.
+ * - `"failed"`: interpreting failed.
+ * - `"agent-failed"`: the agent failed.
+ */
+export type InterpretOutcome = "up-to-date" | "interpreted" | "failed" | "agent-failed";
+
+/**
+ * What came of asking how to split a candidate. Specification name: parameter
+ * `outcome` of the command `Proposed`; the values are the specification's own.
+ *
+ * - `"none"`: the agent has no proposal.
+ * - `"proposal"`: the agent has a proposal.
+ * - `"agent-failed"`: the agent failed.
+ */
+export type ProposalOutcome = "none" | "proposal" | "agent-failed";
+
+/**
+ * The person's answer to an open question. Specification name: parameter `answer`
+ * of the command `QuestionAnswered`; the values are the specification's own.
+ *
+ * - `"accept"`: the reading is right.
+ * - `"supplement"`: the person supplements the specs.
+ * - `"stop"`: the person stops the run.
+ */
+export type QuestionAnswer = "accept" | "supplement" | "stop";
+
+/**
+ * The person's answer to a proposed split. Specification name: parameter `answer`
+ * of the command `SplitAnswered`; the values are the specification's own.
+ *
+ * - `"accept"`: the person takes the split.
+ * - `"decline"`: the person refuses the split.
+ * - `"stop"`: the person stops the run.
+ */
+export type SplitAnswer = "accept" | "decline" | "stop";
+
+/**
+ * Everything the flow remembers, one field per state field of the specification,
+ * under the same names. A field that is `null` has not been set yet.
+ */
+export interface RunFlowState {
+  /** The number of the running round (`round`). */
+  round: number;
+  /** The most rounds the run may take (`roundLimit`). */
+  roundLimit: number | null;
+  /** Whether a split has been accepted in this round (`splitAccepted`). */
+  splitAccepted: boolean;
+  /** Where the flow stands (`status`). */
+  status: RunStatus;
+  /** Whether a question has been supplemented in this round (`supplemented`). */
+  supplemented: boolean;
+  /** Whether supplements are written without asking (`writeUnasked`). */
+  writeUnasked: boolean;
 }
 
 /**
- * One call the flow makes on its driver: `call` names the {@link RunDriver}
- * method, the other fields are its arguments.
+ * What the flow needs done in the outside world; it corresponds to the
+ * specification's external component `run-driver`, with one method per command
+ * under the same name in lower camel case.
+ *
+ * Within one flow command the methods are called in the specification's order, so
+ * order matters and a stand-in should record it. None of them answers: each returns
+ * nothing, and the driver reports back by calling a command of `RunFlow` after the
+ * flow's command has returned, never from inside one of these methods. A method
+ * below that names no answer expects none.
  */
-export type RunDriverCall =
-  | { readonly call: "checkLayer1" }
-  | { readonly call: "nextCandidate" }
-  | { readonly call: "propose" }
-  | { readonly call: "askSplit" }
-  | { readonly call: "writeSplit" }
-  | { readonly call: "decline" }
-  | { readonly call: "startInterpreting" }
-  | { readonly call: "interpret" }
-  | { readonly call: "readQuestions" }
-  | { readonly call: "nextQuestion" }
-  | { readonly call: "askQuestion" }
-  | { readonly call: "markReviewed" }
-  | { readonly call: "placeSupplements" }
-  | { readonly call: "confirmSupplements" }
-  | { readonly call: "writeSupplements" }
-  | { readonly call: "questionsDone" }
-  | { readonly call: "accept" }
-  | { readonly call: "apply" }
-  | { readonly call: "finish"; readonly reason: RunFinishReason };
-
-/** Makes one call on the driver. */
-export function callRunDriver(driver: RunDriver, call: RunDriverCall): void {
-  if (call.call === "finish") {
-    driver.finish(call.reason);
-  } else {
-    driver[call.call]();
-  }
+export interface RunDriver {
+  /** Accepts the interpretations (specification command `Accept`); answered with `RunFlow.accepted`. */
+  accept(): void;
+  /** Brings the code into agreement (specification command `Apply`); answered with `RunFlow.applied`. */
+  apply(): void;
+  /** Asks the person the current question (specification command `AskQuestion`); answered with `RunFlow.questionAnswered`. */
+  askQuestion(): void;
+  /** Asks the person about the proposed split (specification command `AskSplit`); answered with `RunFlow.splitAnswered`. */
+  askSplit(): void;
+  /** Checks Layer 1 (specification command `CheckLayer1`); answered with `RunFlow.layer1Checked`. */
+  checkLayer1(): void;
+  /** Asks the person to confirm the supplements (specification command `ConfirmSupplements`); answered with `RunFlow.supplementsConfirmed`. */
+  confirmSupplements(): void;
+  /** Records the refusal of the proposed split (specification command `Decline`). */
+  decline(): void;
+  /**
+   * Ends the run (specification command `Finish`).
+   *
+   * @param reason how the run ended (specification parameter `reason`).
+   */
+  finish(reason: RunFinishReason): void;
+  /** Interprets the next file (specification command `Interpret`); answered with `RunFlow.interpreted`. */
+  interpret(): void;
+  /** Marks the current reading as reviewed (specification command `MarkReviewed`). */
+  markReviewed(): void;
+  /** Looks for the next split candidate (specification command `NextCandidate`); answered with `RunFlow.candidate` or `RunFlow.noMoreCandidates`. */
+  nextCandidate(): void;
+  /** Looks for the next open question (specification command `NextQuestion`); answered with `RunFlow.question` or `RunFlow.noMoreQuestions`. */
+  nextQuestion(): void;
+  /** Places the supplements (specification command `PlaceSupplements`); answered with `RunFlow.supplementsPlaced`. */
+  placeSupplements(): void;
+  /** Asks an agent how to split the current candidate (specification command `Propose`); answered with `RunFlow.proposed`. */
+  propose(): void;
+  /** Tells that the questions are done (specification command `QuestionsDone`). */
+  questionsDone(): void;
+  /** Reads the open questions (specification command `ReadQuestions`). */
+  readQuestions(): void;
+  /** Tells that interpreting starts (specification command `StartInterpreting`). */
+  startInterpreting(): void;
+  /** Writes the accepted split (specification command `WriteSplit`). */
+  writeSplit(): void;
+  /** Writes the supplements (specification command `WriteSupplements`). */
+  writeSupplements(): void;
 }
 
-/** The result of a step function: the state after the command and the calls to make on the driver, in order. */
-export interface RunFlowStep {
-  readonly state: RunFlowState;
-  readonly calls: readonly RunDriverCall[];
-}
-
-// ---------------------------------------------------------------------------
-// Step functions: one per specification command, pure
-
-/** The reason the run ends with, for each outcome of bringing the code into agreement. */
-const APPLY_FINISH_REASONS: Readonly<Record<ApplyOutcome, RunFinishReason>> = {
+/** How a run ends for each outcome of applying. */
+const FINISH_OF_APPLY: Record<ApplyOutcome, RunFinishReason> = {
   pass: "passed",
   fail: "not-verified",
   "agent-failed": "apply-agent",
   "spec-error": "spec",
 };
 
-/** The run ends now, for the given reason. */
-function finished(state: RunFlowState, reason: RunFinishReason): RunFlowStep {
-  return { state: { ...state, status: "DONE" }, calls: [{ call: "finish", reason }] };
-}
-
-/** The next round starts, unless it would go past the limit: then the run ends. */
-function nextRound(state: RunFlowState): RunFlowStep {
-  if (state.round >= state.roundLimit!) return finished(state, "rounds");
-  return {
-    state: {
-      ...state,
-      round: state.round + 1,
+/**
+ * What ending a round that changed Layer 1 leads to: the next round, with its
+ * per-round flags cleared, or the end of the run when no round is left.
+ */
+function afterRound(flow: RunFlowState): RunFlowState {
+  if (flow.round < flow.roundLimit!) {
+    return {
+      ...flow,
+      round: flow.round + 1,
       splitAccepted: false,
       status: "CHECKING",
       supplemented: false,
-    },
-    calls: [{ call: "checkLayer1" }],
-  };
-}
-
-/** The supplements are written, the questions are done, and the next round starts. */
-function writeSupplements(state: RunFlowState): RunFlowStep {
-  const next = nextRound(state);
-  return {
-    state: next.state,
-    calls: [{ call: "writeSupplements" }, { call: "questionsDone" }, ...next.calls],
-  };
+    };
+  }
+  return { ...flow, status: "DONE" };
 }
 
 /**
- * Specification command `Start`: a run starts.
+ * One run of `clp run`. Create one with `new RunFlow(driver)`; it starts in the
+ * specification's initial state.
  *
- * @param rounds the most rounds the run may take (specification parameter `rounds`).
- * @param yes    whether supplements are written without asking (specification parameter `yes`).
+ * Each method other than `state` performs one command of the specification, under
+ * the same name in lower camel case. A command's `requires` limits when it may be
+ * called and with what; other calls are never made. Each returns nothing: what the
+ * command leads to is seen in the calls on the driver and in `state()`.
  */
-export function startStep(state: RunFlowState, rounds: number, yes: boolean): RunFlowStep {
-  return {
-    state: {
-      round: state.round + 1,
+export class RunFlow {
+  private readonly driver: RunDriver;
+  private flow: RunFlowState = {
+    round: 0,
+    roundLimit: null,
+    splitAccepted: false,
+    status: "IDLE",
+    supplemented: false,
+    writeUnasked: false,
+  };
+
+  /**
+   * @param driver told what to do next, for as long as the flow lives.
+   */
+  constructor(driver: RunDriver) {
+    this.driver = driver;
+  }
+
+  /**
+   * Reads what the flow remembers. It only reads, and may be called at any point.
+   *
+   * @returns a new plain object, so it can be compared by value.
+   */
+  state(): RunFlowState {
+    return { ...this.flow };
+  }
+
+  /**
+   * Performs the specification's command `Start`: the run begins. This is the first
+   * call of a run.
+   *
+   * @param rounds the most rounds the run may take (specification parameter `rounds`).
+   * @param yes whether supplements are written without asking (specification parameter `yes`).
+   */
+  start(rounds: number, yes: boolean): void {
+    this.flow = {
+      round: this.flow.round + 1,
       roundLimit: rounds,
       splitAccepted: false,
       status: "CHECKING",
       supplemented: false,
       writeUnasked: yes,
-    },
-    calls: [{ call: "checkLayer1" }],
-  };
-}
-
-/**
- * Specification command `Layer1Checked`: the check of Layer 1 finished.
- *
- * @param ok whether Layer 1 reads (specification parameter `ok`).
- */
-export function layer1CheckedStep(state: RunFlowState, ok: boolean): RunFlowStep {
-  if (!ok) return finished(state, "layer1");
-  return { state: { ...state, status: "CANDIDATES" }, calls: [{ call: "nextCandidate" }] };
-}
-
-/** Specification command `Candidate`: there is a next split candidate. */
-export function candidateStep(state: RunFlowState): RunFlowStep {
-  return { state: { ...state, status: "PROPOSING" }, calls: [{ call: "propose" }] };
-}
-
-/** Specification command `NoMoreCandidates`: the split candidates have run out. */
-export function noMoreCandidatesStep(state: RunFlowState): RunFlowStep {
-  if (state.splitAccepted) return nextRound(state);
-  return {
-    state: { ...state, status: "INTERPRETING" },
-    calls: [{ call: "startInterpreting" }, { call: "interpret" }],
-  };
-}
-
-/**
- * Specification command `Proposed`: the agent asked to split a candidate finished.
- *
- * @param outcome what came of it (specification parameter `outcome`).
- */
-export function proposedStep(state: RunFlowState, outcome: ProposalOutcome): RunFlowStep {
-  if (outcome === "none") {
-    return { state: { ...state, status: "CANDIDATES" }, calls: [{ call: "nextCandidate" }] };
-  }
-  if (outcome === "proposal") {
-    return { state: { ...state, status: "SPLIT_ASKED" }, calls: [{ call: "askSplit" }] };
-  }
-  return finished(state, "split-agent");
-}
-
-/**
- * Specification command `SplitAnswered`: the person answered about a proposed split.
- *
- * @param answer the person's answer (specification parameter `answer`).
- */
-export function splitAnsweredStep(state: RunFlowState, answer: SplitAnswer): RunFlowStep {
-  if (answer === "stop") return finished(state, "person");
-  if (answer === "accept") {
-    return {
-      state: { ...state, splitAccepted: true, status: "CANDIDATES" },
-      calls: [{ call: "writeSplit" }, { call: "nextCandidate" }],
     };
-  }
-  return {
-    state: { ...state, status: "CANDIDATES" },
-    calls: [{ call: "decline" }, { call: "nextCandidate" }],
-  };
-}
-
-/**
- * Specification command `Interpreted`: interpreting finished one go.
- *
- * @param outcome what came of it (specification parameter `outcome`).
- */
-export function interpretedStep(state: RunFlowState, outcome: InterpretOutcome): RunFlowStep {
-  if (outcome === "interpreted") return { state, calls: [{ call: "interpret" }] };
-  if (outcome === "up-to-date") {
-    return {
-      state: { ...state, status: "QUESTIONS" },
-      calls: [{ call: "readQuestions" }, { call: "nextQuestion" }],
-    };
-  }
-  return finished(state, outcome === "failed" ? "interpret-failed" : "interpret-agent");
-}
-
-/** Specification command `Question`: there is a next question. */
-export function questionStep(state: RunFlowState): RunFlowStep {
-  return { state: { ...state, status: "QUESTION_ASKED" }, calls: [{ call: "askQuestion" }] };
-}
-
-/** Specification command `NoMoreQuestions`: the questions have run out. */
-export function noMoreQuestionsStep(state: RunFlowState): RunFlowStep {
-  if (state.supplemented) {
-    return { state: { ...state, status: "PLACING" }, calls: [{ call: "placeSupplements" }] };
-  }
-  return {
-    state: { ...state, status: "ACCEPTING" },
-    calls: [{ call: "questionsDone" }, { call: "accept" }],
-  };
-}
-
-/**
- * Specification command `QuestionAnswered`: the person answered a question.
- *
- * @param answer the person's answer (specification parameter `answer`).
- */
-export function questionAnsweredStep(state: RunFlowState, answer: QuestionAnswer): RunFlowStep {
-  if (answer === "stop") return finished(state, "person");
-  if (answer === "accept") {
-    return {
-      state: { ...state, status: "QUESTIONS" },
-      calls: [{ call: "markReviewed" }, { call: "nextQuestion" }],
-    };
-  }
-  return {
-    state: { ...state, status: "QUESTIONS", supplemented: true },
-    calls: [{ call: "nextQuestion" }],
-  };
-}
-
-/**
- * Specification command `SupplementsPlaced`: placing the supplements finished.
- *
- * @param placed whether every supplement found a place (specification parameter `placed`).
- */
-export function supplementsPlacedStep(state: RunFlowState, placed: boolean): RunFlowStep {
-  if (!placed) return finished(state, "unplaced");
-  if (state.writeUnasked) return writeSupplements(state);
-  return { state: { ...state, status: "CONFIRMING" }, calls: [{ call: "confirmSupplements" }] };
-}
-
-/**
- * Specification command `SupplementsConfirmed`: the person answered whether the
- * supplements are to be written.
- *
- * @param yes the person's answer (specification parameter `yes`).
- */
-export function supplementsConfirmedStep(state: RunFlowState, yes: boolean): RunFlowStep {
-  if (!yes) return finished(state, "not-written");
-  return writeSupplements(state);
-}
-
-/**
- * Specification command `Accepted`: accepting the interpretations finished.
- *
- * @param ok whether everything was accepted (specification parameter `ok`).
- */
-export function acceptedStep(state: RunFlowState, ok: boolean): RunFlowStep {
-  if (!ok) return finished(state, "not-accepted");
-  return { state: { ...state, status: "APPLYING" }, calls: [{ call: "apply" }] };
-}
-
-/**
- * Specification command `Applied`: bringing the code into agreement finished.
- *
- * @param outcome what came of it (specification parameter `outcome`).
- */
-export function appliedStep(state: RunFlowState, outcome: ApplyOutcome): RunFlowStep {
-  return finished(state, APPLY_FINISH_REASONS[outcome]);
-}
-
-// ---------------------------------------------------------------------------
-// The component
-
-/**
- * The flow of one `clp run`. It starts in the initial state, keeps its state
- * between commands, and makes its calls on the driver synchronously, in order,
- * before the command method returns. No command answers anything; read
- * {@link RunFlow.state} to see where the run is.
- */
-export class RunFlow {
-  private readonly driver: RunDriver;
-  private current: RunFlowState;
-
-  /**
-   * @param driver the driver told what to do next (specification `run-driver`).
-   */
-  constructor(driver: RunDriver) {
-    this.driver = driver;
-    this.current = initialRunFlowState();
-  }
-
-  /** The current state (all specification state fields, with the same names). */
-  get state(): RunFlowState {
-    return this.current;
+    this.driver.checkLayer1();
   }
 
   /**
-   * Starts the run (specification `Start`). The driver is told `checkLayer1`.
-   *
-   * @param rounds the most rounds the run may take (specification parameter `rounds`).
-   * @param yes    whether supplements are written without asking (specification parameter `yes`).
-   */
-  start(rounds: number, yes: boolean): void {
-    this.perform(startStep(this.current, rounds, yes));
-  }
-
-  /**
-   * The check of Layer 1 finished (specification `Layer1Checked`). The driver is
-   * told `nextCandidate` or `finish`.
+   * Performs the specification's command `Layer1Checked`: the answer to
+   * `RunDriver.checkLayer1`.
    *
    * @param ok whether Layer 1 reads (specification parameter `ok`).
    */
   layer1Checked(ok: boolean): void {
-    this.perform(layer1CheckedStep(this.current, ok));
-  }
-
-  /** There is a next split candidate (specification `Candidate`). The driver is told `propose`. */
-  candidate(): void {
-    this.perform(candidateStep(this.current));
+    if (ok) {
+      this.moveTo("CANDIDATES");
+      this.driver.nextCandidate();
+    } else {
+      this.finish("layer1");
+    }
   }
 
   /**
-   * The split candidates have run out (specification `NoMoreCandidates`). The
-   * driver is told `checkLayer1`, `finish`, or `startInterpreting` and `interpret`.
+   * Performs the specification's command `Candidate`: an answer to
+   * `RunDriver.nextCandidate`, there is a candidate.
+   */
+  candidate(): void {
+    this.moveTo("PROPOSING");
+    this.driver.propose();
+  }
+
+  /**
+   * Performs the specification's command `NoMoreCandidates`: an answer to
+   * `RunDriver.nextCandidate`, there are no candidates left.
    */
   noMoreCandidates(): void {
-    this.perform(noMoreCandidatesStep(this.current));
+    if (this.flow.splitAccepted) {
+      this.flow = afterRound(this.flow);
+      this.announceRoundEnd();
+    } else {
+      this.moveTo("INTERPRETING");
+      this.driver.startInterpreting();
+      this.driver.interpret();
+    }
   }
 
   /**
-   * The agent asked to split a candidate finished (specification `Proposed`). The
-   * driver is told `nextCandidate`, `askSplit` or `finish`.
+   * Performs the specification's command `Proposed`: the answer to
+   * `RunDriver.propose`.
    *
-   * @param outcome what came of it (specification parameter `outcome`).
+   * @param outcome what came of asking (specification parameter `outcome`).
    */
   proposed(outcome: ProposalOutcome): void {
-    this.perform(proposedStep(this.current, outcome));
+    if (outcome === "none") {
+      this.moveTo("CANDIDATES");
+      this.driver.nextCandidate();
+    } else if (outcome === "proposal") {
+      this.moveTo("SPLIT_ASKED");
+      this.driver.askSplit();
+    } else {
+      this.finish("split-agent");
+    }
   }
 
   /**
-   * The person answered about a proposed split (specification `SplitAnswered`). The
-   * driver may be told `finish`, `writeSplit`, `decline` and `nextCandidate`.
+   * Performs the specification's command `SplitAnswered`: the answer to
+   * `RunDriver.askSplit`.
    *
    * @param answer the person's answer (specification parameter `answer`).
    */
   splitAnswered(answer: SplitAnswer): void {
-    this.perform(splitAnsweredStep(this.current, answer));
+    if (answer === "stop") {
+      this.finish("person");
+      return;
+    }
+    if (answer === "accept") {
+      this.flow = { ...this.flow, splitAccepted: true, status: "CANDIDATES" };
+      this.driver.writeSplit();
+    } else {
+      this.moveTo("CANDIDATES");
+      this.driver.decline();
+    }
+    this.driver.nextCandidate();
   }
 
   /**
-   * Interpreting finished one go (specification `Interpreted`). The driver may be
-   * told `interpret`, `readQuestions`, `nextQuestion` and `finish`.
+   * Performs the specification's command `Interpreted`: the answer to
+   * `RunDriver.interpret`.
    *
-   * @param outcome what came of it (specification parameter `outcome`).
+   * @param outcome what came of asking (specification parameter `outcome`).
    */
   interpreted(outcome: InterpretOutcome): void {
-    this.perform(interpretedStep(this.current, outcome));
-  }
-
-  /** There is a next question (specification `Question`). The driver is told `askQuestion`. */
-  question(): void {
-    this.perform(questionStep(this.current));
+    if (outcome === "interpreted") {
+      this.driver.interpret();
+    } else if (outcome === "up-to-date") {
+      this.moveTo("QUESTIONS");
+      this.driver.readQuestions();
+      this.driver.nextQuestion();
+    } else if (outcome === "failed") {
+      this.finish("interpret-failed");
+    } else {
+      this.finish("interpret-agent");
+    }
   }
 
   /**
-   * The questions have run out (specification `NoMoreQuestions`). The driver may be
-   * told `placeSupplements`, `questionsDone` and `accept`.
+   * Performs the specification's command `Question`: an answer to
+   * `RunDriver.nextQuestion`, there is a question.
+   */
+  question(): void {
+    this.moveTo("QUESTION_ASKED");
+    this.driver.askQuestion();
+  }
+
+  /**
+   * Performs the specification's command `NoMoreQuestions`: an answer to
+   * `RunDriver.nextQuestion`, there are no questions left.
    */
   noMoreQuestions(): void {
-    this.perform(noMoreQuestionsStep(this.current));
+    if (this.flow.supplemented) {
+      this.moveTo("PLACING");
+      this.driver.placeSupplements();
+    } else {
+      this.moveTo("ACCEPTING");
+      this.driver.questionsDone();
+      this.driver.accept();
+    }
   }
 
   /**
-   * The person answered a question (specification `QuestionAnswered`). The driver
-   * may be told `finish`, `markReviewed` and `nextQuestion`.
+   * Performs the specification's command `QuestionAnswered`: the answer to
+   * `RunDriver.askQuestion`.
    *
    * @param answer the person's answer (specification parameter `answer`).
    */
   questionAnswered(answer: QuestionAnswer): void {
-    this.perform(questionAnsweredStep(this.current, answer));
+    if (answer === "stop") {
+      this.finish("person");
+      return;
+    }
+    if (answer === "accept") {
+      this.moveTo("QUESTIONS");
+      this.driver.markReviewed();
+    } else {
+      this.flow = { ...this.flow, status: "QUESTIONS", supplemented: true };
+    }
+    this.driver.nextQuestion();
   }
 
   /**
-   * Placing the supplements finished (specification `SupplementsPlaced`). The
-   * driver may be told `finish`, `writeSupplements`, `questionsDone`, `checkLayer1`
-   * and `confirmSupplements`.
+   * Performs the specification's command `SupplementsPlaced`: the answer to
+   * `RunDriver.placeSupplements`.
    *
-   * @param placed whether every supplement found a place (specification parameter `placed`).
+   * @param placed whether every supplement has a place (specification parameter `placed`).
    */
   supplementsPlaced(placed: boolean): void {
-    this.perform(supplementsPlacedStep(this.current, placed));
+    if (!placed) {
+      this.finish("unplaced");
+    } else if (this.flow.writeUnasked) {
+      this.writeSupplements();
+    } else {
+      this.moveTo("CONFIRMING");
+      this.driver.confirmSupplements();
+    }
   }
 
   /**
-   * The person answered whether the supplements are to be written (specification
-   * `SupplementsConfirmed`). The driver may be told `finish`, `writeSupplements`,
-   * `questionsDone` and `checkLayer1`.
+   * Performs the specification's command `SupplementsConfirmed`: the answer to
+   * `RunDriver.confirmSupplements`.
    *
-   * @param yes the person's answer (specification parameter `yes`).
+   * @param yes whether the person confirms (specification parameter `yes`).
    */
   supplementsConfirmed(yes: boolean): void {
-    this.perform(supplementsConfirmedStep(this.current, yes));
+    if (yes) {
+      this.writeSupplements();
+    } else {
+      this.finish("not-written");
+    }
   }
 
   /**
-   * Accepting the interpretations finished (specification `Accepted`). The driver
-   * is told `apply` or `finish`.
+   * Performs the specification's command `Accepted`: the answer to
+   * `RunDriver.accept`.
    *
-   * @param ok whether everything was accepted (specification parameter `ok`).
+   * @param ok whether the interpretations were accepted (specification parameter `ok`).
    */
   accepted(ok: boolean): void {
-    this.perform(acceptedStep(this.current, ok));
+    if (ok) {
+      this.moveTo("APPLYING");
+      this.driver.apply();
+    } else {
+      this.finish("not-accepted");
+    }
   }
 
   /**
-   * Bringing the code into agreement finished (specification `Applied`). The driver
-   * is told `finish`.
+   * Performs the specification's command `Applied`: the answer to `RunDriver.apply`.
    *
-   * @param outcome what came of it (specification parameter `outcome`).
+   * @param outcome what came of applying (specification parameter `outcome`).
    */
   applied(outcome: ApplyOutcome): void {
-    this.perform(appliedStep(this.current, outcome));
+    this.finish(FINISH_OF_APPLY[outcome]);
   }
 
-  /** Keeps the state of a step and makes its calls on the driver, in order. */
-  private perform(step: RunFlowStep): void {
-    this.current = step.state;
-    for (const call of step.calls) callRunDriver(this.driver, call);
+  private moveTo(status: RunStatus): void {
+    this.flow = { ...this.flow, status };
+  }
+
+  private finish(reason: RunFinishReason): void {
+    this.moveTo("DONE");
+    this.driver.finish(reason);
+  }
+
+  /** Writes the supplements, which ends the round. */
+  private writeSupplements(): void {
+    this.flow = afterRound(this.flow);
+    this.driver.writeSupplements();
+    this.driver.questionsDone();
+    this.announceRoundEnd();
+  }
+
+  /** Tells the driver what the end of the round led to. */
+  private announceRoundEnd(): void {
+    if (this.flow.status === "CHECKING") {
+      this.driver.checkLayer1();
+    } else {
+      this.driver.finish("rounds");
+    }
   }
 }

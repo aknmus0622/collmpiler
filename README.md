@@ -94,8 +94,26 @@ pnpm exec clp verify --out .
 pnpm exec clp run --out . --agent 'claude -p "Read clp/REQUEST.md and carry out the request." --permission-mode acceptEdits'
 ```
 
-For now the directory has to be a package of this repository's workspace (`examples/*`): Node does not run
-`.ts` files that sit under `node_modules`, so the framework cannot yet be installed into another repository.
+### In a directory of its own
+
+A project outside this repository uses a clone of it through links. Run `pnpm install` once in the clone, then
+give the project this `package.json`, run `pnpm install` there and use the same commands:
+
+```json
+{
+  "name": "my-thing",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@clp/cli": "link:/path/to/co-llm-piler/packages/cli",
+    "@clp/core": "link:/path/to/co-llm-piler/packages/core"
+  }
+}
+```
+
+It has to be a link. Node does not run `.ts` files that sit under `node_modules`, so a copy of the framework, such
+as `pnpm add github:…`, does not work, and packaging it another way is left for after 1.0.
+
 Everything you can write in a spec, and every message `clp compile` gives, is on one page:
 [`REFERENCE.md`](REFERENCE.md).
 

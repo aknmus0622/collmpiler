@@ -1,49 +1,43 @@
-import type { QueryOutput, TargetSystemAdapter } from "./promise-keeper.adapter.contract.ts";
-import { FreshAnswer, increasingAnswer, restartOutcome } from "../src/promise-keeper.ts";
+import type { TargetSystemAdapter } from "./promise-keeper.adapter.contract.ts";
+import { PromiseKeeper, increasingAnswer, restartOutcome } from "../src/promise-keeper.ts";
 
-let system: FreshAnswer | null = null;
+let system: PromiseKeeper | null = null;
 
-function current(): FreshAnswer {
-  if (system === null) throw new Error("adapter: setupIsolation was not called");
+function running(): PromiseKeeper {
+  if (system === null) throw new Error("the system is not set up");
   return system;
 }
 
-// Import the production code from ../src/ and forward each call to it. No business logic here.
+// Forwards each call to the production code. No business logic here.
 export const adapter: TargetSystemAdapter = {
-  async setupIsolation(_ports) {
-    system = new FreshAnswer();
+  async setupIsolation() {
+    // The contract's Ports is empty and PromiseKeeper has no dependencies, so there is nothing to connect.
+    system = new PromiseKeeper();
   },
   async teardownIsolation() {
     system = null;
   },
   async executeCommand(command) {
+    const keeper = running();
     switch (command.name) {
       case "BeginFreshNumber":
-        current().beginNumber(command.input.drawn);
-        return;
+        return keeper.beginFreshNumber(command.input.drawn);
       case "BeginFreshText":
-        current().beginText(command.input.drawn);
-        return;
+        return keeper.beginFreshText(command.input.drawn);
       case "UsedNumber":
-        current().usedNumber(command.input.answered);
-        return;
+        return keeper.usedNumber(command.input.answered);
       case "UsedText":
-        current().usedText(command.input.answered);
-        return;
-      default:
-        throw new Error(`adapter: unknown command ${(command as { name: string }).name}`);
+        return keeper.usedText(command.input.answered);
     }
   },
-  async executeQuery(query): Promise<QueryOutput[keyof QueryOutput]> {
+  async executeQuery(query) {
     switch (query.name) {
       case "Fresh":
-        return current().fresh();
+        return running().fresh();
       case "Increasing":
         return increasingAnswer(query.input);
       case "Restart":
         return restartOutcome(query.input.durable);
-      default:
-        throw new Error(`adapter: unknown query ${(query as { name: string }).name}`);
     }
   },
 };

@@ -1,24 +1,20 @@
 import type { TargetSystemAdapter } from "./outcome-apply.adapter.contract.ts";
-import { outcomeApply } from "../src/outcome-apply.ts";
+import { decideCall } from "../src/outcome-apply.ts";
 
-// Import the production code from ../src/ and forward each call to it. No business logic here.
-// The production component is stateless with no dependencies, so there is no system to build or discard.
+// The production code is one stateless function: there is nothing to build, connect or discard.
 export const adapter: TargetSystemAdapter = {
-  async setupIsolation(_ports) {},
+  async setupIsolation(ports) {},
   async teardownIsolation() {},
   async executeCommand(command) {
-    throw new Error(`unknown command: ${(command as { name: string }).name}`);
+    // The contract defines no commands, so `command` is `never`.
+    throw new Error(`unknown command: ${JSON.stringify(command)}`);
   },
   async executeQuery(query) {
     switch (query.name) {
       case "Call":
-        return outcomeApply({
-          external: query.input.external,
-          guard: query.input.guard,
-          touched: query.input.touched,
-        });
+        return decideCall(query.input);
       default:
-        throw new Error(`unknown query: ${(query as { name: string }).name}`);
+        throw new Error(`unknown query: ${JSON.stringify(query)}`);
     }
   },
 };

@@ -1,130 +1,135 @@
 /**
- * Step choice: chooses which case of a command happens.
+ * Selection among the alternatives of one command.
  *
- * Corresponds to the specification component `step-choice`. It relies on one
- * dependency, the oracle ({@link CaseOracle}, specification component
- * `oracle`), and is not durable. Its entries map onto this module as follows:
+ * The caller opens a round with `beginCases`, submits alternatives one at a time
+ * with `case`, and then reads the result with `decision`. Answers about each
+ * alternative come from a `CaseOracle` handed to the constructor.
  *
- * - Commands `BeginCases` and `Case` and query `Decision`: the methods of
- *   {@link StepChoice}, one instance per command whose case is being chosen
- *   (it can be reused: `beginCases` starts over).
- *
- * The decisions themselves live in the pure functions {@link afterCase} and
- * {@link decideCase}; the class only asks the oracle and holds the state
- * between commands.
+ * It corresponds to the specification's component `step-choice`. It is held in
+ * memory only: a new instance starts empty.
  */
 
 /**
- * The name of a case (specification sort `CaseName`): an opaque identifier,
- * compared only for equality. A case is named by its condition.
+ * Identifies an alternative. Specification type `CaseName`: an opaque identifier,
+ * compared only for equality.
  */
 export type CaseName = string;
 
 /**
- * The oracle (specification component `oracle`, the outside world): it
- * evaluates a case's condition in the situation being considered.
+ * Everything a choice remembers, one field per state field of the specification,
+ * under the same name.
+ */
+export interface StepChoiceState {
+  /**
+   * The alternatives recorded in the current round (`hits`). A list, so its order
+   * is significant.
+   */
+  hits: CaseName[];
+}
+
+/**
+ * The outcome of a round. Specification name: the result of the query `Decision`;
+ * the field names are the specification's own.
+ */
+export interface StepDecision {
+  /** The selected alternative, or `null` (`chosen`). */
+  chosen: CaseName | null;
+  /** The alternatives reported as clashing; possibly an empty list (`conflict`). */
+  conflict: CaseName[];
+  /** Whether the fallback alternative was selected (`otherwise`). */
+  otherwise: boolean;
+}
+
+/**
+ * The outside party that answers for each alternative. It corresponds to the
+ * specification's external component `oracle`.
+ *
+ * Implementations supply the answers and do not throw.
  */
 export interface CaseOracle {
   /**
-   * Specification query `oracle.Holds`: whether the condition of the case
-   * `name` holds in the situation being considered. Asked once by every
-   * {@link StepChoice.considerCase} call, with that call's case name.
+   * Yes-or-no answer for one alternative (specification query `Holds`). Called from
+   * `StepChoice.case`, once per call, with that call's name.
+   *
+   * @param name the alternative in question (specification parameter `name`).
+   * @returns the oracle's answer, `true` for yes.
    */
   holds(name: CaseName): boolean;
 }
 
 /**
- * Which case happens: the answer of the specification query `Decision`
- * (calculation `decision`). Each field is the specification field of the
- * same name.
+ * Computes the outcome from a state. Pure: it reads only its argument and changes
+ * nothing. It corresponds to the specification's calculation `decision`.
+ *
+ * @param state what the choice remembers.
+ * @returns the outcome for that state.
  */
-export interface CaseDecision {
-  /** The case that happens, or `null` when no single case is chosen (field `chosen`). */
-  chosen: CaseName | null;
-  /** The cases in conflict, in the order they were given; empty when there is no conflict (field `conflict`). */
-  conflict: CaseName[];
-  /** Whether the otherwise case happens (field `otherwise`). */
-  otherwise: boolean;
-}
-
-/**
- * The cases given since the last `beginCases` whose condition held, in the
- * order they were given (specification state `hits`), after one more case was
- * given (the update of specification command `Case`).
- *
- * Pure: answers a new list, does not change `hits`.
- *
- * @param hits the cases whose condition held so far (state `hits` before the command).
- * @param name the case just given (parameter `name` of `Case`).
- * @param holds the oracle's answer for that case (`oracle.Holds(name)`).
- * @returns the new value of state `hits`.
- */
-export function afterCase(hits: readonly CaseName[], name: CaseName, holds: boolean): CaseName[] {
-  return holds ? [...hits, name] : [...hits];
-}
-
-/**
- * Which case happens, given the cases whose condition held (specification
- * calculation `decision`).
- *
- * Pure: answers the same result for the same argument, touches nothing.
- *
- * @param hits the cases whose condition held, in the order given (state `hits`).
- * @returns the decision (the specification's result of `Decision`).
- */
-export function decideCase(hits: readonly CaseName[]): CaseDecision {
-  if (hits.length === 0) return { chosen: null, conflict: [], otherwise: true };
-  if (hits.length === 1) return { chosen: hits[0], conflict: [], otherwise: false };
+export function decideCase(state: StepChoiceState): StepDecision {
+  const { hits } = state;
+  if (hits.length === 0) {
+    return { chosen: null, conflict: [], otherwise: true };
+  }
+  if (hits.length === 1) {
+    return { chosen: hits[0], conflict: [], otherwise: false };
+  }
   return { chosen: null, conflict: [...hits], otherwise: false };
 }
 
 /**
- * The choice of the case of one command: give it the command's cases one by
- * one, then read which one happens.
+ * One selection, reusable for another round by calling `beginCases` again. Create
+ * one with `new StepChoice(oracle)`; it starts in the specification's initial state.
  *
- * Typical use: `beginCases()`, then `considerCase(name)` for each case in the
- * order the command lists them, then `decision()`.
+ * `beginCases` and `case` each perform one command of the specification and return
+ * nothing: their effect is seen in `state()` and `decision()`. The usual sequence
+ * is: `beginCases`, then `case` once per alternative, and last `decision`.
  */
 export class StepChoice {
   private readonly oracle: CaseOracle;
-  /** The cases given since the last `beginCases` whose condition held, in order (specification state `hits`). */
-  private hits: CaseName[];
+  private hits: CaseName[] = [];
 
   /**
-   * Starts with no case given (the specification's `init`).
-   *
-   * @param oracle asked whether each given case's condition holds.
+   * @param oracle consulted by `case`, for the lifetime of this instance.
    */
   constructor(oracle: CaseOracle) {
     this.oracle = oracle;
-    this.hits = [];
   }
 
   /**
-   * Specification command `BeginCases`: a case is chosen next; no case has
-   * been given yet. Forgets the cases given before. Does not ask the oracle.
+   * Reads what the choice remembers. It only reads, and may be called at any point.
+   *
+   * @returns a new plain object, so it can be compared by value.
+   */
+  state(): StepChoiceState {
+    return { hits: [...this.hits] };
+  }
+
+  /**
+   * Performs the specification's command `BeginCases`: opens a new round. It takes
+   * no arguments.
    */
   beginCases(): void {
     this.hits = [];
   }
 
   /**
-   * Specification command `Case`: gives one case, named by its condition.
-   * Asks the oracle ({@link CaseOracle.holds}) about this case exactly once,
-   * even when another case already holds; see {@link afterCase}.
+   * Performs the specification's command `Case`: submits one alternative. This is
+   * where `oracle` is consulted.
    *
-   * @param name the case (parameter `name`).
+   * @param name the alternative (specification parameter `name`).
    */
-  considerCase(name: CaseName): void {
-    this.hits = afterCase(this.hits, name, this.oracle.holds(name));
+  case(name: CaseName): void {
+    if (this.oracle.holds(name)) {
+      this.hits = [...this.hits, name];
+    }
   }
 
   /**
-   * Specification query `Decision`: which case happens, from the cases given
-   * since the last `beginCases`; see {@link decideCase}. Does not ask the
-   * oracle and changes nothing.
+   * Performs the specification's query `Decision`. It only reads, and may be called
+   * at any point, including more than once.
+   *
+   * @returns the outcome of the round so far; see `decideCase`.
    */
-  decision(): CaseDecision {
-    return decideCase(this.hits);
+  decision(): StepDecision {
+    return decideCase(this.state());
   }
 }

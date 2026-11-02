@@ -1,18 +1,19 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { parseModule } from "../src/v1/syntax.ts";
 import { compile } from "../src/v1/load.ts";
 import { problemText } from "../src/v1/read.ts";
-import { check8, checkExamples, selfCheck8 } from "../src/v1/pbt.ts";
+import fc from "fast-check";
+import { check8, checkExamples, selfCheck8, stepArbitrary } from "../src/v1/pbt.ts";
 import type { Deciders8 } from "../src/v1/decide.ts";
 import type { Adapter8 } from "../src/v1/pbt.ts";
 import { compare8 } from "../src/v1/compare.ts";
 import { readOut } from "../src/v1/ops.ts";
 import { shapeProblems } from "../src/v1/shape.ts";
 import { contract8, specView } from "../src/v1/generate.ts";
-import { repoRoot } from "./support.ts";
+import { repoRoot, restamp } from "./support.ts";
 
 // The 1.0 notation (DSL.md §17): reading, IR version 8, the oracle, the PBT and the comparison of interpretations.
 // Alloy is not used here (alloy.test.ts writes its modules and runs it).
@@ -57,6 +58,68 @@ test("構文: 部分集合の外は、場所つきの誤りになる", () => {
   }
   const module = parseModule(COUNTER, "counter.ts");
   assert.deepEqual(module.imports.map((i) => i.from), ["@clp/core", "@clp/core"]);
+});
+
+test("置き方: 文だけ、その場で書く、よそで定義して呼ぶ、のどれでも同じ木になる（場合の名前のほかは）", () => {
+  const body = (guard: string, imports: string, before = "") => `import { init, ${imports}service } from "@clp/core";
+import type { Int } from "@clp/core";
+${before}export const Counter = service("数える", {
+  state: { count: init<Int>(0) },
+  commands: {
+    Add(by: Int) {
+      if (${guard}) return "full";
+      this.count += by;
+      return "added";
+    },
+  },
+  queries: { Count() { return this.count; } },
+});
+`;
+  // 場合の名前は、書いた文の名前 (is.full) か番号 (case1) になる。観測されるものではないので、並びの位置に置き換えて比べる
+  const tree = (files: Record<string, string>) => {
+    const ir = compile(specs(files), "counter").ir!;
+    let text = JSON.stringify({ components: ir.components, notes: ir.notes });
+    for (const command of Object.values(ir.components.counter.commands!)) {
+      command.events.forEach((event, index) => { text = text.replaceAll(`"${event}"`, `"#${index}"`); });
+    }
+    return JSON.parse(text);
+  };
+  const SENTENCE = "上限に達している";
+
+  const inline = tree({ "a.component.ts": body(`is.full("${SENTENCE}", this.count >= 3)`, "is, ") });
+  const placed = tree({ "a.component.ts": body("Full()", "condition, ", `export const Full = condition("${SENTENCE}", () => this.count >= 3);\n`) });
+  assert.deepEqual(placed, inline);
+
+  const dir = specs({
+    "a.component.ts": body(`is.full("${SENTENCE}")`, "is, "),
+    "a.interpretation.ts": `import { interpretation } from "@clp/core";
+import { Counter } from "./a.component.ts";
+// layer1 Counter: sha256:0
+export const CounterInterpretation = interpretation(Counter, {
+  conditions: { full() { return this.count >= 3; } },
+});
+`,
+  });
+  restamp(dir);
+  const sentence = compile(dir, "counter");
+  assert.deepEqual(sentence.problems.map(problemText), []);
+  assert.deepEqual(tree(Object.fromEntries(readdirSync(dir).map((name) => [name, readFileSync(join(dir, name), "utf8")]))), inline);
+});
+
+test("入力: 仕様が文字列で書いた識別子 (\"x\" as Leaf) が、入力に現れる", () => {
+  const dir = specs({ "a.component.ts": `import { init, service } from "@clp/core";
+import type { Id } from "@clp/core";
+type Leaf = Id<"leaf">;
+export const A = service("葉を覚える", {
+  state: { last: init<Leaf | null>(null) },
+  commands: { Give(leaf: Leaf) { this.last = leaf; } },
+  queries: { IsSpecial(): boolean { return this.last === ("special" as Leaf); } },
+});
+` });
+  const { ir, problems } = compile(dir, "a");
+  assert.deepEqual(problems.map(problemText), []);
+  assert.deepEqual(ir!.components.a.known, { Leaf: ["special"] });
+  assert.ok(fc.sample(stepArbitrary(ir!), { numRuns: 200, seed: 1 }).some((step) => JSON.stringify(step).includes('"special"')));
 });
 
 test("読み取り: 本体は、上から順の場合ごとのイベントになる（ガードは互いに排他）", () => {

@@ -71,7 +71,7 @@ the one page a spec author needs. The code:
   symlink to it): `specs/`, `src/` (by agents), `clp/` (test side and pass records), `cases/` (R3).
 - Tests: `packages/cli/test/` — `notation.test.ts` (reading, IR, oracle, PBT, comparison), `example.test.ts`,
   `features.test.ts`, `parts.test.ts`, `durable.test.ts`, `interpret.test.ts`, the pipeline tests (`loop`, `gates`,
-  `repeat`, `layout`, `components`, split so that `node --test` runs them in parallel), `boundary.test.ts` (a fixed-shape implementation through the mutation gate), `run.test.ts` (`clp run`),
+  `repeat`, `layout`, `components`, split so that `node --test` runs them in parallel), `boundary.test.ts` (a fixed-shape implementation through the mutation gate), `outside.test.ts` (a new project outside the repository, linked with `link:`), `run.test.ts` (`clp run`),
   `alloy.test.ts` (the modules written for Alloy and what each component gets checked, compared with
   `test/fixtures/alloy/`: after a change to the emitter or to a spec that Alloy checks, rerun it with
   `CLP_UPDATE_ALLOY=1` and read the diff; runs Alloy itself on one small component when Java is there), `cli.test.ts`, `stage.test.ts` (self-hosting). They share `test/support.ts` (`harness(name)` gives each file its own work directory; never share
@@ -281,5 +281,5 @@ From `DISTRIBUTION.md`; settled decisions:
 - Keep third-party dependencies minimal. Use `util.parseArgs`. Resolve paths against `process.cwd()`.
 - **Output must be deterministic**: sorted JSON keys, fixed indentation. Generated file headers carry only
   `ir-version` and `spec-hash`. The IR version is the sole compatibility contract.
-- `--out` must sit where `@clp/cli/runtime` resolves (a workspace package like `examples/*`, or under
-  `packages/cli/` as the tests do).
+- `--out` must sit where `@clp/cli/runtime` resolves (a workspace package like `examples/*`, under `packages/cli/` as
+  the tests do, or a project outside the repository that links the packages with `link:`: README, `outside.test.ts`).

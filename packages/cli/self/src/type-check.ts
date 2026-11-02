@@ -1,42 +1,41 @@
 /**
- * Type check: decides what is wrong with the promises of the outside world and
- * the rows of decision tables.
+ * Decides what is wrong with the promise of a query of the outside world and
+ * with a row of a decision table.
  *
- * Corresponds to the specification component `type-check`. It has no state
- * and no dependencies; each of its queries is implemented here by a pure
- * function that answers the same result for the same argument and touches
- * nothing:
- *
- * - `Promise` → {@link promiseProblems}
- * - `Row` → {@link rowProblems}
+ * Stateless and free of dependencies: nothing is remembered between calls,
+ * nothing needs to be constructed, and calling it has no effect on anything.
+ * It corresponds to the specification's component `type-check`.
  */
 
 /**
- * Specification query `type-check.Promise` (calculation `promise`).
- *
- * Judges the promise made by one query of the outside world.
- *
- * @param promise what the query promises and what it looks like (the
- *   specification's parameters, as one record).
- * @returns the problems found, in the order the specification lists them; an
- *   empty list when there is nothing wrong.
+ * One problem found with a promise. Specification name: the elements of the
+ * result of the query `Promise`; the values are the specification's own, and
+ * each one names its problem.
  */
-export function promiseProblems(promise: PromiseFacts): PromiseProblem[] {
-  const problems: PromiseProblem[] = [];
-  if (promise.fresh && promise.increasing) problems.push("fresh-and-increasing");
-  if (promise.increasing && !promise.integer) problems.push("increasing-not-integer");
-  if (promise.hasParams && (promise.fresh || promise.increasing)) problems.push("promise-with-params");
-  return problems;
-}
+export type PromiseProblem =
+  | "fresh-and-increasing"
+  | "increasing-not-integer"
+  | "promise-with-params";
 
 /**
- * The input of the `Promise` query: one query of the outside world.
- * Each field is the specification parameter of the same name.
+ * One problem found with a row. Specification name: the elements of the result
+ * of the query `Row`; the values are the specification's own, and each one
+ * names its problem.
+ */
+export type RowProblem =
+  | "last-not-otherwise"
+  | "otherwise-not-last"
+  | "cell-not-constant"
+  | "columns-differ";
+
+/**
+ * Everything known about the promise of one query of the outside world. The
+ * field names are the specification's parameter names.
  */
 export interface PromiseFacts {
-  /** Whether the query promises never to answer the same value twice (specification parameter `fresh`). */
+  /** Whether the query promises fresh answers (specification parameter `fresh`). */
   fresh: boolean;
-  /** Whether the query promises never to answer less than before (specification parameter `increasing`). */
+  /** Whether the query promises increasing answers (specification parameter `increasing`). */
   increasing: boolean;
   /** Whether the query answers integers (specification parameter `integer`). */
   integer: boolean;
@@ -45,56 +44,55 @@ export interface PromiseFacts {
 }
 
 /**
- * One problem with a promise (an element of the specification's result of
- * `Promise`). Each value is the specification value of the same name.
- *
- * - `"fresh-and-increasing"`: the query promises both fresh and increasing answers.
- * - `"increasing-not-integer"`: the query promises increasing answers that are not integers.
- * - `"promise-with-params"`: the query makes a promise although it has parameters.
- */
-export type PromiseProblem = "fresh-and-increasing" | "increasing-not-integer" | "promise-with-params";
-
-/**
- * Specification query `type-check.Row` (calculation `row`).
- *
- * Judges one row of a decision table.
- *
- * @param row where the row stands and what it contains (the specification's
- *   parameters, as one record).
- * @returns the problems found, in the order the specification lists them; an
- *   empty list when there is nothing wrong.
- */
-export function rowProblems(row: RowFacts): RowProblem[] {
-  const problems: RowProblem[] = [];
-  if (row.last && !row.otherwise) problems.push("last-not-otherwise");
-  if (row.otherwise && !row.last) problems.push("otherwise-not-last");
-  if (!row.constantCells) problems.push("cell-not-constant");
-  if (!row.sameColumns) problems.push("columns-differ");
-  return problems;
-}
-
-/**
- * The input of the `Row` query: one row of a decision table.
- * Each field is the specification parameter of the same name.
+ * Everything known about one row of a decision table. The field names are the
+ * specification's parameter names.
  */
 export interface RowFacts {
-  /** Whether it is the last row of its table (specification parameter `last`). */
+  /** Whether this is the table's last row (specification parameter `last`). */
   last: boolean;
-  /** Whether its condition is `otherwise` (specification parameter `otherwise`). */
+  /** Whether the row's condition is otherwise (specification parameter `otherwise`). */
   otherwise: boolean;
-  /** Whether every one of its cells is a constant (specification parameter `constantCells`). */
+  /** Whether every cell of the row is a constant (specification parameter `constantCells`). */
   constantCells: boolean;
-  /** Whether it has the same columns as the first row of its table (specification parameter `sameColumns`). */
+  /** Whether the row has the same columns as the table's first row (specification parameter `sameColumns`). */
   sameColumns: boolean;
 }
 
 /**
- * One problem with a decision-table row (an element of the specification's
- * result of `Row`). Each value is the specification value of the same name.
+ * Performs the specification's query `Promise` (`type-check.Promise`).
  *
- * - `"last-not-otherwise"`: the row is the last one but its condition is not `otherwise`.
- * - `"otherwise-not-last"`: the row's condition is `otherwise` but it is not the last row.
- * - `"cell-not-constant"`: a cell of the row is not a constant.
- * - `"columns-differ"`: the row's columns differ from those of the first row.
+ * Accepts any combination of the four facts and always answers. Reads no state,
+ * so the same facts always give the same answer.
+ *
+ * @param facts the promise's four facts, one field per specification parameter.
+ * @returns every problem found, in the order the specification reports them;
+ *   empty when there is none. The order is part of the answer.
  */
-export type RowProblem = "last-not-otherwise" | "otherwise-not-last" | "cell-not-constant" | "columns-differ";
+export function checkPromise(facts: PromiseFacts): PromiseProblem[] {
+  const { fresh, increasing, integer, hasParams } = facts;
+  const problems: PromiseProblem[] = [];
+  if (fresh && increasing) problems.push("fresh-and-increasing");
+  if (increasing && !integer) problems.push("increasing-not-integer");
+  if (hasParams && (fresh || increasing)) problems.push("promise-with-params");
+  return problems;
+}
+
+/**
+ * Performs the specification's query `Row` (`type-check.Row`).
+ *
+ * Accepts any combination of the four facts and always answers. Reads no state,
+ * so the same facts always give the same answer.
+ *
+ * @param facts the row's four facts, one field per specification parameter.
+ * @returns every problem found, in the order the specification reports them;
+ *   empty when there is none. The order is part of the answer.
+ */
+export function checkRow(facts: RowFacts): RowProblem[] {
+  const { last, otherwise, constantCells, sameColumns } = facts;
+  const problems: RowProblem[] = [];
+  if (last && !otherwise) problems.push("last-not-otherwise");
+  if (otherwise && !last) problems.push("otherwise-not-last");
+  if (!constantCells) problems.push("cell-not-constant");
+  if (!sameColumns) problems.push("columns-differ");
+  return problems;
+}

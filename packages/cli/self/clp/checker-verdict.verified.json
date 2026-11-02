@@ -4,7 +4,7 @@
     "checker-verdict.interpretation.ts"
   ],
   "specs": "sha256:85ef0d45c3c96319826d6feeabdba9a23fc874e2b3f430ab55af4b04da0dda24",
-  "code": "sha256:718acd1cab71763299299dd89604446a2bc51bdcdaad6da552e5441f71dec445",
+  "code": "sha256:bca30c4636f33012169bfc7acc6837a7548f0c13567f4b01839423b5801389a9",
   "files": [
     "../src/checker-verdict.ts",
     "../src/fill-check.ts",

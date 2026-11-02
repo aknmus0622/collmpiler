@@ -1299,7 +1299,13 @@ export class Builder {
         // a JSON value read as a type: taken as it is (a value that does not fit is found when the spec runs)
         if (value.t === "json" || (isList(value.t) && value.t.list === "json")) return { e: value.e, t };
         // a string kept somewhere read back as an identifier, and the other way
-        if ((baseOf(value.t) === "string" && isAtom(t)) || (isAtom(value.t) && baseOf(t) === "string")) return { e: value.e, t };
+        if ((baseOf(value.t) === "string" && isAtom(t)) || (isAtom(value.t) && baseOf(t) === "string")) {
+          if (isAtom(t) && Array.isArray(value.e) && value.e[0] === "lit" && typeof value.e[1] === "string") {
+            const known = (cx.b.ir.known ??= {});
+            known[t.atom] = [...new Set([...(known[t.atom] ?? []), value.e[1]])].sort();
+          }
+          return { e: value.e, t };
+        }
         return this.expect(value, t, cx, "as");
       }
       case "assign":

@@ -205,6 +205,11 @@
           "list"
         ]
       },
+      "known": {
+        "Leaf": [
+          "\"output\"|null|null"
+        ]
+      },
       "queries": {
         "Decide": {
           "is": [

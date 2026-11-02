@@ -93,6 +93,7 @@ Node の型ストリップには**`node_modules` 内の `.ts` を実行しない
   pnpm workspace はリンクなので実体は `packages/cli` にあり、制限にかからない
 * **他リポジトリから `pnpm add github:org/co-llm-piler` のような git 依存で入れると、実体がコピーされて動かない。**
   npm 公開していなくても同じ。ここを勘違いすると、後で必ず詰まる
+* **clone へのリンク（`link:`）なら、他のディレクトリの新しいプロジェクトでも動く**（2026-11-02。`README.md`、`outside.test.ts`）。配布の形は 1.0 の後で決める
 
 ### 別リポジトリの specs を扱いたい場合（ビルドを避ける2案）
 

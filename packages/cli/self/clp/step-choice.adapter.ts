@@ -1,14 +1,16 @@
-import type { TargetSystemAdapter } from "./step-choice.adapter.contract.ts";
+import type { Command, Query, QueryOutput, TargetSystemAdapter } from "./step-choice.adapter.contract.ts";
 import { StepChoice } from "../src/step-choice.ts";
 
-// Import the production code from ../src/ and forward each call to it. No business logic here.
 let system: StepChoice | undefined;
 
-function current(): StepChoice {
-  if (!system) throw new Error("setupIsolation was not called");
+function currentSystem(): StepChoice {
+  if (system === undefined) {
+    throw new Error("adapter: setupIsolation has not been called");
+  }
   return system;
 }
 
+// Forwards each call to the production code. No business logic here.
 export const adapter: TargetSystemAdapter = {
   async setupIsolation(ports) {
     system = new StepChoice({
@@ -18,26 +20,28 @@ export const adapter: TargetSystemAdapter = {
   async teardownIsolation() {
     system = undefined;
   },
-  async executeCommand(command) {
+  async executeCommand(command: Command) {
     switch (command.name) {
       case "BeginCases":
-        current().beginCases();
+        currentSystem().beginCases();
         return;
       case "Case":
-        current().considerCase(command.input.name);
+        currentSystem().case(command.input.name);
         return;
-      default:
-        throw new Error(`unknown command: ${(command as { name: string }).name}`);
+      default: {
+        const unknown: never = command;
+        throw new Error(`adapter: unknown command ${JSON.stringify(unknown)}`);
+      }
     }
   },
-  async executeQuery(query) {
+  async executeQuery(query: Query): Promise<QueryOutput[keyof QueryOutput]> {
     switch (query.name) {
-      case "Decision": {
-        const d = current().decision();
-        return { chosen: d.chosen, conflict: d.conflict, otherwise: d.otherwise };
+      case "Decision":
+        return currentSystem().decision();
+      default: {
+        const unknown: never = query.name;
+        throw new Error(`adapter: unknown query ${JSON.stringify(unknown)}`);
       }
-      default:
-        throw new Error(`unknown query: ${(query as { name: string }).name}`);
     }
   },
 };

@@ -1,26 +1,30 @@
-import type { Query, QueryOutput, TargetSystemAdapter } from "./sentence-trace.adapter.contract.ts";
-import { checkEmbedded, checkKey, checkSentence, checkTarget } from "../src/sentence-trace.ts";
+import type { TargetSystemAdapter } from "./sentence-trace.adapter.contract.ts";
+import {
+  decideEmbedded,
+  decideKey,
+  decideSentence,
+  decideTarget,
+} from "../src/sentence-trace.ts";
 
-// Import the production code from ../src/ and forward each call to it. No business logic here.
-// The production component is stateless and has no dependencies, so there is no system instance to build.
+// The production component is a set of stateless functions with no dependencies, so there is nothing to
+// construct or discard, and the contract's `Ports` is empty.
 export const adapter: TargetSystemAdapter = {
-  async setupIsolation(_ports) {},
+  async setupIsolation() {},
   async teardownIsolation() {},
   async executeCommand(command) {
-    throw new Error(`unknown command: ${(command as { name?: unknown }).name}`);
+    // The contract defines no commands (`Command` is `never`).
+    throw new Error(`unknown command: ${JSON.stringify(command)}`);
   },
-  async executeQuery(query: Query): Promise<QueryOutput[keyof QueryOutput]> {
+  async executeQuery(query) {
     switch (query.name) {
       case "Embedded":
-        return checkEmbedded(query.input);
+        return decideEmbedded(query.input);
       case "Key":
-        return checkKey(query.input);
+        return decideKey(query.input.inDescription);
       case "Sentence":
-        return checkSentence(query.input);
+        return decideSentence(query.input);
       case "Target":
-        return checkTarget(query.input);
-      default:
-        throw new Error(`unknown query: ${(query as { name?: unknown }).name}`);
+        return decideTarget(query.input.exists);
     }
   },
 };

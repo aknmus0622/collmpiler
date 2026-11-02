@@ -31,11 +31,12 @@ export const entryName = (ir: Ir8, qualified: string) => (qualified.startsWith(`
 
 // --- What to generate ---
 
-type Hints = { strings: string[]; numbers: number[] };
+type Hints = { strings: string[]; numbers: number[]; atoms?: Record<string, string[]> };
 /** The numbers and strings written in the spec. Inputs mix them in: a threshold or a keyword is almost never hit at random. */
 export function literalsOf(ir: Ir8): Hints {
   const strings = new Set<string>();
   const numbers = new Set<number>();
+  const atoms: Record<string, string[]> = {};
   const walk = (x: unknown) => {
     if (typeof x === "number") numbers.add(x);
     else if (Array.isArray(x)) {
@@ -52,8 +53,9 @@ export function literalsOf(ir: Ir8): Hints {
       if (typeof t === "object" && t !== null) Object.values(t).forEach(types);
     };
     types(c.state);
+    for (const [sort, known] of Object.entries(c.known ?? {})) atoms[sort] = [...new Set([...(atoms[sort] ?? []), ...known])].sort();
   }
-  return { strings: [...strings].sort(), numbers: [...numbers].filter(Number.isFinite).sort((a, b) => a - b) };
+  return { strings: [...strings].sort(), numbers: [...numbers].filter(Number.isFinite).sort((a, b) => a - b), atoms };
 }
 
 /** A drawn atom: which one is decided when the step runs (one already seen, three times in four, or a new one). */
@@ -98,7 +100,11 @@ function arbitraryOf(type: Type, hints: Hints, bounds: { min: number | null; max
     return choices.length === 1 ? fc.string() : fc.oneof(...choices);
   }
   if ("enum" in type) return fc.constantFrom(...type.enum);
-  if ("atom" in type) return fc.nat().map((n): RawAtom => ({ $atom: n }));
+  if ("atom" in type) {
+    const drawn = fc.nat().map((n): RawAtom => ({ $atom: n }));
+    const known = hints.atoms?.[type.atom] ?? [];
+    return known.length ? fc.oneof({ weight: 3, arbitrary: drawn }, { weight: 1, arbitrary: fc.constantFrom(...known) }) : drawn;
+  }
   if ("optional" in type) return fc.option(arbitraryOf(type.optional, hints), { nil: null, freq: 4 });
   if ("list" in type) return fc.array(arbitraryOf(type.list, hints), { maxLength: 4 });
   if ("set" in type) return fc.array(arbitraryOf(type.set, hints), { maxLength: 4 });

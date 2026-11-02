@@ -1,97 +1,27 @@
 /**
- * Fit check: decides, one level at a time, whether a value of one type fits
- * where another type is expected.
+ * Decides, for one level of a type only, how a value of one type relates to the
+ * place where another type is expected. Nested types are not walked here: the
+ * caller looks at the answer and goes on with the inner types itself.
  *
- * Corresponds to the specification component `fit-check`. It has no state
- * and no dependencies; its only entry is the query `Fits`, implemented here
- * by the pure function {@link fitCheck}.
+ * Stateless and free of dependencies: nothing is remembered between calls,
+ * nothing needs to be constructed, and calling it has no effect on anything.
+ * It corresponds to the specification's component `fit-check`.
  */
 
 /**
- * Specification query `fit-check.Fits` (calculation `fits`).
+ * The kind of a type, or of an expression's value. Specification name: the
+ * parameters `given` and `target`, which share these values; the values are the
+ * specification's own.
  *
- * Pure: answers the same result for the same arguments, touches nothing.
- *
- * @param fit the kind of the given value, the expected kind, and what is known
- *            about them (the specification's parameters, as one record).
- * @returns whether the value fits at this level (the specification's result).
- */
-export function fitCheck(fit: FitQuestion): FitAnswer {
-  const { given, target, base, subset, sameSort } = fit;
-  // Anything fits where any is expected, and any fits anywhere.
-  if (target === "any" || given === "any") return "yes";
-  // Where JSON is expected, anything fits but nothing and a temporal formula.
-  if (target === "json") {
-    return given === "void" || given === "temporal" ? "no" : "yes";
-  }
-  // Null fits only where an optional value is expected.
-  if (given === "null") return target === "optional" ? "yes" : "no";
-  // Where an optional value is expected: compare inside, or with its inside.
-  if (target === "optional") return given === "optional" ? "inner" : "unwrap";
-  // An optional value fits nowhere else.
-  if (given === "optional") return "no";
-  // Where an enumeration is expected, only a subset enumeration fits.
-  if (target === "enum") return given === "enum" && subset ? "yes" : "no";
-  // An enumeration fits where its base kind is expected.
-  if (given === "enum") return base === target ? "yes" : "no";
-  // Atoms fit only atoms of the same sort.
-  if (given === "atom" || target === "atom") {
-    return given === "atom" && target === "atom" && sameSort ? "yes" : "no";
-  }
-  // Composites of the same kind are compared inside.
-  if (COMPOSITE_KINDS.has(target)) return given === target ? "inner" : "no";
-  // Otherwise only the same kind fits.
-  return given === target ? "yes" : "no";
-}
-
-/** The composite kinds, whose contents are compared at the next level. */
-const COMPOSITE_KINDS: ReadonlySet<TypeKind> = new Set<TypeKind>([
-  "record",
-  "list",
-  "set",
-  "map",
-]);
-
-/**
- * The input of the `Fits` query: one comparison of a given type with an
- * expected type, at one level. Each field is the specification parameter of
- * the same name.
- */
-export interface FitQuestion {
-  /** The kind of the value being placed (specification parameter `given`). */
-  given: TypeKind;
-  /** The kind expected where it is placed (specification parameter `target`). */
-  target: TypeKind;
-  /**
-   * When the given value is an enumeration: the kind of its members
-   * (specification parameter `base`); `"none"` when there is no such kind.
-   */
-  base: EnumBase;
-  /**
-   * When both are enumerations: whether every member of the given enumeration
-   * is a member of the expected one (specification parameter `subset`).
-   */
-  subset: boolean;
-  /**
-   * When atoms are involved: whether they are identifiers of the same sort
-   * (specification parameter `sameSort`).
-   */
-  sameSort: boolean;
-}
-
-/**
- * The kind of a type, at its outermost level (specification parameters
- * `given` and `target`).
- *
- * - `"int"`, `"string"`, `"bool"`: the plain value kinds.
+ * - `"int"`, `"string"`, `"bool"`: the plain value types.
  * - `"json"`: any JSON value.
- * - `"enum"`: an enumeration of literal values.
- * - `"atom"`: an opaque identifier of some sort.
- * - `"record"`, `"list"`, `"set"`, `"map"`: the composite kinds.
- * - `"optional"`: a value or null.
- * - `"any"`: a type that is not known.
- * - `"null"`: the null value itself.
- * - `"void"`: nothing (no value at all).
+ * - `"enum"`: an enumeration.
+ * - `"atom"`: an identifier of some sort.
+ * - `"record"`, `"list"`, `"set"`, `"map"`: the composite types.
+ * - `"optional"`: a value or nothing.
+ * - `"any"`: the wildcard kind, whose type is not known or not constrained.
+ * - `"null"`: the null value.
+ * - `"void"`: nothing at all, as answered by something that gives no value.
  * - `"temporal"`: a temporal formula.
  */
 export type TypeKind =
@@ -112,19 +42,70 @@ export type TypeKind =
   | "temporal";
 
 /**
- * The kind of the members of an enumeration (specification parameter `base`):
- * `"int"`, `"string"` or `"bool"`, or `"none"` when there is none.
+ * The kind of the members of an enumeration. Specification name: parameter
+ * `base`; the values are the specification's own, and `"none"` means there is no
+ * such kind to name.
  */
 export type EnumBase = "int" | "string" | "bool" | "none";
 
 /**
- * The answer of the `Fits` query (the specification's result of `Fits`).
+ * The answer for one level. Specification name: the result of the query `Fits`;
+ * the values are the specification's own.
  *
- * - `"yes"`: it fits; nothing more to compare.
+ * - `"yes"`: it fits; nothing further needs comparing.
  * - `"no"`: it does not fit.
- * - `"inner"`: it fits at this level if what is inside the given type fits
- *   what is inside the expected type; compare those next.
- * - `"unwrap"`: compare the given type itself with what is inside the
- *   expected type next.
+ * - `"inner"`: undecided at this level; the caller compares the two types'
+ *   corresponding inner types.
+ * - `"unwrap"`: undecided at this level; the caller compares the given type, as
+ *   it is, with the type inside the expected one.
  */
 export type FitAnswer = "yes" | "no" | "inner" | "unwrap";
+
+/**
+ * Everything known about one comparison. The field names are the specification's
+ * parameter names. The caller works out `base`, `subset` and `sameSort` from the
+ * two types beforehand and always supplies all five fields.
+ */
+export interface FitFacts {
+  /** The kind of the value being placed (specification parameter `given`). */
+  given: TypeKind;
+  /** The kind expected at that place (specification parameter `target`). */
+  target: TypeKind;
+  /** The kind of the given enumeration's members (specification parameter `base`). */
+  base: EnumBase;
+  /**
+   * Whether the given enumeration's members are all members of the expected
+   * enumeration (specification parameter `subset`).
+   */
+  subset: boolean;
+  /** Whether the two atoms are of the same sort (specification parameter `sameSort`). */
+  sameSort: boolean;
+}
+
+/**
+ * Performs the specification's query `Fits` (`fit-check.Fits`).
+ *
+ * Accepts any combination of the five facts and always answers. Reads no state,
+ * so the same facts always give the same answer.
+ *
+ * @param facts the comparison's five facts, one field per specification parameter.
+ * @returns how the given kind relates to the expected kind at this level.
+ */
+export function decideFit(facts: FitFacts): FitAnswer {
+  const { given, target, base, subset, sameSort } = facts;
+
+  if (target === "any" || given === "any") return "yes";
+  if (target === "json") return given === "void" || given === "temporal" ? "no" : "yes";
+  if (given === "null") return target === "optional" ? "yes" : "no";
+  if (target === "optional") return given === "optional" ? "inner" : "unwrap";
+  if (given === "optional") return "no";
+  if (target === "enum") return given === "enum" && subset ? "yes" : "no";
+  if (given === "enum") return base === target ? "yes" : "no";
+  if (given === "atom" || target === "atom") {
+    return given === "atom" && target === "atom" && sameSort ? "yes" : "no";
+  }
+  if (target === "record" || target === "list" || target === "set" || target === "map") {
+    return given === target ? "inner" : "no";
+  }
+  return given === target ? "yes" : "no";
+}

@@ -1,124 +1,96 @@
 /**
- * Text plan: decides how types are written in the adapter contract, which
- * notes a query of the outside world carries, and which sections the
- * contract has.
+ * Decides how the adapter contract is written: the text of one type, the notes
+ * one query of the outside world carries, and which sections the contract has.
  *
- * Corresponds to the specification component `text-plan`. It has no state
- * and no dependencies; each of its queries is implemented here by a pure
- * function that answers the same result for the same arguments and touches
- * nothing:
- *
- * - `Notes` → {@link queryNotes}
- * - `Sections` → {@link contractSections}
- * - `TypeText` → {@link typeText}
+ * Stateless and free of dependencies: nothing is remembered between calls,
+ * nothing needs to be constructed, and calling it has no effect on anything.
+ * It has queries only, no commands.
+ * It corresponds to the specification's component `text-plan`.
  */
 
 /**
- * The promise a query of the outside world makes (specification parameter
- * `promise` of `Notes`).
+ * A promise a query of the outside world may make. Specification name:
+ * parameter `promise` of the query `Notes`; the values are the specification's
+ * own.
  *
- * - `"none"`: it promises nothing.
- * - `"fresh"`: it never answers the same value twice.
- * - `"increasing"`: it never answers less than before.
+ * - `"none"`: the query makes no promise.
+ * - `"fresh"`: the query promises never to answer the same value twice.
+ * - `"increasing"`: the query promises never to answer less than before.
  */
 export type QueryPromise = "none" | "fresh" | "increasing";
 
 /**
- * One note a query of the outside world carries in the contract (an element
- * of the specification's result of `Notes`).
+ * One note on a query in the contract. Specification name: the elements of the
+ * result of the query `Notes`; the values are the specification's own.
  *
- * - `"fresh"`, `"increasing"`: the query's promise.
- * - `"may-fail"`: asking the query can fail.
+ * - `"fresh"`: a note on the promise of the same name.
+ * - `"increasing"`: a note on the promise of the same name.
+ * - `"may-fail"`: a note that asking the query can fail.
  */
 export type QueryNote = "fresh" | "increasing" | "may-fail";
 
 /**
- * Specification query `text-plan.Notes` (calculation `notes`).
- *
- * Asked once for each query of the outside world written in the contract.
- *
- * @param promise what the query promises (specification parameter `promise`).
- * @param mayFail whether asking the query can fail (specification parameter
- *   `mayFail`).
- * @returns the notes the query carries, in the order they are written (the
- *   specification's result; may be empty).
+ * The facts about one query of the outside world. The field names are the
+ * specification's parameter names.
  */
-export function queryNotes(promise: QueryPromise, mayFail: boolean): QueryNote[] {
-  const notes: QueryNote[] = [];
-  if (promise === "fresh") notes.push("fresh");
-  else if (promise === "increasing") notes.push("increasing");
-  if (mayFail) notes.push("may-fail");
-  return notes;
+export interface NoteFacts {
+  /** Whether asking the query can fail (specification parameter `mayFail`). */
+  mayFail: boolean;
+  /** The promise the query makes (specification parameter `promise`). */
+  promise: QueryPromise;
 }
 
 /**
- * What is counted about a system to decide which sections its contract has
- * (the parameters of the specification query `Sections`). Each field is the
- * specification parameter of the same name.
+ * The facts about the system a contract describes. The field names are the
+ * specification's parameter names; the counts are integers, zero or more.
  */
-export interface ContractFacts {
-  /** How many commands answer something (specification parameter `answering`). */
+export interface SectionFacts {
+  /** How many commands answer (specification parameter `answering`). */
   answering: number;
-  /** Whether JSON values appear anywhere in the contract (specification parameter `json`). */
+  /** Whether JSON values appear (specification parameter `json`). */
   json: boolean;
   /** How many queries there are (specification parameter `queries`). */
   queries: number;
-  /** Whether the system keeps what it remembers across a restart (specification parameter `restarts`). */
+  /** Whether the system restarts (specification parameter `restarts`). */
   restarts: boolean;
-  /** How many HTTP routes there are (specification parameter `routes`). */
+  /** How many routes there are (specification parameter `routes`). */
   routes: number;
-  /** How many sorts of atoms (identifiers) there are (specification parameter `sorts`). */
+  /** How many sorts of atoms there are (specification parameter `sorts`). */
   sorts: number;
 }
 
 /**
- * Which sections the contract has (the specification's result of
- * `Sections`). Each field is `true` when that section is written.
+ * Which sections the contract has: each field is true when the section is
+ * present. Specification name: the result of the query `Sections`; the field
+ * names are the specification's own.
  */
 export interface ContractSections {
-  /** The section on what commands answer (specification field `commandOutput`). */
+  /** The section on the answers of commands. */
   commandOutput: boolean;
-  /** The section defining the JSON type (specification field `json`). */
+  /** The section on the JSON type. */
   json: boolean;
-  /** The section on queries (specification field `queries`). */
+  /** The section on queries. */
   queries: boolean;
-  /** The section on restarting the system (specification field `restarts`). */
+  /** The section on restarts. */
   restarts: boolean;
-  /** The section on HTTP routes (specification field `routes`). */
+  /** The section on routes. */
   routes: boolean;
-  /** The section on sorts of atoms (specification field `sorts`). */
+  /** The section on the sorts of atoms. */
   sorts: boolean;
 }
 
 /**
- * Specification query `text-plan.Sections` (calculation `sections`).
+ * The kind of a type being written. Specification name: parameter `kind` of the
+ * query `TypeText`; the values are the specification's own.
  *
- * Asked once per contract, before it is written.
- *
- * @param facts what is counted about the system (the specification's
- *   parameters, as one record).
- * @returns which sections the contract has.
+ * - `"int"`, `"string"`, `"bool"`: the plain value types.
+ * - `"json"`: any JSON value.
+ * - `"enum"`: an enumeration.
+ * - `"atom"`: an identifier of some sort.
+ * - `"optional"`: a value or nothing.
+ * - `"list"`, `"set"`, `"map"`, `"record"`: the composite types.
  */
-export function contractSections(facts: ContractFacts): ContractSections {
-  return {
-    commandOutput: facts.answering > 0,
-    json: facts.json,
-    queries: facts.queries > 0,
-    restarts: facts.restarts,
-    routes: facts.routes > 0,
-    sorts: facts.sorts > 0,
-  };
-}
-
-/**
- * The kind of a type, at its outermost level (specification parameter `kind`
- * of `TypeText`). Each value is the specification type constructor of the
- * same name: `"int"`, `"string"`, `"bool"`, `"json"` are plain values;
- * `"enum"` an enumeration of literals; `"atom"` an opaque identifier of some
- * sort; `"optional"` a value or null; `"list"`, `"set"`, `"map"`, `"record"`
- * the composite kinds.
- */
-export type TypeTextKind =
+export type WrittenKind =
   | "int"
   | "string"
   | "bool"
@@ -132,59 +104,86 @@ export type TypeTextKind =
   | "record";
 
 /**
- * One field of a record type, already written (an element of the
- * specification parameter `entries` of `TypeText`).
+ * One field of a record, its type already written. Specification name: the
+ * elements of parameter `entries`; the field names are the specification's own.
  */
-export interface FieldText {
-  /** The field's name, as in the specification (specification field `name`). */
+export interface RecordEntry {
+  /** The field's name. */
   name: string;
-  /**
-   * Whether the name can be written as a bare TypeScript identifier
-   * (specification field `plain`).
-   */
+  /** Whether the name can be written as it stands, rather than as a JSON string. */
   plain: boolean;
-  /** The field's type, already written (specification field `text`). */
+  /** The field's type, already written. */
   text: string;
 }
 
 /**
- * One type to write, with everything inside it already written (the
- * parameters of the specification query `TypeText`). Each field is the
- * specification parameter of the same name; only the fields that matter for
- * `kind` are read, the others may be empty.
+ * One type to write, with what is inside it already written. The field names
+ * are the specification's parameter names. Every field is always present; each
+ * kind reads only the ones that describe it, and the others may hold anything
+ * of their type (an empty string or an empty list, say).
  */
-export interface TypeParts {
-  /** The kind of the type (specification parameter `kind`). */
-  kind: TypeTextKind;
-  /**
-   * For an enumeration: its members, each already written as a TypeScript
-   * literal, in order (specification parameter `members`).
-   */
-  members: string[];
-  /** For an atom: the name of its sort (specification parameter `name`). */
-  name: string;
-  /**
-   * For an optional value, a list, a set, or a map: the type inside it (for a
-   * map, its value type), already written (specification parameter `inner`).
-   */
+export interface TypeFacts {
+  /** The kind of type (specification parameter `kind`). */
+  kind: WrittenKind;
+  /** A record's fields, in order (specification parameter `entries`). */
+  entries: RecordEntry[];
+  /** The written type inside an optional, list or set, or a map's written value type (specification parameter `inner`). */
   inner: string;
-  /** For a map: its key type, already written (specification parameter `key`). */
+  /** A map's written key type (specification parameter `key`). */
   key: string;
-  /** For a record: its fields, in order (specification parameter `entries`). */
-  entries: FieldText[];
+  /** An enumeration's members, each already written, in order (specification parameter `members`). */
+  members: string[];
+  /** An atom's sort name (specification parameter `name`). */
+  name: string;
 }
 
 /**
- * Specification query `text-plan.TypeText` (calculation `typeText`).
+ * Performs the specification's query `Notes` (`text-plan.Notes`).
  *
- * Writes one type as TypeScript text. Asked bottom-up: the parts inside a
- * type are written first and passed in `parts`.
+ * Accepts any combination of the facts and always answers. Reads no state, so
+ * the same facts always give the same answer. Ask once per query of the outside
+ * world.
  *
- * @param parts the type's kind and its parts already written.
- * @returns the TypeScript text of the type.
+ * @param facts the query's two facts, one field per specification parameter.
+ * @returns the notes the query carries, in the order the contract writes them; possibly none.
  */
-export function typeText(parts: TypeParts): string {
-  switch (parts.kind) {
+export function decideNotes(facts: NoteFacts): QueryNote[] {
+  const promised: QueryNote[] = facts.promise === "none" ? [] : [facts.promise];
+  return facts.mayFail ? [...promised, "may-fail"] : promised;
+}
+
+/**
+ * Performs the specification's query `Sections` (`text-plan.Sections`).
+ *
+ * Accepts any combination of the facts and always answers. Reads no state, so
+ * the same facts always give the same answer. Ask once per contract.
+ *
+ * @param facts the system's six facts, one field per specification parameter.
+ * @returns which sections the contract has.
+ */
+export function decideSections(facts: SectionFacts): ContractSections {
+  return {
+    commandOutput: facts.answering > 0,
+    json: facts.json,
+    queries: facts.queries > 0,
+    restarts: facts.restarts,
+    routes: facts.routes > 0,
+    sorts: facts.sorts > 0,
+  };
+}
+
+/**
+ * Performs the specification's query `TypeText` (`text-plan.TypeText`).
+ *
+ * Writes one level of a type: to write a nested type, write what is inside it
+ * first and pass the result in. Reads no state, so the same facts always give
+ * the same answer.
+ *
+ * @param facts the type to write, one field per specification parameter.
+ * @returns the type as it appears in the contract.
+ */
+export function writeType(facts: TypeFacts): string {
+  switch (facts.kind) {
     case "int":
       return "number";
     case "string":
@@ -194,38 +193,35 @@ export function typeText(parts: TypeParts): string {
     case "json":
       return "Json";
     case "enum":
-      if (parts.members.length === 0) return "never";
-      return parts.members.join(" | ");
+      return facts.members.length === 0 ? "never" : facts.members.join(" | ");
     case "atom":
-      return parts.name;
+      return facts.name;
     case "optional":
-      return parts.inner + " | null";
+      return `${facts.inner} | null`;
     case "list":
     case "set":
-      return elementText(parts.inner) + "[]";
+      return needsParentheses(facts.inner) ? `(${facts.inner})[]` : `${facts.inner}[]`;
     case "map":
-      return OBJECT_OPEN + " key: " + parts.key + "; value: " + parts.inner + " " + OBJECT_CLOSE + "[]";
+      return `${OPENING_BRACE} key: ${facts.key}; value: ${facts.inner} }[]`;
     case "record":
-      if (parts.entries.length === 0) return "Record<string, never>";
-      return OBJECT_OPEN + " " + parts.entries.map(fieldText).join("; ") + " " + OBJECT_CLOSE;
+      return writeRecord(facts.entries);
   }
 }
 
-/** How an object-literal type (a map entry or a record) opens and closes. */
-const OBJECT_OPEN = "{";
-const OBJECT_CLOSE = "}";
+/** What a written record or map opens with: its own delimiters enclose any "|" or "&" inside it. */
+const OPENING_BRACE = "{";
 
-/**
- * The element type of a list or set, parenthesized when `[]` would bind to
- * only part of it. An object-literal type is already delimited by its braces.
- */
-function elementText(inner: string): string {
-  const compound = inner.includes("|") || inner.includes("&");
-  return compound && !inner.startsWith(OBJECT_OPEN) ? "(" + inner + ")" : inner;
+/** Whether a written type must be parenthesised before "[]" can follow it. */
+function needsParentheses(written: string): boolean {
+  return (written.includes("|") || written.includes("&")) && !written.startsWith(OPENING_BRACE);
 }
 
-/** One field of a record as `name: text`, quoting a name that is not plain. */
-function fieldText(entry: FieldText): string {
-  const name = entry.plain ? entry.name : '"' + entry.name + '"';
-  return name + ": " + entry.text;
+function writeRecord(entries: RecordEntry[]): string {
+  if (entries.length === 0) return "Record<string, never>";
+  return `${OPENING_BRACE} ${entries.map(writeEntry).join("; ")} }`;
+}
+
+function writeEntry(entry: RecordEntry): string {
+  const name = entry.plain ? entry.name : `"${entry.name}"`;
+  return `${name}: ${entry.text}`;
 }

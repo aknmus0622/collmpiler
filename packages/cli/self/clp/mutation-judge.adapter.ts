@@ -1,45 +1,37 @@
-import type { Ports, TargetSystemAdapter } from "./mutation-judge.adapter.contract.ts";
-import { MutationJudge, type MutationVerdictSink } from "../src/mutation-judge.ts";
+import type { TargetSystemAdapter } from "./mutation-judge.adapter.contract.ts";
+import { MutationJudge } from "../src/mutation-judge.ts";
 
-// Import the production code from ../src/ and forward each call to it. No business logic here.
 let judge: MutationJudge | undefined;
 
-function verdictFor(ports: Ports): MutationVerdictSink {
-  return {
-    inAdapter: () => ports.verdict.InAdapter({}),
-    ineffective: () => ports.verdict.Ineffective({}),
-    survived: () => ports.verdict.Survived({}),
-  };
-}
-
-function system(): MutationJudge {
-  if (!judge) throw new Error("setupIsolation was not called");
-  return judge;
-}
-
+// Import the production code from ../src/ and forward each call to it. No business logic here.
 export const adapter: TargetSystemAdapter = {
   async setupIsolation(ports) {
-    judge = new MutationJudge(verdictFor(ports));
+    judge = new MutationJudge({
+      inAdapter: () => ports.verdict.InAdapter({}),
+      ineffective: () => ports.verdict.Ineffective({}),
+      survived: () => ports.verdict.Survived({}),
+    });
   },
   async teardownIsolation() {
     judge = undefined;
   },
   async executeCommand(command) {
+    if (judge === undefined) throw new Error("the system is not set up");
     switch (command.name) {
       case "BeginValue":
-        system().beginValue({ numeric: command.input.numeric, inAdapter: command.input.inAdapter });
+        judge.beginValue(command.input);
         return;
       case "EndValue":
-        system().endValue();
+        judge.endValue();
         return;
       case "Finish":
-        system().finish(command.input.shared);
+        judge.finish(command.input.shared);
         return;
       case "Mutant":
-        system().mutant(command.input.killed);
+        judge.mutant(command.input.killed);
         return;
       case "Site":
-        system().site(command.input.killed);
+        judge.site(command.input.killed);
         return;
     }
   },
