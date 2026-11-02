@@ -71,7 +71,7 @@ the one page a spec author needs. The code:
   symlink to it): `specs/`, `src/` (by agents), `clp/` (test side and pass records), `cases/` (R3).
 - Tests: `packages/cli/test/` — `notation.test.ts` (reading, IR, oracle, PBT, comparison), `example.test.ts`,
   `features.test.ts`, `parts.test.ts`, `durable.test.ts`, `interpret.test.ts`, the pipeline tests (`loop`, `gates`,
-  `repeat`, `layout`, `components`, split so that `node --test` runs them in parallel), `run.test.ts` (`clp run`),
+  `repeat`, `layout`, `components`, split so that `node --test` runs them in parallel), `boundary.test.ts` (a fixed-shape implementation through the mutation gate), `run.test.ts` (`clp run`),
   `alloy.test.ts` (the modules written for Alloy and what each component gets checked, compared with
   `test/fixtures/alloy/`: after a change to the emitter or to a spec that Alloy checks, rerun it with
   `CLP_UPDATE_ALLOY=1` and read the diff; runs Alloy itself on one small component when Java is there), `cli.test.ts`, `stage.test.ts` (self-hosting). They share `test/support.ts` (`harness(name)` gives each file its own work directory; never share
@@ -119,7 +119,7 @@ pass record), `--mutation auto|builtin|off`, `--static-check auto|tsc|off`, `--t
 Dependencies: `typescript` (in `@clp/cli`, plus `@types/node` at the root) and `fast-check`; `packages/core` has none.
 Java is needed for the Alloy checker (`CLP_ALLOY_JAR`, or the jar is downloaded to `~/.cache/clp/` on first use and
 checked against the pinned sha256 in `v1/alloy.ts`; results are cached in `~/.cache/clp/alloy-results/`, keyed by the
-module written; `CLP_ALLOY=off` disables it). Alloy's questions run in parallel processes: `--alloy-jobs <n>` on the commands
+module written (what `check8`'s search finds, in `~/.cache/clp/searched/`, keyed by the spec, the seed and the fixed traces); `CLP_ALLOY=off` disables it). Alloy's questions run in parallel processes: `--alloy-jobs <n>` on the commands
 that run Alloy, or `CLP_ALLOY_JOBS`; by default half the processors; the answers are the same for any number.
 
 ## Vocabulary

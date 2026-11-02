@@ -3,8 +3,9 @@
 // adapter. The outside world is the harness's stand-in, answering what the implementation and the spec ask with the
 // same values and keeping the promises written in the spec.
 
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { createHash } from "node:crypto";
+import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import fc from "fast-check";
@@ -271,6 +272,7 @@ export function stepArbitrary(ir: Ir8, hints: Hints = literalsOf(ir), only?: Ent
 export const MAX_STEPS = 8;
 const SEARCH_RUNS = 2000;
 const MOST_SEARCHED = 40;
+const SEARCH_VERSION = 1;
 // after a fixed trace: how many times its end is looked at, and with how many queries
 const LOOKS = 10;
 const LOOK_STEPS = 4;
@@ -607,9 +609,15 @@ export const DEFAULT_RUNS = 5000;
  * seed, so a mutant is run on the same sequences as the code.
  */
 async function searched(ir: Ir8, seed: number, fixed: { event: string; raw: RawStep[] }[]): Promise<{ event: string; raw: RawStep[] }[]> {
+  const arbitrary = sequencesFrom(ir, fixed.map((t) => t.raw));
+  // each sequence from a seed of its own: what was found is kept as which one and how long, not as the steps (they hold functions)
+  const drawn = (index: number) => fc.sample(arbitrary, { seed: (seed + index) | 0, numRuns: 1 })[0];
+  const cache = searchCache(ir, seed, fixed);
+  const remembered = cache.read();
+  if (remembered) return remembered.map(({ event, index, length }) => ({ event, raw: drawn(index).slice(0, length) }));
   const have = new Set(fixed.map((t) => t.event));
   const wanted = Object.keys(coverageOf(ir, {}).events).filter((event) => !have.has(event));
-  const found = new Map<string, RawStep[]>();
+  const found = new Map<string, Found>();
   const sidesIn = async (raw: RawStep[], coverage: Record<string, number>) => {
     const sides = new Set<string>();
     const watch = (e: unknown, difference: number) => {
@@ -618,10 +626,11 @@ async function searched(ir: Ir8, seed: number, fixed: { event: string; raw: RawS
     await watchingComparisons(watch, () => trial(ir, raw, { coverage }));
     return sides;
   };
-  const keep = (key: string, raw: RawStep[]) => {
-    if (raw.length < (found.get(key)?.length ?? Infinity)) found.set(key, raw);
+  const keep = (key: string, index: number, length: number) => {
+    if (length < (found.get(key)?.length ?? Infinity)) found.set(key, { event: key, index, length });
   };
-  for (const raw of fc.sample(sequencesFrom(ir, fixed.map((t) => t.raw)), { seed, numRuns: SEARCH_RUNS })) {
+  for (let index = 0; index < SEARCH_RUNS; index++) {
+    const raw = drawn(index);
     const coverage: Record<string, number> = {};
     let sides: Set<string>;
     try {
@@ -630,23 +639,52 @@ async function searched(ir: Ir8, seed: number, fixed: { event: string; raw: RawS
       if (error instanceof SpecError) continue;
       throw error;
     }
-    for (const event of wanted) if (coverage[event]) keep(event, raw);
-    for (const side of sides) keep(side, raw);
+    for (const event of wanted) if (coverage[event]) keep(event, index, raw.length);
+    for (const side of sides) keep(side, index, raw.length);
   }
   // cut right after what was found: the steps after it may undo it before it is looked at
-  for (const [key, raw] of found) {
-    for (let length = 1; length < raw.length; length++) {
+  for (const [key, one] of found) {
+    const raw = drawn(one.index);
+    for (let length = 1; length < one.length; length++) {
       const coverage: Record<string, number> = {};
       const sides = await sidesIn(raw.slice(0, length), coverage).catch(() => new Set<string>());
       if (sides.has(key) || coverage[key]) {
-        found.set(key, raw.slice(0, length));
+        found.set(key, { ...one, length });
         break;
       }
     }
   }
   // the events first, then the comparisons, shortest first
-  const shortest = [...found].sort(([k, a], [l, b]) => Number(wanted.includes(l)) - Number(wanted.includes(k)) || a.length - b.length);
-  return shortest.slice(0, MOST_SEARCHED).map(([event, raw]) => ({ event, raw }));
+  const shortest = [...found.values()].sort((a, b) => Number(wanted.includes(b.event)) - Number(wanted.includes(a.event)) || a.length - b.length).slice(0, MOST_SEARCHED);
+  cache.write(shortest);
+  return shortest.map(({ event, index, length }) => ({ event, raw: drawn(index).slice(0, length) }));
+}
+
+type Found = { event: string; index: number; length: number };
+
+/** What a search found is a function of the spec, the seed and the fixed traces: every mutant of a gate is run on the same, in a process of its own. */
+function searchCache(ir: Ir8, seed: number, fixed: { event: string; raw: RawStep[] }[]) {
+  const key = createHash("sha256").update(JSON.stringify({ version: SEARCH_VERSION, runs: SEARCH_RUNS, seed, ir, fixed })).digest("hex");
+  const dir = join(process.env.XDG_CACHE_HOME ?? join(homedir(), ".cache"), "clp", "searched");
+  const file = join(dir, `${key}.json`);
+  return {
+    read(): Found[] | undefined {
+      try {
+        return JSON.parse(readFileSync(file, "utf8")) as Found[];
+      } catch {
+        return undefined;
+      }
+    },
+    // only saves time: a failure here is a search again next time
+    write(found: Found[]) {
+      try {
+        mkdirSync(dir, { recursive: true });
+        const written = `${file}.${process.pid}`;
+        writeFileSync(written, JSON.stringify(found));
+        renameSync(written, file);
+      } catch {}
+    },
+  };
 }
 
 /** Queries to ask at the end of each trace (`LOOKS` for each). Depends only on the seed. */
